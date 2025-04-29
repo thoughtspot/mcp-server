@@ -1,0 +1,31 @@
+{
+  "name": "mcp-server",
+  "version": "1.0.0",
+  "description": "The ThoughtSpot MCP Server",
+  "main": "index.js",
+  "scripts": {
+    "cf-typegen": "wrangler types",
+    "start": "wrangler dev",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "format": "biome format --write",
+    "lint:fix": "biome lint --fix"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
+    "typescript": "^5.8.3",
+    "workers-mcp": "^0.0.13",
+    "wrangler": "^4.12.0"
+  },
+  "dependencies": {
+    "@cloudflare/workers-oauth-provider": "^0.0.4",
+    "@modelcontextprotocol/sdk": "^1.10.0",
+    "@thoughtspot/rest-api-sdk": "^2.13.1",
+    "agents": "^0.0.75",
+    "hono": "^4.7.8",
+    "zod": "^3.24.3"
+  }
+}

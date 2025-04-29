@@ -1,0 +1,32 @@
+/**
+ * For more details on how to configure Wrangler, refer to:
+ * https://developers.cloudflare.com/workers/wrangler/configuration/
+ */
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "thoughtspot-mcp-server",
+	"main": "src/index.ts",
+	"compatibility_date": "2025-04-17",
+	"durable_objects": {
+		"bindings": [
+			{
+				"class_name": "ThoughtSpotMCP",
+				"name": "ThoughtSpotMCP_OBJECT"
+			}
+		]
+	},
+	"migrations": [{
+		"tag": "v1",
+		"new_classes": [
+			"ThoughtSpotMCP"
+		]
+    }],
+	"observability": {
+		"enabled": true
+	},
+	"assets": { "directory": "./static/", "binding": "ASSETS" },
+	"vars": {
+		"ACCESS_TOKEN": "accessToken",
+		"INSTANCE_URL": "instanceUrl"
+	}
+}
