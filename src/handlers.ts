@@ -13,6 +13,7 @@ app.get("/", async (c) => {
 
 app.get("/authorize", async (c) => {
     // TODO: Implement
+    console.log("Authorizing");
     const oauthReqInfo = await c.env.OAUTH_PROVIDER.parseAuthRequest(c.req.raw)
     const { redirectTo } = await c.env.OAUTH_PROVIDER.completeAuthorization({
         request: oauthReqInfo,
