@@ -26,8 +26,10 @@ export class ThoughtSpotMCP extends McpAgent<Props, Env> {
 
 
 export default new OAuthProvider({
-    apiRoute: "/mcp",
-    apiHandler: ThoughtSpotMCP.serve("/mcp") as any, // TODO: Remove 'any'
+    apiHandlers: {
+        "/mcp": ThoughtSpotMCP.serve("/mcp") as any, // TODO: Remove 'any'
+        "/sse": ThoughtSpotMCP.serveSSE("/sse") as any, // TODO: Remove 'any'
+    },
     defaultHandler: handler as any, // TODO: Remove 'any'
     authorizeEndpoint: "/authorize",
     tokenEndpoint: "/token",
