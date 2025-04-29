@@ -24,6 +24,10 @@
 			"ThoughtSpotMCP"
 		]
     }],
+	"kv_namespaces": [{
+		"binding": "OAUTH_KV",
+		"id": "05ca6fed380e4fe48dbfc5c3d03b4070"
+	}],
 	"observability": {
 		"enabled": true
 	},
