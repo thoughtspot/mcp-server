@@ -22,7 +22,7 @@
   },
   "dependencies": {
     "@cloudflare/workers-oauth-provider": "^0.0.4",
-    "@modelcontextprotocol/sdk": "^1.10.0",
+    "@modelcontextprotocol/sdk": "^1.10.2",
     "@thoughtspot/rest-api-sdk": "^2.13.1",
     "agents": "^0.0.75",
     "hono": "^4.7.8",
