@@ -14,7 +14,7 @@
 		"bindings": [
 			{
 				"class_name": "ThoughtSpotMCP",
-				"name": "ThoughtSpotMCP_OBJECT"
+				"name": "MCP_OBJECT"
 			}
 		]
 	},
