@@ -7,6 +7,9 @@
 	"name": "thoughtspot-mcp-server",
 	"main": "src/index.ts",
 	"compatibility_date": "2025-04-17",
+	"compatibility_flags": [
+		"nodejs_compat"
+	],
 	"durable_objects": {
 		"bindings": [
 			{
