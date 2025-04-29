@@ -5,6 +5,12 @@ import { Props } from './utils';
 
 const app = new Hono<{ Bindings: Env & { OAUTH_PROVIDER: OAuthHelpers } }>()
 
+app.get("/", async (c) => {
+    return c.json({
+        message: "Hello, World!",
+    });
+});
+
 app.get("/authorize", async (c) => {
     // TODO: Implement
     const oauthReqInfo = await c.env.OAUTH_PROVIDER.parseAuthRequest(c.req.raw)
@@ -17,8 +23,8 @@ app.get("/authorize", async (c) => {
         scope: oauthReqInfo.scope,
         // This will be available on this.props inside ThoughtSpotMCP
         props: {
-            accessToken: c.env.ACCESS_TOKEN,
-            instanceUrl: c.env.INSTANCE_URL,
+            accessToken: await c.env.accessToken.get(),
+            instanceUrl: await c.env.instanceUrl.get(),
         } as Props,
     });
 
