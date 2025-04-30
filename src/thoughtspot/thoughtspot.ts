@@ -1,6 +1,6 @@
 import { ThoughtSpotRestApi } from "@thoughtspot/rest-api-sdk";
 
-const DATA_SOURCE_ID = process.env.TS_DATASOURCE_ID || "cd252e5c-b552-49a8-821d-3eadaa049cca";
+const DATA_SOURCE_ID = "cd252e5c-b552-49a8-821d-3eadaa049cca";
 
 
 export async function getRelevantQuestions(query: string, additionalContext: string = '', client: ThoughtSpotRestApi): Promise<string[]> {
