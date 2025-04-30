@@ -27,9 +27,12 @@ export class ThoughtSpotMCP extends McpAgent<Env, any, Props> {
             async ({ query }) => {
                 const client = getThoughtSpotClient(this.props.instanceUrl, this.props.accessToken);
                 const relevantData = await getRelevantData(query, false, (data) => this.server.server.notification({
-                    method: "notifications/message",
+                    method: "notifications/progress",
                     params: {
                         message: data,
+                        progressToken: Math.random().toString(36).substring(2, 15),
+                        progress: 50,
+                        total: 100,
                     },
                 }), client);
                 return {
