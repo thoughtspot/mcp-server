@@ -1,4 +1,4 @@
-import { createLiveboard, getAnswerForQuestion, getRelevantQuestions } from "./thoughtspot";
+import { createLiveboard, getAnswerForQuestion, getRelevantQuestions } from "./thoughtspot-service";
 import { ThoughtSpotRestApi } from "@thoughtspot/rest-api-sdk";
 async function getAnswersForQuestions(questions: string[], shouldGetTML: boolean, notify: (data: string) => void, client: ThoughtSpotRestApi) {
     const answers = (await Promise.all(
