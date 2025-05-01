@@ -1,2 +1,76 @@
-# mcp-server
-The ThoughtSpot MCP Server
+# ThoughtSpot MCP Server
+
+The ThoughtSpot MCP Server is a Cloudflare Worker-based service that exposes Model Context Protocol (MCP) endpoints for interacting with ThoughtSpot data and tools. It provides secure OAuth-based authentication and a set of tools for querying and retrieving relevant data from a ThoughtSpot instance.
+
+## Features
+
+- **OAuth Authentication**: Secure endpoints using OAuth flows.
+- **MCP Tools**:
+  - `ping`: Test connectivity and authentication.
+  - `getRelevantData`: Query ThoughtSpot for relevant data based on a user question, returning answers and optionally a dashboard (Liveboard) link.
+- **Cloudflare Worker**: Built with [Hono](https://hono.dev/) and [wrangler](https://developers.cloudflare.com/workers/wrangler/).
+- **Type Safety**: Uses [zod](https://github.com/colinhacks/zod) for schema validation and [TypeScript](https://www.typescriptlang.org/).
+- **ThoughtSpot Integration**: Uses the [@thoughtspot/rest-api-sdk](https://www.npmjs.com/package/@thoughtspot/rest-api-sdk) for all data operations.
+
+## Project Structure
+
+```
+.
+├── src/
+│   ├── index.ts                # Main entry point, sets up OAuth and MCP endpoints
+│   ├── handlers.ts             # HTTP route handlers (OAuth, root, etc.)
+│   ├── utils.ts                # Shared types/utilities
+│   └── thoughtspot/
+│       ├── relevant-data.ts    # Logic for fetching relevant data/answers
+│       ├── thoughtspot-client.ts # Client setup for ThoughtSpot API
+│       └── thoughtspot-service.ts # Service functions for questions, answers, liveboards
+├── static/                     # Static assets (if any)
+├── wrangler.jsonc              # Cloudflare Worker configuration
+├── package.json                # Project metadata and scripts
+└── README.md                   # This file
+```
+
+## Scripts
+
+- `start` / `dev`: Start the worker locally with Wrangler.
+- `deploy`: Deploy the worker to Cloudflare.
+- `cf-typegen`: Generate Cloudflare Worker types.
+- `format`: Format code using [biome](https://biomejs.dev/).
+- `lint:fix`: Lint and auto-fix code using biome.
+
+## Usage
+
+### Local Development
+
+1. **Install dependencies**:
+   ```sh
+   npm install
+   ```
+2. **Set up environment variables**:
+   - Copy `.dev.vars` and fill in your ThoughtSpot instance URL and access token.
+3. **Start the development server**:
+   ```sh
+   npm run dev
+   ```
+
+### Deployment
+
+Deploy to Cloudflare Workers using Wrangler:
+```sh
+npm run deploy
+```
+
+### Endpoints
+
+- `/mcp`: MCP HTTP Streaming endpoint
+- `/sse`: Server-sent events for MCP
+- `/authorize`, `/token`, `/register`: OAuth endpoints
+
+## Configuration
+
+- **wrangler.jsonc**: Configure bindings, secrets, and compatibility.
+- **Secrets**: Store your secrets securely using Cloudflare secrets.
+
+
+MCP Server, © ThoughtSpot, Inc. 2025
+
