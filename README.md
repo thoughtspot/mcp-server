@@ -1,3 +1,10 @@
+<p align="center">
+    <img src="https://raw.githubusercontent.com/thoughtspot/visual-embed-sdk/main/static/doc-images/images/TS-Logo-black-no-bg.svg" width=120 align="center" alt="ThoughtSpot" />
+</p>
+
+<br/>
+
+
 # ThoughtSpot MCP Server
 
 The ThoughtSpot MCP Server is a Cloudflare Worker-based service that exposes Model Context Protocol (MCP) endpoints for interacting with ThoughtSpot data and tools. It provides secure OAuth-based authentication and a set of tools for querying and retrieving relevant data from a ThoughtSpot instance.
