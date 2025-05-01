@@ -4,10 +4,19 @@
 
 <br/>
 
-
 # ThoughtSpot MCP Server
 
 The ThoughtSpot MCP Server is a Cloudflare Worker-based service that exposes Model Context Protocol (MCP) endpoints for interacting with ThoughtSpot data and tools. It provides secure OAuth-based authentication and a set of tools for querying and retrieving relevant data from a ThoughtSpot instance.
+
+## Table of Contents
+
+- [Features](#features)
+- [Project Structure](#project-structure)
+- [Scripts](#scripts)
+- [Usage](#usage)
+- [Endpoints](#endpoints)
+- [Configuration](#configuration)
+- [License](#license)
 
 ## Features
 
