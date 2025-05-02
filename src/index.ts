@@ -7,6 +7,8 @@ import { createMCPServer } from "./mcp-server";
 
 export class ThoughtSpotMCP extends McpAgent<Env, any, Props> {
     server = createMCPServer(this);
+
+    async init() { }
 }
 
 export default new OAuthProvider({
