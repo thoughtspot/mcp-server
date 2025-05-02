@@ -2,13 +2,15 @@ import OAuthProvider from "@cloudflare/workers-oauth-provider";
 import { McpAgent } from "agents/mcp";
 import handler from "./handlers";
 import { Props } from "./utils";
-import { createMCPServer } from "./mcp-server";
+import { MCPServer } from "./mcp-server";
 
 
 export class ThoughtSpotMCP extends McpAgent<Env, any, Props> {
-    server = createMCPServer(this);
+    server = new MCPServer(this);
 
-    async init() { }
+    async init() {
+        await this.server.init();
+    }
 }
 
 export default new OAuthProvider({

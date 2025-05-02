@@ -25,86 +25,88 @@ interface Context {
     props: Props;
 }
 
-export function createMCPServer(ctx: Context): Server {
-    const server = new Server({
-        name: "ThoughtSpot",
-        version: "1.0.0",
-        capabilities: {
-            tools: {},
-            logging: {},
-            completion: {},
-            resources: {},
-        }
-    });
-
-    server.setRequestHandler(ListToolsRequestSchema, async () => {
-        return {
-            tools: [
-                {
-                    name: ToolName.Ping,
-                    description: "Simple ping tool to test connectivity and Auth",
-                    inputSchema: zodToJsonSchema(PingSchema) as ToolInput,
-                },
-                {
-                    name: ToolName.GetRelevantData,
-                    description: "Get relevant data from ThoughtSpot database",
-                    inputSchema: zodToJsonSchema(GetRelevantDataSchema) as ToolInput,
-                }
-            ]
-        };
-    });
-
-    // Handle call tool request
-    server.setRequestHandler(CallToolRequestSchema, async (request: z.infer<typeof CallToolRequestSchema>) => {
-        const { name } = request.params;
-
-        switch (name) {
-            case ToolName.Ping:
-                if (ctx.props.accessToken && ctx.props.instanceUrl) {
-                    return {
-                        content: [{ type: "text", text: "Pong" }],
-                    };
-                } else {
-                    return {
-                        content: [{ type: "text", text: "ERROR: Not authenticated" }],
-                    };
-                }
-
-            case ToolName.GetRelevantData: {
-                return callGetRelevantData(request, server, ctx);
+export class MCPServer extends Server {
+    constructor(private ctx: Context) {
+        super({
+            name: "ThoughtSpot",
+            version: "1.0.0",
+            capabilities: {
+                tools: {},
+                logging: {},
+                completion: {},
+                resources: {},
             }
+        });
+    }
 
-            default:
-                throw new Error(`Unknown tool: ${name}`);
-        }
-    });
+    async init() {
+        this.setRequestHandler(ListToolsRequestSchema, async () => {
+            return {
+                tools: [
+                    {
+                        name: ToolName.Ping,
+                        description: "Simple ping tool to test connectivity and Auth",
+                        inputSchema: zodToJsonSchema(PingSchema) as ToolInput,
+                    },
+                    {
+                        name: ToolName.GetRelevantData,
+                        description: "Get relevant data from ThoughtSpot database",
+                        inputSchema: zodToJsonSchema(GetRelevantDataSchema) as ToolInput,
+                    }
+                ]
+            };
+        });
 
-    return server;
-}
+        // Handle call tool request
+        this.setRequestHandler(CallToolRequestSchema, async (request: z.infer<typeof CallToolRequestSchema>) => {
+            const { name } = request.params;
 
-async function callGetRelevantData(request: z.infer<typeof CallToolRequestSchema>, server: Server, ctx: Context) {
-    const { query } = GetRelevantDataSchema.parse(request.params.arguments);
-    const client = getThoughtSpotClient(ctx.props.instanceUrl, ctx.props.accessToken);
-    const progressToken = request.params._meta?.progressToken;
-    let progress = 0;
+            switch (name) {
+                case ToolName.Ping:
+                    if (this.ctx.props.accessToken && this.ctx.props.instanceUrl) {
+                        return {
+                            content: [{ type: "text", text: "Pong" }],
+                        };
+                    } else {
+                        return {
+                            content: [{ type: "text", text: "ERROR: Not authenticated" }],
+                        };
+                    }
 
-    const relevantData = await getRelevantData(query, false, (data) => server.notification({
-        method: "notifications/progress",
-        params: {
-            message: data,
-            progressToken: progressToken,
-            progress: Math.max(progress++ * 10, 100),
-            total: 100,
-        },
-    }), client);
+                case ToolName.GetRelevantData: {
+                    return this.callGetRelevantData(request);
+                }
 
-    return {
-        content: [{
-            type: "text",
-            text: relevantData.allAnswers.map((answer) => `Question: ${answer.question}\nAnswer: ${answer.data}`).join("\n\n")
-        }, {
-            type: "text",
-            text: `Dashboard Url: ${relevantData.liveboard}`,
-        }],
-    };
+                default:
+                    throw new Error(`Unknown tool: ${name}`);
+            }
+        });
+    }
+
+    async callGetRelevantData(request: z.infer<typeof CallToolRequestSchema>) {
+        const { query } = GetRelevantDataSchema.parse(request.params.arguments);
+        const client = getThoughtSpotClient(this.ctx.props.instanceUrl, this.ctx.props.accessToken);
+        const progressToken = request.params._meta?.progressToken;
+        let progress = 0;
+
+        const relevantData = await getRelevantData(query, false, (data) => this.notification({
+            method: "notifications/progress",
+            params: {
+                message: data,
+                progressToken: progressToken,
+                progress: Math.max(progress++ * 10, 100),
+                total: 100,
+            },
+        }), client);
+
+        return {
+            content: [{
+                type: "text",
+                text: relevantData.allAnswers.map((answer) => `Question: ${answer.question}\nAnswer: ${answer.data}`).join("\n\n")
+            }, {
+                type: "text",
+                text: `Dashboard Url: ${relevantData.liveboard}`,
+            }],
+        };
+    }
 }
