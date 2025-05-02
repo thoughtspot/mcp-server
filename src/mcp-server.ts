@@ -30,6 +30,7 @@ export class MCPServer extends Server {
         super({
             name: "ThoughtSpot",
             version: "1.0.0",
+        }, {
             capabilities: {
                 tools: {},
                 logging: {},
