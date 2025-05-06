@@ -70,6 +70,7 @@ export class MCPServer extends Server {
                         };
                     } else {
                         return {
+                            isError: true,
                             content: [{ type: "text", text: "ERROR: Not authenticated" }],
                         };
                     }

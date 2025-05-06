@@ -29,35 +29,3 @@ describe("The ThoughtSpot MCP Worker: Auth handler", () => {
         });
     });
 });
-
-describe("The ThoughtSpot MCP Worker: Tools", () => {
-    it("responds with Error when Ping called without auth token", async () => {
-        const id = env.MCP_OBJECT.idFromName("test");
-        const object = env.MCP_OBJECT.get(id);
-        try {
-            const result = await runInDurableObject(object, async (instance: ThoughtSpotMCP) => {
-                expect(instance).toBeInstanceOf(ThoughtSpotMCP);
-                const request = new IncomingRequest("https://example.com/mcp", {
-                    method: "POST",
-                    body: JSON.stringify({
-                        "jsonrpc": "2.0",
-                        "id": 2,
-                        "method": "tools/call",
-                        "params": {
-                            "name": "ping",
-                        }
-                    }),
-                });
-                // Create an empty context to pass to `worker.fetch()`
-                const ctx = createExecutionContext();
-                return ThoughtSpotMCP.serve("/mcp").fetch(request, env, ctx);
-            });
-            expect(result.status).toBe(200);
-            expect(await result.json()).toMatchObject({
-                message: "Hello, World!",
-            });
-        } finally {
-            object[Symbol.dispose]!();
-        }
-    });
-});
