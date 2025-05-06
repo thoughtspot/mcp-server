@@ -16,7 +16,19 @@ async function getAnswersForQuestions(questions: string[], shouldGetTML: boolean
     return answers;
 }
 
-export const getRelevantData = async (query: string, shouldCreateLiveboard: boolean, notify: (data: string) => void, client: ThoughtSpotRestApi) => {
+
+
+export const getRelevantData = async ({
+    query,
+    shouldCreateLiveboard,
+    notify,
+    client,
+}: {
+    query: string;
+    shouldCreateLiveboard: boolean;
+    notify: (data: string) => void;
+    client: ThoughtSpotRestApi;
+}) => {
     const questions = await getRelevantQuestions(query, "", client);
     notify(`#### Retrieving answers to these relevant questions:\n ${questions.map((q) => `- ${q}`).join("\n")}`);
 

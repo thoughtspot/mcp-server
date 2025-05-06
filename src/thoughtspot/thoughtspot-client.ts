@@ -1,7 +1,7 @@
 import { createBearerAuthenticationConfig, ThoughtSpotRestApi } from "@thoughtspot/rest-api-sdk"
 import YAML from "yaml";
 
-let token;
+let token: string;
 
 export const getThoughtSpotClient = (instanceUrl: string, bearerToken: string) => {
     const client = new ThoughtSpotRestApi(createBearerAuthenticationConfig(
@@ -9,6 +9,7 @@ export const getThoughtSpotClient = (instanceUrl: string, bearerToken: string) =
         () => Promise.resolve(bearerToken),
     ));
     (client as any).instanceUrl = instanceUrl;
+    token = bearerToken;
     addExportUnsavedAnswerTML(client, instanceUrl);
     return client;
 }

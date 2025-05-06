@@ -91,15 +91,20 @@ export class MCPServer extends Server {
         const progressToken = request.params._meta?.progressToken;
         let progress = 0;
 
-        const relevantData = await getRelevantData(query, false, (data) => this.notification({
-            method: "notifications/progress",
-            params: {
-                message: data,
-                progressToken: progressToken,
-                progress: Math.max(progress++ * 10, 100),
-                total: 100,
-            },
-        }), client);
+        const relevantData = await getRelevantData({
+            query,
+            shouldCreateLiveboard: true,
+            notify: (data) => this.notification({
+                method: "notifications/progress",
+                params: {
+                    message: data,
+                    progressToken: progressToken,
+                    progress: Math.max(progress++ * 10, 100),
+                    total: 100,
+                },
+            }),
+            client,
+        });
 
         return {
             content: [{
