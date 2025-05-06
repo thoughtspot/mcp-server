@@ -475,17 +475,15 @@ export function renderApprovalDialog(request: Request, options: ApprovalDialogOp
 }
 
 /**
- * Decodes a URL-safe base64 string back to its original data.
- * @param encoded - The URL-safe base64 encoded string.
- * @returns The original data.
+ * Decodes a base64-encoded state string back into an object
  */
-function decodeState<T = any>(encoded: string): T {
+function decodeState<T>(encodedState: string): T {
     try {
-      const jsonString = atob(encoded)
-      return JSON.parse(jsonString)
+        const decoded = atob(encodedState);
+        return JSON.parse(decoded) as T;
     } catch (e) {
-      console.error('Error decoding state:', e)
-      throw new Error('Could not decode state')
+        console.error('Error decoding state:', e);
+        throw new Error('Invalid state format');
     }
 }
 
@@ -505,46 +503,45 @@ export interface ParsedApprovalResult {
  * and generates Set-Cookie headers to mark the client as approved.
  *
  * @param request - The incoming POST Request object containing the form data.
- * @param cookieSecret - The secret key used to sign the approval cookie.
  * @returns A promise resolving to an object containing the parsed state and necessary headers.
  * @throws If the request method is not POST, form data is invalid, or state is missing.
  */
 export async function parseRedirectApproval(request: Request): Promise<ParsedApprovalResult> {
     if (request.method !== 'POST') {
-      throw new Error('Invalid request method. Expected POST.')
+        throw new Error('Invalid request method. Expected POST.')
     }
   
     let state: any
     let clientId: string | undefined
     let instanceUrl: string | undefined
     try {
-      const formData = await request.formData()
-      const encodedState = formData.get('state')
+        const formData = await request.formData()
+        const encodedState = formData.get('state')
+        instanceUrl = formData.get('instanceUrl') as string;
+  
+        if (typeof encodedState !== 'string' || !encodedState) {
+            throw new Error("Missing or invalid 'state' in form data.")
+        }
+  
+        state = decodeState<{ oauthReqInfo?: AuthRequest }>(encodedState)
+        clientId = state?.oauthReqInfo?.clientId
+  
+        if (!clientId) {
+            throw new Error('Could not extract clientId from state object.')
+        }
 
-      instanceUrl = formData.get('instanceUrl') as string;
-  
-      if (typeof encodedState !== 'string' || !encodedState) {
-        throw new Error("Missing or invalid 'state' in form data.")
-      }
-  
-      state = decodeState<{ oauthReqInfo?: AuthRequest }>(encodedState) // Decode the state
-      clientId = state?.oauthReqInfo?.clientId // Extract clientId from within the state
-  
-      if (!clientId) {
-        throw new Error('Could not extract clientId from state object.')
-      }
+        if (!instanceUrl) {
+            throw new Error('Missing instance URL')
+        }
     } catch (e) {
-      console.error('Error processing form submission:', e)
-      // Rethrow or handle as appropriate, maybe return a specific error response
-      throw new Error(`Failed to parse approval form: ${e instanceof Error ? e.message : String(e)}`)
+        console.error('Error processing form submission:', e)
+        throw new Error(`Failed to parse approval form: ${e instanceof Error ? e.message : String(e)}`)
     }
   
     return { state, instanceUrl }
-  }
+}
 
-
-
-  /**
+/**
  * Sanitizes HTML content to prevent XSS attacks
  * @param unsafe - The unsafe string that might contain HTML
  * @returns A safe string with HTML special characters escaped
