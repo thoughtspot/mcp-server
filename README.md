@@ -26,9 +26,6 @@ The ThoughtSpot MCP Server is a Cloudflare Worker-based service that exposes Mod
 - **MCP Tools**:
   - `ping`: Test connectivity and authentication.
   - `getRelevantData`: Query ThoughtSpot for relevant data based on a user question, returning answers and optionally a dashboard (Liveboard) link.
-- **Cloudflare Worker**: Built with [Hono](https://hono.dev/) and [wrangler](https://developers.cloudflare.com/workers/wrangler/).
-- **Type Safety**: Uses [zod](https://github.com/colinhacks/zod) for schema validation and [TypeScript](https://www.typescriptlang.org/).
-- **ThoughtSpot Integration**: Uses the [@thoughtspot/rest-api-sdk](https://www.npmjs.com/package/@thoughtspot/rest-api-sdk) for all data operations.
 
 ## Project Structure
 
