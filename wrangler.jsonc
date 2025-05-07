@@ -32,13 +32,4 @@
 		"enabled": true
 	},
 	"assets": { "directory": "./static/", "binding": "ASSETS" },
-	"secrets_store_secrets": [{
-		"binding": "instanceUrl",
-		"store_id": "a0d7fd5ae3af4aad8c87bccb41323cac",
-		"secret_name": "TS_INSTANCE_URL"
-	}, {
-		"binding": "accessToken",
-		"store_id": "a0d7fd5ae3af4aad8c87bccb41323cac",
-		"secret_name": "TS_ACCESS_TOKEN"
-	}]
 }

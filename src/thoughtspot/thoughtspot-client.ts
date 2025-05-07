@@ -43,6 +43,8 @@ function addExportUnsavedAnswerTML(client: any, instanceUrl: string) {
             headers: {
                 "Content-Type": "application/json",
                 "Authorization": `Bearer ${token}`,
+                "Accept": "application/json",
+                "User-Agent": "ThoughtSpot-ts-client",
             },
             body: JSON.stringify({
                 operationName: "GetUnsavedAnswerTML",

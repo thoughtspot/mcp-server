@@ -73,6 +73,6 @@ export async function createLiveboard(name: string, answers: any[], client: Thou
         import_policy: "ALL_OR_NONE",
     })
 
-    return `https://${(client as any).instanceUrl}/pinboard/${resp[0].response.header.id_guid}`;
+    return `${(client as any).instanceUrl}/#/pinboard/${resp[0].response.header.id_guid}`;
 }
 

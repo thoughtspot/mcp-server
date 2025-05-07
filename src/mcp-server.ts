@@ -64,6 +64,7 @@ export class MCPServer extends Server {
 
             switch (name) {
                 case ToolName.Ping:
+                    console.log("Received Ping request");
                     if (this.ctx.props.accessToken && this.ctx.props.instanceUrl) {
                         return {
                             content: [{ type: "text", text: "Pong" }],
@@ -99,7 +100,7 @@ export class MCPServer extends Server {
                 params: {
                     message: data,
                     progressToken: progressToken,
-                    progress: Math.max(progress++ * 10, 100),
+                    progress: Math.min(progress++ * 10, 100),
                     total: 100,
                 },
             }),
