@@ -16,6 +16,36 @@ export async function getRelevantQuestions(query: string, additionalContext: str
     return questions.decomposedQueryResponse?.decomposedQueries?.map((q) => q.query!) || [];
 }
 
+async function getAnswerData({ session_identifier, generation_number, client }: { session_identifier: string, generation_number: number, client: ThoughtSpotRestApi }) {
+    try {
+        const data = await client.exportAnswerReport({
+            session_identifier,
+            generation_number,
+            file_format: "CSV",
+        })
+        let csvData = await data.text();
+        // get only the first 100 lines of the csv data
+        csvData = csvData.split('\n').slice(0, 100).join('\n');
+        return csvData;
+    } catch (error) {
+        console.error("Error getting answer Data: ", error);
+        return null;
+    }
+}
+
+async function getAnswerTML({ session_identifier, generation_number, client }: { session_identifier: string, generation_number: number, client: ThoughtSpotRestApi }) {
+    try {
+        const tml = await (client as any).exportUnsavedAnswerTML({
+            session_identifier,
+            generation_number,
+        })
+        return tml;
+    } catch (error) {
+        console.error("Error getting answer TML: ", error);
+        return null;
+    }
+}
+
 export async function getAnswerForQuestion(question: string, shouldGetTML: boolean, client: ThoughtSpotRestApi) {
     console.log("[DEBUG] Getting answer for question: ", question);
     const answer = await client.singleAnswer({
@@ -23,32 +53,34 @@ export async function getAnswerForQuestion(question: string, shouldGetTML: boole
         metadata_identifier: DATA_SOURCE_ID,
     })
 
+    const { session_identifier, generation_number } = answer as any;
+
     console.log("[DEBUG] Getting Data for question: ", question);
     const [data, tml] = await Promise.all([
-        client.exportAnswerReport({
-            session_identifier: answer.session_identifier!,
-            generation_number: answer.generation_number!,
-            file_format: "CSV",
+        getAnswerData({
+            session_identifier,
+            generation_number,
+            client
         }),
-        shouldGetTML ? (client as any).exportUnsavedAnswerTML({
-            session_identifier: answer.session_identifier!,
-            generation_number: answer.generation_number!,
-        }) : Promise.resolve(null)
+        shouldGetTML
+            ? getAnswerTML({
+                session_identifier,
+                generation_number,
+                client
+            })
+            : Promise.resolve(null)
     ])
-
-    let csvData = await data.text();
-    // get only the first 100 lines of the csv data
-    csvData = csvData.split('\n').slice(0, 100).join('\n');
 
     return {
         question,
         ...answer,
-        data: csvData,
+        data,
         tml,
     };
 }
 
 export async function createLiveboard(name: string, answers: any[], client: ThoughtSpotRestApi) {
+    answers = answers.filter((answer) => answer.tml);
     const tml = {
         liveboard: {
             name,

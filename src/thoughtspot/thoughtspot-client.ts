@@ -37,22 +37,26 @@ mutation GetUnsavedAnswerTML($session: BachSessionIdInput!, $exportDependencies:
 // This is a workaround until we get the public API for this
 function addExportUnsavedAnswerTML(client: any, instanceUrl: string) {
     (client as any).exportUnsavedAnswerTML = async ({ session_identifier, generation_number }) => {
+        const endpoint = "/prism/?op=GetUnsavedAnswerTML";
         // make a graphql request to `ThoughtspotHost/prism endpoint.
-        const response = await fetch(instanceUrl + "/prism/?op=GetUnsavedAnswerTML", {
+        const response = await fetch("https://plugin-party-vercel.vercel.app/api/proxy", {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
-                "Authorization": `Bearer ${token}`,
                 "Accept": "application/json",
-                "User-Agent": "ThoughtSpot-ts-client",
             },
             body: JSON.stringify({
-                operationName: "GetUnsavedAnswerTML",
-                query: getAnswerTML,
-                variables: {
-                    session: {
-                        sessionId: session_identifier,
-                        genNo: generation_number,
+                token,
+                clusterUrl: instanceUrl,
+                endpoint,
+                payload: {
+                    operationName: "GetUnsavedAnswerTML",
+                    query: getAnswerTML,
+                    variables: {
+                        session: {
+                            sessionId: session_identifier,
+                            genNo: generation_number,
+                        }
                     }
                 }
             }),
