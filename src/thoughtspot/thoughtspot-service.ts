@@ -16,9 +16,11 @@ export async function getRelevantQuestions(query: string, additionalContext: str
     return questions.decomposedQueryResponse?.decomposedQueries?.map((q) => q.query!) || [];
 }
 
-async function getAnswerData({ session_identifier, generation_number, client }: { session_identifier: string, generation_number: number, client: ThoughtSpotRestApi }) {
+async function getAnswerData({ question, session_identifier, generation_number, client }: { question: string, session_identifier: string, generation_number: number, client: ThoughtSpotRestApi }) {
     try {
-        const data = await client.exportAnswerReport({
+        console.log("[DEBUG] Getting Data for question: ", question);
+        // Proxy to avoid 403 from TS AWS WAF.
+        const data = await (client as any).exportAnswerReportProxied({
             session_identifier,
             generation_number,
             file_format: "CSV",
@@ -33,8 +35,9 @@ async function getAnswerData({ session_identifier, generation_number, client }: 
     }
 }
 
-async function getAnswerTML({ session_identifier, generation_number, client }: { session_identifier: string, generation_number: number, client: ThoughtSpotRestApi }) {
+async function getAnswerTML({ question, session_identifier, generation_number, client }: { question: string, session_identifier: string, generation_number: number, client: ThoughtSpotRestApi }) {
     try {
+        console.log("[DEBUG] Getting TML for question: ", question);
         const tml = await (client as any).exportUnsavedAnswerTML({
             session_identifier,
             generation_number,
@@ -55,15 +58,16 @@ export async function getAnswerForQuestion(question: string, shouldGetTML: boole
 
     const { session_identifier, generation_number } = answer as any;
 
-    console.log("[DEBUG] Getting Data for question: ", question);
     const [data, tml] = await Promise.all([
         getAnswerData({
+            question,
             session_identifier,
             generation_number,
             client
         }),
         shouldGetTML
             ? getAnswerTML({
+                question,
                 session_identifier,
                 generation_number,
                 client
