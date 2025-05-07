@@ -4,6 +4,7 @@ import { Props } from './utils';
 import { parseRedirectApproval, renderApprovalDialog } from './oauth-manager/oauth-utils';
 import { renderTokenCallback } from './oauth-manager/token-utils';
 import { any } from 'zod';
+import { encodeBase64, decodeBase64 } from 'hono/utils/encode';
 
 
 const app = new Hono<{ Bindings: Env & { OAUTH_PROVIDER: OAuthHelpers } }>()
@@ -54,7 +55,8 @@ app.post("/authorize", async (c) => {
     // The callback endpoint will get the encrypted token and decrypt it to get the user's access token.
     const targetURLPath = new URL("/callback", c.req.url);
     targetURLPath.searchParams.append('instanceUrl', instanceUrl);
-    targetURLPath.searchParams.append('oauthReqInfo', JSON.stringify(state.oauthReqInfo));
+    const encodedState = btoa(JSON.stringify(state.oauthReqInfo));
+    targetURLPath.searchParams.append('oauthReqInfo', encodedState);
     redirectUrl.searchParams.append('targetURLPath', targetURLPath.href);
     console.log("redirectUrl", redirectUrl.toString());
 
@@ -63,15 +65,15 @@ app.post("/authorize", async (c) => {
 
 app.get("/callback", async (c) => {
     const instanceUrl = c.req.query('instanceUrl');
-    const oauthReqInfo = c.req.query('oauthReqInfo');
+    const encodedOauthReqInfo = c.req.query('oauthReqInfo');
     if (!instanceUrl) {
         return c.text('Missing instance URL', 400);
     }
-    if (!oauthReqInfo) {
+    if (!encodedOauthReqInfo) {
         return c.text('Missing OAuth request info', 400);
     }
-
-    return new Response(renderTokenCallback(instanceUrl, oauthReqInfo), {
+    const decodedOAuthReqInfo = JSON.parse(atob(encodedOauthReqInfo));
+    return new Response(renderTokenCallback(instanceUrl, decodedOAuthReqInfo), {
         headers: {
             'Content-Type': 'text/html',
         },
@@ -84,8 +86,6 @@ app.post("/store-token", async (c) => {
         return c.text('Missing token or OAuth request info or instanceUrl', 400);
     }
 
-    console.log('Token received and stored', token);
-
     // Complete the authorization with the provided information
     const { redirectTo } = await c.env.OAUTH_PROVIDER.completeAuthorization({
         request: oauthReqInfo,
@@ -95,7 +95,7 @@ app.post("/store-token", async (c) => {
         },
         scope: oauthReqInfo.scope,
         props: {
-            accessToken: token.token,
+            accessToken: token.data.token,
             instanceUrl: instanceUrl,
         } as Props,
     });
