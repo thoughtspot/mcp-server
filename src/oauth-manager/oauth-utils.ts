@@ -516,11 +516,6 @@ function validateAndSanitizeUrl(url: string): string {
         
         const parsedUrl = new URL(urlWithProtocol);
         
-        // Ensure it's using HTTPS
-        if (parsedUrl.protocol !== 'https:') {
-            throw new Error('URL must use HTTPS');
-        }
-        
         // Remove trailing slashes and normalize the URL
         const sanitizedUrl = parsedUrl.origin;
         
