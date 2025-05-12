@@ -1,10 +1,15 @@
 import { createLiveboard, getAnswerForQuestion, getRelevantQuestions } from "./thoughtspot-service";
 import { ThoughtSpotRestApi } from "@thoughtspot/rest-api-sdk";
-async function getAnswersForQuestions(questions: string[], shouldGetTML: boolean, notify: (data: string) => void, client: ThoughtSpotRestApi) {
+
+const DEFAULT_DATA_SOURCE_ID = "cd252e5c-b552-49a8-821d-3eadaa049cca";
+const DO_ADDITIONAL_QUESTIONS = false;
+
+
+async function getAnswersForQuestions(questions: string[], sourceId: string, shouldGetTML: boolean, notify: (data: string) => void, client: ThoughtSpotRestApi) {
     const answers = (await Promise.all(
         questions.map(async (question) => {
             try {
-                return await getAnswerForQuestion(question, shouldGetTML, client);
+                return await getAnswerForQuestion(question, sourceId, shouldGetTML, client);
             } catch (error) {
                 console.error(`Failed to get answer for question: ${question}`, error);
                 return null;
@@ -20,33 +25,39 @@ async function getAnswersForQuestions(questions: string[], shouldGetTML: boolean
 
 export const getRelevantData = async ({
     query,
+    sourceId,
     shouldCreateLiveboard,
     notify,
     client,
 }: {
     query: string;
+    sourceId?: string;
     shouldCreateLiveboard: boolean;
     notify: (data: string) => void;
     client: ThoughtSpotRestApi;
 }) => {
-    const questions = await getRelevantQuestions(query, "", client);
+    sourceId = sourceId || DEFAULT_DATA_SOURCE_ID;
+    const questions = await getRelevantQuestions(query, sourceId, "", client);
     notify(`#### Retrieving answers to these relevant questions:\n ${questions.map((q) => `- ${q}`).join("\n")}`);
 
-    const answers = await getAnswersForQuestions(questions, shouldCreateLiveboard, notify, client);
+    let answers = await getAnswersForQuestions(questions, sourceId, shouldCreateLiveboard, notify, client);
 
-    const additionalQuestions = await getRelevantQuestions(query, `
-        These questions have been answered already (with their csv data): ${answers.map((a) => `Question: ${a.question} \n CSV data: \n${a.data}`).join("\n\n ")}
+    if (DO_ADDITIONAL_QUESTIONS) {
+        const additionalQuestions = await getRelevantQuestions(query, sourceId, `
+            These questions have been answered already (with their csv data): ${answers.map((a) => `Question: ${a.question} \n CSV data: \n${a.data}`).join("\n\n ")}
         Look at the csv data of the above queries to see if you need additional related queries to be answered. You can also ask questions going deeper into the data returned by applying filters.
         Do NOT resend the same query already asked before.
     `, client);
-    notify(`#### Need to get answers to some of these additional questions:\n ${additionalQuestions.map((q) => `- ${q}`).join("\n")}`);
+        notify(`#### Need to get answers to some of these additional questions:\n ${additionalQuestions.map((q) => `- ${q}`).join("\n")}`);
 
-    const additionalAnswers = await getAnswersForQuestions(additionalQuestions, shouldCreateLiveboard, notify, client);
+        const additionalAnswers = await getAnswersForQuestions(additionalQuestions, sourceId, shouldCreateLiveboard, notify, client);
 
-    const allAnswers = [...answers, ...additionalAnswers];
-    const liveboard = shouldCreateLiveboard ? await createLiveboard(query, allAnswers, client) : null;
+        answers = [...answers, ...additionalAnswers];
+    }
+
+    const liveboard = shouldCreateLiveboard ? await createLiveboard(query, answers, client) : null;
     return {
-        allAnswers,
+        allAnswers: answers,
         liveboard,
     };
 };
