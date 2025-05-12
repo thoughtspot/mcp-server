@@ -451,7 +451,7 @@ export function renderApprovalDialog(request: Request, options: ApprovalDialogOp
                   
                   <div class="form-group">
                     <label for="instanceUrl">ThoughtSpot Instance URL</label>
-                    <input type="url" id="instanceUrl" name="instanceUrl" required 
+                    <input type="text" id="instanceUrl" name="instanceUrl" required 
                            placeholder="https://your-instance.thoughtspot.cloud">
                   </div>
                   
@@ -499,6 +499,36 @@ export interface ParsedApprovalResult {
   
 
 /**
+ * Validates and sanitizes a URL to ensure it's a valid ThoughtSpot instance URL
+ * @param url - The URL to validate and sanitize
+ * @returns The sanitized URL
+ * @throws Error if the URL is invalid
+ */
+function validateAndSanitizeUrl(url: string): string {
+    try {
+        // Remove any whitespace
+        const trimmedUrl = url.trim();
+        
+        // Add https:// if no protocol is specified
+        const urlWithProtocol = trimmedUrl.startsWith('http://') || trimmedUrl.startsWith('https://') 
+            ? trimmedUrl 
+            : `https://${trimmedUrl}`;
+        
+        const parsedUrl = new URL(urlWithProtocol);
+        
+        // Remove trailing slashes and normalize the URL
+        const sanitizedUrl = parsedUrl.origin;
+        
+        return sanitizedUrl;
+    } catch (e) {
+        if (e instanceof Error) {
+            throw new Error(`Invalid URL: ${e.message}`);
+        }
+        throw new Error('Invalid URL format');
+    }
+}
+
+/**
  * Parses the form submission from the approval dialog, extracts the state,
  * and generates Set-Cookie headers to mark the client as approved.
  *
@@ -517,7 +547,7 @@ export async function parseRedirectApproval(request: Request): Promise<ParsedApp
     try {
         const formData = await request.formData()
         const encodedState = formData.get('state')
-        instanceUrl = formData.get('instanceUrl') as string;
+        const rawInstanceUrl = formData.get('instanceUrl') as string;
   
         if (typeof encodedState !== 'string' || !encodedState) {
             throw new Error("Missing or invalid 'state' in form data.")
@@ -530,9 +560,12 @@ export async function parseRedirectApproval(request: Request): Promise<ParsedApp
             throw new Error('Could not extract clientId from state object.')
         }
 
-        if (!instanceUrl) {
+        if (!rawInstanceUrl) {
             throw new Error('Missing instance URL')
         }
+
+        // Validate and sanitize the instance URL
+        instanceUrl = validateAndSanitizeUrl(rawInstanceUrl);
     } catch (e) {
         console.error('Error processing form submission:', e)
         throw new Error(`Failed to parse approval form: ${e instanceof Error ? e.message : String(e)}`)

@@ -53,6 +53,18 @@ app.post("/authorize", async (c) => {
     // redirect URL as query params = new URL("/callback", c.req.url).href to 
     // send the user back to callback endpoint.
     // The callback endpoint will get the encrypted token and decrypt it to get the user's access token.
+
+    // const targetURLAuthorize = new URL("callosum/v1/v2/auth/token/authorize", instanceUrl);
+    // targetURLAuthorize.searchParams.append('validity_time_in_sec', "86400");
+    // const targetURLCallbackPath = new URL("/callback", c.req.url);
+    // targetURLCallbackPath.searchParams.append('instanceUrl', instanceUrl);
+    // targetURLAuthorize.searchParams.append('redirect_url', btoa(targetURLCallbackPath.toString()));
+    // const encodedState = btoa(JSON.stringify(state.oauthReqInfo));
+    // targetURLAuthorize.searchParams.append('state', encodedState);
+    // targetURLAuthorize.searchParams.append('token_encryption_key', "1234567812345678");
+    // targetURLAuthorize.searchParams.append('encryption_algorithm', 'AES');
+    // redirectUrl.searchParams.append('targetURLPath', targetURLAuthorize.href);
+
     const targetURLPath = new URL("/callback", c.req.url);
     targetURLPath.searchParams.append('instanceUrl', instanceUrl);
     const encodedState = btoa(JSON.stringify(state.oauthReqInfo));
@@ -64,6 +76,13 @@ app.post("/authorize", async (c) => {
 })
 
 app.get("/callback", async (c) => {
+
+    // TODO(shikhar.bhargava): remove this once we have a proper callback URL
+    // With the proper callback URL, we will get the encrypted token in the query params
+    // along with it we will get the instanceUrl and the state (oauthReqInfo).
+    // and we will decrypt the token to get the user's access token and complete the authorization.
+    // const encodedOauthReqInfo = c.req.query('state');
+
     const instanceUrl = c.req.query('instanceUrl');
     const encodedOauthReqInfo = c.req.query('oauthReqInfo');
     if (!instanceUrl) {
