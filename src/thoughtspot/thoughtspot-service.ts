@@ -1,9 +1,6 @@
 import { ThoughtSpotRestApi } from "@thoughtspot/rest-api-sdk";
 
-const DATA_SOURCE_ID = "cd252e5c-b552-49a8-821d-3eadaa049cca";
-
-
-export async function getRelevantQuestions(query: string, additionalContext: string = '', client: ThoughtSpotRestApi): Promise<string[]> {
+export async function getRelevantQuestions(query: string, sourceId: string, additionalContext: string = '', client: ThoughtSpotRestApi): Promise<string[]> {
     const questions = await client.queryGetDecomposedQuery({
         nlsRequest: {
             query: query,
@@ -11,7 +8,7 @@ export async function getRelevantQuestions(query: string, additionalContext: str
         content: [
             additionalContext,
         ],
-        worksheetIds: [DATA_SOURCE_ID]
+        worksheetIds: [sourceId]
     })
     return questions.decomposedQueryResponse?.decomposedQueries?.map((q) => q.query!) || [];
 }
@@ -49,11 +46,11 @@ async function getAnswerTML({ question, session_identifier, generation_number, c
     }
 }
 
-export async function getAnswerForQuestion(question: string, shouldGetTML: boolean, client: ThoughtSpotRestApi) {
+export async function getAnswerForQuestion(question: string, sourceId: string, shouldGetTML: boolean, client: ThoughtSpotRestApi) {
     console.log("[DEBUG] Getting answer for question: ", question);
     const answer = await client.singleAnswer({
         query: question,
-        metadata_identifier: DATA_SOURCE_ID,
+        metadata_identifier: sourceId,
     })
 
     const { session_identifier, generation_number } = answer as any;
@@ -112,3 +109,30 @@ export async function createLiveboard(name: string, answers: any[], client: Thou
     return `${(client as any).instanceUrl}/#/pinboard/${resp[0].response.header.id_guid}`;
 }
 
+export interface DataSource {
+    name: string;
+    id: string;
+    description: string;
+}
+
+export async function getDataSources(client: ThoughtSpotRestApi): Promise<DataSource[]> {
+    const resp = await client.searchMetadata({
+        metadata: [{
+            type: "LOGICAL_TABLE",
+        }],
+        record_size: 1000,
+        sort_options: {
+            field_name: "LAST_ACCESSED",
+            order: "DESC",
+        }
+    });
+    return resp
+        .filter(d => d.metadata_header.type === "WORKSHEET")
+        .map(d => {
+            return {
+                name: d.metadata_header.name,
+                id: d.metadata_header.id,
+                description: d.metadata_header.description,
+            }
+        });
+}
