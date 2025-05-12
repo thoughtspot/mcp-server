@@ -26,6 +26,8 @@ The ThoughtSpot MCP Server is a Cloudflare Worker-based service that exposes Mod
 - **MCP Tools**:
   - `ping`: Test connectivity and authentication.
   - `getRelevantData`: Query ThoughtSpot for relevant data based on a user question, returning answers and optionally a dashboard (Liveboard) link.
+- **MCP Resources**:
+   - `datasources`: List of TS Data models the user has access to.
 
 ## Project Structure
 
