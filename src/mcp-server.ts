@@ -169,7 +169,9 @@ export class MCPServer extends Server {
                 text: relevantData.allAnswers.map((answer) => `Question: ${answer.question}\nAnswer: ${answer.data}`).join("\n\n")
             }, {
                 type: "text",
-                text: `Dashboard Url: ${relevantData.liveboard} Use this url to view the dashboard in ThoughtSpot which contains visualizations for the generated data. Present this url to the user as a link to view the data as a reference.`,
+                text: `Dashboard Url: ${relevantData.liveboard}
+                
+                Use this url to view the dashboard/liveboard in ThoughtSpot which contains visualizations for the generated data. *Always* Present this url to the user as a link to view the data as a reference.`,
             }],
         };
     }
