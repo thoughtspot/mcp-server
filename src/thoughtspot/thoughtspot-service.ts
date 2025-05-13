@@ -81,6 +81,20 @@ export async function getAnswerForQuestion(question: string, sourceId: string, s
     };
 }
 
+export async function fetchTMLAndCreateLiveboard(name: string, answers: any[], client: ThoughtSpotRestApi) {
+    const tmls = await Promise.all(answers.map((answer) => getAnswerTML({
+        question: answer.question,
+        session_identifier: answer.session_identifier,
+        generation_number: answer.generation_number,
+        client,
+    })));
+    answers.forEach((answer, idx) => {
+        answer.tml = tmls[idx];
+    });
+
+    return createLiveboard(name, answers, client);
+}
+
 export async function createLiveboard(name: string, answers: any[], client: ThoughtSpotRestApi) {
     answers = answers.filter((answer) => answer.tml);
     const tml = {
