@@ -8,7 +8,8 @@ export async function getRelevantQuestions(query: string, sourceId: string, addi
         content: [
             additionalContext,
         ],
-        worksheetIds: [sourceId]
+        worksheetIds: [sourceId],
+        maxDecomposedQueries: 5,
     })
     return questions.decomposedQueryResponse?.decomposedQueries?.map((q) => q.query!) || [];
 }

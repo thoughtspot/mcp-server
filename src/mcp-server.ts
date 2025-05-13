@@ -153,6 +153,16 @@ export class MCPServer extends Server {
             client,
         });
 
+        if (relevantData.allAnswers.length === 0) {
+            return {
+                isError: true,
+                content: [{
+                    type: "text",
+                    text: "No relevant data found, please make sure the datasource is correct, and you have data download privileges in ThoughtSpot.",
+                }],
+            };
+        }
+
         return {
             content: [{
                 type: "text",
