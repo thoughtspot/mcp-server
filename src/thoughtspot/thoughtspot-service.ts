@@ -140,7 +140,7 @@ export async function getDataSources(client: ThoughtSpotRestApi): Promise<DataSo
         metadata: [{
             type: "LOGICAL_TABLE",
         }],
-        record_size: 1000,
+        record_size: 2000,
         sort_options: {
             field_name: "LAST_ACCESSED",
             order: "DESC",

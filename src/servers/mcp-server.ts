@@ -2,10 +2,10 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { CallToolRequestSchema, ListToolsRequestSchema, ToolSchema, Tool, ListResourcesRequestSchema, ReadResourceRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
-import { Props } from "./utils";
-import { getRelevantData } from "./thoughtspot/relevant-data";
-import { getThoughtSpotClient } from "./thoughtspot/thoughtspot-client";
-import { DataSource, fetchTMLAndCreateLiveboard, getAnswerForQuestion, getDataSources, getRelevantQuestions } from "./thoughtspot/thoughtspot-service";
+import { Props } from "../utils";
+import { getRelevantData } from "../thoughtspot/relevant-data";
+import { getThoughtSpotClient } from "../thoughtspot/thoughtspot-client";
+import { DataSource, fetchTMLAndCreateLiveboard, getAnswerForQuestion, getDataSources, getRelevantQuestions } from "../thoughtspot/thoughtspot-service";
 
 
 const ToolInputSchema = ToolSchema.shape.inputSchema;
