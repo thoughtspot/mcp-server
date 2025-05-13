@@ -1,6 +1,11 @@
 import { Hono } from 'hono'
 import { Props } from '../utils';
-import { createLiveboard, getAnswerForQuestion, getDataSources, getRelevantQuestions } from '../thoughtspot/thoughtspot-service';
+import {
+    createLiveboard,
+    getAnswerForQuestion,
+    getDataSources,
+    getRelevantQuestions
+} from '../thoughtspot/thoughtspot-service';
 import { getThoughtSpotClient } from '../thoughtspot/thoughtspot-client';
 
 const apiServer = new Hono<{ Bindings: Env & { props: Props } }>()
