@@ -1,11 +1,22 @@
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { CallToolRequestSchema, ListToolsRequestSchema, ToolSchema, Tool, ListResourcesRequestSchema, ReadResourceRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import {
+    CallToolRequestSchema,
+    ListToolsRequestSchema,
+    ToolSchema,
+    ListResourcesRequestSchema,
+    ReadResourceRequestSchema
+} from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
-import { Props } from "./utils";
-import { getRelevantData } from "./thoughtspot/relevant-data";
-import { getThoughtSpotClient } from "./thoughtspot/thoughtspot-client";
-import { DataSource, fetchTMLAndCreateLiveboard, getAnswerForQuestion, getDataSources, getRelevantQuestions } from "./thoughtspot/thoughtspot-service";
+import { Props } from "../utils";
+import { getThoughtSpotClient } from "../thoughtspot/thoughtspot-client";
+import {
+    DataSource,
+    fetchTMLAndCreateLiveboard,
+    getAnswerForQuestion,
+    getDataSources,
+    getRelevantQuestions
+} from "../thoughtspot/thoughtspot-service";
 
 
 const ToolInputSchema = ToolSchema.shape.inputSchema;
@@ -18,16 +29,8 @@ const GetRelevantQuestionsSchema = z.object({
     additionalContext: z.string()
         .describe("Additional context to add to the query, this might be older data returned for previous questions or any other relevant context that might help the system generate better questions.")
         .optional(),
-    datasourceId: z.string()
-        .describe("The datasource to get questions for, this is the id of the datasource to get data from")
-        .optional()
-});
-
-const GetRelevantDataSchema = z.object({
-    query: z.string().describe("The query to get relevant data for, this could be a high level task or question the user is asking or hoping to get answered. You can pass the complete raw query as the system is smart to make sense of it."),
-    datasourceId: z.string()
-        .describe("The datasource to get data from, this is the id of the datasource to get data from")
-        .optional()
+    datasourceIds: z.array(z.string())
+        .describe("The datasources to get questions for, this is the ids of the datasources to get data from")
 });
 
 const GetAnswerSchema = z.object({
@@ -177,24 +180,29 @@ export class MCPServer extends Server {
 
 
     async callGetRelevantQuestions(request: z.infer<typeof CallToolRequestSchema>) {
-        const { query, datasourceId: sourceId, additionalContext } = GetRelevantQuestionsSchema.parse(request.params.arguments);
+        const { query, datasourceIds: sourceIds, additionalContext } = GetRelevantQuestionsSchema.parse(request.params.arguments);
         const client = getThoughtSpotClient(this.ctx.props.instanceUrl, this.ctx.props.accessToken);
-        const progressToken = request.params._meta?.progressToken;
-        let progress = 0;
-        console.log("[DEBUG] Getting relevant questions for query: ", query, " and datasource: ", sourceId);
+        console.log("[DEBUG] Getting relevant questions for query: ", query, " and datasource: ", sourceIds);
 
         const relevantQuestions = await getRelevantQuestions(
             query,
-            sourceId!,
+            sourceIds!,
             additionalContext,
             client,
         );
 
+        if (relevantQuestions.error) {
+            return {
+                isError: true,
+                content: [{ type: "text", text: "ERROR: " + relevantQuestions.error.message }],
+            };
+        }
+
         return {
-            content: [{
+            content: relevantQuestions.questions.map(q => ({
                 type: "text",
-                text: relevantQuestions.map((question) => `- ${question}`).join("\n"),
-            }],
+                text: `Question: ${q.question}\nDatasourceId: ${q.datasourceId}`,
+            })),
         };
     }
 
@@ -206,6 +214,12 @@ export class MCPServer extends Server {
         console.log("[DEBUG] Getting answer for question: ", question, " and datasource: ", sourceId);
 
         const answer = await getAnswerForQuestion(question, sourceId, false, client);
+        if (answer.error) {
+            return {
+                isError: true,
+                content: [{ type: "text", text: "ERROR: " + answer.error.message }],
+            };
+        }
 
         return {
             content: [{
@@ -221,60 +235,19 @@ export class MCPServer extends Server {
     async callCreateLiveboard(request: z.infer<typeof CallToolRequestSchema>) {
         const { name, answers } = CreateLiveboardSchema.parse(request.params.arguments);
         const client = getThoughtSpotClient(this.ctx.props.instanceUrl, this.ctx.props.accessToken);
-        const liveboardUrl = await fetchTMLAndCreateLiveboard(name, answers, client);
-        return {
-            content: [{
-                type: "text",
-                text: `Liveboard created successfully, you can view it at ${liveboardUrl}
-                
-                Provide this url to the user as a link to view the liveboard in ThoughtSpot.`,
-            }],
-        };
-    }
-
-
-    async callGetRelevantData(request: z.infer<typeof CallToolRequestSchema>) {
-        const { query, datasourceId: sourceId } = GetRelevantDataSchema.parse(request.params.arguments);
-        const client = getThoughtSpotClient(this.ctx.props.instanceUrl, this.ctx.props.accessToken);
-        const progressToken = request.params._meta?.progressToken;
-        let progress = 0;
-        console.log("[DEBUG] Getting relevant data for query: ", query, " and datasource: ", sourceId);
-
-        const relevantData = await getRelevantData({
-            query,
-            sourceId,
-            shouldCreateLiveboard: true,
-            notify: (data) => this.notification({
-                method: "notifications/progress",
-                params: {
-                    message: data,
-                    progressToken: progressToken,
-                    progress: Math.min(progress++ * 10, 100),
-                    total: 100,
-                },
-            }),
-            client,
-        });
-
-        if (relevantData.allAnswers.length === 0) {
+        const liveboard = await fetchTMLAndCreateLiveboard(name, answers, client);
+        if (liveboard.error) {
             return {
                 isError: true,
-                content: [{
-                    type: "text",
-                    text: "No relevant data found, please make sure the datasource is correct, and you have data download privileges in ThoughtSpot.",
-                }],
+                content: [{ type: "text", text: "ERROR: " + liveboard.error.message }],
             };
         }
-
         return {
             content: [{
                 type: "text",
-                text: relevantData.allAnswers.map((answer) => `Question: ${answer.question}\nAnswer: ${answer.data}`).join("\n\n")
-            }, {
-                type: "text",
-                text: `Dashboard Url: ${relevantData.liveboard}
+                text: `Liveboard created successfully, you can view it at ${liveboard.url}
                 
-                Use this url to view the dashboard/liveboard in ThoughtSpot which contains visualizations for the generated data. *Always* Present this url to the user as a link to view the data as a reference.`,
+                Provide this url to the user as a link to view the liveboard in ThoughtSpot.`,
             }],
         };
     }
