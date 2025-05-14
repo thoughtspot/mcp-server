@@ -1,21 +1,31 @@
 import { ThoughtSpotRestApi } from "@thoughtspot/rest-api-sdk";
 
-export async function getRelevantQuestions(query: string, sourceId: string, additionalContext: string = '', client: ThoughtSpotRestApi): Promise<string[]> {
+export async function getRelevantQuestions(query: string, sourceIds: string[], additionalContext: string = '', client: ThoughtSpotRestApi): Promise<{ questions: { question: string, datasourceId: string }[], error: Error | null }> {
     try {
-        const questions = await client.queryGetDecomposedQuery({
+        const resp = await client.queryGetDecomposedQuery({
             nlsRequest: {
                 query: query,
             },
             content: [
                 additionalContext,
             ],
-            worksheetIds: [sourceId],
-            maxDecomposedQueries: 7,
+            worksheetIds: sourceIds,
+            maxDecomposedQueries: 5,
         })
-        return questions.decomposedQueryResponse?.decomposedQueries?.map((q) => q.query!) || [];
+        const questions = resp.decomposedQueryResponse?.decomposedQueries?.map((q) => ({
+            question: q.query!,
+            datasourceId: q.worksheetId!,
+        })) || [];
+        return {
+            questions,
+            error: null,
+        }
     } catch (error) {
         console.error("Error getting relevant questions: ", error);
-        return [];
+        return {
+            questions: [],
+            error: error as Error,
+        }
     }
 }
 
@@ -34,7 +44,7 @@ async function getAnswerData({ question, session_identifier, generation_number, 
         return csvData;
     } catch (error) {
         console.error("Error getting answer Data: ", error);
-        return null;
+        throw error;
     }
 }
 
@@ -54,50 +64,70 @@ async function getAnswerTML({ question, session_identifier, generation_number, c
 
 export async function getAnswerForQuestion(question: string, sourceId: string, shouldGetTML: boolean, client: ThoughtSpotRestApi) {
     console.log("[DEBUG] Getting answer for question: ", question);
-    const answer = await client.singleAnswer({
-        query: question,
-        metadata_identifier: sourceId,
-    })
+    try {
+        const answer = await client.singleAnswer({
+            query: question,
+            metadata_identifier: sourceId,
+        })
 
-    const { session_identifier, generation_number } = answer as any;
+        const { session_identifier, generation_number } = answer as any;
 
-    const [data, tml] = await Promise.all([
-        getAnswerData({
-            question,
-            session_identifier,
-            generation_number,
-            client
-        }),
-        shouldGetTML
-            ? getAnswerTML({
+        const [data, tml] = await Promise.all([
+            getAnswerData({
                 question,
                 session_identifier,
                 generation_number,
                 client
-            })
-            : Promise.resolve(null)
-    ])
+            }),
+            shouldGetTML
+                ? getAnswerTML({
+                    question,
+                    session_identifier,
+                    generation_number,
+                    client
+                })
+                : Promise.resolve(null)
+        ])
 
-    return {
-        question,
-        ...answer,
-        data,
-        tml,
-    };
+        return {
+            question,
+            ...answer,
+            data,
+            tml,
+            error: null,
+        };
+    } catch (error) {
+        console.error("Error getting answer for question: ", question, " and sourceId: ", sourceId, " and shouldGetTML: ", shouldGetTML, " and error: ", error);
+        return {
+            error: error as Error,
+        };
+    }
 }
 
 export async function fetchTMLAndCreateLiveboard(name: string, answers: any[], client: ThoughtSpotRestApi) {
-    const tmls = await Promise.all(answers.map((answer) => getAnswerTML({
-        question: answer.question,
-        session_identifier: answer.session_identifier,
-        generation_number: answer.generation_number,
-        client,
-    })));
-    answers.forEach((answer, idx) => {
-        answer.tml = tmls[idx];
-    });
+    try {
+        const tmls = await Promise.all(answers.map((answer) => getAnswerTML({
+            question: answer.question,
+            session_identifier: answer.session_identifier,
+            generation_number: answer.generation_number,
+            client,
+        })));
+        answers.forEach((answer, idx) => {
+            answer.tml = tmls[idx];
+        });
 
-    return createLiveboard(name, answers, client);
+        const liveboardUrl = await createLiveboard(name, answers, client);
+        return {
+            url: liveboardUrl,
+            error: null,
+        }
+    } catch (error) {
+        console.error("Error fetching TML and creating liveboard: ", error);
+        return {
+            liveboardUrl: null,
+            error: error as Error,
+        }
+    }
 }
 
 export async function createLiveboard(name: string, answers: any[], client: ThoughtSpotRestApi) {

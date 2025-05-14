@@ -34,7 +34,7 @@
     "wrangler": "^4.12.0"
   },
   "dependencies": {
-    "@cloudflare/workers-oauth-provider": "^0.0.4",
+    "@cloudflare/workers-oauth-provider": "^0.0.5",
     "@modelcontextprotocol/sdk": "^1.10.2",
     "@thoughtspot/rest-api-sdk": "^2.13.1",
     "agents": "^0.0.75",
