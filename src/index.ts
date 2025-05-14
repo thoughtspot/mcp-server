@@ -3,6 +3,7 @@ import { McpAgent } from "agents/mcp";
 import handler from "./handlers";
 import { Props } from "./utils";
 import { MCPServer } from "./mcp-server";
+import {apiServer} from "./api-server";
 
 
 export class ThoughtSpotMCP extends McpAgent<Env, any, Props> {
@@ -17,6 +18,7 @@ export default new OAuthProvider({
     apiHandlers: {
         "/mcp": ThoughtSpotMCP.serve("/mcp") as any, // TODO: Remove 'any'
         "/sse": ThoughtSpotMCP.serveSSE("/sse") as any, // TODO: Remove 'any'
+        "/ping": apiServer as any, // TODO: Remove 'any'
     },
     defaultHandler: handler as any, // TODO: Remove 'any'
     authorizeEndpoint: "/authorize",
