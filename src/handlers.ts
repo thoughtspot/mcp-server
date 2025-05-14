@@ -4,7 +4,10 @@ import type { Props } from './utils';
 import { parseRedirectApproval, renderApprovalDialog } from './oauth-manager/oauth-utils';
 import { renderTokenCallback } from './oauth-manager/token-utils';
 import { any } from 'zod';
-import { encodeBase64Url, decodeBase64Url } from 'hono/utils/encode';
+import { encodeBase64, decodeBase64 } from 'hono/utils/encode';
+import { PingSchema, GetRelevantQuestionsSchema, GetAnswerSchema, CreateLiveboardSchema, ToolName, toolDefinitions } from './api-schemas/schemas';
+import { zodToJsonSchema } from 'zod-to-json-schema';
+import { capitalize } from './utils';
 
 
 const app = new Hono<{ Bindings: Env & { OAUTH_PROVIDER: OAuthHelpers } }>()
@@ -137,6 +140,92 @@ app.post("/store-token", async (c) => {
             'Content-Type': 'application/json'
         }
     });
+});
+
+
+
+app.get('/mcp-openapi-spec', async (c) => {
+    const paths: Record<string, any> = {};
+    const schemas: Record<string, any> = {};
+
+    for (const tool of toolDefinitions) {
+        const schemaName = `${capitalize(tool.name)}Input`;
+        // Convert Zod schema to JSON schema.
+        // The `as any` is used because zodToJsonSchema returns a more generic JSONSchema type,
+        // but for OpenAPI, we're placing it directly.
+        schemas[schemaName] = zodToJsonSchema(tool.schema, schemaName) as any;
+
+        paths[`/tools/${tool.name}`] = {
+            post: {
+                summary: tool.description,
+                operationId: `call${capitalize(tool.name)}`,
+                tags: ['MCP Tools'],
+                requestBody: {
+                    required: true,
+                    content: {
+                        'application/json': {
+                            schema: {
+                                $ref: `#/components/schemas/${schemaName}`
+                            }
+                        }
+                    }
+                },
+                responses: {
+                    '200': {
+                        description: 'Tool execution successful',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object', // Generic response
+                                    properties: {
+                                        content: {
+                                            type: 'array',
+                                            items: {
+                                                type: 'object',
+                                                properties: {
+                                                    type: { type: 'string', example: 'text' },
+                                                    text: { type: 'string' }
+                                                }
+                                            }
+                                        },
+                                        isError: { type: 'boolean', optional: true }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    '400': {
+                        description: 'Invalid input',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: {
+                                        error: { type: 'string' }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        };
+    }
+
+    const openApiDocument = {
+        openapi: '3.0.0',
+        info: {
+            title: 'MCP Server Tools API',
+            version: '1.0.0',
+            description: 'OpenAPI specification for tools available via the MCP server, generated from Zod schemas.'
+        },
+        paths: paths,
+        components: {
+            schemas: schemas
+        }
+    };
+
+    return c.json(openApiDocument);
 });
 
 export default app;

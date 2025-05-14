@@ -20,6 +20,18 @@ import {
 } from "../thoughtspot/thoughtspot-service";
 import { MixpanelTracker } from "../metrics/mixpanel";
 import { Trackers, type Tracker, TrackEvent } from "../metrics";
+import { Props } from "./utils";
+import { getRelevantData } from "./thoughtspot/relevant-data";
+import { getThoughtSpotClient } from "./thoughtspot/thoughtspot-client";
+import { 
+    PingSchema, 
+    GetRelevantQuestionsSchema, 
+    GetRelevantDataSchema, 
+    GetAnswerSchema, 
+    CreateLiveboardSchema, 
+    ToolName, 
+    toolDefinitions
+} from "./api-schemas/schemas";
 
 const ToolInputSchema = ToolSchema.shape.inputSchema;
 type ToolInput = z.infer<typeof ToolInputSchema>;
@@ -89,28 +101,11 @@ export class MCPServer extends Server {
 
         this.setRequestHandler(ListToolsRequestSchema, async () => {
             return {
-                tools: [
-                    {
-                        name: ToolName.Ping,
-                        description: "Simple ping tool to test connectivity and Auth",
-                        inputSchema: zodToJsonSchema(PingSchema) as ToolInput,
-                    },
-                    {
-                        name: ToolName.GetRelevantQuestions,
-                        description: "Get relevant data questions from ThoughtSpot database",
-                        inputSchema: zodToJsonSchema(GetRelevantQuestionsSchema) as ToolInput,
-                    },
-                    {
-                        name: ToolName.GetAnswer,
-                        description: "Get the answer to a question from ThoughtSpot database",
-                        inputSchema: zodToJsonSchema(GetAnswerSchema) as ToolInput,
-                    },
-                    {
-                        name: ToolName.CreateLiveboard,
-                        description: "Create a liveboard from a list of answers",
-                        inputSchema: zodToJsonSchema(CreateLiveboardSchema) as ToolInput,
-                    }
-                ]
+                tools: toolDefinitions.map(toolDef => ({
+                    name: toolDef.name,
+                    description: toolDef.description,
+                    inputSchema: zodToJsonSchema(toolDef.schema) as ToolInput,
+                }))
             };
         });
 
