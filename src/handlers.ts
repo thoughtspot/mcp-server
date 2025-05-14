@@ -142,18 +142,34 @@ app.post("/store-token", async (c) => {
     });
 });
 
+app.get("/pong/t", async (c) => {
+    console.log("Received Pong request");
+    const { props } = c.executionCtx;
+    if (props.accessToken && props.instanceUrl) {
+        console.log(props.accessToken, props.instanceUrl);
+        return c.json({
+            message: "Pong",
+        });
+    } else {
+        return c.json({
+            message: "Fail",
+        });
+    }
+});
 
-
-app.get('/mcp-openapi-spec', async (c) => {
+app.get('/openapi-spec', async (c) => {
     const paths: Record<string, any> = {};
     const schemas: Record<string, any> = {};
 
     for (const tool of toolDefinitions) {
+        if (tool.name === ToolName.Ping) {
+        
         const schemaName = `${capitalize(tool.name)}Input`;
-        // Convert Zod schema to JSON schema.
-        // The `as any` is used because zodToJsonSchema returns a more generic JSONSchema type,
-        // but for OpenAPI, we're placing it directly.
-        schemas[schemaName] = zodToJsonSchema(tool.schema, schemaName) as any;
+        // Convert Zod schema to JSON schema directly
+        const generatedSchema = zodToJsonSchema(tool.schema) as any;
+        // Remove the $schema keyword as it's not allowed by OpenAPI in this context
+        delete generatedSchema.$schema;
+        schemas[schemaName] = generatedSchema;
 
         paths[`/tools/${tool.name}`] = {
             post: {
@@ -188,7 +204,7 @@ app.get('/mcp-openapi-spec', async (c) => {
                                                 }
                                             }
                                         },
-                                        isError: { type: 'boolean', optional: true }
+                                        isError: { type: 'boolean' }
                                     }
                                 }
                             }
@@ -209,7 +225,8 @@ app.get('/mcp-openapi-spec', async (c) => {
                     }
                 }
             }
-        };
+            };
+        }
     }
 
     const openApiDocument = {
@@ -219,6 +236,12 @@ app.get('/mcp-openapi-spec', async (c) => {
             version: '1.0.0',
             description: 'OpenAPI specification for tools available via the MCP server, generated from Zod schemas.'
         },
+        servers: [
+            {
+                url: new URL(c.req.url).origin, // Dynamically set the server URL
+                description: 'Current environment'
+            }
+        ],
         paths: paths,
         components: {
             schemas: schemas
