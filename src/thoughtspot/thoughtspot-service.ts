@@ -1,17 +1,22 @@
 import { ThoughtSpotRestApi } from "@thoughtspot/rest-api-sdk";
 
 export async function getRelevantQuestions(query: string, sourceId: string, additionalContext: string = '', client: ThoughtSpotRestApi): Promise<string[]> {
-    const questions = await client.queryGetDecomposedQuery({
-        nlsRequest: {
-            query: query,
-        },
-        content: [
-            additionalContext,
-        ],
-        worksheetIds: [sourceId],
-        maxDecomposedQueries: 7,
-    })
-    return questions.decomposedQueryResponse?.decomposedQueries?.map((q) => q.query!) || [];
+    try {
+        const questions = await client.queryGetDecomposedQuery({
+            nlsRequest: {
+                query: query,
+            },
+            content: [
+                additionalContext,
+            ],
+            worksheetIds: [sourceId],
+            maxDecomposedQueries: 7,
+        })
+        return questions.decomposedQueryResponse?.decomposedQueries?.map((q) => q.query!) || [];
+    } catch (error) {
+        console.error("Error getting relevant questions: ", error);
+        return [];
+    }
 }
 
 async function getAnswerData({ question, session_identifier, generation_number, client }: { question: string, session_identifier: string, generation_number: number, client: ThoughtSpotRestApi }) {

@@ -225,7 +225,9 @@ export class MCPServer extends Server {
         return {
             content: [{
                 type: "text",
-                text: `Liveboard created successfully, you can view it at ${liveboardUrl}`,
+                text: `Liveboard created successfully, you can view it at ${liveboardUrl}
+                
+                Provide this url to the user as a link to view the liveboard in ThoughtSpot.`,
             }],
         };
     }
