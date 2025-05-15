@@ -23,5 +23,5 @@ export default new OAuthProvider({
     authorizeEndpoint: "/authorize",
     tokenEndpoint: "/token",
     clientRegistrationEndpoint: "/register",
-    accessTokenTTL: 10, // Set access token TTL to 252900 seconds
+    accessTokenTTL: 60, // Set access token TTL to 252900 seconds
 });
