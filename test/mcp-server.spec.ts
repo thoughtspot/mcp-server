@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { connect, close } from "mcp-testing-kit";
-import { MCPServer } from "../src/mcp-server";
+import { MCPServer } from "../src/servers/mcp-server";
 
 describe("MCP Server", () => {
     it("should be able to send a message to the server", async () => {
