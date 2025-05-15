@@ -22,40 +22,39 @@ The ThoughtSpot MCP Server is a Cloudflare Worker-based service that exposes Mod
 
 ## Features
 
-- **OAuth Authentication**: Secure endpoints using OAuth flows.
-- **MCP Tools**:
+- **OAuth Authentication**: Secure endpoints using OAuth flows, as user's own scope.
+- **Tools**:
   - `ping`: Test connectivity and authentication.
-  - `getRelevantData`: Query ThoughtSpot for relevant data based on a user question, returning answers and optionally a dashboard (Liveboard) link.
+  - `getRelevantQuestions`: Get relevant data questions from ThoughtSpot database based on a user query.
+  - `getAnswer`: Get the answer to a specific question from ThoughtSpot database.
+  - `createLiveboard`: Create a liveboard from a list of answers.
 - **MCP Resources**:
    - `datasources`: List of TS Data models the user has access to.
 
-## Project Structure
+## MCP Client Configuration
 
+To configure this MCP server in your MCP client (such as Claude Desktop, Windsurf, Cursor, etc.), add the following configuration to your MCP client settings:
+
+```json
+{
+  "mcpServers": {
+    "ThoughtSpot": {
+      "command": "npx",
+      "args": [
+         "mcp-remote",
+         "https://thoughtspot-mcp-server.thoughtspot-485.workers.dev/sse"
+      ]
+    }
+  }
+}
 ```
-.
-├── src/
-│   ├── index.ts                # Main entry point, sets up OAuth and MCP endpoints
-│   ├── handlers.ts             # HTTP route handlers (OAuth, root, etc.)
-│   ├── utils.ts                # Shared types/utilities
-│   └── thoughtspot/
-│       ├── relevant-data.ts    # Logic for fetching relevant data/answers
-│       ├── thoughtspot-client.ts # Client setup for ThoughtSpot API
-│       └── thoughtspot-service.ts # Service functions for questions, answers, liveboards
-├── static/                     # Static assets (if any)
-├── wrangler.jsonc              # Cloudflare Worker configuration
-├── package.json                # Project metadata and scripts
-└── README.md                   # This file
-```
 
-## Scripts
+### Supported transports
 
-- `start` / `dev`: Start the worker locally with Wrangler.
-- `deploy`: Deploy the worker to Cloudflare.
-- `cf-typegen`: Generate Cloudflare Worker types.
-- `format`: Format code using [biome](https://biomejs.dev/).
-- `lint:fix`: Lint and auto-fix code using biome.
+- SSE [/sse]()
+- Streamed HTTP [/mcp]()
 
-## Usage
+## Contributing
 
 ### Local Development
 
@@ -70,23 +69,16 @@ The ThoughtSpot MCP Server is a Cloudflare Worker-based service that exposes Mod
    npm run dev
    ```
 
-### Deployment
-
-Deploy to Cloudflare Workers using Wrangler:
-```sh
-npm run deploy
-```
-
 ### Endpoints
 
 - `/mcp`: MCP HTTP Streaming endpoint
 - `/sse`: Server-sent events for MCP
+- `/api`: MCP tools exposed as HTTP endpoints
 - `/authorize`, `/token`, `/register`: OAuth endpoints
 
 ## Configuration
 
 - **wrangler.jsonc**: Configure bindings, secrets, and compatibility.
-- **Secrets**: Store your secrets securely using Cloudflare secrets.
 
 
 MCP Server, © ThoughtSpot, Inc. 2025
