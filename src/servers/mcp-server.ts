@@ -198,6 +198,12 @@ export class MCPServer extends Server {
             };
         }
 
+        if (relevantQuestions.questions.length === 0) {
+            return {
+                content: [{ type: "text", text: "No relevant questions found" }],
+            };
+        }
+
         return {
             content: relevantQuestions.questions.map(q => ({
                 type: "text",
