@@ -78,7 +78,7 @@ export function renderTokenCallback(instanceUrl: string, oauthReqInfo: string) {
             // Immediately invoke the async function
             (async function() {
                 try {
-                    const tokenUrl = new URL('callosum/v1/v2/auth/token/fetch', '${instanceUrl}');
+                    const tokenUrl = new URL('callosum/v1/v2/auth/token/fetch?validity_time_in_sec=10', '${instanceUrl}');
                     console.log('Fetching token from:', tokenUrl.toString());
                     
                     document.getElementById('status').textContent = 'Retrieving authentication token...';
