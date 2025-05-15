@@ -135,6 +135,7 @@ app.post("/store-token", async (c) => {
 
 app.get("/pong/t", async (c) => {
     console.log("Received Pong request");
+    console.log(c.executionCtx);
     const { props } = c.executionCtx;
     if (props.accessToken && props.instanceUrl) {
         console.log(props.accessToken, props.instanceUrl);

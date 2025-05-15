@@ -15,14 +15,14 @@ apiServer.post("/ping/test/abc", async (c) => {
 
     console.log("Received Ping request");
     if (props.accessToken && props.instanceUrl) {
-        return {
+        return c.json({
             content: [{ type: "text", text: "Pong" }],
-        };
+        });
     } else {
-        return {
+        return c.json({
             isError: true,
             content: [{ type: "text", text: "ERROR: Not authenticated" }],
-        };
+        });
     }
 });
 
