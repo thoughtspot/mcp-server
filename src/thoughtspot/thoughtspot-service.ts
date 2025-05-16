@@ -33,7 +33,7 @@ async function getAnswerData({ question, session_identifier, generation_number, 
     try {
         console.log("[DEBUG] Getting Data for question: ", question);
         // Proxy to avoid 403 from TS AWS WAF.
-        const data = await (client as any).exportAnswerReportProxied({
+        const data = await client.exportAnswerReport({
             session_identifier,
             generation_number,
             file_format: "CSV",
