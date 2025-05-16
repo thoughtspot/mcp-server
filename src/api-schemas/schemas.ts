@@ -7,8 +7,8 @@ export const GetRelevantQuestionsSchema = z.object({
     additionalContext: z.string()
         .describe("Additional context to add to the query, this might be older data returned for previous questions or any other relevant context that might help the system generate better questions.")
         .optional(),
-    datasourceId: z.string()
-        .describe("The datasource to get questions for, this is the id of the datasource to get data from")
+    datasourceIds: z.array(z.string())
+        .describe("The datasources to get questions for, these are the ids of the datasources to get data from")
         .optional()
 });
 
