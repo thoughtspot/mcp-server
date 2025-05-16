@@ -31,7 +31,7 @@ import {
     CreateLiveboardSchema, 
     ToolName, 
     toolDefinitions
-} from "./api-schemas/schemas";
+} from "../api-schemas/schemas";
 
 const ToolInputSchema = ToolSchema.shape.inputSchema;
 type ToolInput = z.infer<typeof ToolInputSchema>;
