@@ -30,7 +30,7 @@ const GetRelevantQuestionsSchema = z.object({
         .describe("Additional context to add to the query, this might be older data returned for previous questions or any other relevant context that might help the system generate better questions.")
         .optional(),
     datasourceIds: z.array(z.string())
-        .describe("The datasources to get questions for, this is the ids of the datasources to get data from")
+        .describe("The datasources to get questions for, this is the ids of the datasources to get data from. Each id is a GUID string.")
 });
 
 const GetAnswerSchema = z.object({
