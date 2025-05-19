@@ -42,7 +42,7 @@ To configure this MCP server in your MCP client (such as Claude Desktop, Windsur
       "command": "npx",
       "args": [
          "mcp-remote",
-         "https://thoughtspot-mcp-server.thoughtspot-485.workers.dev/sse"
+         "https://agent.thoughtspot.app/sse"
       ]
     }
   }
