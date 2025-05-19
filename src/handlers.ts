@@ -163,20 +163,74 @@ app.get('/openapi-spec', async (c) => {
     const schemas: Record<string, any> = {};
 
     for (const tool of toolDefinitions) {
-        if (tool.name === ToolName.Ping) {
-        
-        const schemaName = `${capitalize(tool.name)}Input`;
-        // Convert Zod schema to JSON schema directly
+        const schemaName = `${capitalize(tool.name)}Request`;
+        // Convert Zod schema to JSON schema
         const generatedSchema = zodToJsonSchema(tool.schema) as any;
-        // Remove the $schema keyword as it's not allowed by OpenAPI in this context
         delete generatedSchema.$schema;
         schemas[schemaName] = generatedSchema;
 
-        paths[`/tools/${tool.name}`] = {
+        // Create response schema based on tool name
+        let responseSchema;
+        switch (tool.name) {
+            case ToolName.GetRelevantQuestions:
+                responseSchema = {
+                    type: 'array',
+                    items: {
+                        type: 'object',
+                        properties: {
+                            question: { type: 'string', example: 'What are the monthly sales trends?' },
+                            confidence: { type: 'number', example: 0.85 },
+                            datasourceId: { type: 'string', example: '123e4567-e89b-12d3-a456-426614174000' }
+                        }
+                    }
+                };
+                break;
+            case ToolName.GetAnswer:
+                responseSchema = {
+                    type: 'object',
+                    properties: {
+                        answer: { type: 'string', example: 'The total sales by region are: North - $1.2M, South - $800K' },
+                        metadata: {
+                            type: 'object',
+                            properties: {
+                                confidence: { type: 'number', example: 0.95 },
+                                source: { type: 'string', example: 'Sales Analysis Dashboard' }
+                            }
+                        }
+                    }
+                };
+                break;
+            case ToolName.CreateLiveboard:
+                responseSchema = {
+                    type: 'string',
+                    description: 'URL of the created liveboard',
+                    example: 'https://thoughtspot.thoughtspot.com/viz/123456'
+                };
+                break;
+            default:
+                responseSchema = {
+                    type: 'object',
+                    properties: {
+                        content: {
+                            type: 'array',
+                            items: {
+                                type: 'object',
+                                properties: {
+                                    type: { type: 'string', example: 'text' },
+                                    text: { type: 'string' }
+                                }
+                            }
+                        },
+                        isError: { type: 'boolean' }
+                    }
+                };
+        }
+
+        paths[`/api/tools/${tool.name}`] = {
             post: {
                 summary: tool.description,
                 operationId: `call${capitalize(tool.name)}`,
-                tags: ['MCP Tools'],
+                tags: ['Tools'],
                 requestBody: {
                     required: true,
                     content: {
@@ -189,30 +243,15 @@ app.get('/openapi-spec', async (c) => {
                 },
                 responses: {
                     '200': {
-                        description: 'Tool execution successful',
+                        description: 'Successful response',
                         content: {
                             'application/json': {
-                                schema: {
-                                    type: 'object', // Generic response
-                                    properties: {
-                                        content: {
-                                            type: 'array',
-                                            items: {
-                                                type: 'object',
-                                                properties: {
-                                                    type: { type: 'string', example: 'text' },
-                                                    text: { type: 'string' }
-                                                }
-                                            }
-                                        },
-                                        isError: { type: 'boolean' }
-                                    }
-                                }
+                                schema: responseSchema
                             }
                         }
                     },
                     '400': {
-                        description: 'Invalid input',
+                        description: 'Bad request - Invalid input parameters',
                         content: {
                             'application/json': {
                                 schema: {
@@ -223,17 +262,22 @@ app.get('/openapi-spec', async (c) => {
                                 }
                             }
                         }
+                    },
+                    '401': {
+                        description: 'Unauthorized - Invalid or missing authentication'
+                    },
+                    '500': {
+                        description: 'Internal server error'
                     }
                 }
             }
-            };
-        }
+        };
     }
 
     const openApiDocument = {
         openapi: '3.0.0',
         info: {
-            title: 'MCP Server Tools API',
+            title: 'ThoughtSpot API',
             version: '1.0.0',
             description: 'OpenAPI specification for tools available via the MCP server, generated from Zod schemas.'
         },
