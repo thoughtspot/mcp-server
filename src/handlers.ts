@@ -4,7 +4,7 @@ import { Props } from './utils';
 import { parseRedirectApproval, renderApprovalDialog } from './oauth-manager/oauth-utils';
 import { renderTokenCallback } from './oauth-manager/token-utils';
 import { any } from 'zod';
-import { encodeBase64, decodeBase64 } from 'hono/utils/encode';
+import { encodeBase64Url, decodeBase64Url } from 'hono/utils/encode';
 
 
 const app = new Hono<{ Bindings: Env & { OAUTH_PROVIDER: OAuthHelpers } }>()
@@ -67,7 +67,7 @@ app.post("/authorize", async (c) => {
 
     const targetURLPath = new URL("/callback", c.req.url);
     targetURLPath.searchParams.append('instanceUrl', instanceUrl);
-    const encodedState = btoa(JSON.stringify(state.oauthReqInfo));
+    const encodedState = encodeBase64Url(new TextEncoder().encode(JSON.stringify(state.oauthReqInfo)).buffer);
     targetURLPath.searchParams.append('oauthReqInfo', encodedState);
     redirectUrl.searchParams.append('targetURLPath', targetURLPath.href);
     console.log("redirectUrl", redirectUrl.toString());
@@ -91,12 +91,17 @@ app.get("/callback", async (c) => {
     if (!encodedOauthReqInfo) {
         return c.text('Missing OAuth request info', 400);
     }
-    const decodedOAuthReqInfo = JSON.parse(atob(encodedOauthReqInfo));
-    return new Response(renderTokenCallback(instanceUrl, decodedOAuthReqInfo), {
-        headers: {
-            'Content-Type': 'text/html',
-        },
-    });
+    try {
+        const decodedOAuthReqInfo = JSON.parse(new TextDecoder().decode(decodeBase64Url(encodedOauthReqInfo)));
+        return new Response(renderTokenCallback(instanceUrl, decodedOAuthReqInfo), {
+            headers: {
+                'Content-Type': 'text/html',
+            },
+        });
+    } catch (error) {
+        console.error('Error decoding OAuth request info:', error);
+        return c.text('Invalid OAuth request info format', 400);
+    }
 })
 
 app.post("/store-token", async (c) => {
