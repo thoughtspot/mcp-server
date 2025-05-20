@@ -3,6 +3,7 @@ import { Props } from '../utils';
 import {
     createLiveboard,
     getAnswerForQuestion,
+    getDataSourceName,
     getDataSources,
     getRelevantQuestions
 } from '../thoughtspot/thoughtspot-service';
@@ -45,6 +46,14 @@ apiServer.get("/api/resources/datasources", async (c) => {
     const { props } = c.executionCtx;
     const client = getThoughtSpotClient(props.instanceUrl, props.accessToken);
     const datasources = await getDataSources(client);
+    return c.json(datasources);
+});
+
+apiServer.get("/api/resources/datasource-name", async (c) => {
+    const { props } = c.executionCtx;
+    const name = c.req.query('name');
+    const client = getThoughtSpotClient(props.instanceUrl, props.accessToken);
+    const datasources = await getDataSourceName(client, name);
     return c.json(datasources);
 });
 
