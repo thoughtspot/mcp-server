@@ -317,18 +317,6 @@ export function renderApprovalDialog(request: Request, options: ApprovalDialogOp
               label.textContent = 'ThoughtSpot Instance URL';
               lastError = false;
             }
-            function isValidUrl(url) {
-              try {
-                const trimmed = url.trim();
-                if (!trimmed) return false;
-                // Accept only http(s) URLs
-                if (!/^https?:\/\//i.test(trimmed)) return false;
-                new URL(trimmed);
-                return true;
-              } catch {
-                return false;
-              }
-            }
             input.addEventListener('input', function() {
               if (input.value.trim()) {
                 setBlue();
@@ -337,9 +325,10 @@ export function renderApprovalDialog(request: Request, options: ApprovalDialogOp
               }
             });
             form.addEventListener('submit', function(e) {
-              if (!input.value.trim() || !isValidUrl(input.value)) {
+              if (!input.value.trim()) {
                 e.preventDefault();
                 setRed();
+                input.focus();
               } else {
                 setBlue();
               }
