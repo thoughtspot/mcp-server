@@ -1,8 +1,12 @@
 {
-  "name": "mcp-server",
-  "version": "1.0.0",
-  "description": "MCP Server for ThoughtSpot integration",
+  "name": "@thoughtspot/mcp-server",
+  "version": "0.4.0",
+  "description": "MCP Server for ThoughtSpot",
+  "private": false,
   "main": "src/index.ts",
+  "bin": {
+    "mcp-server": "node --import tsx ./src/stdio.ts"
+  },
   "type": "module",
   "scripts": {
     "cf-typegen": "wrangler types",
@@ -10,14 +14,16 @@
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "format": "biome format --write",
-    "lint:fix": "biome lint --fix",
+    "lint": "biome lint",
+    "lint:fix": "biome lint --write",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "test:bin": "node --import tsx ./src/stdio.ts"
   },
   "keywords": [],
   "author": "",
-  "license": "ISC",
+  "license": "ThoughtSpot End user license agreement",
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
     "@cloudflare/vitest-pool-workers": "^0.8.24",
@@ -28,6 +34,7 @@
     "@vitest/coverage-v8": "^3.1.2",
     "mcp-testing-kit": "^0.2.0",
     "node-fetch": "^2.6.0",
+    "tsx": "^4.7.1",
     "typescript": "^5.8.3",
     "vitest": "^3.1.2",
     "workers-mcp": "^0.0.13",

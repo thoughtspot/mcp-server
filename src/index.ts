@@ -1,7 +1,7 @@
 import OAuthProvider from "@cloudflare/workers-oauth-provider";
 import { McpAgent } from "agents/mcp";
 import handler from "./handlers";
-import { Props } from "./utils";
+import type { Props } from "./utils";
 import { MCPServer } from "./servers/mcp-server";
 import { apiServer } from "./servers/api-server";
 

@@ -8,10 +8,10 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
-import { Props } from "../utils";
+import type { Props } from "../utils";
 import { getThoughtSpotClient } from "../thoughtspot/thoughtspot-client";
 import {
-    DataSource,
+    type DataSource,
     fetchTMLAndCreateLiveboard,
     getAnswerForQuestion,
     getDataSources,
@@ -153,12 +153,11 @@ export class MCPServer extends Server {
                         return {
                             content: [{ type: "text", text: "Pong" }],
                         };
-                    } else {
+                    }
                         return {
                             isError: true,
                             content: [{ type: "text", text: "ERROR: Not authenticated" }],
                         };
-                    }
 
                 case ToolName.GetRelevantQuestions: {
                     return this.callGetRelevantQuestions(request);
@@ -194,7 +193,7 @@ export class MCPServer extends Server {
         if (relevantQuestions.error) {
             return {
                 isError: true,
-                content: [{ type: "text", text: "ERROR: " + relevantQuestions.error.message }],
+                content: [{ type: "text", text: `ERROR: ${relevantQuestions.error.message}` }],
             };
         }
 
@@ -216,14 +215,14 @@ export class MCPServer extends Server {
         const { question, datasourceId: sourceId } = GetAnswerSchema.parse(request.params.arguments);
         const client = getThoughtSpotClient(this.ctx.props.instanceUrl, this.ctx.props.accessToken);
         const progressToken = request.params._meta?.progressToken;
-        let progress = 0;
+        const progress = 0;
         console.log("[DEBUG] Getting answer for question: ", question, " and datasource: ", sourceId);
 
         const answer = await getAnswerForQuestion(question, sourceId, false, client);
         if (answer.error) {
             return {
                 isError: true,
-                content: [{ type: "text", text: "ERROR: " + answer.error.message }],
+                content: [{ type: "text", text: `ERROR: ${answer.error.message}` }],
             };
         }
 
@@ -245,7 +244,7 @@ export class MCPServer extends Server {
         if (liveboard.error) {
             return {
                 isError: true,
-                content: [{ type: "text", text: "ERROR: " + liveboard.error.message }],
+                content: [{ type: "text", text: `ERROR: ${liveboard.error.message}` }],
             };
         }
         return {
