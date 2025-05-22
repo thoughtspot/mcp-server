@@ -60,413 +60,288 @@ export interface ApprovalDialogOptions {
  * @returns A Response containing the HTML approval dialog
  */
 export function renderApprovalDialog(request: Request, options: ApprovalDialogOptions): Response {
-  const { client, server, state } = options
+    const { server, state } = options;
+    const encodedState = btoa(JSON.stringify(state));
+    const serverName = sanitizeHtml(server.name);
+    const mcpLogoUrl = 'https://raw.githubusercontent.com/thoughtspot/mcp-server/refs/heads/main/static/MCP%20Server%20Logo.svg';
+    const thoughtspotLogoUrl = 'https://avatars.githubusercontent.com/u/8906680?s=200&v=4';
 
-  // Encode state for form submission
-  const encodedState = btoa(JSON.stringify(state))
-
-  // Sanitize any untrusted content
-  const serverName = sanitizeHtml(server.name)
-  const clientName = client?.clientName ? sanitizeHtml(client.clientName) : 'Unknown MCP Client'
-  const serverDescription = server.description ? sanitizeHtml(server.description) : ''
-
-  // Safe URLs
-  const logoUrl = server.logo ? sanitizeHtml(server.logo) : ''
-  const clientUri = client?.clientUri ? sanitizeHtml(client.clientUri) : ''
-  const policyUri = client?.policyUri ? sanitizeHtml(client.policyUri) : ''
-  const tosUri = client?.tosUri ? sanitizeHtml(client.tosUri) : ''
-
-  // Client contacts
-  const contacts = client?.contacts && client.contacts.length > 0 ? sanitizeHtml(client.contacts.join(', ')) : ''
-
-  // Get redirect URIs
-  const redirectUris = client?.redirectUris && client.redirectUris.length > 0 ? client.redirectUris.map((uri) => sanitizeHtml(uri)) : []
-
-  // Generate HTML for the approval dialog
-  const htmlContent = `
+    const htmlContent = `
       <!DOCTYPE html>
       <html lang="en">
         <head>
           <meta charset="UTF-8">
           <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <title>${clientName} | Authorization Request</title>
+          <title>${serverName} | Authorization Request</title>
           <style>
-            /* Modern, formal styling with system fonts */
-            :root {
-              --primary-color: #1a56db;
-              --primary-hover: #1e429f;
-              --error-color: #dc2626;
-              --border-color: #e5e7eb;
-              --text-color: #111827;
-              --text-secondary: #4b5563;
-              --background-color: #fff;
-              --card-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-              --input-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
-            }
-            
-            body {
-              font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, 
-                          Helvetica, Arial, sans-serif, "Apple Color Emoji", 
-                          "Segoe UI Emoji", "Segoe UI Symbol";
-              line-height: 1.6;
-              color: var(--text-color);
-              background-color: #f3f4f6;
+            html, body {
+              height: 100%;
               margin: 0;
               padding: 0;
+              background: #f6f7fa;
+            }
+            body {
               min-height: 100vh;
               display: flex;
               align-items: center;
               justify-content: center;
+              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+              color: #111827;
             }
-            
-            .container {
-              max-width: 640px;
+            .approval-card {
+              background: #fff;
+              border-radius: 18px;
+              box-shadow: 0 2px 16px 0 rgba(16,30,54,0.10), 0 1.5px 4px 0 rgba(16,30,54,0.06);
+              max-width: 520px;
               width: 100%;
-              margin: 2rem;
-              padding: 0;
+              padding: 40px 32px 32px 32px;
+              box-sizing: border-box;
+              display: flex;
+              flex-direction: column;
+              align-items: center;
             }
-            
-            .precard {
-              padding: 2.5rem 2rem;
-              text-align: center;
-              background: linear-gradient(to bottom, #ffffff, #f9fafb);
-              border-radius: 12px 12px 0 0;
-              border: 1px solid var(--border-color);
-              border-bottom: none;
-            }
-            
-            .card {
-              background-color: var(--background-color);
-              border-radius: 0 0 12px 12px;
-              box-shadow: var(--card-shadow);
-              padding: 2.5rem;
-              border: 1px solid var(--border-color);
-              border-top: none;
-            }
-            
-            .header {
+            .approval-logos {
               display: flex;
               align-items: center;
               justify-content: center;
-              margin-bottom: 1.5rem;
+              margin-bottom: 32px;
+              gap: 40px;
             }
-            
-            .logo {
-              width: 56px;
-              height: 56px;
-              margin-right: 1rem;
-              border-radius: 12px;
+            .approval-logo {
+              width: 64px;
+              height: 64px;
               object-fit: contain;
-              box-shadow: var(--card-shadow);
+              background: #fff;
+              border-radius: 12px;
+              box-shadow: 0 2px 8px rgba(0,0,0,0.04);
             }
-            
-            .title {
-              margin: 0;
-              font-size: 1.5rem;
-              font-weight: 600;
-              color: var(--text-color);
-              letter-spacing: -0.025em;
+            .approval-arrow {
+              width: 56px;
+              height: 32px;
+              display: flex;
+              align-items: center;
+              justify-content: center;
             }
-            
-            .alert {
-              margin: 0;
-              font-size: 1.75rem;
-              font-weight: 600;
-              margin: 1.5rem 0;
-              text-align: center;
-              color: var(--text-color);
-              letter-spacing: -0.025em;
-            }
-            
-            .description {
-              color: var(--text-secondary);
-              font-size: 1.125rem;
-              max-width: 32rem;
-              margin: 0 auto;
-            }
-            
-            .form-section {
-              margin-top: 2.5rem;
-              padding-top: 2rem;
-              border-top: 1px solid var(--border-color);
-            }
-            
-            .client-info {
-              border: 1px solid var(--border-color);
-              border-radius: 8px;
-              padding: 1.5rem;
-              margin-bottom: 2rem;
-              background-color: #f9fafb;
-            }
-            
-            .client-name {
-              font-weight: 600;
+            .approval-title {
               font-size: 1.25rem;
-              margin: 0 0 1rem 0;
-              color: var(--text-color);
+              font-weight: 700;
+              text-align: center;
+              margin: 0 0 32px 0;
+              line-height: 1.3;
             }
-            
-            .client-detail {
+            .approval-form {
+              width: 100%;
               display: flex;
-              margin-bottom: 0.75rem;
-              align-items: baseline;
+              flex-direction: column;
+              align-items: stretch;
             }
-            
-            .detail-label {
-              font-weight: 500;
-              min-width: 140px;
-              color: var(--text-secondary);
-            }
-            
-            .detail-value {
-              font-family: SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-              word-break: break-all;
-              color: var(--text-color);
-            }
-            
-            .detail-value a {
-              color: var(--primary-color);
-              text-decoration: none;
-              transition: color 0.2s;
-            }
-            
-            .detail-value a:hover {
-              color: var(--primary-hover);
-              text-decoration: underline;
-            }
-            
-            .detail-value.small {
-              font-size: 0.875em;
-            }
-            
-            .actions {
-              display: flex;
-              justify-content: flex-end;
-              gap: 1rem;
-              margin-top: 2.5rem;
-            }
-            
-            .button {
-              padding: 0.875rem 1.75rem;
-              border-radius: 8px;
-              font-weight: 500;
-              cursor: pointer;
-              border: none;
-              font-size: 1rem;
-              transition: all 0.2s;
-            }
-            
-            .button-primary {
-              background-color: var(--primary-color);
-              color: white;
-            }
-            
-            .button-primary:hover {
-              background-color: var(--primary-hover);
-              transform: translateY(-1px);
-            }
-            
-            .button-secondary {
-              background-color: white;
-              border: 1px solid var(--border-color);
-              color: var(--text-color);
-            }
-            
-            .button-secondary:hover {
-              background-color: #f9fafb;
-              border-color: #d1d5db;
-            }
-
             .form-group {
-              margin-bottom: 2rem;
+              margin-bottom: 28px;
             }
-
             .form-group label {
               display: block;
-              margin-bottom: 0.75rem;
-              font-weight: 500;
-              color: var(--text-color);
-              font-size: 1.125rem;
+              margin-bottom: 8px;
+              font-weight: 400;
+              font-size: 0.94rem;
+              color: #111827;
+              transition: color 0.2s;
             }
-
+            .form-group label.label-blue {
+              color: #2563eb;
+            }
+            .form-group label.label-red {
+              color: #dc2626;
+            }
             .form-group input {
               width: 100%;
-              padding: 0.875rem 1rem;
-              border: 1px solid var(--border-color);
+              padding: 14px 16px;
+              border: 1.5px solid #d1d5db;
               border-radius: 8px;
-              font-size: 1rem;
-              transition: all 0.2s;
-              background-color: white;
-              box-shadow: var(--input-shadow);
+              font-size: 0.94rem;
+              background: #fff;
+              box-sizing: border-box;
+              transition: border-color 0.2s;
             }
-
-            .form-group input:focus {
-              outline: none;
-              border-color: var(--primary-color);
-              box-shadow: 0 0 0 3px rgba(26, 86, 219, 0.1);
+            .form-group input.input-blue {
+              border-color: #2563eb;
             }
-
-            .form-group input::placeholder {
-              color: #9ca3af;
+            .form-group input.input-red {
+              border-color: #dc2626;
             }
-            
-            /* Responsive adjustments */
-            @media (max-width: 640px) {
-              .container {
-                margin: 1rem;
+            .approval-subtitle {
+              font-weight: 600;
+              font-size: 0.94rem;
+              margin-bottom: 8px;
+              margin-top: 0;
+            }
+            .approval-permissions {
+              margin: 0 0 32px 0;
+              padding: 0 0 0 18px;
+              list-style: disc;
+              color: #111827;
+              font-size: 0.94rem;
+            }
+            .approval-permissions li {
+              margin-bottom: 8px;
+              line-height: 1.6;
+            }
+            .approval-actions {
+              display: flex;
+              justify-content: space-between;
+              gap: 16px;
+              margin-bottom: 18px;
+            }
+            .button {
+              flex: 1 1 0;
+              padding: 12px 0;
+              border-radius: 8px;
+              font-weight: 500;
+              font-size: 0.94rem;
+              border: none;
+              cursor: pointer;
+              transition: background 0.2s, color 0.2s;
+            }
+            .button-cancel {
+              background: #f3f4f6;
+              color: #6b7280;
+              border: none;
+            }
+            .button-cancel:hover {
+              background: #e5e7eb;
+            }
+            .button-allow {
+              background: #2563eb;
+              color: #fff;
+              border: none;
+            }
+            .button-allow:hover {
+              background: #1a56db;
+            }
+            .approval-footer {
+              text-align: center;
+              font-size: 0.88rem;
+              color: #111827;
+              margin-top: 8px;
+            }
+            .approval-footer a {
+              color: #2563eb;
+              text-decoration: none;
+              margin-left: 0.25em;
+              font-weight: 500;
+            }
+            .approval-footer a:hover {
+              text-decoration: underline;
+            }
+            @media (max-width: 600px) {
+              .approval-card {
+                padding: 18px 4vw 18px 4vw;
+                max-width: 98vw;
               }
-              
-              .precard {
-                padding: 2rem 1.5rem;
+              .approval-logos {
+                gap: 18px;
+                margin-bottom: 18px;
               }
-              
-              .card {
-                padding: 1.5rem;
-              }
-              
-              .client-detail {
-                flex-direction: column;
-              }
-              
-              .detail-label {
-                min-width: unset;
-                margin-bottom: 0.25rem;
-              }
-              
-              .actions {
-                flex-direction: column;
-              }
-              
-              .button {
-                width: 100%;
-              }
-
-              .alert {
-                font-size: 1.5rem;
-              }
-
-              .description {
-                font-size: 1rem;
+              .approval-title {
+                font-size: 1.1rem;
+                margin-bottom: 18px;
               }
             }
           </style>
         </head>
         <body>
-          <div class="container">
-            <div class="precard">
-              <div class="header">
-                ${logoUrl ? `<img src="${logoUrl}" alt="${serverName} Logo" class="logo">` : ''}
-                <h1 class="title">${serverName}</h1>
-              </div>
-              
-              ${serverDescription ? `<p class="description">${serverDescription}</p>` : ''}
+          <div class="approval-card">
+            <div class="approval-logos">
+              <img src="${mcpLogoUrl}" alt="MCP Server Logo" class="approval-logo">
+              <span class="approval-arrow">
+                <svg width="56" height="32" viewBox="0 0 56 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <g opacity="0.25">
+                    <!-- Right arrow -->
+                    <line x1="8" y1="10" x2="48" y2="10" stroke="#6B7280" stroke-width="2.5" stroke-linecap="round"/>
+                    <polyline points="44,6 48,10 44,14" fill="none" stroke="#6B7280" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+                    <!-- Left arrow -->
+                    <line x1="48" y1="22" x2="8" y2="22" stroke="#6B7280" stroke-width="2.5" stroke-linecap="round"/>
+                    <polyline points="12,18 8,22 12,26" fill="none" stroke="#6B7280" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+                  </g>
+                </svg>
+              </span>
+              <img src="${thoughtspotLogoUrl}" alt="ThoughtSpot Logo" class="approval-logo">
             </div>
-              
-            <div class="card">
-              <h2 class="alert">Authorization Request</h2>
-              
-              <div class="client-info">
-                <div class="client-detail">
-                  <div class="detail-label">Client Name:</div>
-                  <div class="detail-value">
-                    ${clientName}
-                  </div>
-                </div>
-                
-                ${clientUri
-      ? `
-                  <div class="client-detail">
-                    <div class="detail-label">Website:</div>
-                    <div class="detail-value small">
-                      <a href="${clientUri}" target="_blank" rel="noopener noreferrer">
-                        ${clientUri}
-                      </a>
-                    </div>
-                  </div>
-                `
-      : ''
-    }
-                
-                ${policyUri
-      ? `
-                  <div class="client-detail">
-                    <div class="detail-label">Privacy Policy:</div>
-                    <div class="detail-value">
-                      <a href="${policyUri}" target="_blank" rel="noopener noreferrer">
-                        ${policyUri}
-                      </a>
-                    </div>
-                  </div>
-                `
-      : ''
-    }
-                
-                ${tosUri
-      ? `
-                  <div class="client-detail">
-                    <div class="detail-label">Terms of Service:</div>
-                    <div class="detail-value">
-                      <a href="${tosUri}" target="_blank" rel="noopener noreferrer">
-                        ${tosUri}
-                      </a>
-                    </div>
-                  </div>
-                `
-      : ''
-    }
-                
-                ${redirectUris.length > 0
-      ? `
-                  <div class="client-detail">
-                    <div class="detail-label">Redirect URIs:</div>
-                    <div class="detail-value small">
-                      ${redirectUris.map((uri) => `<div>${uri}</div>`).join('')}
-                    </div>
-                  </div>
-                `
-      : ''
-    }
-                
-                ${contacts
-      ? `
-                  <div class="client-detail">
-                    <div class="detail-label">Contact:</div>
-                    <div class="detail-value">${contacts}</div>
-                  </div>
-                `
-      : ''
-    }
+            <div class="approval-title">ThoughtSpot MCP Server wants access<br>to your ThoughtSpot instance</div>
+            <form class="approval-form" method="post" action="${new URL(request.url).pathname}" id="approvalForm" autocomplete="off" novalidate>
+              <div class="form-group">
+                <label for="instanceUrl" id="instanceUrlLabel">ThoughtSpot Instance URL</label>
+                <input type="text" id="instanceUrl" name="instanceUrl" placeholder="https://your-instance.thoughtspot.cloud" autocomplete="off">
+                <input type="hidden" name="state" value="${encodedState}">
               </div>
-              
-              <p class="description">Please provide your ThoughtSpot instance URL to authorize this client.</p>
-              
-              <div class="form-section">
-                <form method="post" action="${new URL(request.url).pathname}">
-                  <input type="hidden" name="state" value="${encodedState}">
-                  
-                  <div class="form-group">
-                    <label for="instanceUrl">ThoughtSpot Instance URL</label>
-                    <input type="text" id="instanceUrl" name="instanceUrl" required 
-                           placeholder="https://your-instance.thoughtspot.cloud">
-                  </div>
-                  
-                  <div class="actions">
-                    <button type="button" class="button button-secondary" onclick="window.history.back()">Cancel</button>
-                    <button type="submit" class="button button-primary">Authorize Access</button>
-                  </div>
-                </form>
+              <div class="approval-subtitle">ThoughtSpot MCP Server will be able to:</div>
+              <ul class="approval-permissions">
+                <li>Read all ThoughtSpot data you have access to</li>
+                <li>Read all ThoughtSpot content you have access to</li>
+                <li>Send data to the client you are connecting to</li>
+              </ul>
+              <div class="approval-actions">
+                <button type="button" class="button button-cancel" onclick="window.history.back()">Cancel</button>
+                <button type="submit" class="button button-allow">Allow</button>
               </div>
+            </form>
+            <div class="approval-footer">
+              Don't have an account?
+              <a href="https://www.thoughtspot.com/trial" target="_blank" rel="noopener noreferrer">Sign up</a>
             </div>
           </div>
+          <script>
+            const input = document.getElementById('instanceUrl');
+            const label = document.getElementById('instanceUrlLabel');
+            const form = document.getElementById('approvalForm');
+            let lastError = false;
+
+            function setBlue() {
+              input.classList.add('input-blue');
+              input.classList.remove('input-red');
+              label.classList.add('label-blue');
+              label.classList.remove('label-red');
+              label.textContent = 'ThoughtSpot Instance URL';
+              lastError = false;
+            }
+            function setRed() {
+              input.classList.add('input-red');
+              input.classList.remove('input-blue');
+              label.classList.add('label-red');
+              label.classList.remove('label-blue');
+              label.textContent = 'ThoughtSpot Instance URL';
+              lastError = true;
+            }
+            function clearColors() {
+              input.classList.remove('input-blue', 'input-red');
+              label.classList.remove('label-blue', 'label-red');
+              label.textContent = 'ThoughtSpot Instance URL';
+              lastError = false;
+            }
+            input.addEventListener('input', function() {
+              if (input.value.trim()) {
+                setBlue();
+              } else {
+                clearColors();
+              }
+            });
+            form.addEventListener('submit', function(e) {
+              if (!input.value.trim()) {
+                e.preventDefault();
+                setRed();
+                input.focus();
+              } else {
+                setBlue();
+              }
+            });
+          </script>
         </body>
       </html>
-    `
-
-  return new Response(htmlContent, {
-    headers: {
-      'Content-Type': 'text/html; charset=utf-8',
-    },
-  })
+    `;
+    return new Response(htmlContent, {
+      headers: {
+        'Content-Type': 'text/html; charset=utf-8',
+      },
+    });
 }
 
 /**
