@@ -9,13 +9,7 @@ export class ThoughtSpotMCP extends McpAgent<Env, any, Props> {
     server = new MCPServer(this);
 
     async init() {
-        await this.server.init((eventName, ...args) => {
-            this.env.ANALYTICS.writeDataPoint({
-                blobs: [eventName, this.props.instanceUrl, ...args],
-                doubles: [1],
-                indexes: [crypto.randomUUID()],
-            });
-        });
+        await this.server.init();
     }
 }
 
