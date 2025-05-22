@@ -5,6 +5,7 @@ export default defineWorkersConfig({
         coverage: {
             provider: "istanbul",
             enabled: true,
+            include: ["src/**/*.ts"],
             reporter: ["text", "json", "html", "lcov"],
         },
         poolOptions: {
