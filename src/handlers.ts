@@ -18,26 +18,26 @@ app.get("/", async (c) => {
 app.get("/authorize", async (c) => {
     const oauthReqInfo = await c.env.OAUTH_PROVIDER.parseAuthRequest(c.req.raw);
     const { clientId } = oauthReqInfo
-	if (!clientId) {
-		return c.text('Invalid request', 400)
-	}
+    if (!clientId) {
+        return c.text('Invalid request', 400)
+    }
     return renderApprovalDialog(c.req.raw, {
-		client: await c.env.OAUTH_PROVIDER.lookupClient(clientId),
-		server: {
-			name: "ThoughtSpot MCP Server",
-			logo: "https://avatars.githubusercontent.com/u/8906680?s=200&v=4",
-			description: 'MCP Server for ThoughtSpot Agent', // optional
-		},
-		state: { oauthReqInfo }, // arbitrary data that flows through the form submission below
-	})
+        client: await c.env.OAUTH_PROVIDER.lookupClient(clientId),
+        server: {
+            name: "ThoughtSpot MCP Server",
+            logo: "https://avatars.githubusercontent.com/u/8906680?s=200&v=4",
+            description: 'MCP Server for ThoughtSpot Agent', // optional
+        },
+        state: { oauthReqInfo }, // arbitrary data that flows through the form submission below
+    })
 })
 
 app.post("/authorize", async (c) => {
     // Validates form submission and extracts state
-	const { state, instanceUrl } = await parseRedirectApproval(c.req.raw)
-	if (!state.oauthReqInfo) {
-		return c.text('Invalid request', 400)
-	}
+    const { state, instanceUrl } = await parseRedirectApproval(c.req.raw)
+    if (!state.oauthReqInfo) {
+        return c.text('Invalid request', 400)
+    }
 
     if (!instanceUrl) {
         return new Response('Missing instance URL', { status: 400 });
@@ -45,7 +45,7 @@ app.post("/authorize", async (c) => {
 
     // Construct the redirect URL to v1/saml
     const redirectUrl = new URL('callosum/v1/saml/login', instanceUrl);
-    
+
 
     // TODO(shikhar.bhargava): remove this once we have a proper callback URL
     // the proper callback URL is the one /callosum/v1/v2/auth/token/authroize endpoint
@@ -110,6 +110,9 @@ app.post("/store-token", async (c) => {
         return c.text('Missing token or OAuth request info or instanceUrl', 400);
     }
 
+    const { clientId } = oauthReqInfo;
+    const clientName = await c.env.OAUTH_PROVIDER.lookupClient(clientId);
+
     // Complete the authorization with the provided information
     const { redirectTo } = await c.env.OAUTH_PROVIDER.completeAuthorization({
         request: oauthReqInfo,
@@ -121,6 +124,7 @@ app.post("/store-token", async (c) => {
         props: {
             accessToken: token.data.token,
             instanceUrl: instanceUrl,
+            clientName: clientName,
         } as Props,
     });
 

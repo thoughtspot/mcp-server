@@ -191,3 +191,34 @@ export async function getDataSources(client: ThoughtSpotRestApi): Promise<DataSo
             }
         });
 }
+
+
+export interface SessionInfo {
+    mixpanelToken: string;
+    clusterName: string;
+    clusterId: string;
+    userGUID: string;
+    userName: string;
+    releaseVersion: string;
+    currentOrgId: string;
+    privileges: string[];
+}
+
+export async function getSessionInfo(client: ThoughtSpotRestApi): Promise<SessionInfo> {
+    const info = await (client as any).getSessionInfo();
+    const devMixpanelToken = info.configInfo.mixpanelConfig.devSdkKey;
+    const prodMixpanelToken = info.configInfo.mixpanelConfig.prodSdkKey;
+    const mixpanelToken = info.configInfo.mixpanelConfig.production
+        ? prodMixpanelToken
+        : devMixpanelToken;
+    return {
+        mixpanelToken,
+        userGUID: info.userGUID,
+        userName: info.userName,
+        clusterName: info.configInfo.selfClusterName,
+        clusterId: info.configInfo.selfClusterId,
+        releaseVersion: info.releaseVersion,
+        currentOrgId: info.currentOrgId,
+        privileges: info.privileges,
+    }
+}

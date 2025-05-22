@@ -15,9 +15,11 @@ import {
     fetchTMLAndCreateLiveboard,
     getAnswerForQuestion,
     getDataSources,
-    getRelevantQuestions
+    getRelevantQuestions,
+    getSessionInfo
 } from "../thoughtspot/thoughtspot-service";
-
+import { MixpanelTracker } from "../metrics/mixpanel";
+import { Trackers, type Tracker, TrackEvent } from "../metrics";
 
 const ToolInputSchema = ToolSchema.shape.inputSchema;
 type ToolInput = z.infer<typeof ToolInputSchema>;
@@ -60,6 +62,7 @@ interface Context {
 }
 
 export class MCPServer extends Server {
+    private trackers: Trackers = new Trackers();
     constructor(private ctx: Context) {
         super({
             name: "ThoughtSpot",
@@ -74,7 +77,16 @@ export class MCPServer extends Server {
         });
     }
 
-    async init(sendAnalytics: (eventName: string, ...args: any[]) => void = () => { }) {
+    async init() {
+        const client = getThoughtSpotClient(this.ctx.props.instanceUrl, this.ctx.props.accessToken);
+        const sessionInfo = await getSessionInfo(client);
+        const mixpanel = new MixpanelTracker(
+            sessionInfo,
+            this.ctx.props.clientName
+        );
+        this.addTracker(mixpanel);
+        this.trackers.track(TrackEvent.Init);
+
         this.setRequestHandler(ListToolsRequestSchema, async () => {
             return {
                 tools: [
@@ -146,7 +158,8 @@ export class MCPServer extends Server {
         this.setRequestHandler(CallToolRequestSchema, async (request: z.infer<typeof CallToolRequestSchema>) => {
             const { name } = request.params;
 
-            sendAnalytics("call_tool", name);
+
+            this.trackers.track(TrackEvent.CallTool, { toolName: name });
 
             switch (name) {
                 case ToolName.Ping:
@@ -188,7 +201,7 @@ export class MCPServer extends Server {
         const relevantQuestions = await getRelevantQuestions(
             query,
             sourceIds!,
-            additionalContext,
+            additionalContext ?? "",
             client,
         );
 
@@ -275,5 +288,9 @@ export class MCPServer extends Server {
             map: new Map(sources.map(s => [s.id, s])),
         }
         return this._sources;
+    }
+
+    async addTracker(tracker: Tracker) {
+        this.trackers.add(tracker);
     }
 }
