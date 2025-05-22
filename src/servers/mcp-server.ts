@@ -74,7 +74,7 @@ export class MCPServer extends Server {
         });
     }
 
-    async init() {
+    async init(sendAnalytics: (eventName: string, ...args: any[]) => void = () => { }) {
         this.setRequestHandler(ListToolsRequestSchema, async () => {
             return {
                 tools: [
@@ -146,6 +146,8 @@ export class MCPServer extends Server {
         this.setRequestHandler(CallToolRequestSchema, async (request: z.infer<typeof CallToolRequestSchema>) => {
             const { name } = request.params;
 
+            sendAnalytics("call_tool", name);
+
             switch (name) {
                 case ToolName.Ping:
                     console.log("Received Ping request");
@@ -154,10 +156,10 @@ export class MCPServer extends Server {
                             content: [{ type: "text", text: "Pong" }],
                         };
                     }
-                        return {
-                            isError: true,
-                            content: [{ type: "text", text: "ERROR: Not authenticated" }],
-                        };
+                    return {
+                        isError: true,
+                        content: [{ type: "text", text: "ERROR: Not authenticated" }],
+                    };
 
                 case ToolName.GetRelevantQuestions: {
                     return this.callGetRelevantQuestions(request);
