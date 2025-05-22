@@ -1,0 +1,74 @@
+openapi: 3.0.0
+info:
+  title: ThoughtSpot API
+  version: 1.0.0
+  description: API for interacting with ThoughtSpot services
+
+servers:
+  - url: https://thoughtspot-mcp-server-open-api.thoughtspot-485.workers.dev
+    description: ThoughtSpot agent url
+
+paths:
+  /api/tools/get-answer:
+    post:
+      summary: Get answer for a question
+      description: Returns an answer for a given question using the specified datasource
+      operationId: getAnswer
+      tags:
+        - Tools
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GetAnswerRequest'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetAnswerResponse'
+        '400':
+          description: Bad request - Invalid input parameters
+        '401':
+          description: Unauthorized - Invalid or missing authentication
+        '500':
+          description: Internal server error
+
+components:
+  schemas:
+    GetAnswerRequest:
+      type: object
+      required:
+        - question
+        - datasourceId
+      properties:
+        question:
+          type: string
+          description: The question to get an answer for
+          example: "What is the total sales by region?"
+        datasourceId:
+          type: string
+          description: The ID of the datasource to use for answering the question
+          example: "cd252e5c-b552-49a8-821d-3eadaa049cca"
+    
+    GetAnswerResponse:
+      type: object
+      properties:
+        answer:
+          type: string
+          description: The answer to the question
+          example: "The total sales by region are: North - $1.2M, South - $800K, East - $1.5M, West - $900K"
+        metadata:
+          type: object
+          description: Additional metadata about the answer
+          properties:
+            confidence:
+              type: number
+              description: Confidence score of the answer
+              example: 0.95
+            source:
+              type: string
+              description: Source of the answer
+              example: "Sales Analysis Dashboard"

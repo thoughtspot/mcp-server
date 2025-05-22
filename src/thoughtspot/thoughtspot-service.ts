@@ -192,7 +192,7 @@ export async function getDataSources(client: ThoughtSpotRestApi): Promise<DataSo
         });
 }
 
-export async function getDataSourceName(client: ThoughtSpotRestApi, name?: string): Promise<DataSource[]> {
+export async function getDataSourceId(client: ThoughtSpotRestApi, name?: string): Promise<DataSource[]> {
     const resp = await client.searchMetadata({
         metadata: [{
             type: "LOGICAL_TABLE",

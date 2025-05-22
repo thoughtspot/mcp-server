@@ -1,0 +1,72 @@
+openapi: 3.0.0
+info:
+  title: API Server - Ping Test
+  version: 1.0.0
+  description: OpenAPI specification for the /ping/test/abc endpoint.
+servers:
+  - url: https://thoughtspot-mcp-server-open-api.thoughtspot-485.workers.dev
+    description: Development server
+paths:
+  /api/test/ping:
+    get:
+      summary: Test endpoint to check authentication status.
+      operationId: pingTestAbc
+      tags:
+        - Ping
+      responses:
+        '200':
+          description: >-
+            Returns a Pong message if authenticated, or an error message
+            if not authenticated. Note: The endpoint currently returns a 200 OK
+            status for both success and authentication failure cases,
+            differentiating them by the 'isError' field in the response body.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: object
+                    properties:
+                      content:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            type:
+                              type: string
+                              example: text
+                            text:
+                              type: string
+                              example: Pong
+                          required:
+                            - type
+                            - text
+                      isError:
+                        type: boolean
+                        example: false
+                    required:
+                      - content
+                  - type: object
+                    properties:
+                      isError:
+                        type: boolean
+                        example: true
+                      content:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            type:
+                              type: string
+                              example: text
+                            text:
+                              type: string
+                              example: "ERROR: Not authenticated"
+                          required:
+                            - type
+                            - text
+                    required:
+                      - isError
+                      - content
+      # No request body is defined as the endpoint appears to rely on context/session data
+      # for accessToken and instanceUrl. If these were expected in the request body or
+      # as parameters, this section would need to be updated.

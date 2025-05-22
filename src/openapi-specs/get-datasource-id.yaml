@@ -1,0 +1,67 @@
+openapi: 3.0.0
+info:
+  title: ThoughtSpot API
+  version: 1.0.0
+  description: API for interacting with ThoughtSpot services
+
+servers:
+  - url: https://thoughtspot-mcp-server-open-api.thoughtspot-485.workers.dev
+    description: ThoughtSpot agent url
+
+paths:
+  /api/resources/datasource-id:
+    get:
+      summary: Get datasource by name
+      description: Returns a datasource matching the provided name
+      operationId: getDataSourceByName
+      tags:
+        - Resources
+      parameters:
+        - name: name
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Name of the datasource to search for
+          example: "Sales Data"
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                    description: Unique identifier of the datasource
+                    example: "123e4567-e89b-12d3-a456-426614174000"
+                  name:
+                    type: string
+                    description: Name of the datasource
+                    example: "Sales Data"
+                  type:
+                    type: string
+                    description: Type of the datasource
+                    example: "worksheet"
+                  description:
+                    type: string
+                    description: Description of the datasource
+                    example: "Contains sales data for all regions"
+                  createdBy:
+                    type: string
+                    description: Username of the creator
+                    example: "admin"
+                  lastModified:
+                    type: string
+                    format: date-time
+                    description: Last modification timestamp
+                    example: "2024-03-20T10:30:00Z"
+        '400':
+          description: Bad request - Missing or invalid name parameter
+        '401':
+          description: Unauthorized - Invalid or missing authentication
+        '404':
+          description: Not found - No datasource found with the given name
+        '500':
+          description: Internal server error
