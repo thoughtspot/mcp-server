@@ -1,0 +1,57 @@
+openapi: 3.0.0
+info:
+  title: ThoughtSpot API
+  version: 1.0.0
+  description: API for interacting with ThoughtSpot services
+
+servers:
+  - url: https://thoughtspot-mcp-server-open-api.thoughtspot-485.workers.dev
+    description: ThoughtSpot agent url
+
+paths:
+  /api/resources/datasources:
+    get:
+      summary: Get available datasources
+      description: Returns a list of all available datasources in the ThoughtSpot instance
+      operationId: getDataSources
+      tags:
+        - Resources
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:
+                      type: string
+                      description: Unique identifier of the datasource
+                      example: "123e4567-e89b-12d3-a456-426614174000"
+                    name:
+                      type: string
+                      description: Name of the datasource
+                      example: "Sales Data"
+                    type:
+                      type: string
+                      description: Type of the datasource
+                      example: "worksheet"
+                    description:
+                      type: string
+                      description: Description of the datasource
+                      example: "Contains sales data for all regions"
+                    createdBy:
+                      type: string
+                      description: Username of the creator
+                      example: "admin"
+                    lastModified:
+                      type: string
+                      format: date-time
+                      description: Last modification timestamp
+                      example: "2024-03-20T10:30:00Z"
+        '401':
+          description: Unauthorized - Invalid or missing authentication
+        '500':
+          description: Internal server error
