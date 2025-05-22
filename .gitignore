@@ -136,3 +136,4 @@ dist
 .pnp.*
 .wrangler
 .dev.vars
+coverage

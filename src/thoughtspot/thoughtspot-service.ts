@@ -1,7 +1,12 @@
-import { ThoughtSpotRestApi } from "@thoughtspot/rest-api-sdk";
+import type { ThoughtSpotRestApi } from "@thoughtspot/rest-api-sdk";
 
-export async function getRelevantQuestions(query: string, sourceIds: string[], additionalContext: string = '', client: ThoughtSpotRestApi): Promise<{ questions: { question: string, datasourceId: string }[], error: Error | null }> {
+export async function getRelevantQuestions(
+    query: string,
+    sourceIds: string[],
+    additionalContext: string,
+    client: ThoughtSpotRestApi): Promise<{ questions: { question: string, datasourceId: string }[], error: Error | null }> {
     try {
+        additionalContext = additionalContext || '';
         const resp = await client.queryGetDecomposedQuery({
             nlsRequest: {
                 query: query,

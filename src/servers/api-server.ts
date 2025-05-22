@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-import { Props } from '../utils';
+import type { Props } from '../utils';
 import {
     createLiveboard,
     getAnswerForQuestion,

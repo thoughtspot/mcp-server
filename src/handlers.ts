@@ -1,6 +1,6 @@
 import type { AuthRequest, OAuthHelpers } from '@cloudflare/workers-oauth-provider'
 import { Hono } from 'hono'
-import { Props } from './utils';
+import type { Props } from './utils';
 import { parseRedirectApproval, renderApprovalDialog } from './oauth-manager/oauth-utils';
 import { renderTokenCallback } from './oauth-manager/token-utils';
 import { any } from 'zod';

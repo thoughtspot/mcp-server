@@ -1,0 +1,25 @@
+{
+  "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+  "organizeImports": {
+    "enabled": true
+  },
+  "files": {
+    "include": ["src/**/*.ts", "test/**/*.ts"]
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+        "suspicious": {
+            "noExplicitAny": "off"
+        },
+        "style": {
+            "noNonNullAssertion": "off",
+            "noParameterAssign": "off"
+        }
+    }
+  },
+  "formatter": {
+    "enabled": true,
+    "include": ["src/**/*.ts", "test/**/*.ts"]
+  }
+} 

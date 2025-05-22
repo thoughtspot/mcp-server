@@ -5,49 +5,49 @@ import type { ClientInfo, AuthRequest } from '@cloudflare/workers-oauth-provider
  * Configuration for the approval dialog
  */
 export interface ApprovalDialogOptions {
-    /**
-     * Client information to display in the approval dialog
-     */
-    client: ClientInfo | null
-    /**
-     * Server information to display in the approval dialog
-     */
-    server: {
-      name: string
-      logo?: string
-      description?: string
-    }
-    /**
-     * Arbitrary state data to pass through the approval flow
-     * Will be encoded in the form and returned when approval is complete
-     */
-    state: Record<string, any>
-    /**
-     * Name of the cookie to use for storing approvals
-     * @default "mcp_approved_clients"
-     */
-    cookieName?: string
-    /**
-     * Secret used to sign cookies for verification
-     * Can be a string or Uint8Array
-     * @default Built-in Uint8Array key
-     */
-    cookieSecret?: string | Uint8Array
-    /**
-     * Cookie domain
-     * @default current domain
-     */
-    cookieDomain?: string
-    /**
-     * Cookie path
-     * @default "/"
-     */
-    cookiePath?: string
-    /**
-     * Cookie max age in seconds
-     * @default 30 days
-     */
-    cookieMaxAge?: number
+  /**
+   * Client information to display in the approval dialog
+   */
+  client: ClientInfo | null
+  /**
+   * Server information to display in the approval dialog
+   */
+  server: {
+    name: string
+    logo?: string
+    description?: string
+  }
+  /**
+   * Arbitrary state data to pass through the approval flow
+   * Will be encoded in the form and returned when approval is complete
+   */
+  state: Record<string, any>
+  /**
+   * Name of the cookie to use for storing approvals
+   * @default "mcp_approved_clients"
+   */
+  cookieName?: string
+  /**
+   * Secret used to sign cookies for verification
+   * Can be a string or Uint8Array
+   * @default Built-in Uint8Array key
+   */
+  cookieSecret?: string | Uint8Array
+  /**
+   * Cookie domain
+   * @default current domain
+   */
+  cookieDomain?: string
+  /**
+   * Cookie path
+   * @default "/"
+   */
+  cookiePath?: string
+  /**
+   * Cookie max age in seconds
+   * @default 30 days
+   */
+  cookieMaxAge?: number
 }
 
 /**
@@ -60,30 +60,30 @@ export interface ApprovalDialogOptions {
  * @returns A Response containing the HTML approval dialog
  */
 export function renderApprovalDialog(request: Request, options: ApprovalDialogOptions): Response {
-    const { client, server, state } = options
-  
-    // Encode state for form submission
-    const encodedState = btoa(JSON.stringify(state))
-  
-    // Sanitize any untrusted content
-    const serverName = sanitizeHtml(server.name)
-    const clientName = client?.clientName ? sanitizeHtml(client.clientName) : 'Unknown MCP Client'
-    const serverDescription = server.description ? sanitizeHtml(server.description) : ''
-  
-    // Safe URLs
-    const logoUrl = server.logo ? sanitizeHtml(server.logo) : ''
-    const clientUri = client?.clientUri ? sanitizeHtml(client.clientUri) : ''
-    const policyUri = client?.policyUri ? sanitizeHtml(client.policyUri) : ''
-    const tosUri = client?.tosUri ? sanitizeHtml(client.tosUri) : ''
-  
-    // Client contacts
-    const contacts = client?.contacts && client.contacts.length > 0 ? sanitizeHtml(client.contacts.join(', ')) : ''
-  
-    // Get redirect URIs
-    const redirectUris = client?.redirectUris && client.redirectUris.length > 0 ? client.redirectUris.map((uri) => sanitizeHtml(uri)) : []
-  
-    // Generate HTML for the approval dialog
-    const htmlContent = `
+  const { client, server, state } = options
+
+  // Encode state for form submission
+  const encodedState = btoa(JSON.stringify(state))
+
+  // Sanitize any untrusted content
+  const serverName = sanitizeHtml(server.name)
+  const clientName = client?.clientName ? sanitizeHtml(client.clientName) : 'Unknown MCP Client'
+  const serverDescription = server.description ? sanitizeHtml(server.description) : ''
+
+  // Safe URLs
+  const logoUrl = server.logo ? sanitizeHtml(server.logo) : ''
+  const clientUri = client?.clientUri ? sanitizeHtml(client.clientUri) : ''
+  const policyUri = client?.policyUri ? sanitizeHtml(client.policyUri) : ''
+  const tosUri = client?.tosUri ? sanitizeHtml(client.tosUri) : ''
+
+  // Client contacts
+  const contacts = client?.contacts && client.contacts.length > 0 ? sanitizeHtml(client.contacts.join(', ')) : ''
+
+  // Get redirect URIs
+  const redirectUris = client?.redirectUris && client.redirectUris.length > 0 ? client.redirectUris.map((uri) => sanitizeHtml(uri)) : []
+
+  // Generate HTML for the approval dialog
+  const htmlContent = `
       <!DOCTYPE html>
       <html lang="en">
         <head>
@@ -373,9 +373,8 @@ export function renderApprovalDialog(request: Request, options: ApprovalDialogOp
                   </div>
                 </div>
                 
-                ${
-                  clientUri
-                    ? `
+                ${clientUri
+      ? `
                   <div class="client-detail">
                     <div class="detail-label">Website:</div>
                     <div class="detail-value small">
@@ -385,12 +384,11 @@ export function renderApprovalDialog(request: Request, options: ApprovalDialogOp
                     </div>
                   </div>
                 `
-                    : ''
-                }
+      : ''
+    }
                 
-                ${
-                  policyUri
-                    ? `
+                ${policyUri
+      ? `
                   <div class="client-detail">
                     <div class="detail-label">Privacy Policy:</div>
                     <div class="detail-value">
@@ -400,12 +398,11 @@ export function renderApprovalDialog(request: Request, options: ApprovalDialogOp
                     </div>
                   </div>
                 `
-                    : ''
-                }
+      : ''
+    }
                 
-                ${
-                  tosUri
-                    ? `
+                ${tosUri
+      ? `
                   <div class="client-detail">
                     <div class="detail-label">Terms of Service:</div>
                     <div class="detail-value">
@@ -415,12 +412,11 @@ export function renderApprovalDialog(request: Request, options: ApprovalDialogOp
                     </div>
                   </div>
                 `
-                    : ''
-                }
+      : ''
+    }
                 
-                ${
-                  redirectUris.length > 0
-                    ? `
+                ${redirectUris.length > 0
+      ? `
                   <div class="client-detail">
                     <div class="detail-label">Redirect URIs:</div>
                     <div class="detail-value small">
@@ -428,19 +424,18 @@ export function renderApprovalDialog(request: Request, options: ApprovalDialogOp
                     </div>
                   </div>
                 `
-                    : ''
-                }
+      : ''
+    }
                 
-                ${
-                  contacts
-                    ? `
+                ${contacts
+      ? `
                   <div class="client-detail">
                     <div class="detail-label">Contact:</div>
                     <div class="detail-value">${contacts}</div>
                   </div>
                 `
-                    : ''
-                }
+      : ''
+    }
               </div>
               
               <p class="description">Please provide your ThoughtSpot instance URL to authorize this client.</p>
@@ -466,37 +461,37 @@ export function renderApprovalDialog(request: Request, options: ApprovalDialogOp
         </body>
       </html>
     `
-  
-    return new Response(htmlContent, {
-      headers: {
-        'Content-Type': 'text/html; charset=utf-8',
-      },
-    })
+
+  return new Response(htmlContent, {
+    headers: {
+      'Content-Type': 'text/html; charset=utf-8',
+    },
+  })
 }
 
 /**
  * Decodes a base64-encoded state string back into an object
  */
 function decodeState<T>(encodedState: string): T {
-    try {
-        const decoded = atob(encodedState);
-        return JSON.parse(decoded) as T;
-    } catch (e) {
-        console.error('Error decoding state:', e);
-        throw new Error('Invalid state format');
-    }
+  try {
+    const decoded = atob(encodedState);
+    return JSON.parse(decoded) as T;
+  } catch (e) {
+    console.error('Error decoding state:', e);
+    throw new Error('Invalid state format');
+  }
 }
 
 /**
  * Result of parsing the approval form submission.
  */
 export interface ParsedApprovalResult {
-    /** The original state object passed through the form. */
-    state: any
-    /** The instance URL extracted from the form. */
-    instanceUrl: string
-  }
-  
+  /** The original state object passed through the form. */
+  state: any
+  /** The instance URL extracted from the form. */
+  instanceUrl: string
+}
+
 
 /**
  * Validates and sanitizes a URL to ensure it's a valid ThoughtSpot instance URL
@@ -504,28 +499,28 @@ export interface ParsedApprovalResult {
  * @returns The sanitized URL
  * @throws Error if the URL is invalid
  */
-function validateAndSanitizeUrl(url: string): string {
-    try {
-        // Remove any whitespace
-        const trimmedUrl = url.trim();
-        
-        // Add https:// if no protocol is specified
-        const urlWithProtocol = trimmedUrl.startsWith('http://') || trimmedUrl.startsWith('https://') 
-            ? trimmedUrl 
-            : `https://${trimmedUrl}`;
-        
-        const parsedUrl = new URL(urlWithProtocol);
-        
-        // Remove trailing slashes and normalize the URL
-        const sanitizedUrl = parsedUrl.origin;
-        
-        return sanitizedUrl;
-    } catch (e) {
-        if (e instanceof Error) {
-            throw new Error(`Invalid URL: ${e.message}`);
-        }
-        throw new Error('Invalid URL format');
+export function validateAndSanitizeUrl(url: string): string {
+  try {
+    // Remove any whitespace
+    const trimmedUrl = url.trim();
+
+    // Add https:// if no protocol is specified
+    const urlWithProtocol = trimmedUrl.startsWith('http://') || trimmedUrl.startsWith('https://')
+      ? trimmedUrl
+      : `https://${trimmedUrl}`;
+
+    const parsedUrl = new URL(urlWithProtocol);
+
+    // Remove trailing slashes and normalize the URL
+    const sanitizedUrl = parsedUrl.origin;
+
+    return sanitizedUrl;
+  } catch (e) {
+    if (e instanceof Error) {
+      throw new Error(`Invalid URL: ${e.message}`);
     }
+    throw new Error('Invalid URL format');
+  }
 }
 
 /**
@@ -537,41 +532,41 @@ function validateAndSanitizeUrl(url: string): string {
  * @throws If the request method is not POST, form data is invalid, or state is missing.
  */
 export async function parseRedirectApproval(request: Request): Promise<ParsedApprovalResult> {
-    if (request.method !== 'POST') {
-        throw new Error('Invalid request method. Expected POST.')
-    }
-  
-    let state: any
-    let clientId: string | undefined
-    let instanceUrl: string | undefined
-    try {
-        const formData = await request.formData()
-        const encodedState = formData.get('state')
-        const rawInstanceUrl = formData.get('instanceUrl') as string;
-  
-        if (typeof encodedState !== 'string' || !encodedState) {
-            throw new Error("Missing or invalid 'state' in form data.")
-        }
-  
-        state = decodeState<{ oauthReqInfo?: AuthRequest }>(encodedState)
-        clientId = state?.oauthReqInfo?.clientId
-  
-        if (!clientId) {
-            throw new Error('Could not extract clientId from state object.')
-        }
+  if (request.method !== 'POST') {
+    throw new Error('Invalid request method. Expected POST.')
+  }
 
-        if (!rawInstanceUrl) {
-            throw new Error('Missing instance URL')
-        }
+  let state: any
+  let clientId: string | undefined
+  let instanceUrl: string | undefined
+  try {
+    const formData = await request.formData()
+    const encodedState = formData.get('state')
+    const rawInstanceUrl = formData.get('instanceUrl') as string;
 
-        // Validate and sanitize the instance URL
-        instanceUrl = validateAndSanitizeUrl(rawInstanceUrl);
-    } catch (e) {
-        console.error('Error processing form submission:', e)
-        throw new Error(`Failed to parse approval form: ${e instanceof Error ? e.message : String(e)}`)
+    if (typeof encodedState !== 'string' || !encodedState) {
+      throw new Error("Missing or invalid 'state' in form data.")
     }
-  
-    return { state, instanceUrl }
+
+    state = decodeState<{ oauthReqInfo?: AuthRequest }>(encodedState)
+    clientId = state?.oauthReqInfo?.clientId
+
+    if (!clientId) {
+      throw new Error('Could not extract clientId from state object.')
+    }
+
+    if (!rawInstanceUrl) {
+      throw new Error('Missing instance URL')
+    }
+
+    // Validate and sanitize the instance URL
+    instanceUrl = validateAndSanitizeUrl(rawInstanceUrl);
+  } catch (e) {
+    console.error('Error processing form submission:', e)
+    throw new Error(`Failed to parse approval form: ${e instanceof Error ? e.message : String(e)}`)
+  }
+
+  return { state, instanceUrl }
 }
 
 /**
@@ -580,5 +575,5 @@ export async function parseRedirectApproval(request: Request): Promise<ParsedApp
  * @returns A safe string with HTML special characters escaped
  */
 function sanitizeHtml(unsafe: string): string {
-    return unsafe.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;')
-  }
+  return unsafe.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;')
+}

@@ -81,5 +81,39 @@ To configure this MCP server in your MCP client (such as Claude Desktop, Windsur
 - **wrangler.jsonc**: Configure bindings, secrets, and compatibility.
 
 
+## Stdio support (fallback)
+
+If you are unable to use the remote MCP server due to connectivity restrictions on your Thoughtspot instance. You could use the `stdio` local transport using the `npm` package.
+
+Here is how to configure `stdio` with MCP Client:
+
+```json 
+{
+  "mcpServers": {
+    "ThoughtSpot": {
+      "command": "npx",
+      "args": [
+         "@thoughtspot/mcp-server"
+      ],
+      "env": {
+         "TS_INSTANCE": "<your Thoughtspot Instance URL>",
+         "TS_AUTH_TOKEN": "<ThoughtSpot Access Token>"
+      }
+    }
+  }
+}
+```
+
+#### How to obtain a `TS_AUTH_TOKEN` ?
+
+- Go to ThoughtSpot => _Develop_ => _Rest Playground v2.0_
+- _Authentication_ => _Get Full access token_
+- Scroll down and expand the "body"
+- Add your "username" and "password".
+- Put whatever "validity_time" you want the token to be.
+- Click on "Try it out" on the bottom right.
+- You should get a token in the response, thats the bearer token.
+
+
 MCP Server, © ThoughtSpot, Inc. 2025
 
