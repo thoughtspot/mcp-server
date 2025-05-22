@@ -167,6 +167,30 @@ app.get('/openapi-spec', async (c) => {
         // Convert Zod schema to JSON schema
         const generatedSchema = zodToJsonSchema(tool.schema) as any;
         delete generatedSchema.$schema;
+
+        // Add hardcoded values and additional properties based on tool name
+        switch (tool.name) {
+            case ToolName.GetAnswer:
+                generatedSchema.properties.datasourceId = {
+                    type: 'string',
+                    description: 'The ID of the datasource to use for answering the question',
+                    example: '123e4567-e89b-12d3-a456-426614174000',
+                    default: '123e4567-e89b-12d3-a456-426614174000',
+                    enum: ['123e4567-e89b-12d3-a456-426614174000']
+                };
+                break;
+            case ToolName.GetRelevantQuestions:
+                generatedSchema.properties.datasourceIds = {
+                    type: 'array',
+                    description: 'List of datasource IDs to search within',
+                    items: {
+                        type: 'string'
+                    },
+                    example: ['123e4567-e89b-12d3-a456-426614174000']
+                };
+                break;
+        }
+
         schemas[schemaName] = generatedSchema;
 
         // Create response schema based on tool name
@@ -178,9 +202,21 @@ app.get('/openapi-spec', async (c) => {
                     items: {
                         type: 'object',
                         properties: {
-                            question: { type: 'string', example: 'What are the monthly sales trends?' },
-                            confidence: { type: 'number', example: 0.85 },
-                            datasourceId: { type: 'string', example: '123e4567-e89b-12d3-a456-426614174000' }
+                            question: { 
+                                type: 'string', 
+                                description: 'The relevant question',
+                                example: 'What are the monthly sales trends?' 
+                            },
+                            confidence: { 
+                                type: 'number', 
+                                description: 'Confidence score of the question relevance',
+                                example: 0.85 
+                            },
+                            datasourceId: { 
+                                type: 'string', 
+                                description: 'The datasource ID this question is most relevant to',
+                                example: '123e4567-e89b-12d3-a456-426614174000' 
+                            }
                         }
                     }
                 };
@@ -189,12 +225,25 @@ app.get('/openapi-spec', async (c) => {
                 responseSchema = {
                     type: 'object',
                     properties: {
-                        answer: { type: 'string', example: 'The total sales by region are: North - $1.2M, South - $800K' },
+                        answer: { 
+                            type: 'string', 
+                            description: 'The answer to the question',
+                            example: 'The total sales by region are: North - $1.2M, South - $800K' 
+                        },
                         metadata: {
                             type: 'object',
+                            description: 'Additional metadata about the answer',
                             properties: {
-                                confidence: { type: 'number', example: 0.95 },
-                                source: { type: 'string', example: 'Sales Analysis Dashboard' }
+                                confidence: { 
+                                    type: 'number', 
+                                    description: 'Confidence score of the answer',
+                                    example: 0.95 
+                                },
+                                source: { 
+                                    type: 'string', 
+                                    description: 'Source of the answer',
+                                    example: 'Sales Analysis Dashboard' 
+                                }
                             }
                         }
                     }
@@ -283,8 +332,8 @@ app.get('/openapi-spec', async (c) => {
         },
         servers: [
             {
-                url: new URL(c.req.url).origin, // Dynamically set the server URL
-                description: 'Current environment'
+                url: '$TS-AGENT-URL',
+                description: 'ThoughtSpot agent url'
             }
         ],
         paths: paths,
