@@ -1,17 +1,14 @@
 import { createBearerAuthenticationConfig, ThoughtSpotRestApi } from "@thoughtspot/rest-api-sdk"
 import YAML from "yaml";
 
-let token: string;
-
 export const getThoughtSpotClient = (instanceUrl: string, bearerToken: string) => {
     const client = new ThoughtSpotRestApi(createBearerAuthenticationConfig(
         instanceUrl,
         () => Promise.resolve(bearerToken),
     ));
     (client as any).instanceUrl = instanceUrl;
-    token = bearerToken;
-    addExportUnsavedAnswerTML(client, instanceUrl);
-    addExportAnswerDataProxied(client, instanceUrl);
+    addExportUnsavedAnswerTML(client, instanceUrl, bearerToken);
+    addGetSessionInfo(client, instanceUrl, bearerToken);
     return client;
 }
 
@@ -37,32 +34,9 @@ mutation GetUnsavedAnswerTML($session: BachSessionIdInput!, $exportDependencies:
 
 const PROXY_URL = "https://plugin-party-vercel.vercel.app/api/proxy";
 
-function addExportAnswerDataProxied(client: any, instanceUrl: string) {
-    (client as any).exportAnswerReportProxied = async ({ session_identifier, generation_number, file_format }: { session_identifier: string, generation_number: number, file_format: string }) => {
-        const endpoint = "/api/rest/2.0/report/answer";
-        const response = await fetch(PROXY_URL, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-                token,
-                clusterUrl: instanceUrl,
-                endpoint,
-                payload: {
-                    session_identifier,
-                    generation_number,
-                    file_format,
-                }
-            })
-        });
-        return response;
-    }
-}
-
 
 // This is a workaround until we get the public API for this
-function addExportUnsavedAnswerTML(client: any, instanceUrl: string) {
+function addExportUnsavedAnswerTML(client: any, instanceUrl: string, token: string) {
     (client as any).exportUnsavedAnswerTML = async ({ session_identifier, generation_number }) => {
         const endpoint = "/prism/?op=GetUnsavedAnswerTML";
         // make a graphql request to `ThoughtspotHost/prism endpoint.
@@ -93,4 +67,24 @@ function addExportUnsavedAnswerTML(client: any, instanceUrl: string) {
         const edoc = data.data.UnsavedAnswer_getTML.object[0].edoc;
         return YAML.parse(edoc);
     }
+}
+
+async function addGetSessionInfo(client: any, instanceUrl: string, token: string) {
+    (client as any).getSessionInfo = async (): Promise<SessionInfo> => {
+        const endpoint = "/prism/preauth/info";
+        // make a graphql request to `ThoughtspotHost/prism endpoint.
+        const response = await fetch(`${instanceUrl}${endpoint}`, {
+            method: "GET",
+            headers: {
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "user-agent": "ThoughtSpot-ts-client",
+                "Authorization": `Bearer ${token}`,
+            }
+        });
+
+        const data: any = await response.json();
+        const info = data.info;
+        return info;
+    };
 }
