@@ -1,6 +1,7 @@
 export function renderTokenCallback(instanceUrl: string, oauthReqInfo: string) {
     // Parse the oauthReqInfo if it's a string
     const parsedOAuthReqInfo = typeof oauthReqInfo === 'string' ? JSON.parse(oauthReqInfo) : oauthReqInfo;
+    const oauthReqInfoJson = JSON.stringify(parsedOAuthReqInfo);
 
     return `
     <!DOCTYPE html>
@@ -74,9 +75,17 @@ export function renderTokenCallback(instanceUrl: string, oauthReqInfo: string) {
                 ThoughtSpot MCP Server
             </div>
         </div>
+        <div id="manual-token-section" style="display:none; margin-top:2rem;">
+            <button id="open-token-url" style="margin-bottom:1rem; padding:0.5rem 1rem; font-size:1rem;">Open Token URL in New Tab</button>
+            <div style="margin-bottom:0.5rem;">Paste the token JSON here:</div>
+            <textarea id="manual-token-input" rows="6" style="width:100%; max-width:100%; font-family:monospace; font-size:0.95rem;"></textarea>
+            <button id="submit-manual-token" style="margin-top:1rem; padding:0.5rem 1rem; font-size:1rem;">Submit Token</button>
+        </div>
+        <script type="application/json" id="oauth-req-info">${oauthReqInfoJson}</script>
         <script>
             // Immediately invoke the async function
             (async function() {
+                const oauthReqInfo = JSON.parse(document.getElementById('oauth-req-info').textContent);
                 try {
                     const tokenUrl = new URL('callosum/v1/v2/auth/token/fetch?validity_time_in_sec=2592000', '${instanceUrl}');
                     console.log('Fetching token from:', tokenUrl.toString());
@@ -89,12 +98,59 @@ export function renderTokenCallback(instanceUrl: string, oauthReqInfo: string) {
                     });
                     
                     if (!response.ok) {
-                        const errorText = await response.text();
-                        throw new Error(\`Authentication failed (Status: \${response.status}): \${errorText}\`);
+                        if (response.status === 401) {
+                            // 401 likely due to 3rd party cookies being blocked
+                            document.getElementById('status').textContent = 'Authentication failed due to browser restrictions (possibly 3rd party cookies). Please open the token URL in a new tab, sign in, and paste the token JSON below.';
+                            document.getElementById('status').style.color = '#dc3545';
+                            document.querySelector('h2').textContent = 'Manual Token Entry Required';
+                            document.querySelector('.spinner').style.display = 'none';
+                            document.getElementById('manual-token-section').style.display = 'block';
+                            document.getElementById('open-token-url').onclick = function() {
+                                window.open(tokenUrl.toString(), '_blank');
+                            };
+                            document.getElementById('submit-manual-token').onclick = async function() {
+                                const tokenText = document.getElementById('manual-token-input').value;
+                                let tokenData;
+                                try {
+                                    tokenData = JSON.parse(tokenText);
+                                } catch (e) {
+                                    document.getElementById('status').textContent = 'Invalid JSON. Please paste the correct token JSON.';
+                                    document.getElementById('status').style.color = '#dc3545';
+                                    return;
+                                }
+                                document.getElementById('status').textContent = 'Submitting token...';
+                                document.getElementById('status').style.color = '#495057';
+                                try {
+                                    const storeResponse = await fetch('/store-token', {
+                                        method: 'POST',
+                                        headers: {
+                                            'Content-Type': 'application/json'
+                                        },
+                                        body: JSON.stringify({ 
+                                            token: tokenData,
+                                            oauthReqInfo: oauthReqInfo,
+                                            instanceUrl: '${instanceUrl}'
+                                        })
+                                    });
+                                    const responseData = await storeResponse.json();
+                                    if (!storeResponse.ok) {
+                                        const errorText = await storeResponse.text();
+                                        throw new Error(\`Failed to store token (Status: \${storeResponse.status}): \${errorText}\`);
+                                    }
+                                    window.location.href = responseData.redirectTo;
+                                } catch (err) {
+                                    document.getElementById('status').textContent = err.message;
+                                    document.getElementById('status').style.color = '#dc3545';
+                                }
+                            };
+                            return;
+                        } else {
+                            const errorText = await response.text();
+                            throw new Error(\`Authentication failed (Status: \${response.status}): \${errorText} \`);
+                        }
                     }
                     
                     const data = await response.json();
-                    console.log('Token data:', data);
                     document.getElementById('status').textContent = 'Authentication successful. Securing your session...';
 
                     // Send the token to the server
@@ -105,7 +161,7 @@ export function renderTokenCallback(instanceUrl: string, oauthReqInfo: string) {
                         },
                         body: JSON.stringify({ 
                             token: data,
-                            oauthReqInfo: ${JSON.stringify(parsedOAuthReqInfo)},
+                            oauthReqInfo: oauthReqInfo,
                             instanceUrl: '${instanceUrl}'
                         })
                     });
