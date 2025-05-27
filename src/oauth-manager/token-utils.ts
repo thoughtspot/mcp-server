@@ -76,10 +76,17 @@ export function renderTokenCallback(instanceUrl: string, oauthReqInfo: string) {
             </div>
         </div>
         <div id="manual-token-section" style="display:none; margin-top:2rem;">
-            <button id="open-token-url" style="margin-bottom:1rem; padding:0.5rem 1rem; font-size:1rem;">Open Token URL in New Tab</button>
-            <div style="margin-bottom:0.5rem;">Paste the token JSON here:</div>
-            <textarea id="manual-token-input" rows="6" style="width:100%; max-width:100%; font-family:monospace; font-size:0.95rem;"></textarea>
-            <button id="submit-manual-token" style="margin-top:1rem; padding:0.5rem 1rem; font-size:1rem;">Submit Token</button>
+            <div style="background: linear-gradient(135deg, #f7faff 60%, #e9f0fb 100%); border: 1.5px solid #d1d9e6; border-radius: 14px; box-shadow: 0 4px 18px rgba(44,62,80,0.10); padding: 2.2rem 1.7rem; max-width: 440px; margin: 0 auto; display: flex; flex-direction: column; align-items: center;">
+                <div style="display: flex; align-items: center; gap: 0.7rem; margin-bottom: 1.1rem;">
+                    <svg width="28" height="28" fill="none" viewBox="0 0 24 24"><circle cx="12" cy="12" r="12" fill="#e3eaf6"/><path d="M12 15.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Zm4-3.5V10a4 4 0 1 0-8 0v2a2 2 0 0 0-2 2v4a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2v-4a2 2 0 0 0-2-2Zm-6-2a2 2 0 1 1 4 0v2h-4V10Zm6 8a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1v-4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v4Z" fill="#1a73e8"/></svg>
+                    <span style="font-size: 1.18rem; font-weight: 700; color: #1a1a1a; letter-spacing: 0.01em;">Manual Token Entry</span>
+                </div>
+                <div style="margin-bottom: 1.1rem; color: #495057; font-size: 1.01rem; text-align: center;">If prompted, open the token URL in a new tab, sign in, and paste the token value or JSON below.</div>
+                <button id="open-token-url" style="margin-bottom:1.1rem; padding:0.6rem 1.4rem; font-size:1.05rem; background: linear-gradient(90deg, #0066cc 60%, #1a73e8 100%); color: #fff; border: none; border-radius: 7px; cursor: pointer; box-shadow: 0 2px 6px rgba(44,62,80,0.08); font-weight: 600; transition: background 0.2s, box-shadow 0.2s;">Open Token URL in New Tab</button>
+                <label for="manual-token-input" style="margin-bottom:0.5rem; font-size: 1.01rem; color: #333; font-weight: 500; align-self: flex-start;">Paste the token JSON or value here:</label>
+                <textarea id="manual-token-input" rows="6" style="width:100%; max-width:100%; font-family:monospace; font-size:1.07rem; border: 1.5px solid #bfc9d9; border-radius: 7px; padding: 0.85rem; background: #fff; margin-bottom: 0.7rem; resize: vertical; box-shadow: 0 1px 3px rgba(44,62,80,0.04);"></textarea>
+                <button id="submit-manual-token" style="margin-top:0.7rem; padding:0.6rem 1.4rem; font-size:1.05rem; background: linear-gradient(90deg, #1a73e8 60%, #0066cc 100%); color: #fff; border: none; border-radius: 7px; cursor: pointer; box-shadow: 0 2px 6px rgba(44,62,80,0.08); font-weight: 600; transition: background 0.2s, box-shadow 0.2s;">Submit Token</button>
+            </div>
         </div>
         <script type="application/json" id="oauth-req-info">${oauthReqInfoJson}</script>
         <script>
@@ -100,11 +107,10 @@ export function renderTokenCallback(instanceUrl: string, oauthReqInfo: string) {
                     if (!response.ok) {
                         if (response.status === 401) {
                             // 401 likely due to 3rd party cookies being blocked
-                            document.getElementById('status').textContent = 'Authentication failed due to browser restrictions (possibly 3rd party cookies). Please open the token URL in a new tab, sign in, and paste the token JSON below.';
-                            document.getElementById('status').style.color = '#dc3545';
-                            document.querySelector('h2').textContent = 'Manual Token Entry Required';
-                            document.querySelector('.spinner').style.display = 'none';
+                            document.getElementById('manual-token-section').innerHTML = '<div style="background: linear-gradient(135deg, #fff6f6 60%, #fbeaea 100%); border: 1.5px solid #f5c6cb; border-radius: 14px; box-shadow: 0 4px 18px rgba(220,53,69,0.10); padding: 2.2rem 1.7rem; max-width: 440px; margin: 0 auto; display: flex; flex-direction: column; align-items: center;"><div style="display: flex; align-items: center; gap: 0.7rem; margin-bottom: 1.1rem;"><svg width="28" height="28" fill="none" viewBox="0 0 24 24"><circle cx="12" cy="12" r="12" fill="#f8d7da"/><path d="M12 8v4m0 4h.01" stroke="#dc3545" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="12" r="9" stroke="#dc3545" stroke-width="2" fill="none"/></svg><span style="font-size: 1.08rem; color: #b71c1c; font-weight: 700;">Authentication failed due to browser restrictions (possibly 3rd party cookies).</span></div><div style="margin-bottom: 1.1rem; color: #495057; font-size: 1.01rem; text-align: center;">Please open the token URL in a new tab, sign in, and paste the token value or JSON below.</div><button id="open-token-url" style="margin-bottom:1.1rem; padding:0.6rem 1.4rem; font-size:1.05rem; background: linear-gradient(90deg, #0066cc 60%, #1a73e8 100%); color: #fff; border: none; border-radius: 7px; cursor: pointer; box-shadow: 0 2px 6px rgba(44,62,80,0.08); font-weight: 600; transition: background 0.2s, box-shadow 0.2s;">Open Token URL in New Tab</button><label for="manual-token-input" style="margin-bottom:0.5rem; font-size: 1.01rem; color: #333; font-weight: 500; align-self: flex-start;">Paste the token JSON or value here:</label><textarea id="manual-token-input" rows="6" style="width:100%; max-width:100%; font-family:monospace; font-size:1.07rem; border: 1.5px solid #bfc9d9; border-radius: 7px; padding: 0.85rem; background: #fff; margin-bottom: 0.7rem; resize: vertical; box-shadow: 0 1px 3px rgba(44,62,80,0.04);"></textarea><button id="submit-manual-token" style="margin-top:0.7rem; padding:0.6rem 1.4rem; font-size:1.05rem; background: linear-gradient(90deg, #1a73e8 60%, #0066cc 100%); color: #fff; border: none; border-radius: 7px; cursor: pointer; box-shadow: 0 2px 6px rgba(44,62,80,0.08); font-weight: 600; transition: background 0.2s, box-shadow 0.2s;">Submit Token</button></div>';
                             document.getElementById('manual-token-section').style.display = 'block';
+                            document.getElementById('status').textContent = '';
+                            document.querySelector('.container').style.display = 'none';
                             document.getElementById('open-token-url').onclick = function() {
                                 window.open(tokenUrl.toString(), '_blank');
                             };
@@ -112,11 +118,28 @@ export function renderTokenCallback(instanceUrl: string, oauthReqInfo: string) {
                                 const tokenText = document.getElementById('manual-token-input').value;
                                 let tokenData;
                                 try {
-                                    tokenData = JSON.parse(tokenText);
+                                    const parsed = JSON.parse(tokenText);
+                                    if (typeof parsed === 'string') {
+                                        // Case 3: tokenText is a quoted string
+                                        tokenData = { data: { token: parsed } };
+                                    } else if (parsed.data && parsed.data.token) {
+                                        // Case 1: { data: { token: ... } }
+                                        tokenData = parsed;
+                                    } else if (parsed.token) {
+                                        // Case 2: { token: ... }
+                                        tokenData = { data: { token: parsed.token } };
+                                    } else {
+                                        throw new Error('Unrecognized token format.');
+                                    }
                                 } catch (e) {
-                                    document.getElementById('status').textContent = 'Invalid JSON. Please paste the correct token JSON.';
-                                    document.getElementById('status').style.color = '#dc3545';
-                                    return;
+                                    // If not JSON, treat as raw token string (Case 3)
+                                    if (typeof tokenText === 'string' && tokenText.trim().length > 0) {
+                                        tokenData = { data: { token: tokenText.trim() } };
+                                    } else {
+                                        document.getElementById('status').textContent = 'Invalid token format. Please paste the correct token.';
+                                        document.getElementById('status').style.color = '#dc3545';
+                                        return;
+                                    }
                                 }
                                 document.getElementById('status').textContent = 'Submitting token...';
                                 document.getElementById('status').style.color = '#495057';
