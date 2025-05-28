@@ -25,8 +25,14 @@ export default new OAuthProvider({
     clientRegistrationEndpoint: "/register",
     accessTokenTTL: 65,
     tokenExchangeCallback: async (options) => {
-        if (options.grantType === "refresh_token") {
-            console.log("tokenExchangeCallback- refreshtoken options", options);
+        if (options.grantType === "authorization_code") {
+            // Your custom logic here
+            console.log("User logged in with code grant:", {
+              options
+            });
+        
+            // Don't return anything → fallback to default behavior
+            return;
         }
         return;
     },
