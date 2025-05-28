@@ -23,7 +23,7 @@ export default new OAuthProvider({
     authorizeEndpoint: "/authorize",
     tokenEndpoint: "/token",
     clientRegistrationEndpoint: "/register",
-    accessTokenTTL: 30,
+    accessTokenTTL: 65,
     tokenExchangeCallback: async (options) => {
         if (options.grantType === "refresh_token") {
             console.log("tokenExchangeCallback- refreshtoken options", options);
