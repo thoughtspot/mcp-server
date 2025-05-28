@@ -28,5 +28,6 @@ export default new OAuthProvider({
         if (options.grantType === "refresh_token") {
             console.log("tokenExchangeCallback- refreshtoken options", options);
         }
+        return;
     },
 });
