@@ -27,7 +27,7 @@ type ToolInput = z.infer<typeof ToolInputSchema>;
 const PingSchema = z.object({});
 
 const GetRelevantQuestionsSchema = z.object({
-    query: z.string().describe("The query to get relevant data questions for, this could be a high level task or question the user is asking or hoping to get answered. You can pass the complete raw query as the system is smart to make sense of it."),
+    query: z.string().describe("The query to get relevant data questions for, this could be a high level task or question the user is asking or hoping to get answered. Do minimal processing of the original question. You can even pass the complete raw query as it is, the system is smart to make sense of it as it has access to the entire schema."),
     additionalContext: z.string()
         .describe("Additional context to add to the query, this might be older data returned for previous questions or any other relevant context that might help the system generate better questions.")
         .optional(),
