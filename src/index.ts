@@ -26,13 +26,14 @@ export default new OAuthProvider({
     accessTokenTTL: 120,
     tokenExchangeCallback: async (options) => {
         if (options.grantType === "refresh_token") {
+            console.log("tokenExchangeCallback- refresh_token options", options);
             const { accessToken, instanceUrl } = options.props as Props;
             if (!accessToken || !instanceUrl) {
                 throw new Error("Missing accessToken or instanceUrl in props");
             }
 
             // Call the ThoughtSpot token fetch API
-            const url = `${instanceUrl.replace(/\/$/, "")}/callosum/v1/v2/auth/token/fetch?validity_time_in_sec=150`;
+            const url = `${instanceUrl.replace(/\/$/, "")}/callosum/v1/v2/auth/token/fetch?validity_time_in_sec=180`;
             const response = await fetch(url, {
                 method: "GET",
                 headers: {
