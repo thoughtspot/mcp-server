@@ -2,6 +2,9 @@ import { createBearerAuthenticationConfig, ThoughtSpotRestApi } from "@thoughtsp
 import YAML from "yaml";
 
 export const getThoughtSpotClient = (instanceUrl: string, bearerToken: string) => {
+    if (!instanceUrl || !bearerToken) {
+        throw Error("instanceUrl and bearerToken are required to create a ThoughtSpot client");
+    }
     const client = new ThoughtSpotRestApi(createBearerAuthenticationConfig(
         instanceUrl,
         () => Promise.resolve(bearerToken),
@@ -82,6 +85,11 @@ async function addGetSessionInfo(client: any, instanceUrl: string, token: string
                 "Authorization": `Bearer ${token}`,
             }
         });
+        
+        if (response.status !== 200) {
+            console.log("response", response);
+            throw new Error(`Failed to get session info.`);
+        }
 
         const data: any = await response.json();
         const info = data.info;
