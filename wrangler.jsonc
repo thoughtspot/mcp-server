@@ -29,7 +29,8 @@
 		"id": "05ca6fed380e4fe48dbfc5c3d03b4070"
 	}],
 	"observability": {
-		"enabled": true
+		"enabled": true,
+		"head_sampling_rate": 1
 	},
 	"analytics_engine_datasets": [
         { "binding": "ANALYTICS", "dataset": "mcp_events" }
