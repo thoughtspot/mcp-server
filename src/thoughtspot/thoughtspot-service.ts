@@ -192,30 +192,6 @@ export async function getDataSources(client: ThoughtSpotRestApi): Promise<DataSo
         });
 }
 
-export async function getDataSourceId(client: ThoughtSpotRestApi, name?: string): Promise<DataSource[]> {
-    const resp = await client.searchMetadata({
-        metadata: [{
-            type: "LOGICAL_TABLE",
-        }],
-        record_size: 2000,
-        sort_options: {
-            field_name: "LAST_ACCESSED",
-            order: "DESC",
-        }
-    });
-    return resp
-        .filter(d => d.metadata_header.type === "WORKSHEET")
-        .filter(d => !name || d.metadata_header.name.toLowerCase().includes(name.toLowerCase()))
-        .map(d => {
-            console.log(d);
-            return {
-                name: d.metadata_header.name,
-                id: d.metadata_header.id,
-                description: d.metadata_header.description,
-            }
-        });
-}
-
 
 export interface SessionInfo {
     mixpanelToken: string;

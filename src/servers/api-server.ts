@@ -3,7 +3,6 @@ import type { Props } from '../utils';
 import {
     createLiveboard,
     getAnswerForQuestion,
-    getDataSourceId,
     getDataSources,
     getRelevantQuestions
 } from '../thoughtspot/thoughtspot-service';
@@ -11,6 +10,21 @@ import { getThoughtSpotClient } from '../thoughtspot/thoughtspot-client';
 import { GetRelevantQuestionsSchema, GetAnswerSchema, CreateLiveboardSchema } from '../api-schemas/schemas';
 
 const apiServer = new Hono<{ Bindings: Env & { props: Props } }>()
+
+apiServer.get("/api/tools/ping", async (c) => {
+    const { props } = c.executionCtx;
+    console.log("Received Ping request");
+    if (props.accessToken && props.instanceUrl) {
+        return c.json({
+            content: [{ type: "text", text: "Pong" }],
+        });
+    } else {
+        return c.json({
+            isError: true,
+            content: [{ type: "text", text: "ERROR: Not authenticated" }],
+        });
+    }
+});
 
 apiServer.post("/api/tools/relevant-questions", async (c) => {
     const { props } = c.executionCtx;
@@ -49,14 +63,6 @@ apiServer.get("/api/resources/datasources", async (c) => {
     return c.json(datasources);
 });
 
-apiServer.get("/api/resources/datasource-id", async (c) => {
-    const { props } = c.executionCtx;
-    const name = c.req.query('name');
-    const client = getThoughtSpotClient(props.instanceUrl, props.accessToken);
-    const datasources = await getDataSourceId(client, name);
-    return c.json(datasources);
-});
-
 apiServer.post("/api/rest/2.0/*", async (c) => {
     const { props } = c.executionCtx;
     const path = c.req.path;
@@ -86,21 +92,6 @@ apiServer.get("/api/rest/2.0/*", async (c) => {
             "User-Agent": "ThoughtSpot-ts-client",
         }
     });
-});
-
-apiServer.get("/api/test/ping", async (c) => {
-    const { props } = c.executionCtx;
-    console.log("Received Ping request");
-    if (props.accessToken && props.instanceUrl) {
-        return c.json({
-            content: [{ type: "text", text: "Pong" }],
-        });
-    } else {
-        return c.json({
-            isError: true,
-            content: [{ type: "text", text: "ERROR: Not authenticated" }],
-        });
-    }
 });
 
 export {

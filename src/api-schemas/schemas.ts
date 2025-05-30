@@ -3,20 +3,12 @@ import { z } from "zod";
 export const PingSchema = z.object({});
 
 export const GetRelevantQuestionsSchema = z.object({
-    query: z.string().describe("The query to get relevant data questions for, this could be a high level task or question the user is asking or hoping to get answered. You can pass the complete raw query as the system is smart to make sense of it."),
+    query: z.string().describe("The query to get relevant data questions for, this could be a high level task or question the user is asking or hoping to get answered. Do minimal processing of the original question. You can even pass the complete raw query as it is, the system is smart to make sense of it as it has access to the entire schema. Do not add analytical hints or directions."),
     additionalContext: z.string()
         .describe("Additional context to add to the query, this might be older data returned for previous questions or any other relevant context that might help the system generate better questions.")
         .optional(),
     datasourceIds: z.array(z.string())
-        .describe("The datasources to get questions for, these are the ids of the datasources to get data from. Each id is a GUID string.")
-        .optional()
-});
-
-export const GetRelevantDataSchema = z.object({
-    query: z.string().describe("The query to get relevant data for, this could be a high level task or question the user is asking or hoping to get answered. You can pass the complete raw query as the system is smart to make sense of it."),
-    datasourceId: z.string()
-        .describe("The datasource to get data from, this is the id of the datasource to get data from")
-        .optional()
+        .describe("The datasources to get questions for, this is the ids of the datasources to get data from. Each id is a GUID string.")
 });
 
 export const GetAnswerSchema = z.object({
