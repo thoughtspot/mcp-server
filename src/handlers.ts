@@ -1,11 +1,10 @@
-import type { AuthRequest, OAuthHelpers } from '@cloudflare/workers-oauth-provider'
+import type { OAuthHelpers } from '@cloudflare/workers-oauth-provider'
 import { Hono } from 'hono'
 import type { Props } from './utils';
 import { parseRedirectApproval, renderApprovalDialog } from './oauth-manager/oauth-utils';
 import { renderTokenCallback } from './oauth-manager/token-utils';
-import { any } from 'zod';
 import { encodeBase64Url, decodeBase64Url } from 'hono/utils/encode';
-
+import { openApiSpecHandler } from './api-schemas/openapi-spec';
 
 const app = new Hono<{ Bindings: Env & { OAUTH_PROVIDER: OAuthHelpers } }>()
 
@@ -138,5 +137,7 @@ app.post("/store-token", async (c) => {
         }
     });
 });
+
+app.route('/openapi-spec', openApiSpecHandler);
 
 export default app;

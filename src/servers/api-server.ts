@@ -7,20 +7,40 @@ import {
     getRelevantQuestions
 } from '../thoughtspot/thoughtspot-service';
 import { getThoughtSpotClient } from '../thoughtspot/thoughtspot-client';
+import { GetRelevantQuestionsSchema, GetAnswerSchema, CreateLiveboardSchema } from '../api-schemas/schemas';
 
 const apiServer = new Hono<{ Bindings: Env & { props: Props } }>()
 
+apiServer.get("/api/tools/ping", async (c) => {
+    const { props } = c.executionCtx;
+    console.log("Received Ping request");
+    if (props.accessToken && props.instanceUrl) {
+        return c.json({
+            content: [{ type: "text", text: "Pong" }],
+        });
+    } else {
+        return c.json({
+            isError: true,
+            content: [{ type: "text", text: "ERROR: Not authenticated" }],
+        });
+    }
+});
+
 apiServer.post("/api/tools/relevant-questions", async (c) => {
     const { props } = c.executionCtx;
-    const { query, datasourceIds, additionalContext } = await c.req.json();
+    const body = await c.req.json();
+    const validatedData = GetRelevantQuestionsSchema.parse(body);
+    const { query, datasourceIds, additionalContext } = validatedData;
     const client = getThoughtSpotClient(props.instanceUrl, props.accessToken);
-    const questions = await getRelevantQuestions(query, datasourceIds, additionalContext || '', client);
+    const questions = await getRelevantQuestions(query, datasourceIds || [], additionalContext || '', client);
     return c.json(questions);
 });
 
 apiServer.post("/api/tools/get-answer", async (c) => {
     const { props } = c.executionCtx;
-    const { question, datasourceId } = await c.req.json();
+    const body = await c.req.json();
+    const validatedData = GetAnswerSchema.parse(body);
+    const { question, datasourceId } = validatedData;
     const client = getThoughtSpotClient(props.instanceUrl, props.accessToken);
     const answer = await getAnswerForQuestion(question, datasourceId, false, client);
     return c.json(answer);
@@ -28,7 +48,9 @@ apiServer.post("/api/tools/get-answer", async (c) => {
 
 apiServer.post("/api/tools/create-liveboard", async (c) => {
     const { props } = c.executionCtx;
-    const { name, answers } = await c.req.json();
+    const body = await c.req.json();
+    const validatedData = CreateLiveboardSchema.parse(body);
+    const { name, answers } = validatedData;
     const client = getThoughtSpotClient(props.instanceUrl, props.accessToken);
     const liveboardUrl = await createLiveboard(name, answers, client);
     return c.text(liveboardUrl);
