@@ -18,7 +18,7 @@ import {
     getRelevantQuestions,
     getSessionInfo
 } from "../thoughtspot/thoughtspot-service";
-import { MixpanelTracker } from "../metrics/mixpanel";
+import { MixpanelTracker } from "../metrics/mixpanel/mixpanel";
 import { Trackers, type Tracker, TrackEvent } from "../metrics";
 
 const ToolInputSchema = ToolSchema.shape.inputSchema;

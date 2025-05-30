@@ -26,7 +26,7 @@ export async function getRelevantQuestions(
             error: null,
         }
     } catch (error) {
-        console.error("Error getting relevant questions: ", error);
+        console.error("Error getting relevant questions: ", error, "sourceIds: ", sourceIds, "instanceUrl: ", (client as any).instanceUrl);
         return {
             questions: [],
             error: error as Error,
@@ -36,7 +36,7 @@ export async function getRelevantQuestions(
 
 async function getAnswerData({ question, session_identifier, generation_number, client }: { question: string, session_identifier: string, generation_number: number, client: ThoughtSpotRestApi }) {
     try {
-        console.log("[DEBUG] Getting Data for question: ", question);
+        console.log("[DEBUG] Getting Data for question: ", question, "instanceUrl: ", (client as any).instanceUrl);
         // Proxy to avoid 403 from TS AWS WAF.
         const data = await client.exportAnswerReport({
             session_identifier,
@@ -48,7 +48,7 @@ async function getAnswerData({ question, session_identifier, generation_number, 
         csvData = csvData.split('\n').slice(0, 100).join('\n');
         return csvData;
     } catch (error) {
-        console.error("Error getting answer Data: ", error);
+        console.error("Error getting answer Data: ", error, "instanceUrl: ", (client as any).instanceUrl);
         throw error;
     }
 }
@@ -102,7 +102,7 @@ export async function getAnswerForQuestion(question: string, sourceId: string, s
             error: null,
         };
     } catch (error) {
-        console.error("Error getting answer for question: ", question, " and sourceId: ", sourceId, " and shouldGetTML: ", shouldGetTML, " and error: ", error);
+        console.error("Error getting answer for question: ", question, " and sourceId: ", sourceId, " and shouldGetTML: ", shouldGetTML, " and error: ", error, "instanceUrl: ", (client as any).instanceUrl);
         return {
             error: error as Error,
         };
