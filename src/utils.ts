@@ -1,5 +1,9 @@
 export type Props = {
     accessToken: string;
     instanceUrl: string;
-    clientName: string;
+    clientName: {
+        clientId: string;
+        clientName: string;
+        registrationDate: number;
+    };
 };
