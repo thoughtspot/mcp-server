@@ -191,6 +191,27 @@ export function renderApprovalDialog(request: Request, options: ApprovalDialogOp
               gap: 16px;
               margin-bottom: 18px;
             }
+            .terms-checkbox {
+              margin-bottom: 24px;
+              display: flex;
+              align-items: flex-start;
+              gap: 8px;
+            }
+            .terms-checkbox input[type="checkbox"] {
+              margin-top: 3px;
+            }
+            .terms-checkbox label {
+              font-size: 0.94rem;
+              line-height: 1.4;
+              color: #111827;
+            }
+            .terms-checkbox a {
+              color: #2563eb;
+              text-decoration: none;
+            }
+            .terms-checkbox a:hover {
+              text-decoration: underline;
+            }
             .button {
               flex: 1 1 0;
               padding: 12px 0;
@@ -216,6 +237,10 @@ export function renderApprovalDialog(request: Request, options: ApprovalDialogOp
             }
             .button-allow:hover {
               background: #1a56db;
+            }
+            .button-allow:disabled {
+              background: #93c5fd;
+              cursor: not-allowed;
             }
             .approval-footer {
               text-align: center;
@@ -279,9 +304,17 @@ export function renderApprovalDialog(request: Request, options: ApprovalDialogOp
                 <li>Read all ThoughtSpot content you have access to</li>
                 <li>Send data to the client you are connecting to</li>
               </ul>
+              <div class="terms-checkbox">
+                <input type="checkbox" id="termsCheckbox" name="termsCheckbox" required>
+                <label for="termsCheckbox">
+                  By checking this box, I acknowledge and agree that my use of this application is subject to the ThoughtSpot
+                  <a href="https://www.thoughtspot.com/legal/thoughtspot-for-apps" target="_blank" rel="noopener noreferrer">Terms of Use</a> 
+                  and <a href="https://www.thoughtspot.com/privacy-statement" target="_blank" rel="noopener noreferrer">Privacy Statement</a>.
+                </label>
+              </div>
               <div class="approval-actions">
                 <button type="button" class="button button-cancel" onclick="window.history.back()">Cancel</button>
-                <button type="submit" class="button button-allow">Allow</button>
+                <button type="submit" class="button button-allow" id="allowButton" disabled>Allow</button>
               </div>
             </form>
             <div class="approval-footer">
@@ -293,6 +326,8 @@ export function renderApprovalDialog(request: Request, options: ApprovalDialogOp
             const input = document.getElementById('instanceUrl');
             const label = document.getElementById('instanceUrlLabel');
             const form = document.getElementById('approvalForm');
+            const termsCheckbox = document.getElementById('termsCheckbox');
+            const allowButton = document.getElementById('allowButton');
             let lastError = false;
 
             function setBlue() {
@@ -317,18 +352,26 @@ export function renderApprovalDialog(request: Request, options: ApprovalDialogOp
               label.textContent = 'ThoughtSpot Instance URL';
               lastError = false;
             }
+            function updateAllowButton() {
+              allowButton.disabled = !(input.value.trim() && termsCheckbox.checked);
+            }
             input.addEventListener('input', function() {
               if (input.value.trim()) {
                 setBlue();
               } else {
                 clearColors();
               }
+              updateAllowButton();
             });
+            termsCheckbox.addEventListener('change', updateAllowButton);
             form.addEventListener('submit', function(e) {
               if (!input.value.trim()) {
                 e.preventDefault();
                 setRed();
                 input.focus();
+              } else if (!termsCheckbox.checked) {
+                e.preventDefault();
+                termsCheckbox.focus();
               } else {
                 setBlue();
               }
