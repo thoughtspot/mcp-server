@@ -18,7 +18,7 @@ describe("The ThoughtSpot MCP Worker: Auth handler", () => {
         const object = env.MCP_OBJECT.get(id);
         const result = await runInDurableObject(object, async (instance) => {
             expect(instance).toBeInstanceOf(ThoughtSpotMCP);
-            const request = new IncomingRequest("https://example.com/");
+            const request = new IncomingRequest("https://example.com/hello");
             // Create an empty context to pass to `worker.fetch()`
             const ctx = createExecutionContext();
             return worker.fetch(request, env, ctx);
