@@ -9,6 +9,12 @@
 
 The ThoughtSpot MCP Server provides secure OAuth-based authentication and a set of tools for querying and retrieving relevant data from your ThoughtSpot instance. It's a remote server hosted on Cloudflare.
 
+If you do not have a Thoughtspot account, create one for free [here](https://thoughtspot.com/trial).
+
+Learn more about [ThoughtSpot](https://thoughtspot.com).
+
+Join our [Discord](https://developers.thoughtspot.com/join-discord) to get support.
+
 ## Table of Contents
 
 - [MCP Client Configuration](#mcp-client-configuration)

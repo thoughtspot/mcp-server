@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ThoughtSpot MCP Server</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/babel-standalone@6/babel.min.js"></script>
@@ -100,6 +101,21 @@
         .markdown-content img.badge {
             margin: 0 5px;
         }
+        .header {
+            display: flex;
+            justify-content: flex-end;
+            padding: 10px 0;
+            margin-bottom: 20px;
+        }
+        .header a {
+            color: #333;
+            font-size: 24px;
+            margin-left: 20px;
+            transition: color 0.3s ease;
+        }
+        .header a:hover {
+            color: #0366d6;
+        }
     </style>
 </head>
 <body>
@@ -163,6 +179,15 @@
 
                     return (
                         <React.Fragment>
+                            <header className="header">
+                                <a href="https://github.com/thoughtspot/mcp-server" target="_blank" rel="noopener noreferrer" title="GitHub Repository">
+                                    <i className="fab fa-github"></i>
+                                </a>
+                                <a href="https://www.developers.thoughtspot.com" target="_blank" rel="noopener noreferrer" title="ThoughtSpot Website"
+                                style={{ display: 'flex', alignItems: 'center', fontSize: '12px' }}>
+                                    Thoughtspot for Developers
+                                </a>
+                            </header>
                             <div 
                                 className="markdown-content"
                                 dangerouslySetInnerHTML={{ __html: marked.parse(content, { renderer }) }}
