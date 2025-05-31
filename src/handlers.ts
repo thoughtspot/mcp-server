@@ -7,12 +7,15 @@ import { any } from 'zod';
 import { encodeBase64Url, decodeBase64Url } from 'hono/utils/encode';
 
 
+
 const app = new Hono<{ Bindings: Env & { OAUTH_PROVIDER: OAuthHelpers } }>()
 
 app.get("/", async (c) => {
-    return c.json({
-        message: "Hello, World!",
-    });
+    return c.env.ASSETS.fetch('/index.html');
+});
+
+app.get("/hello", async (c) => {
+    return c.json({ message: "Hello, World!" });
 });
 
 app.get("/authorize", async (c) => {

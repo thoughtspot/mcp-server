@@ -7,29 +7,19 @@
 # ThoughtSpot MCP Server <br/> ![MCP Server](https://badge.mcpx.dev?type=server 'MCP Server') ![Static Badge](https://img.shields.io/badge/cloudflare%20worker-deployed-green?link=https%3A%2F%2Fdash.cloudflare.com%2F485d90aa3d1ea138ad7ede769fe2c35e%2Fworkers%2Fservices%2Fview%2Fthoughtspot-mcp-server%2Fproduction%2Fmetrics) ![GitHub branch check runs](https://img.shields.io/github/check-runs/thoughtspot/mcp-server/main) [![Coverage Status](https://coveralls.io/repos/github/thoughtspot/mcp-server/badge.svg?branch=main)](https://coveralls.io/github/thoughtspot/mcp-server?branch=main)
 
 
-
-The ThoughtSpot MCP Server is a Cloudflare Worker-based service that exposes Model Context Protocol (MCP) endpoints for interacting with ThoughtSpot data and tools. It provides secure OAuth-based authentication and a set of tools for querying and retrieving relevant data from a ThoughtSpot instance.
+The ThoughtSpot MCP Server provides secure OAuth-based authentication and a set of tools for querying and retrieving relevant data from your ThoughtSpot instance. It's a remote server hosted on Cloudflare.
 
 ## Table of Contents
 
+- [MCP Client Configuration](#mcp-client-configuration)
 - [Features](#features)
-- [Project Structure](#project-structure)
-- [Scripts](#scripts)
-- [Usage](#usage)
-- [Endpoints](#endpoints)
+  - [Supported transports](#supported-transports)
+- [Contributing](#contributing)
+  - [Local Development](#local-development)
+  - [Endpoints](#endpoints)
 - [Configuration](#configuration)
-- [License](#license)
-
-## Features
-
-- **OAuth Authentication**: Secure endpoints using OAuth flows, as user's own scope.
-- **Tools**:
-  - `ping`: Test connectivity and authentication.
-  - `getRelevantQuestions`: Get relevant data questions from ThoughtSpot database based on a user query.
-  - `getAnswer`: Get the answer to a specific question from ThoughtSpot database.
-  - `createLiveboard`: Create a liveboard from a list of answers.
-- **MCP Resources**:
-   - `datasources`: List of TS Data models the user has access to.
+- [Stdio support (fallback)](#stdio-support-fallback)
+  - [How to obtain a TS_AUTH_TOKEN](#how-to-obtain-a-ts_auth_token)
 
 ## MCP Client Configuration
 
@@ -48,6 +38,17 @@ To configure this MCP server in your MCP client (such as Claude Desktop, Windsur
   }
 }
 ```
+
+## Features
+
+- **OAuth Authentication**: Access your data, as yourself.
+- **Tools**:
+  - `ping`: Test connectivity and authentication.
+  - `getRelevantQuestions`: Get relevant data questions from ThoughtSpot analytics based on a user query.
+  - `getAnswer`: Get the answer to a specific question from ThoughtSpot analytics.
+  - `createLiveboard`: Create a liveboard from a list of answers.
+- **MCP Resources**:
+   - `datasources`: List of ThoughtSpot Data models the user has access to.
 
 ### Supported transports
 
