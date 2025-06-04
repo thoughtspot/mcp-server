@@ -26,6 +26,7 @@ Join our [Discord](https://developers.thoughtspot.com/join-discord) to get suppo
 - [Configuration](#configuration)
 - [Stdio support (fallback)](#stdio-support-fallback)
   - [How to obtain a TS_AUTH_TOKEN](#how-to-obtain-a-ts_auth_token)
+- [Troubleshooting](#troubleshooting)
 
 ## MCP Client Configuration
 
@@ -44,6 +45,8 @@ To configure this MCP server in your MCP client (such as Claude Desktop, Windsur
   }
 }
 ```
+
+See the [Troubleshooting](#troubleshooting) section for any errors.
 
 ## Features
 
@@ -124,7 +127,7 @@ Here is how to configure `stdio` with MCP Client:
 #### Alternative way to get `TS_AUTH_TOKEN`
 - Login to the ThoughtSpot instance as you would normally.
 - Opem in a new tab this URL:
-  - https://<your-ts-instance>/api/rest/2.0/auth/session/token
+  - https://your-ts-instance/api/rest/2.0/auth/session/token
 - You will see a JSON response, copy the "token" value (without the quotes).
 - This is the token you could use.
 
