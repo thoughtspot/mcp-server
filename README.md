@@ -121,6 +121,33 @@ Here is how to configure `stdio` with MCP Client:
 - Click on "Try it out" on the bottom right.
 - You should get a token in the response, thats the bearer token.
 
+#### Alternative way to get `TS_AUTH_TOKEN`
+- Login to the ThoughtSpot instance as you would normally.
+- Opem in a new tab this URL:
+  - https://<your-ts-instance>/api/rest/2.0/auth/session/token
+- You will see a JSON response, copy the "token" value (without the quotes).
+- This is the token you could use.
+
+### Troubleshooting
+
+> Oauth errors due to CORS/SAML.
+
+Make sure to add the following entries in your ThoughtSpot instance:
+
+*CORS*
+
+- Go to ThoughtSpot => _Develop_ => Security settings
+- Click "Edit"
+- Add "agent.thoughtspot.app" to the the "CORS whitelisted domains". 
+
+*SAML*
+
+- Go to ThoughtSpot => _Develop_
+- Go to "All Orgs" Tab on the left panel if there is one.
+- Click "Security settings"
+- Click "Edit"
+- Add "agent.thoughtspot.app" to the the "SAML redirect domains". 
+
+
 
 MCP Server, © ThoughtSpot, Inc. 2025
-
