@@ -87,13 +87,17 @@ app.get("/callback", async (c) => {
     // const encodedOauthReqInfo = c.req.query('state');
 
     const instanceUrl = c.req.query('instanceUrl');
-    const encodedOauthReqInfo = c.req.query('oauthReqInfo');
+    const encodedOauthReqInfo = c.req
+        .query('oauthReqInfo')
+        // Added as a workaround for https://thoughtspot.atlassian.net/browse/SCAL-258056
+        ?.replace('/10023.html', '');
     if (!instanceUrl) {
         return c.text('Missing instance URL', 400);
     }
     if (!encodedOauthReqInfo) {
         return c.text('Missing OAuth request info', 400);
     }
+
     try {
         const decodedOAuthReqInfo = JSON.parse(new TextDecoder().decode(decodeBase64Url(encodedOauthReqInfo)));
         return new Response(renderTokenCallback(instanceUrl, decodedOAuthReqInfo), {
