@@ -143,7 +143,7 @@ Make sure to add the following entries in your ThoughtSpot instance:
 - Click "Edit"
 - Add "agent.thoughtspot.app" to the the "CORS whitelisted domains". 
 
-*SAML*
+*SAML* (need to be Admin)
 
 - Go to ThoughtSpot => _Develop_
 - Go to "All Orgs" Tab on the left panel if there is one.
