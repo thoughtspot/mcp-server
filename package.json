@@ -43,9 +43,9 @@
   },
   "dependencies": {
     "@cloudflare/workers-oauth-provider": "^0.0.5",
-    "@modelcontextprotocol/sdk": "^1.10.2",
+    "@modelcontextprotocol/sdk": "^1.12.1",
     "@thoughtspot/rest-api-sdk": "^2.13.1",
-    "agents": "^0.0.75",
+    "agents": "^0.0.95",
     "hono": "^4.7.8",
     "yaml": "^2.7.1",
     "zod": "^3.24.3",
