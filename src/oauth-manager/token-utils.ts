@@ -75,17 +75,29 @@ export function renderTokenCallback(instanceUrl: string, oauthReqInfo: string) {
                 ThoughtSpot MCP Server
             </div>
         </div>
-        <div id="manual-token-section" style="display:none; margin-top:2rem;">
-            <div style="background: #fff; border: 1.5px solid #d1d9e6; border-radius: 18px; box-shadow: 0 2px 16px 0 rgba(16,30,54,0.10), 0 1.5px 4px 0 rgba(16,30,54,0.06); padding: 2.2rem 1.7rem; max-width: 440px; margin: 0 auto; display: flex; flex-direction: column; align-items: center; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
-                <div style="display: flex; align-items: center; gap: 0.7rem; margin-bottom: 1.1rem;">
-                    <svg width="28" height="28" fill="none" viewBox="0 0 24 24"><circle cx="12" cy="12" r="12" fill="#e3eaf6"/><path d="M12 8v4m0 4h.01" stroke="#2563eb" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="12" r="9" stroke="#2563eb" stroke-width="2" fill="none"/></svg>
-                    <span style="font-size: 1.13rem; color: #2563eb; font-weight: 700;">Manual Token Entry</span>
+        <!-- Card -->
+        <div id="manual-token-section" style="display:none;">
+            <div style="background: #fff; border-radius: 18px; box-shadow: 0 2px 16px 0 rgba(16,30,54,0.10), 0 1.5px 4px 0 rgba(16,30,54,0.06); padding: 2.5rem 2.2rem 2.2rem 2.2rem; max-width: 480px; margin: 2.5rem auto 0 auto; display: flex; flex-direction: column; align-items: stretch; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+                <div id="manual-warning-banner" style="display:none; position: relative; background: #fff8e1; border-radius: 12px; color: #856404; font-size: 1.05rem; font-weight: 500; padding: 1.1rem 1.5rem 1.1rem 1.1rem; box-sizing: border-box; align-items: center; margin-bottom: 1.5rem; border: 1px solid #ffe082;">
+                    <div style="display: flex; align-items: flex-start; gap: 0.7rem;">
+                        <svg width="24" height="24" fill="none" viewBox="0 0 24 24" style="flex-shrink:0;"><circle cx="12" cy="12" r="12" fill="#ffe082"/><path d="M12 8v4m0 4h.01" stroke="#ff9800" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="12" r="9" stroke="#ff9800" stroke-width="2" fill="none"/></svg>
+                        <span style="flex:1;">Browser privacy settings, network issues, or strict cookie settings may be impacting authentication. Take the additional steps below to fix the issue.</span>
+                        <button id="manual-warning-dismiss" style="background: none; border: none; color: #856404; font-size: 1.3rem; font-weight: bold; cursor: pointer; margin-left: 0.7rem; line-height: 1;">&times;</button>
+                    </div>
                 </div>
-                <div style="margin-bottom: 1.1rem; color: #495057; font-size: 1.01rem; text-align: center;"><span style="display:inline-block; background:#fff3cd; color:#856404; font-weight:600; border-radius:6px; padding:8px 12px; margin-bottom:8px;">Authentication was unsuccessful. This may be due to browser privacy settings, network issues, or strict cookie settings (such as blocking third-party cookies).</span><br>Please open the token URL in a new tab, sign in, and paste the token value or JSON below.</div>
-                <button id="open-token-url" style="margin-bottom:1.1rem; padding:12px 0; width:100%; font-size:0.94rem; background: #2563eb; color: #fff; border: none; border-radius: 8px; cursor: pointer; font-weight: 500; transition: background 0.2s; box-shadow: 0 1.5px 4px 0 rgba(16,30,54,0.06);">Open Token URL in New Tab</button>
-                <label for="manual-token-input" style="margin-bottom:0.5rem; font-size: 0.97rem; color: #111827; font-weight: 500; align-self: flex-start;">Paste the token JSON or value here:</label>
-                <textarea id="manual-token-input" rows="6" style="width:100%; max-width:100%; font-family:monospace; font-size:0.97rem; border: 1.5px solid #d1d5db; border-radius: 8px; padding: 14px 16px; background: #fff; margin-bottom: 0.7rem; resize: vertical; box-sizing: border-box;"></textarea>
-                <button id="submit-manual-token" style="margin-top:0.7rem; padding:12px 0; width:100%; font-size:0.94rem; background: #2563eb; color: #fff; border: none; border-radius: 8px; cursor: pointer; font-weight: 500; transition: background 0.2s; box-shadow: 0 1.5px 4px 0 rgba(16,30,54,0.06);">Submit Token</button>
+                <div style="font-size: 1.22rem; font-weight: 700; color: #1a1a1a; margin-bottom: 0.7rem; text-align: center;">ThoughtSpot MCP Server wants access<br>to your ThoughtSpot instance</div>
+                <div style="font-size: 1.01rem; color: #22223b; font-weight: 500; margin-bottom: 1.1rem; text-align: center;">Complete the below steps to finish authenticating:</div>
+                <ul style="text-align:left; margin: 0 0 1.1rem 1.2rem; padding: 0; color: #444; font-size: 0.98rem;">
+                    <li>Open this <a id="manual-token-url-link" href="#" style="color:#2563eb; text-decoration:underline;">token URL</a> in a new tab</li>
+                    <li>Copy the token value or JSON</li>
+                    <li>Paste the token value or JSON into the box below</li>
+                </ul>
+                <label for="manual-token-input" style="margin-bottom:0.5rem; font-size: 0.97rem; color: #111827; font-weight: 500; align-self: flex-start;">Token value or JSON</label>
+                <textarea id="manual-token-input" rows="6" style="width:100%; max-width:100%; font-family:monospace; font-size:1rem; border: 1.5px solid #d1d5db; border-radius: 10px; padding: 16px 18px; background: #fff; margin-bottom: 1.5rem; resize: vertical; box-sizing: border-box; outline: none; transition: border 0.2s; min-height: 90px;"></textarea>
+                <div style="display: flex; width: 100%; gap: 1rem; margin-top: 0.2rem;">
+                    <button id="manual-back-btn" style="flex:1; padding:13px 0; font-size:1.08rem; background: #f3f4f6; color: #22223b; border: none; border-radius: 10px; cursor: pointer; font-weight: 500; transition: background 0.2s;">Back</button>
+                    <button id="submit-manual-token" style="flex:1; padding:13px 0; font-size:1.08rem; background: #2563eb; color: #fff; border: none; border-radius: 10px; cursor: pointer; font-weight: 500; transition: background 0.2s;">Submit</button>
+                </div>
             </div>
         </div>
         <script type="application/json" id="oauth-req-info">${oauthReqInfoJson}</script>
@@ -107,12 +119,19 @@ export function renderTokenCallback(instanceUrl: string, oauthReqInfo: string) {
                     if (!response.ok) {
                         if (response.status === 401) {
                             // 401 likely due to 3rd party cookies being blocked
-                            document.getElementById('manual-token-section').innerHTML = '<div style="background: #fff; border: 1.5px solid #d1d9e6; border-radius: 18px; box-shadow: 0 2px 16px 0 rgba(16,30,54,0.10), 0 1.5px 4px 0 rgba(16,30,54,0.06); padding: 2.2rem 1.7rem; max-width: 440px; margin: 0 auto; display: flex; flex-direction: column; align-items: center;"><div style="display: flex; align-items: center; gap: 0.7rem; margin-bottom: 1.1rem;"><svg width="28" height="28" fill="none" viewBox="0 0 24 24"><circle cx="12" cy="12" r="12" fill="#e3eaf6"/><path d="M12 8v4m0 4h.01" stroke="#2563eb" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="12" r="9" stroke="#2563eb" stroke-width="2" fill="none"/></svg><span style="font-size: 1.13rem; color: #2563eb; font-weight: 700;">Manual Token Entry</span></div><div style="margin-bottom: 1.1rem; color: #495057; font-size: 1.01rem; text-align: center;\"><span style="display:inline-block; background:#fff3cd; color:#856404; font-weight:600; border-radius:6px; padding:8px 12px; margin-bottom:8px;">Authentication was unsuccessful. This may be due to browser privacy settings, network issues, or strict cookie settings (such as blocking third-party cookies).</span><br>Please open the token URL in a new tab, sign in, and paste the token value or JSON below.</div><button id="open-token-url" style="margin-bottom:1.1rem; padding:12px 0; width:100%; font-size:0.94rem; background: #2563eb; color: #fff; border: none; border-radius: 8px; cursor: pointer; font-weight: 500; transition: background 0.2s; box-shadow: 0 1.5px 4px 0 rgba(16,30,54,0.06);\">Open Token URL in New Tab</button><label for="manual-token-input" style="margin-bottom:0.5rem; font-size: 0.97rem; color: #111827; font-weight: 500; align-self: flex-start;\">Paste the token JSON or value here:</label><textarea id="manual-token-input" rows="6" style="width:100%; max-width:100%; font-family:monospace; font-size:0.97rem; border: 1.5px solid #d1d5db; border-radius: 8px; padding: 14px 16px; background: #fff; margin-bottom: 0.7rem; resize: vertical; box-sizing: border-box;\"></textarea><button id="submit-manual-token" style="margin-top:0.7rem; padding:12px 0; width:100%; font-size:0.94rem; background: #2563eb; color: #fff; border: none; border-radius: 8px; cursor: pointer; font-weight: 500; transition: background 0.2s; box-shadow: 0 1.5px 4px 0 rgba(16,30,54,0.06);\">Submit Token</button></div>';
+                            document.getElementById('manual-warning-banner').style.display = 'block';
                             document.getElementById('manual-token-section').style.display = 'block';
                             document.getElementById('status').textContent = '';
                             document.querySelector('.container').style.display = 'none';
-                            document.getElementById('open-token-url').onclick = function() {
+                            document.getElementById('manual-token-url-link').onclick = function(e) {
+                                e.preventDefault();
                                 window.open(tokenUrl.toString(), '_blank');
+                            };
+                            document.getElementById('manual-back-btn').onclick = function() {
+                                window.location.href = '/';
+                            };
+                            document.getElementById('manual-warning-dismiss').onclick = function() {
+                                document.getElementById('manual-warning-banner').style.display = 'none';
                             };
                             document.getElementById('submit-manual-token').onclick = async function() {
                                 const tokenText = document.getElementById('manual-token-input').value;
@@ -210,4 +229,4 @@ export function renderTokenCallback(instanceUrl: string, oauthReqInfo: string) {
     </body>
     </html>
     `;
-} 
+}
