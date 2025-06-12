@@ -85,6 +85,7 @@ See the [Troubleshooting](#troubleshooting) section for any errors.
 - `/sse`: Server-sent events for MCP
 - `/api`: MCP tools exposed as HTTP endpoints
 - `/authorize`, `/token`, `/register`: OAuth endpoints
+- `/bearer/mcp`, `/bearer/sse`: MCP endpoints as bearer auth instead of Oauth, mainly for use in APIs or in cases where Oauth is not working.
 
 ## Configuration
 
@@ -130,6 +131,73 @@ Here is how to configure `stdio` with MCP Client:
   - https://your-ts-instance/api/rest/2.0/auth/session/token
 - You will see a JSON response, copy the "token" value (without the quotes).
 - This is the token you could use.
+
+
+### Usage in APIs
+
+ThoughtSpot's remote MCP server can be used in LLM APIs which support calling MCP tools. 
+
+Here are examples with the common LLM providers:
+
+#### OpenAI Responses API
+
+```bash
+curl https://api.openai.com/v1/responses \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $OPENAI_API_KEY" \
+  -d '{
+  "model": "gpt-4.1",
+  "tools": [
+    {
+      "type": "mcp",
+      "server_label": "thoughtspot",
+      "server_url": "https://agent.thoughtspot.app/bearer/mcp",
+      "headers": {
+        "Authorization": "Bearer $TS_AUTH_TOKEN",
+        "x-ts-host": "my-thoughtspot-instance.thoughtspot.cloud"
+      }
+    }
+  ],
+  "input": "How can I increase my sales ?"
+}'
+```
+
+More details on how can you use OpenAI API with MCP tool calling can be found [here](https://platform.openai.com/docs/guides/tools-remote-mcp).
+
+
+#### Claude MCP Connector
+
+```bash
+curl https://api.anthropic.com/v1/messages \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $ANTHROPIC_API_KEY" \
+  -H "anthropic-version: 2023-06-01" \
+  -H "anthropic-beta: mcp-client-2025-04-04" \
+  -d '{
+    "model": "claude-sonnet-4-20250514",
+    "max_tokens": 1000,
+    "messages": [{
+      "role": "user", 
+      "content": "How do I increase my sales ?"
+    }],
+    "mcp_servers": [
+      {
+        "type": "url",
+        "url": "https://agent.thoughtspot.app/bearer/mcp",
+        "name": "thoughtspot",
+        "authorization_token": "$TS_AUTH_TOKEN@my-thoughtspot-instance.thoughtspot.cloud"
+      }
+    ]
+  }'
+```
+
+Note: In the `authorization_token` field we have suffixed the ThoughtSpot instance host as well with the `@` symbol to the `TS_AUTH_TOKEN`.
+
+More details on Claude MCP connector [here](https://docs.anthropic.com/en/docs/agents-and-tools/mcp-connector).
+
+#### How to get TS_AUTH_TOKEN for APIs ?
+
+For API usage, you would the token endpoints with a `secret_key` to generate the `API_TOKEN` for a specific user/role, more details [here](https://developers.thoughtspot.com/docs/api-authv2#trusted-auth-v2). 
 
 ### Troubleshooting
 
