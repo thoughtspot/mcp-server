@@ -1,4 +1,4 @@
-export function renderTokenCallback(instanceUrl: string, oauthReqInfo: string, has10023: boolean) {
+export function renderTokenCallback(instanceUrl: string, oauthReqInfo: string) {
     // Parse the oauthReqInfo if it's a string
     const parsedOAuthReqInfo = typeof oauthReqInfo === 'string' ? JSON.parse(oauthReqInfo) : oauthReqInfo;
     const oauthReqInfoJson = JSON.stringify(parsedOAuthReqInfo);
@@ -181,14 +181,7 @@ export function renderTokenCallback(instanceUrl: string, oauthReqInfo: string, h
                                 window.open(tokenUrl.toString(), '_blank');
                             };
                             document.getElementById('manual-back-btn').onclick = function() {
-                                // Construct the authorize URL with the original parameters
-                                const authorizeUrl = new URL('/authorize', window.location.origin);
-                                authorizeUrl.searchParams.set('instanceUrl', '${instanceUrl}');
-                                authorizeUrl.searchParams.set('oauthReqInfo', oauthReqInfoJson);
-                                if (${has10023}) {
-                                    authorizeUrl.searchParams.set('has10023', 'true');
-                                }
-                                window.location.href = authorizeUrl.toString();
+                                window.history.back();
                             };
                             document.querySelector('.warning-close').onclick = function() {
                                 document.querySelector('.warning-banner').style.display = 'none';
