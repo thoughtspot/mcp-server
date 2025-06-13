@@ -4,7 +4,7 @@
  */
 {
 	"$schema": "node_modules/wrangler/config-schema.json",
-	"name": "thoughtspot-mcp-server",
+	"name": "thoughtspot-mcp-server-third-party-block",
 	"main": "src/index.ts",
 	"compatibility_date": "2025-04-17",
 	"compatibility_flags": [
