@@ -1,4 +1,5 @@
-import { createBearerAuthenticationConfig, RequestContext, ResponseContext, ThoughtSpotRestApi } from "@thoughtspot/rest-api-sdk"
+import { createBearerAuthenticationConfig, ThoughtSpotRestApi } from "@thoughtspot/rest-api-sdk"
+import type { RequestContext, ResponseContext } from "@thoughtspot/rest-api-sdk"
 import YAML from "yaml";
 import type { Observable } from "rxjs";
 import { of } from "rxjs";
