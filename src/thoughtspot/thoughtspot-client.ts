@@ -10,7 +10,10 @@ export const getThoughtSpotClient = (instanceUrl: string, bearerToken: string) =
 
     config.middleware.push({
         pre: (context: RequestContext): Observable<RequestContext> => {
-            context.setHeaderParam('Accept-Language', 'en-US');
+            const headers = context.getHeaders();
+            if (!headers || !headers["Accept-Language"]) {
+                context.setHeaderParam('Accept-Language', 'en-US');
+            }
             return of(context);
         },
         post: (context: ResponseContext): Observable<ResponseContext> => {
