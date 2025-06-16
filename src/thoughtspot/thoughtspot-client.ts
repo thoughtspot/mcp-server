@@ -1,6 +1,7 @@
 import { createBearerAuthenticationConfig, RequestContext, ResponseContext, ThoughtSpotRestApi } from "@thoughtspot/rest-api-sdk"
 import YAML from "yaml";
-import { Observable, of } from "rxjs";
+import type { Observable } from "rxjs";
+import { of } from "rxjs";
 
 export const getThoughtSpotClient = (instanceUrl: string, bearerToken: string) => {
     const config = createBearerAuthenticationConfig(
