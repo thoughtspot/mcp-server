@@ -6,4 +6,5 @@ export type Props = {
         clientName: string;
         registrationDate: number;
     };
+    honeycombApiKey?: string;
 };

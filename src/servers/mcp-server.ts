@@ -20,6 +20,7 @@ import {
 } from "../thoughtspot/thoughtspot-service";
 import { MixpanelTracker } from "../metrics/mixpanel/mixpanel";
 import { Trackers, type Tracker, TrackEvent } from "../metrics";
+import { HoneycombTracker } from "../metrics/honeycomb/honeycomb";
 
 const ToolInputSchema = ToolSchema.shape.inputSchema;
 type ToolInput = z.infer<typeof ToolInputSchema>;
@@ -80,11 +81,28 @@ export class MCPServer extends Server {
     async init() {
         const client = getThoughtSpotClient(this.ctx.props.instanceUrl, this.ctx.props.accessToken);
         const sessionInfo = await getSessionInfo(client);
+        
+        // Initialize Mixpanel
         const mixpanel = new MixpanelTracker(
             sessionInfo,
             this.ctx.props.clientName
         );
         this.addTracker(mixpanel);
+
+        // Initialize Honeycomb if API key is available
+        //if (this.ctx.props.honeycombApiKey) {
+            try {
+                const honeycomb = new HoneycombTracker(
+                    "hcaik_01jxknvspqymzj4r6kqatrksm83er50wfxsj6dedjt9whtnjhqak8fxgmk",
+                    "test-mcp-server"
+                );
+                this.addTracker(honeycomb);
+            } catch (error) {
+                console.error('Failed to initialize Honeycomb:', error);
+                // Continue without Honeycomb
+            }
+        //}
+
         this.trackers.track(TrackEvent.Init);
 
         this.setRequestHandler(ListToolsRequestSchema, async () => {
