@@ -1,11 +1,28 @@
 import { createBearerAuthenticationConfig, ThoughtSpotRestApi } from "@thoughtspot/rest-api-sdk"
+import type { RequestContext, ResponseContext } from "@thoughtspot/rest-api-sdk"
 import YAML from "yaml";
+import type { Observable } from "rxjs";
+import { of } from "rxjs";
 
 export const getThoughtSpotClient = (instanceUrl: string, bearerToken: string) => {
-    const client = new ThoughtSpotRestApi(createBearerAuthenticationConfig(
+    const config = createBearerAuthenticationConfig(
         instanceUrl,
         () => Promise.resolve(bearerToken),
-    ));
+    );
+
+    config.middleware.push({
+        pre: (context: RequestContext): Observable<RequestContext> => {
+            const headers = context.getHeaders();
+            if (!headers || !headers["Accept-Language"]) {
+                context.setHeaderParam('Accept-Language', 'en-US');
+            }
+            return of(context);
+        },
+        post: (context: ResponseContext): Observable<ResponseContext> => {
+            return of(context);
+        }
+    });
+    const client = new ThoughtSpotRestApi(config);
     (client as any).instanceUrl = instanceUrl;
     addExportUnsavedAnswerTML(client, instanceUrl, bearerToken);
     addGetSessionInfo(client, instanceUrl, bearerToken);
