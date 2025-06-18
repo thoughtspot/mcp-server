@@ -20,7 +20,7 @@ import {
 } from "../thoughtspot/thoughtspot-service";
 import { MixpanelTracker } from "../metrics/mixpanel/mixpanel";
 import { Trackers, type Tracker, TrackEvent } from "../metrics";
-import { HoneycombTracker } from "../metrics/honeycomb/honeycomb";
+import { getTracer } from "../metrics/honeycomb/shared-tracer";
 
 const ToolInputSchema = ToolSchema.shape.inputSchema;
 type ToolInput = z.infer<typeof ToolInputSchema>;
@@ -89,20 +89,6 @@ export class MCPServer extends Server {
         );
         this.addTracker(mixpanel);
 
-        // Initialize Honeycomb if API key is available
-        //if (this.ctx.props.honeycombApiKey) {
-            try {
-                const honeycomb = new HoneycombTracker(
-                    "hcaik_01jxknvspqymzj4r6kqatrksm83er50wfxsj6dedjt9whtnjhqak8fxgmk",
-                    "test-mcp-server"
-                );
-                this.addTracker(honeycomb);
-            } catch (error) {
-                console.error('Failed to initialize Honeycomb:', error);
-                // Continue without Honeycomb
-            }
-        //}
-
         this.trackers.track(TrackEvent.Init);
 
         this.setRequestHandler(ListToolsRequestSchema, async () => {
@@ -134,6 +120,9 @@ export class MCPServer extends Server {
 
         this.setRequestHandler(ListResourcesRequestSchema, async () => {
             const client = getThoughtSpotClient(this.ctx.props.instanceUrl, this.ctx.props.accessToken);
+            const tracer = getTracer();
+            tracer?.log("ListResourcesRequestSchema called");
+            tracer?.addData({instanceUrl: this.ctx.props.instanceUrl});
             const sources = await this.getDatasources();
             return {
                 resources: sources.list.map((s) => ({
@@ -146,14 +135,19 @@ export class MCPServer extends Server {
         });
 
         this.setRequestHandler(ReadResourceRequestSchema, async (request: z.infer<typeof ReadResourceRequestSchema>) => {
+            const tracer = getTracer();
+            tracer?.log("ReadResourceRequestSchema called");
+            tracer?.addData({instanceUrl: this.ctx.props.instanceUrl});
             const { uri } = request.params;
             const sourceId = uri.split("///").pop();
             if (!sourceId) {
+                tracer?.log("Invalid datasource uri");
                 throw new Error("Invalid datasource uri");
             }
             const { map: sourceMap } = await this.getDatasources();
             const source = sourceMap.get(sourceId);
             if (!source) {
+                tracer?.log("Datasource not found");
                 throw new Error("Datasource not found");
             }
             return {
@@ -171,37 +165,42 @@ export class MCPServer extends Server {
             };
         });
 
-
         // Handle call tool request
         this.setRequestHandler(CallToolRequestSchema, async (request: z.infer<typeof CallToolRequestSchema>) => {
             const { name } = request.params;
-
+            const tracer = getTracer();
+            tracer?.log("CallToolRequestSchema called");
+            tracer?.addData({instanceUrl: this.ctx.props.instanceUrl});
+            tracer?.addData({toolName: name});
+            tracer?.addData({"mcp-server": "true"});
 
             this.trackers.track(TrackEvent.CallTool, { toolName: name });
 
             switch (name) {
                 case ToolName.Ping:
-                    console.log("Received Ping request");
+                    tracer?.log("Received Ping request");
                     if (this.ctx.props.accessToken && this.ctx.props.instanceUrl) {
+                        tracer?.log("Authenticated");
                         return {
                             content: [{ type: "text", text: "Pong" }],
                         };
                     }
+                    tracer?.log("Not authenticated");
                     return {
                         isError: true,
                         content: [{ type: "text", text: "ERROR: Not authenticated" }],
                     };
 
                 case ToolName.GetRelevantQuestions: {
-                    return this.callGetRelevantQuestions(request);
+                    return this.callGetRelevantQuestions(request, tracer);
                 }
 
                 case ToolName.GetAnswer: {
-                    return this.callGetAnswer(request);
+                    return this.callGetAnswer(request, tracer);
                 }
 
                 case ToolName.CreateLiveboard: {
-                    return this.callCreateLiveboard(request);
+                    return this.callCreateLiveboard(request, tracer);
                 }
 
                 default:
@@ -211,10 +210,13 @@ export class MCPServer extends Server {
     }
 
 
-    async callGetRelevantQuestions(request: z.infer<typeof CallToolRequestSchema>) {
+    async callGetRelevantQuestions(request: z.infer<typeof CallToolRequestSchema>, tracer: any) {
+        tracer.log("Getting relevant questions");
         const { query, datasourceIds: sourceIds, additionalContext } = GetRelevantQuestionsSchema.parse(request.params.arguments);
         const client = getThoughtSpotClient(this.ctx.props.instanceUrl, this.ctx.props.accessToken);
         console.log("[DEBUG] Getting relevant questions for query: ", query, " and datasource: ", sourceIds);
+        tracer.addData({query, sourceIds, additionalContext});
+        
 
         const relevantQuestions = await getRelevantQuestions(
             query,
@@ -224,6 +226,7 @@ export class MCPServer extends Server {
         );
 
         if (relevantQuestions.error) {
+            tracer.log("Error getting relevant questions", relevantQuestions.error);
             return {
                 isError: true,
                 content: [{ type: "text", text: `ERROR: ${relevantQuestions.error.message}` }],
@@ -231,6 +234,7 @@ export class MCPServer extends Server {
         }
 
         if (relevantQuestions.questions.length === 0) {
+            tracer.log("No relevant questions found");
             return {
                 content: [{ type: "text", text: "No relevant questions found" }],
             };
@@ -244,15 +248,19 @@ export class MCPServer extends Server {
         };
     }
 
-    async callGetAnswer(request: z.infer<typeof CallToolRequestSchema>) {
+    async callGetAnswer(request: z.infer<typeof CallToolRequestSchema>, tracer: any) {
         const { question, datasourceId: sourceId } = GetAnswerSchema.parse(request.params.arguments);
         const client = getThoughtSpotClient(this.ctx.props.instanceUrl, this.ctx.props.accessToken);
         const progressToken = request.params._meta?.progressToken;
         const progress = 0;
+        tracer.addData({question, sourceId, progressToken, progress});
+        tracer.log("Getting answer");
         console.log("[DEBUG] Getting answer for question: ", question, " and datasource: ", sourceId);
 
         const answer = await getAnswerForQuestion(question, sourceId, false, client);
+
         if (answer.error) {
+            tracer.log("Error getting answer", answer.error);
             return {
                 isError: true,
                 content: [{ type: "text", text: `ERROR: ${answer.error.message}` }],
@@ -270,11 +278,14 @@ export class MCPServer extends Server {
         };
     }
 
-    async callCreateLiveboard(request: z.infer<typeof CallToolRequestSchema>) {
+    async callCreateLiveboard(request: z.infer<typeof CallToolRequestSchema>, tracer: any) {
+        tracer.log("Creating liveboard");
         const { name, answers } = CreateLiveboardSchema.parse(request.params.arguments);
+        tracer.addData({liveboardName: name});
         const client = getThoughtSpotClient(this.ctx.props.instanceUrl, this.ctx.props.accessToken);
         const liveboard = await fetchTMLAndCreateLiveboard(name, answers, client);
         if (liveboard.error) {
+            tracer.log("Error creating liveboard", liveboard.error);
             return {
                 isError: true,
                 content: [{ type: "text", text: `ERROR: ${liveboard.error.message}` }],
