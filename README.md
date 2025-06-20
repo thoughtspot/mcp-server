@@ -18,6 +18,7 @@ Join our [Discord](https://developers.thoughtspot.com/join-discord) to get suppo
 ## Table of Contents
 
 - [MCP Client Configuration](#mcp-client-configuration)
+- [Demo video](#demo)
 - [Features](#features)
   - [Supported transports](#supported-transports)
 - [Contributing](#contributing)
@@ -47,6 +48,10 @@ To configure this MCP server in your MCP client (such as Claude Desktop, Windsur
 ```
 
 See the [Troubleshooting](#troubleshooting) section for any errors.
+
+## Demo
+
+Here is a [demo video](https://www.loom.com/share/433988d98a7b41fb8df2239da014169a?sid=704e96ba-5cf7-4126-8596-9cc5e7542ea4) using Claude Desktop.
 
 ## Features
 
