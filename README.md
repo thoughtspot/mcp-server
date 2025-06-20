@@ -51,7 +51,10 @@ See the [Troubleshooting](#troubleshooting) section for any errors.
 
 ## Demo
 
-Here is a [demo video](https://www.loom.com/share/433988d98a7b41fb8df2239da014169a?sid=704e96ba-5cf7-4126-8596-9cc5e7542ea4) using Claude Desktop.
+Here is a demo video using Claude Desktop.
+
+<Video src="https://github.com/thoughtspot/mcp-server/static/ThoughtSpot-MCP-server-demo.mp4" />
+
 
 ## Features
 
