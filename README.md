@@ -55,6 +55,7 @@ Here is a demo video using Claude Desktop.
 
 https://github.com/user-attachments/assets/72a5383a-7b2a-4987-857a-b6218d7eea22
 
+Watch on [Loom](https://www.loom.com/share/433988d98a7b41fb8df2239da014169a?sid=ef2032a2-6e9b-4902-bef0-57df5623963e)
 
 ## Features
 
