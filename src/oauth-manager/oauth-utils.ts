@@ -1,4 +1,5 @@
 import type { ClientInfo, AuthRequest } from '@cloudflare/workers-oauth-provider'
+import { encodeBase64Url } from 'hono/utils/encode'
 
 
 /**
@@ -494,4 +495,22 @@ export async function parseRedirectApproval(request: Request): Promise<ParsedApp
  */
 function sanitizeHtml(unsafe: string): string {
   return unsafe.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;')
+}
+
+/**
+ * Constructs the SAML login redirect URL for the /authorize POST handler.
+ * @param instanceUrl The instance URL to use as the base for the redirect.
+ * @param oauthReqInfo The OAuth request info object to encode in the state.
+ * @param callbackOrigin The origin to use for the callback URL (e.g., from the incoming request).
+ * @returns The full redirect URL as a string.
+ */
+export function buildSamlRedirectUrl(instanceUrl: string, oauthReqInfo: any, callbackOrigin: string): string {
+    // Construct the redirect URL to v1/saml
+    const redirectUrl = new URL('callosum/v1/saml/login', instanceUrl);
+    const targetURLPath = new URL("/callback", callbackOrigin);
+    targetURLPath.searchParams.append('instanceUrl', instanceUrl);
+    const encodedState = encodeBase64Url(new TextEncoder().encode(JSON.stringify(oauthReqInfo)).buffer);
+    targetURLPath.searchParams.append('oauthReqInfo', encodedState);
+    redirectUrl.searchParams.append('targetURLPath', targetURLPath.href);
+    return redirectUrl.toString();
 }
