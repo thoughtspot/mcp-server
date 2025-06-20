@@ -1,7 +1,7 @@
 import type { AuthRequest, OAuthHelpers } from '@cloudflare/workers-oauth-provider'
 import { Hono } from 'hono'
 import type { Props } from './utils';
-import { parseRedirectApproval, renderApprovalDialog } from './oauth-manager/oauth-utils';
+import { parseRedirectApproval, renderApprovalDialog, buildSamlRedirectUrl } from './oauth-manager/oauth-utils';
 import { renderTokenCallback } from './oauth-manager/token-utils';
 import { any } from 'zod';
 import { encodeBase64Url, decodeBase64Url } from 'hono/utils/encode';
@@ -36,46 +36,33 @@ app.get("/authorize", async (c) => {
 })
 
 app.post("/authorize", async (c) => {
-    // Validates form submission and extracts state
-    const { state, instanceUrl } = await parseRedirectApproval(c.req.raw)
-    if (!state.oauthReqInfo) {
-        return c.text('Invalid request', 400)
+    try {
+        // Validates form submission and extracts state
+        const { state, instanceUrl } = await parseRedirectApproval(c.req.raw)
+        if (!state.oauthReqInfo) {
+            return c.text('Invalid request', 400)
+        }
+
+        if (!instanceUrl) {
+            return new Response('Missing instance URL', { status: 400 });
+        }
+
+        // Use the new utility function to build the redirect URL
+        const redirectUrl = buildSamlRedirectUrl(
+            instanceUrl,
+            state.oauthReqInfo,
+            new URL(c.req.url).origin
+        );
+        console.log("redirectUrl", redirectUrl);
+
+        return Response.redirect(redirectUrl);
+    } catch (error) {
+        console.error('Error in POST /authorize:', error);
+        if (error instanceof Error && error.message.includes('Missing instance URL')) {
+            return new Response('Missing instance URL', { status: 400 });
+        }
+        return new Response('Invalid request', { status: 400 });
     }
-
-    if (!instanceUrl) {
-        return new Response('Missing instance URL', { status: 400 });
-    }
-
-    // Construct the redirect URL to v1/saml
-    const redirectUrl = new URL('callosum/v1/saml/login', instanceUrl);
-
-
-    // TODO(shikhar.bhargava): remove this once we have a proper callback URL
-    // the proper callback URL is the one /callosum/v1/v2/auth/token/authroize endpoint
-    // which gives the encrypted token to the client. Also with that it will have the 
-    // redirect URL as query params = new URL("/callback", c.req.url).href to 
-    // send the user back to callback endpoint.
-    // The callback endpoint will get the encrypted token and decrypt it to get the user's access token.
-
-    // const targetURLAuthorize = new URL("callosum/v1/v2/auth/token/authorize", instanceUrl);
-    // targetURLAuthorize.searchParams.append('validity_time_in_sec', "86400");
-    // const targetURLCallbackPath = new URL("/callback", c.req.url);
-    // targetURLCallbackPath.searchParams.append('instanceUrl', instanceUrl);
-    // targetURLAuthorize.searchParams.append('redirect_url', btoa(targetURLCallbackPath.toString()));
-    // const encodedState = btoa(JSON.stringify(state.oauthReqInfo));
-    // targetURLAuthorize.searchParams.append('state', encodedState);
-    // targetURLAuthorize.searchParams.append('token_encryption_key', "1234567812345678");
-    // targetURLAuthorize.searchParams.append('encryption_algorithm', 'AES');
-    // redirectUrl.searchParams.append('targetURLPath', targetURLAuthorize.href);
-
-    const targetURLPath = new URL("/callback", c.req.url);
-    targetURLPath.searchParams.append('instanceUrl', instanceUrl);
-    const encodedState = encodeBase64Url(new TextEncoder().encode(JSON.stringify(state.oauthReqInfo)).buffer);
-    targetURLPath.searchParams.append('oauthReqInfo', encodedState);
-    redirectUrl.searchParams.append('targetURLPath', targetURLPath.href);
-    console.log("redirectUrl", redirectUrl.toString());
-
-    return Response.redirect(redirectUrl.toString());
 })
 
 app.get("/callback", async (c) => {
@@ -112,7 +99,18 @@ app.get("/callback", async (c) => {
 })
 
 app.post("/store-token", async (c) => {
-    const { token, oauthReqInfo, instanceUrl } = await c.req.json();
+    let token, oauthReqInfo, instanceUrl;
+    
+    try {
+        const body = await c.req.json();
+        token = body.token;
+        oauthReqInfo = body.oauthReqInfo;
+        instanceUrl = body.instanceUrl;
+    } catch (error) {
+        console.error('Error parsing JSON in store-token:', error);
+        return c.text('Invalid JSON format', 400);
+    }
+    
     if (!token || !oauthReqInfo || !instanceUrl) {
         return c.text('Missing token or OAuth request info or instanceUrl', 400);
     }
