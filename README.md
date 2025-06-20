@@ -53,7 +53,7 @@ See the [Troubleshooting](#troubleshooting) section for any errors.
 
 Here is a demo video using Claude Desktop.
 
-<Video src="public/ThoughtSpot-MCP-server-demo.mp4"></Video>
+<video src="public/ThoughtSpot-MCP-server-demo.mp4"></video>
 
 
 ## Features
