@@ -20,6 +20,7 @@ import {
 } from "../thoughtspot/thoughtspot-service";
 import { MixpanelTracker } from "../metrics/mixpanel/mixpanel";
 import { Trackers, type Tracker, TrackEvent } from "../metrics";
+import { trace } from "@opentelemetry/api";
 
 const ToolInputSchema = ToolSchema.shape.inputSchema;
 type ToolInput = z.infer<typeof ToolInputSchema>;
@@ -63,7 +64,7 @@ interface Context {
 
 export class MCPServer extends Server {
     private trackers: Trackers = new Trackers();
-    constructor(private ctx: Context) {
+    public constructor(private ctx: Context) {
         super({
             name: "ThoughtSpot",
             version: "1.0.0",
@@ -115,6 +116,11 @@ export class MCPServer extends Server {
         });
 
         this.setRequestHandler(ListResourcesRequestSchema, async () => {
+            const tracer = trace.getTracer('list-resources');
+            tracer.startActiveSpan('list-datasources', async (span) => {
+                span.setAttribute('instance_url', this.ctx.props.instanceUrl);
+                span.setAttribute('resource_list', true);
+            });
             const client = getThoughtSpotClient(this.ctx.props.instanceUrl, this.ctx.props.accessToken);
             const sources = await this.getDatasources();
             return {
@@ -133,6 +139,11 @@ export class MCPServer extends Server {
             if (!sourceId) {
                 throw new Error("Invalid datasource uri");
             }
+            const tracer = trace.getTracer('read-resources');
+            tracer.startActiveSpan('read-datasources', async (span) => {
+                span.setAttribute('instance_url', this.ctx.props.instanceUrl);
+                span.setAttribute('datasource_id', sourceId);
+            });
             const { map: sourceMap } = await this.getDatasources();
             const source = sourceMap.get(sourceId);
             if (!source) {
@@ -157,13 +168,26 @@ export class MCPServer extends Server {
         // Handle call tool request
         this.setRequestHandler(CallToolRequestSchema, async (request: z.infer<typeof CallToolRequestSchema>) => {
             const { name } = request.params;
-
+            const tracer = trace.getTracer('call-tool');
+            tracer.startActiveSpan('call-tool', async (span) => {
+                console.log("call-tool span");
+                span.setAttribute('tool', name);
+                span.setAttribute('instance_url', this.ctx.props.instanceUrl);
+            });
 
             this.trackers.track(TrackEvent.CallTool, { toolName: name });
 
             switch (name) {
                 case ToolName.Ping:
                     console.log("Received Ping request");
+                    //const span = trace.getActiveSpan();
+                    const span = trace.getActiveSpan();
+                    if (span) {
+                        console.log("span is active");
+                        span.setAttribute('tool', name);
+                        span.setAttribute('instance_url', this.ctx.props.instanceUrl);
+                        span.end();
+                    }
                     if (this.ctx.props.accessToken && this.ctx.props.instanceUrl) {
                         return {
                             content: [{ type: "text", text: "Pong" }],
@@ -197,6 +221,12 @@ export class MCPServer extends Server {
         const { query, datasourceIds: sourceIds, additionalContext } = GetRelevantQuestionsSchema.parse(request.params.arguments);
         const client = getThoughtSpotClient(this.ctx.props.instanceUrl, this.ctx.props.accessToken);
         console.log("[DEBUG] Getting relevant questions for query: ", query, " and datasource: ", sourceIds);
+        const span = trace.getActiveSpan();
+        if (span) {
+            console.log("span is active");
+            span.setAttribute('datasource_ids', sourceIds.join(","));
+            span.setAttribute('query', query);
+        }
 
         const relevantQuestions = await getRelevantQuestions(
             query,
@@ -232,6 +262,13 @@ export class MCPServer extends Server {
         const progressToken = request.params._meta?.progressToken;
         const progress = 0;
         console.log("[DEBUG] Getting answer for question: ", question, " and datasource: ", sourceId);
+        const span = trace.getActiveSpan();
+        if (span) {
+            console.log("span is active");
+            span.setAttribute('datasource_id', sourceId);
+            span.setAttribute('question', question);
+        }
+
 
         const answer = await getAnswerForQuestion(question, sourceId, false, client);
         if (answer.error) {
@@ -255,6 +292,12 @@ export class MCPServer extends Server {
     async callCreateLiveboard(request: z.infer<typeof CallToolRequestSchema>) {
         const { name, answers } = CreateLiveboardSchema.parse(request.params.arguments);
         const client = getThoughtSpotClient(this.ctx.props.instanceUrl, this.ctx.props.accessToken);
+        const span = trace.getActiveSpan();
+        if (span) {
+            console.log("span is active");
+            span.setAttribute('name', name);
+            span.setAttribute('answers', answers.length);
+        }
         const liveboard = await fetchTMLAndCreateLiveboard(name, answers, client);
         if (liveboard.error) {
             return {
