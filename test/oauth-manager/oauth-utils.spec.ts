@@ -117,10 +117,10 @@ describe("OAuth Utils", () => {
                 "https://example.com:8080"
             ];
 
-            validUrls.forEach(url => {
+            for (const url of validUrls) {
                 expect(() => validateAndSanitizeUrl(url)).not.toThrow();
                 expect(validateAndSanitizeUrl(url)).toBe(url);
-            });
+            }
         });
 
         it("should add https:// to URLs without protocol", () => {
@@ -140,9 +140,9 @@ describe("OAuth Utils", () => {
                 "://example.com", // Missing protocol
             ];
 
-            invalidUrls.forEach(url => {
+            for (const url of invalidUrls) {
                 expect(() => validateAndSanitizeUrl(url)).toThrow();
-            });
+            }
         });
 
         it("should throw error for empty URL", () => {

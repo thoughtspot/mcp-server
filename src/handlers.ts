@@ -99,7 +99,9 @@ app.get("/callback", async (c) => {
 })
 
 app.post("/store-token", async (c) => {
-    let token, oauthReqInfo, instanceUrl;
+    let token: string;
+    let oauthReqInfo: any;
+    let instanceUrl: string;
     
     try {
         const body = await c.req.json();
