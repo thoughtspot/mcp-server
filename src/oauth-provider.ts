@@ -1,12 +1,12 @@
-import { instrumentDO, ResolveConfigFn } from '@microlabs/otel-cf-workers';
+import { instrumentDO, type ResolveConfigFn } from '@microlabs/otel-cf-workers';
 import type { DurableObject } from '@cloudflare/workers-types';
 import OAuthProvider from "@cloudflare/workers-oauth-provider";
 import { McpAgent } from "agents/mcp";
-import handler from "../handlers";
-import type { Props } from "../utils";
-import { MCPServer } from "../servers/mcp-server";
-import { apiServer } from "../servers/api-server";
-import { withBearerHandler } from "../bearer";
+import handler from "./handlers";
+import type { Props } from "./utils";
+import { MCPServer } from "./servers/mcp-server";
+import { apiServer } from "./servers/api-server";
+import { withBearerHandler } from "./bearer";
 
 // OpenTelemetry configuration
 const doConfig: ResolveConfigFn = (env: Env, _trigger) => {
@@ -15,12 +15,12 @@ const doConfig: ResolveConfigFn = (env: Env, _trigger) => {
 			url: 'https://api.honeycomb.io/v1/traces',
 			headers: { 'x-honeycomb-team': process.env.HONEYCOMB_API_KEY },
 		},
-		service: { name: 'thoughtspot-mcp-server' },
+		service: { name: process.env.HONEYCOMB_DATASET },
 	}
 };
 
 // Base ThoughtSpotMCP class
-export class BaseThoughtSpotMCP extends McpAgent<Env, any, Props> {
+export class ThoughtSpotMCPShell extends McpAgent<Env, any, Props> {
     server = new MCPServer(this);
 
     async init() {
@@ -29,17 +29,13 @@ export class BaseThoughtSpotMCP extends McpAgent<Env, any, Props> {
 }
 
 // Wrapper class with public constructor for instrumentDO
-class ThoughtSpotMCPWrapper extends BaseThoughtSpotMCP {
+class ThoughtSpotMCPWrapper extends ThoughtSpotMCPShell {
+    // biome-ignore lint/complexity/noUselessConstructor: reason
     public constructor(state: DurableObjectState, env: Env) {
         super(state, env);
     }
-    // static serve(path: string) {
-    //     return BaseThoughtSpotMCP.serve(path);
-    // }
-    // static serveSSE(path: string) {
-    //     return BaseThoughtSpotMCP.serveSSE(path);
-    // }
 }
+
 
 // Create the instrumented ThoughtSpotMCP for the main export
 export const ThoughtSpotMCP = instrumentDO(ThoughtSpotMCPWrapper, doConfig);
@@ -58,7 +54,7 @@ const oauthProvider = new OAuthProvider({
 });
 
 // Durable Object class that wraps the OAuth provider
-class OtelOAuthProviderDO implements DurableObject {
+class OAuthProviderShell implements DurableObject {
     private oauthProvider: typeof oauthProvider;
 
     constructor(private state: DurableObjectState, private env: Env) {
@@ -76,4 +72,4 @@ class OtelOAuthProviderDO implements DurableObject {
 }
 
 // Export the instrumented durable object
-export const InstrumentedOAuthProviderDO = instrumentDO(OtelOAuthProviderDO, doConfig); 
+export const ThoughtSpotOAuthProvider = instrumentDO(OAuthProviderShell, doConfig); 

@@ -1,23 +1,7 @@
-import OAuthProvider from "@cloudflare/workers-oauth-provider";
-import { McpAgent } from "agents/mcp";
-import handler from "./handlers";
-import type { Props } from "./utils";
-import { MCPServer } from "./servers/mcp-server";
-import { apiServer } from "./servers/api-server";
-import { withBearerHandler } from "./bearer";
-import { InstrumentedOAuthProviderDO, ThoughtSpotMCP } from "./durable-objects/otel-oauth-provider";
-import { trace } from "@opentelemetry/api";
-
-// export class ThoughtSpotMCP extends McpAgent<Env, any, Props> {
-//     server = new MCPServer(this);
-
-//     async init() {
-//         await this.server.init();
-//     }
-// }
+import { ThoughtSpotMCP, ThoughtSpotOAuthProvider } from "./oauth-provider";
 
 // Export the instrumented durable objects for Wrangler
-export { InstrumentedOAuthProviderDO, ThoughtSpotMCP };
+export { ThoughtSpotOAuthProvider, ThoughtSpotMCP };
 
 // Create a simple handler that delegates to the durable object
 export default {
