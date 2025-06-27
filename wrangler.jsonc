@@ -18,7 +18,7 @@
 			},
 			{
 				"class_name": "ThoughtSpotOAuthProvider",
-				"name": "OAUTH_PROVIDER_DO"
+				"name": "THOUGHTSPOT_OAUTH_PROVIDER"
 			}
 		]
 	},

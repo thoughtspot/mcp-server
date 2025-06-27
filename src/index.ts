@@ -7,8 +7,8 @@ export { ThoughtSpotOAuthProvider, ThoughtSpotMCP };
 export default {
     async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
         // Get or create the durable object instance
-        const id = env.OAUTH_PROVIDER_DO.idFromName('oauth-provider');
-        const obj = env.OAUTH_PROVIDER_DO.get(id);
+        const id = env.THOUGHTSPOT_OAUTH_PROVIDER.idFromName('oauth-provider');
+        const obj = env.THOUGHTSPOT_OAUTH_PROVIDER.get(id);
         return obj.fetch(request);
     }
 };
