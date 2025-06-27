@@ -1,27 +1,14 @@
-import OAuthProvider from "@cloudflare/workers-oauth-provider";
-import { McpAgent } from "agents/mcp";
-import handler from "./handlers";
-import type { Props } from "./utils";
-import { MCPServer } from "./servers/mcp-server";
-import { apiServer } from "./servers/api-server";
-import { withBearerHandler } from "./bearer";
+import { ThoughtSpotMCP, ThoughtSpotOAuthProvider } from "./oauth-provider";
 
-export class ThoughtSpotMCP extends McpAgent<Env, any, Props> {
-    server = new MCPServer(this);
+// Export the instrumented durable objects for Wrangler
+export { ThoughtSpotOAuthProvider, ThoughtSpotMCP };
 
-    async init() {
-        await this.server.init();
+// Create a simple handler that delegates to the durable object
+export default {
+    async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+        // Get or create the durable object instance
+        const id = env.THOUGHTSPOT_OAUTH_PROVIDER.idFromName('oauth-provider');
+        const obj = env.THOUGHTSPOT_OAUTH_PROVIDER.get(id);
+        return obj.fetch(request);
     }
-}
-
-export default new OAuthProvider({
-    apiHandlers: {
-        "/mcp": ThoughtSpotMCP.serve("/mcp") as any, // TODO: Remove 'any'
-        "/sse": ThoughtSpotMCP.serveSSE("/sse") as any, // TODO: Remove 'any'
-        "/api": apiServer as any, // TODO: Remove 'any'
-    },
-    defaultHandler: withBearerHandler(handler, ThoughtSpotMCP) as any, // TODO: Remove 'any'
-    authorizeEndpoint: "/authorize",
-    tokenEndpoint: "/token",
-    clientRegistrationEndpoint: "/register",
-});
+};

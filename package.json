@@ -43,6 +43,7 @@
   },
   "dependencies": {
     "@cloudflare/workers-oauth-provider": "^0.0.5",
+    "@microlabs/otel-cf-workers": "^1.0.0-rc.52",
     "@modelcontextprotocol/sdk": "^1.12.1",
     "@thoughtspot/rest-api-sdk": "^2.13.1",
     "agents": "^0.0.95",
