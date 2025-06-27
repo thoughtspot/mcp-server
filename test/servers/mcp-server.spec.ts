@@ -224,7 +224,8 @@ describe("MCP Server", () => {
                 "Show me revenue data",
                 ["ds-123"],
                 "Previous data showed declining trends",
-                expect.any(Object)
+                expect.any(Object),
+                expect.any(Object),
             );
         });
     });
