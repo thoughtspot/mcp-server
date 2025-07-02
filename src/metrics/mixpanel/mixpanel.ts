@@ -7,6 +7,7 @@ export class MixpanelTracker implements Tracker {
     private mixpanel: MixpanelClient;
 
     constructor(sessionInfo: SessionInfo, client: any = {}) {
+        client = client || {};
         this.mixpanel = new MixpanelClient(sessionInfo.mixpanelToken);
         this.mixpanel.identify(sessionInfo.userGUID);
         this.mixpanel.register({
