@@ -1,0 +1,101 @@
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    margin: 0;
+    background-color: #f8f9fa;
+    color: #2c3e50;
+}
+.container {
+    text-align: center;
+    padding: 3rem;
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    max-width: 480px;
+    width: 90%;
+}
+.logo {
+    width: 48px;
+    height: 48px;
+    margin-bottom: 1.5rem;
+}
+h2 {
+    font-size: 1.5rem;
+    font-weight: 600;
+    margin: 0 0 1rem 0;
+    color: #1a1a1a;
+}
+.spinner {
+    border: 3px solid #e9ecef;
+    border-top: 3px solid #0066cc;
+    border-radius: 50%;
+    width: 36px;
+    height: 36px;
+    animation: spin 1s linear infinite;
+    margin: 1.5rem auto;
+}
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+#status {
+    font-size: 0.95rem;
+    color: #495057;
+    margin: 1rem 0;
+    line-height: 1.5;
+}
+.footer {
+    margin-top: 2rem;
+    font-size: 0.85rem;
+    color: #6c757d;
+}
+
+.warning-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: #FFF8E1;
+    border: 1px solid #FFE082;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(16, 30, 54, 0.04);
+    padding: 12px 16px;
+    margin-bottom: 1rem;
+}
+
+.warning-icon {
+    flex-shrink: 0;
+    margin-right: 10px;
+    align-self: flex-start;
+    margin-top: 2px;
+}
+
+.warning-text {
+    flex: 1;
+    margin: 0;
+    font-size: 14px;
+    line-height: 1.4;
+    color: #333;
+    text-align: left;
+    max-width: 100%;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+}
+
+.warning-close {
+    background: none;
+    border: none;
+    font-size: 16px;
+    line-height: 1;
+    color: #999;
+    opacity: 0.7;
+    cursor: pointer;
+    padding: 0;
+    align-self: flex-start;
+    margin-top: 2px;
+    margin-left: 5px;
+}
+.warning-close:hover {
+    opacity: 1;
+} 
