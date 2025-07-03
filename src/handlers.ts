@@ -87,7 +87,9 @@ app.get("/callback", async (c) => {
 
     try {
         const decodedOAuthReqInfo = JSON.parse(new TextDecoder().decode(decodeBase64Url(encodedOauthReqInfo)));
-        return new Response(renderTokenCallback(instanceUrl, decodedOAuthReqInfo), {
+        const origin = new URL(c.req.url).origin;
+        const htmlContent = await renderTokenCallback(instanceUrl, decodedOAuthReqInfo, c.env.ASSETS, origin);
+        return new Response(htmlContent, {
             headers: {
                 'Content-Type': 'text/html',
             },
@@ -99,7 +101,7 @@ app.get("/callback", async (c) => {
 })
 
 app.post("/store-token", async (c) => {
-    let token: string;
+    let token: any;
     let oauthReqInfo: any;
     let instanceUrl: string;
     
