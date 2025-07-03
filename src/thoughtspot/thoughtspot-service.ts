@@ -164,15 +164,6 @@ export async function createLiveboard(name: string, answers: any[], client: Thou
     return `${(client as any).instanceUrl}/#/pinboard/${resp[0].response.header.id_guid}`;
 }
 
-export async function getDatasourcesFromQuery(query: string, client: ThoughtSpotRestApi) {
-    
-    const resp = await ({
-        nlsRequest: {
-            query: query,
-        },
-    });
-}
-
 export interface DataSource {
     name: string;
     id: string;
