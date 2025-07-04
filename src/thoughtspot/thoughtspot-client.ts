@@ -102,7 +102,8 @@ async function addGetSessionInfo(client: any, instanceUrl: string, token: string
         });
 
         if (response.status !== 200) {
-            throw new Error(`Failed to get session info: ${response.status} ${response.statusText}`);
+            console.error(`Failed to get session info: ${response.status} ${response.statusText}`);
+            //throw new Error(`Failed to get session info: ${response.status} ${response.statusText}`);
         }
         const data: any = await response.json();
         const info = data.info;
