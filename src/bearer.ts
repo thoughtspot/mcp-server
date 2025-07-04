@@ -46,6 +46,7 @@ export function withBearerHandler(app: typeof honoApp, MCPServer: typeof Thought
             
             // Handle GET requests for tool listing
             if (req.method === "GET") {
+                console.log("GET /mcp", req.body);
                 return new Response(JSON.stringify({
                     tools: [
                         {
