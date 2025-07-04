@@ -3,6 +3,7 @@ import type { RequestContext, ResponseContext } from "@thoughtspot/rest-api-sdk"
 import YAML from "yaml";
 import type { Observable } from "rxjs";
 import { of } from "rxjs";
+import type { SessionInfo } from "./thoughtspot-service";
 
 export const getThoughtSpotClient = (instanceUrl: string, bearerToken: string) => {
     const config = createBearerAuthenticationConfig(
@@ -100,6 +101,9 @@ async function addGetSessionInfo(client: any, instanceUrl: string, token: string
             }
         });
 
+        if (response.status !== 200) {
+            throw new Error(`Failed to get session info: ${response.status} ${response.statusText}`);
+        }
         const data: any = await response.json();
         const info = data.info;
         return info;
