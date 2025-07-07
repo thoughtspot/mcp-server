@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>ThoughtSpot Authorization</title>
+    <link rel="stylesheet" href="oauth-callback.css">
+</head>
+<body>
+    <div class="container">
+        <img src="https://avatars.githubusercontent.com/u/8906680?s=200&v=4" alt="ThoughtSpot Logo" class="logo">
+        <h2>Authorization in Progress</h2>
+        <div class="spinner"></div>
+        <p id="status">Establishing secure connection...</p>
+        <div class="footer">
+            ThoughtSpot MCP Server
+        </div>
+    </div>
+    <!-- Card -->
+    <div id="manual-token-section" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: #f4f5f7; z-index: 9999; flex-direction: column; justify-content: center; align-items: center; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+        <div style="background: #fff; border-radius: 16px; box-shadow: 0 2px 12px 0 rgba(16,30,54,0.08); padding: 2.5rem 2rem 2rem 2rem; max-width: 440px; width: 100%; margin: 0 auto; display: flex; flex-direction: column; align-items: stretch;">
+           <div class="warning-banner">
+            <svg class="warning-icon" width="15" height="15" viewBox="0 0 24 24" fill="none">
+                <circle cx="12" cy="12" r="12" fill="#FFE082"/>
+                <path d="M12 8v4m0 4h.01" stroke="#FF9800" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                <circle cx="12" cy="12" r="9" stroke="#FF9800" stroke-width="2" fill="none"/>
+            </svg>
+            <p class="warning-text">
+                Browser privacy settings, network issues, or strict cookie settings may be impacting authentication. <br>
+                Take the additional steps below to fix the issue.
+            </p>
+            <button class="warning-close" aria-label="Dismiss">&times;</button>
+            </div>
+            <div style="font-size: 1.1rem; font-weight: 500; color: #23272f; margin-bottom: 1.1rem; text-align: center; letter-spacing: -0.01em;">ThoughtSpot MCP Server wants access<br>to your ThoughtSpot instance</div>
+            <div style="font-size: 1rem; color: #23272f; font-weight: 500; margin-bottom: 0.5rem; text-align: left;">Complete the below steps to finish authenticating:</div>
+            <ul style="text-align:left; margin: 0 0 1.2rem 1.1rem; padding: 0; color: #444; font-size: 0.9rem; line-height: 1.7; font-weight: 400;">
+                <li>Open this <a id="manual-token-url-link" href="#" style="color:#2563eb; text-decoration:underline;">token URL</a> in a new tab</li>
+                <li>Copy the token value or JSON</li>
+                <li>Paste the token value or JSON into the box below</li>
+            </ul>
+            <label for="manual-token-input" style="margin-bottom:0.4rem; font-size: 0.8rem; color: #23272f; font-weight: 500; align-self: flex-start;">Token value or JSON</label>
+            <textarea id="manual-token-input" rows="6" style="width:100%; max-width:100%; font-family:monospace; font-size:1rem; border: 1.2px solid #e0e3e8; border-radius: 8px; padding: 14px 14px; background: #fafbfc; margin-bottom: 1.4rem; resize: vertical; box-sizing: border-box; outline: none; transition: border 0.2s; min-height: 90px;"></textarea>
+            <div style="display: flex; width: 100%; gap: 0.8rem; margin-top: 0.1rem;">
+                <button id="manual-back-btn" style="flex:1; padding:12px 0; font-size:1.05rem; background: #f6f7f9; color: #23272f; border: none; border-radius: 8px; cursor: pointer; font-weight: 500; transition: background 0.2s;">Back</button>
+                <button id="submit-manual-token" style="flex:1; padding:12px 0; font-size:1.05rem; background: #2563eb; color: #fff; border: none; border-radius: 8px; cursor: pointer; font-weight: 500; transition: background 0.2s;">Submit</button>
+            </div>
+        </div>
+    </div>
+    <script type="application/json" id="oauth-req-info">{{OAUTH_REQ_INFO}}</script>
+    <script src="oauth-callback.js"></script>
+</body>
+</html> 
