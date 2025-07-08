@@ -16,12 +16,13 @@ import {
     getAnswerForQuestion,
     getDataSources,
     getRelevantQuestions,
-    getSessionInfo
+    getSessionInfo,
+    ThoughtSpotService
 } from "../thoughtspot/thoughtspot-service";
 import { MixpanelTracker } from "../metrics/mixpanel/mixpanel";
 import { Trackers, type Tracker, TrackEvent } from "../metrics";
-import { type Span, SpanStatusCode } from "@opentelemetry/api";
-import { withSpan } from "../metrics/tracing/tracing-utils";
+import { context, type Span, SpanStatusCode, trace } from "@opentelemetry/api";
+import { WithSpan } from "../metrics/tracing/tracing-utils";
 
 const ToolInputSchema = ToolSchema.shape.inputSchema;
 type ToolInput = z.infer<typeof ToolInputSchema>;
@@ -79,9 +80,12 @@ export class MCPServer extends Server {
         });
     }
 
+    private getThoughtSpotService() {
+        return new ThoughtSpotService(getThoughtSpotClient(this.ctx.props.instanceUrl, this.ctx.props.accessToken));
+    }
+
     async init() {
-        const client = getThoughtSpotClient(this.ctx.props.instanceUrl, this.ctx.props.accessToken);
-        const sessionInfo = await getSessionInfo(client);
+        const sessionInfo = await this.getThoughtSpotService().getSessionInfo();
         const mixpanel = new MixpanelTracker(
             sessionInfo,
             this.ctx.props.clientName
@@ -90,235 +94,223 @@ export class MCPServer extends Server {
         this.trackers.track(TrackEvent.Init);
 
         this.setRequestHandler(ListToolsRequestSchema, async () => {
-            return withSpan('list-tools', async (span) => {
-                return {
-                    tools: [
-                        {
-                            name: ToolName.Ping,
-                            description: "Simple ping tool to test connectivity and Auth",
-                            inputSchema: zodToJsonSchema(PingSchema) as ToolInput,
-                        },
-                        {
-                            name: ToolName.GetRelevantQuestions,
-                            description: "Get relevant data questions from ThoughtSpot database",
-                            inputSchema: zodToJsonSchema(GetRelevantQuestionsSchema) as ToolInput,
-                        },
-                        {
-                            name: ToolName.GetAnswer,
-                            description: "Get the answer to a question from ThoughtSpot database",
-                            inputSchema: zodToJsonSchema(GetAnswerSchema) as ToolInput,
-                        },
-                        {
-                            name: ToolName.CreateLiveboard,
-                            description: "Create a liveboard from a list of answers",
-                            inputSchema: zodToJsonSchema(CreateLiveboardSchema) as ToolInput,
-                        }
-                        ]
-                    };
-                });
+            return this.listTools();
         });
 
         this.setRequestHandler(ListResourcesRequestSchema, async () => {
-            return withSpan('list-datasources', async (span) => {
-              span.setAttribute('instance_url', this.ctx.props.instanceUrl);
-              const client = getThoughtSpotClient(this.ctx.props.instanceUrl, this.ctx.props.accessToken);
-              const sources = await this.getDatasources(span);
-              return {
-                resources: sources.list.map((s) => ({
-                  uri: `datasource:///${s.id}`,
-                  name: s.name,
-                  description: s.description,
-                  mimeType: "text/plain"
-                }))
-              };
-            });
-          });
-
-        this.setRequestHandler(ReadResourceRequestSchema, async (request: z.infer<typeof ReadResourceRequestSchema>) => {
-            return withSpan('read-datasources', async (span) => {
-                span.setAttribute('instance_url', this.ctx.props.instanceUrl);
-                const { uri } = request.params;
-                const sourceId = uri.split("///").pop();
-                if (!sourceId) {
-                    throw new Error("Invalid datasource uri");
-                }
-                const { map: sourceMap } = await this.getDatasources(span);
-                const source = sourceMap.get(sourceId);
-                if (!source) {
-                    span.setStatus({ code: SpanStatusCode.ERROR, message: "Datasource not found" });
-                    throw new Error("Datasource not found");
-                }
-                return {
-                    contents: [{
-                        uri: uri,
-                        mimeType: "text/plain",
-                        text: `
-                        ${source.description}
-
-                        The id of the datasource is ${sourceId}.
-
-                        Use ThoughtSpot's getRelevantQuestions tool to get relevant questions for a query. And then use the getAnswer tool to get the answer for a question.
-                        `,
-                    }],
-                };
-            });
+            return this.listResources();
         });
 
+        this.setRequestHandler(ReadResourceRequestSchema, async (request: z.infer<typeof ReadResourceRequestSchema>) => {
+            return this.readResource(request);
+        });
 
         // Handle call tool request
         this.setRequestHandler(CallToolRequestSchema, async (request: z.infer<typeof CallToolRequestSchema>) => {
-            return withSpan('call-tool', async (span) => {
-                const { name } = request.params;
-                span.setAttribute('tool', name);
-                span.setAttribute('instance_url', this.ctx.props.instanceUrl);
-                span.addEvent("tool_call");
-                this.trackers.track(TrackEvent.CallTool, { toolName: name });
-
-                switch (name) {
-                    case ToolName.Ping:
-                        console.log("Received Ping request");
-                        if (this.ctx.props.accessToken && this.ctx.props.instanceUrl) {
-                            span.setStatus({ code: SpanStatusCode.OK, message: "User is authenticated" });
-                            return {
-                                content: [{ type: "text", text: "Pong" }],
-                            };
-                        }
-                        span.setStatus({ code: SpanStatusCode.ERROR, message: "User is not authenticated" });
-                        return {
-                            isError: true,
-                            content: [{ type: "text", text: "ERROR: Not authenticated" }],
-                        };
-
-                    case ToolName.GetRelevantQuestions: {
-                        return this.callGetRelevantQuestions(request, span);
-                    }
-
-                    case ToolName.GetAnswer: {
-                        return this.callGetAnswer(request, span);
-                    }
-
-                    case ToolName.CreateLiveboard: {
-                        return this.callCreateLiveboard(request, span);
-                    }
-
-                    default:
-                        throw new Error(`Unknown tool: ${name}`);
-                }
-            });
+            return this.callTool(request);
         });
     }
 
-
-    async callGetRelevantQuestions(request: z.infer<typeof CallToolRequestSchema>, parentSpan?: Span) {
-        return withSpan('call-get-relevant-questions', async (span) => {
-            const { query, datasourceIds: sourceIds, additionalContext } = GetRelevantQuestionsSchema.parse(request.params.arguments);
-            const client = getThoughtSpotClient(this.ctx.props.instanceUrl, this.ctx.props.accessToken);
-            span.setAttribute('datasource_ids', sourceIds.join(","));
-            console.log("[DEBUG] Getting relevant questions for query: ", query, " and datasource: ", sourceIds);
-
-            const relevantQuestions = await getRelevantQuestions(
-                query,
-                sourceIds!,
-                additionalContext ?? "",
-                client,
-                span
-            );
-
-            if (relevantQuestions.error) {
-                span.setStatus({ code: SpanStatusCode.ERROR, message: relevantQuestions.error.message });
-                return {
-                    isError: true,
-                    content: [{ type: "text", text: `ERROR: ${relevantQuestions.error.message}` }],
-                };
-            }
-
-            if (relevantQuestions.questions.length === 0) {
-                span.setStatus({ code: SpanStatusCode.ERROR, message: "No relevant questions found" });
-                return {
-                    content: [{ type: "text", text: "No relevant questions found" }],
-                };
-            }
-            span.setStatus({ code: SpanStatusCode.OK, message: "Relevant questions found" });
-            return {
-                content: relevantQuestions.questions.map(q => ({
-                    type: "text",
-                    text: `Question: ${q.question}\nDatasourceId: ${q.datasourceId}`,
-                })),
-            };
-        }, parentSpan);
+    @WithSpan('list-tools')
+    async listTools() {
+        return {
+            tools: [
+                {
+                    name: ToolName.Ping,
+                    description: "Simple ping tool to test connectivity and Auth",
+                    inputSchema: zodToJsonSchema(PingSchema) as ToolInput,
+                },
+                {
+                    name: ToolName.GetRelevantQuestions,
+                    description: "Get relevant data questions from ThoughtSpot database",
+                    inputSchema: zodToJsonSchema(GetRelevantQuestionsSchema) as ToolInput,
+                },
+                {
+                    name: ToolName.GetAnswer,
+                    description: "Get the answer to a question from ThoughtSpot database",
+                    inputSchema: zodToJsonSchema(GetAnswerSchema) as ToolInput,
+                },
+                {
+                    name: ToolName.CreateLiveboard,
+                    description: "Create a liveboard from a list of answers",
+                    inputSchema: zodToJsonSchema(CreateLiveboardSchema) as ToolInput,
+                }
+            ]
+        };
     }
 
-    async callGetAnswer(request: z.infer<typeof CallToolRequestSchema>, parentSpan?: Span) {
-        return withSpan('call-get-answer', async (span) => {
-          const { question, datasourceId: sourceId } = GetAnswerSchema.parse(request.params.arguments);
-          const client = getThoughtSpotClient(this.ctx.props.instanceUrl, this.ctx.props.accessToken);
-      
-          span.setAttribute('datasource_id', sourceId);
-      
-          const answer = await getAnswerForQuestion(question, sourceId, false, client, span);
-      
-          if (answer.error) {
-            span.setStatus({ code: SpanStatusCode.ERROR, message: answer.error.message });
-            return {
-              isError: true,
-              content: [{ type: "text", text: `ERROR: ${answer.error.message}` }],
-            };
-          }
-      
-          span.setStatus({ code: SpanStatusCode.OK });
-          return {
-            content: [
-              { type: "text", text: answer.data },
-              {
-                type: "text",
-                text: `Question: ${question}\nSession Identifier: ${answer.session_identifier}\nGeneration Number: ${answer.generation_number}\n\nUse this information to create a liveboard with the createLiveboard tool, if the user asks.`,
-              },
-            ],
-          };
-        }, parentSpan);
-      }
+    @WithSpan('list-datasources')
+    async listResources() {
+        const sources = await this.getDatasources();
+        return {
+            resources: sources.list.map((s) => ({
+                uri: `datasource:///${s.id}`,
+                name: s.name,
+                description: s.description,
+                mimeType: "text/plain"
+            }))
+        };
+    }
 
-    async callCreateLiveboard(request: z.infer<typeof CallToolRequestSchema>, parentSpan?: Span) {
-        return withSpan('call-create-liveboard', async (span) => {
-            const { name, answers } = CreateLiveboardSchema.parse(request.params.arguments);
-            const client = getThoughtSpotClient(this.ctx.props.instanceUrl, this.ctx.props.accessToken);
-            const liveboard = await fetchTMLAndCreateLiveboard(name, answers, client, span);
-            if (liveboard.error) {
-                span.setStatus({ code: SpanStatusCode.ERROR, message: liveboard.error.message });
+    @WithSpan('read-datasources')
+    async readResource(request: z.infer<typeof ReadResourceRequestSchema>) {
+        const { uri } = request.params;
+        const sourceId = uri.split("///").pop();
+        if (!sourceId) {
+            throw new Error("Invalid datasource uri");
+        }
+        const { map: sourceMap } = await this.getDatasources();
+        const source = sourceMap.get(sourceId);
+        if (!source) {
+            throw new Error("Datasource not found");
+        }
+        return {
+            contents: [{
+                uri: uri,
+                mimeType: "text/plain",
+                text: `
+                ${source.description}
+
+                The id of the datasource is ${sourceId}.
+
+                Use ThoughtSpot's getRelevantQuestions tool to get relevant questions for a query. And then use the getAnswer tool to get the answer for a question.
+                `,
+            }],
+        };
+    }
+
+    @WithSpan('call-tool')
+    async callTool(request: z.infer<typeof CallToolRequestSchema>) {
+        const { name } = request.params;
+        this.trackers.track(TrackEvent.CallTool, { toolName: name });
+
+        switch (name) {
+            case ToolName.Ping: {
+                console.log("Received Ping request");
+                const span = trace.getSpan(context.active());
+                span?.setAttribute("instanceUrl", this.ctx.props.instanceUrl);
+                if (this.ctx.props.accessToken && this.ctx.props.instanceUrl) {
+                    span?.setStatus({ code: SpanStatusCode.OK, message: "Ping successful" });
+                    return {
+                        content: [{ type: "text", text: "Pong" }],
+                    };
+                }
+                span?.setStatus({ code: SpanStatusCode.ERROR, message: "Ping failed" });
                 return {
                     isError: true,
-                    content: [{ type: "text", text: `ERROR: ${liveboard.error.message}` }],
+                    content: [{ type: "text", text: "ERROR: Not authenticated" }],
                 };
             }
+            case ToolName.GetRelevantQuestions: {
+                return this.callGetRelevantQuestions(request);
+            }
+
+            case ToolName.GetAnswer: {
+                return this.callGetAnswer(request);
+            }
+
+            case ToolName.CreateLiveboard: {
+                return this.callCreateLiveboard(request);
+            }
+
+            default:
+                throw new Error(`Unknown tool: ${name}`);
+        }
+    }
+
+    @WithSpan('call-get-relevant-questions')
+    async callGetRelevantQuestions(request: z.infer<typeof CallToolRequestSchema>) {
+        const { query, datasourceIds: sourceIds, additionalContext } = GetRelevantQuestionsSchema.parse(request.params.arguments);
+        console.log("[DEBUG] Getting relevant questions for query: ", query, " and datasource: ", sourceIds);
+
+        const relevantQuestions = await this.getThoughtSpotService().getRelevantQuestions(
+            query,
+            sourceIds!,
+            additionalContext ?? ""
+        );
+
+        if (relevantQuestions.error) {
             return {
-                content: [{
-                    type: "text",
-                    text: `Liveboard created successfully, you can view it at ${liveboard.url}
-                    
-                    Provide this url to the user as a link to view the liveboard in ThoughtSpot.`,
-                }],
+                isError: true,
+                content: [{ type: "text", text: `ERROR: ${relevantQuestions.error.message}` }],
             };
-        }, parentSpan);
+        }
+
+        if (relevantQuestions.questions.length === 0) {
+            return {
+                content: [{ type: "text", text: "No relevant questions found" }],
+            };
+        }
+        
+        return {
+            content: relevantQuestions.questions.map(q => ({
+                type: "text",
+                text: `Question: ${q.question}\nDatasourceId: ${q.datasourceId}`,
+            })),
+        };
+    }
+
+    @WithSpan('call-get-answer')
+    async callGetAnswer(request: z.infer<typeof CallToolRequestSchema>) {
+        const { question, datasourceId: sourceId } = GetAnswerSchema.parse(request.params.arguments);
+
+        const answer = await this.getThoughtSpotService().getAnswerForQuestion(question, sourceId, false);
+
+        if (answer.error) {
+            return {
+                isError: true,
+                content: [{ type: "text", text: `ERROR: ${answer.error.message}` }],
+            };
+        }
+
+        return {
+            content: [
+                { type: "text", text: answer.data },
+                {
+                    type: "text",
+                    text: `Question: ${question}\nSession Identifier: ${answer.session_identifier}\nGeneration Number: ${answer.generation_number}\n\nUse this information to create a liveboard with the createLiveboard tool, if the user asks.`,
+                },
+            ],
+        };
+    }
+
+    @WithSpan('call-create-liveboard')
+    async callCreateLiveboard(request: z.infer<typeof CallToolRequestSchema>) {
+        const { name, answers } = CreateLiveboardSchema.parse(request.params.arguments);
+        const liveboard = await this.getThoughtSpotService().fetchTMLAndCreateLiveboard(name, answers);
+        if (liveboard.error) {
+            return {
+                isError: true,
+                content: [{ type: "text", text: `ERROR: ${liveboard.error.message}` }],
+            };
+        }
+        return {
+            content: [{
+                type: "text",
+                text: `Liveboard created successfully, you can view it at ${liveboard.url}
+                
+                Provide this url to the user as a link to view the liveboard in ThoughtSpot.`,
+            }],
+        };
     }
 
     private _sources: {
         list: DataSource[];
         map: Map<string, DataSource>;
     } | null = null;
-    async getDatasources(parentSpan?: Span) {
-        return withSpan('get-datasources', async (span) => {
-            if (this._sources) {
-                return this._sources;
-            }
 
-            const client = getThoughtSpotClient(this.ctx.props.instanceUrl, this.ctx.props.accessToken);
-            const sources = await getDataSources(client, span);
-            this._sources = {
-                list: sources,
-                map: new Map(sources.map(s => [s.id, s])),
-            }
+    @WithSpan('get-datasources')
+    async getDatasources() {
+        if (this._sources) {
             return this._sources;
-            }, parentSpan);
+        }
+
+        const sources = await this.getThoughtSpotService().getDataSources();
+        this._sources = {
+            list: sources,
+            map: new Map(sources.map(s => [s.id, s])),
+        }
+        return this._sources;
     }
 
     async addTracker(tracker: Tracker) {

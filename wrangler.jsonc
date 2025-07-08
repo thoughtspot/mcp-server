@@ -16,10 +16,7 @@
 				"class_name": "ThoughtSpotMCP",
 				"name": "MCP_OBJECT"
 			},
-			{
-				"class_name": "ThoughtSpotOAuthProvider",
-				"name": "THOUGHTSPOT_OAUTH_PROVIDER"
-			}
+
 		]
 	},
 	"migrations": [{

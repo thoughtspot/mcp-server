@@ -7,7 +7,6 @@ declare namespace Cloudflare {
 		HONEYCOMB_API_KEY: string;
 		HONEYCOMB_DATASET: string;
 		MCP_OBJECT: DurableObjectNamespace<import("./src/index").ThoughtSpotMCP>;
-		THOUGHTSPOT_OAUTH_PROVIDER: DurableObjectNamespace<import("./src/index").ThoughtSpotOAuthProvider>;
 		ANALYTICS: AnalyticsEngineDataset;
 		ASSETS: Fetcher;
 	}
