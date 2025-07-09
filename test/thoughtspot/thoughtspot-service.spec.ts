@@ -379,7 +379,6 @@ describe('thoughtspot-service', () => {
       const result = await fetchTMLAndCreateLiveboard('Test Liveboard', answers, mockClient);
 
       expect(result).toEqual({
-        liveboardUrl: null,
         error: expect.any(Error),
       });
     });

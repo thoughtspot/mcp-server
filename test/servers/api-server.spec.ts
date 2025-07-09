@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { apiServer } from "../../src/servers/api-server";
+import { ThoughtSpotService } from "../../src/thoughtspot/thoughtspot-service";
 import * as thoughtspotService from "../../src/thoughtspot/thoughtspot-service";
 import * as thoughtspotClient from "../../src/thoughtspot/thoughtspot-client";
 
@@ -10,6 +11,7 @@ vi.mock("../../src/thoughtspot/thoughtspot-client");
 describe("API Server", () => {
     let mockClient: any;
     let mockProps: any;
+    let mockServiceInstance: any;
 
     beforeEach(() => {
         // Reset all mocks
@@ -20,6 +22,17 @@ describe("API Server", () => {
             instanceUrl: "https://test.thoughtspot.cloud",
         };
         vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue(mockClient);
+
+        // Mock ThoughtSpotService instance methods
+        mockServiceInstance = {
+            getRelevantQuestions: vi.fn(),
+            getAnswerForQuestion: vi.fn(),
+            fetchTMLAndCreateLiveboard: vi.fn(),
+            getDataSources: vi.fn(),
+        };
+
+        // Mock the ThoughtSpotService constructor
+        vi.mocked(ThoughtSpotService).mockImplementation(() => mockServiceInstance);
 
         // Mock props
         mockProps = {
@@ -45,7 +58,7 @@ describe("API Server", () => {
                 error: null,
             };
 
-            vi.spyOn(thoughtspotService, "getRelevantQuestions").mockResolvedValue(mockQuestions);
+            mockServiceInstance.getRelevantQuestions.mockResolvedValue(mockQuestions);
 
             const requestBody = {
                 query: "Show me revenue data",
@@ -70,11 +83,10 @@ describe("API Server", () => {
                 mockProps.instanceUrl,
                 mockProps.accessToken
             );
-            expect(thoughtspotService.getRelevantQuestions).toHaveBeenCalledWith(
+            expect(mockServiceInstance.getRelevantQuestions).toHaveBeenCalledWith(
                 requestBody.query,
                 requestBody.datasourceIds,
-                requestBody.additionalContext,
-                mockClient
+                requestBody.additionalContext
             );
         });
 
@@ -84,7 +96,7 @@ describe("API Server", () => {
                 error: null,
             };
 
-            vi.spyOn(thoughtspotService, "getRelevantQuestions").mockResolvedValue(mockQuestions);
+            mockServiceInstance.getRelevantQuestions.mockResolvedValue(mockQuestions);
 
             const requestBody = {
                 query: "Show me revenue data",
@@ -104,11 +116,10 @@ describe("API Server", () => {
             expect(response.status).toBe(200);
             const data = await response.json();
             expect(data).toEqual(mockQuestions);
-            expect(thoughtspotService.getRelevantQuestions).toHaveBeenCalledWith(
+            expect(mockServiceInstance.getRelevantQuestions).toHaveBeenCalledWith(
                 requestBody.query,
                 requestBody.datasourceIds,
-                "",
-                mockClient
+                ""
             );
         });
     });
@@ -125,7 +136,7 @@ describe("API Server", () => {
                 message_type: "TSAnswer",
             } as any;
 
-            vi.spyOn(thoughtspotService, "getAnswerForQuestion").mockResolvedValue(mockAnswer);
+            mockServiceInstance.getAnswerForQuestion.mockResolvedValue(mockAnswer);
 
             const requestBody = {
                 question: "What is the total revenue?",
@@ -149,11 +160,10 @@ describe("API Server", () => {
                 mockProps.instanceUrl,
                 mockProps.accessToken
             );
-            expect(thoughtspotService.getAnswerForQuestion).toHaveBeenCalledWith(
+            expect(mockServiceInstance.getAnswerForQuestion).toHaveBeenCalledWith(
                 requestBody.question,
                 requestBody.datasourceId,
-                false,
-                mockClient
+                false
             );
         });
     });
@@ -162,7 +172,7 @@ describe("API Server", () => {
         it("should create liveboard successfully", async () => {
             const mockLiveboardUrl = "https://test.thoughtspot.cloud/#/pinboard/liveboard-123";
 
-            vi.spyOn(thoughtspotService, "createLiveboard").mockResolvedValue(mockLiveboardUrl);
+            mockServiceInstance.fetchTMLAndCreateLiveboard.mockResolvedValue({ url: mockLiveboardUrl });
 
             const requestBody = {
                 name: "Revenue Dashboard",
@@ -192,17 +202,16 @@ describe("API Server", () => {
                 mockProps.instanceUrl,
                 mockProps.accessToken
             );
-            expect(thoughtspotService.createLiveboard).toHaveBeenCalledWith(
+            expect(mockServiceInstance.fetchTMLAndCreateLiveboard).toHaveBeenCalledWith(
                 requestBody.name,
-                requestBody.answers,
-                mockClient
+                requestBody.answers
             );
         });
 
         it("should handle service errors", async () => {
             const mockError = new Error("Failed to create liveboard");
 
-            vi.spyOn(thoughtspotService, "createLiveboard").mockRejectedValue(mockError);
+            mockServiceInstance.fetchTMLAndCreateLiveboard.mockRejectedValue(mockError);
 
             const requestBody = {
                 name: "Revenue Dashboard",
@@ -245,7 +254,7 @@ describe("API Server", () => {
                 },
             ];
 
-            vi.spyOn(thoughtspotService, "getDataSources").mockResolvedValue(mockDatasources);
+            mockServiceInstance.getDataSources.mockResolvedValue(mockDatasources);
 
             const request = new Request("http://localhost/api/resources/datasources", {
                 method: "GET",
@@ -262,13 +271,13 @@ describe("API Server", () => {
                 mockProps.instanceUrl,
                 mockProps.accessToken
             );
-            expect(thoughtspotService.getDataSources).toHaveBeenCalledWith(mockClient);
+            expect(mockServiceInstance.getDataSources).toHaveBeenCalledWith();
         });
 
         it("should handle service errors", async () => {
             const mockError = new Error("Failed to fetch datasources");
 
-            vi.spyOn(thoughtspotService, "getDataSources").mockRejectedValue(mockError);
+            mockServiceInstance.getDataSources.mockRejectedValue(mockError);
 
             const request = new Request("http://localhost/api/resources/datasources", {
                 method: "GET",

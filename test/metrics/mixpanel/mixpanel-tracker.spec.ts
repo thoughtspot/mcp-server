@@ -324,15 +324,19 @@ describe("MixpanelTracker", () => {
             const props = { action: "click" };
 
             // Simulate async delay
+            let resolved = false;
             mockMixpanelClient.track.mockImplementation(() => 
-                new Promise(resolve => setTimeout(() => resolve("1"), 10))
+                new Promise(resolve => {
+                    setTimeout(() => {
+                        resolved = true;
+                        resolve("1");
+                    }, 10);
+                })
             );
 
-            const startTime = Date.now();
+            expect(resolved).toBe(false);
             await tracker.track(eventName, props);
-            const endTime = Date.now();
-
-            expect(endTime - startTime).toBeGreaterThanOrEqual(5); // Should have some delay
+            expect(resolved).toBe(true);
             expect(mockMixpanelClient.track).toHaveBeenCalledWith(eventName, props);
         });
     });

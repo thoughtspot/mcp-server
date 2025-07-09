@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import type { Props } from '../utils';
-import { ThoughtSpotService } from '../thoughtspot/thoughtspot-service';
+import { getDataSources, ThoughtSpotService } from '../thoughtspot/thoughtspot-service';
 import { getThoughtSpotClient } from '../thoughtspot/thoughtspot-client';
 import { WithSpan } from '../metrics/tracing/tracing-utils';
 import { context, type Span, SpanStatusCode, trace } from "@opentelemetry/api";
@@ -97,8 +97,7 @@ apiServer.post("/api/tools/create-liveboard", async (c) => {
 
 apiServer.get("/api/resources/datasources", async (c) => {
     const { props } = c.executionCtx;
-    const client = getThoughtSpotClient(props.instanceUrl, props.accessToken);
-    const datasources = await getDataSources(client);
+    const datasources = await handler.getDataSources(props);
     return c.json(datasources);
 });
 

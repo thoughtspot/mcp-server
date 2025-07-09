@@ -2,6 +2,10 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { withBearerHandler } from "../src/bearer";
 import { ThoughtSpotMCP } from "../src";
 import { Hono } from "hono";
+import { encodeBase64Url, decodeBase64Url } from 'hono/utils/encode';
+
+// For correctly-typed Request
+const IncomingRequest = Request<unknown, IncomingRequestCfProperties>;
 
 describe("Bearer Handler", () => {
     let app: any;

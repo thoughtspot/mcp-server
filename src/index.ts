@@ -59,7 +59,7 @@ const oauthHandler = {
         const span = trace.getActiveSpan();
         if (span) {
             span.setAttribute('component', 'OAuthProvider');
-            span.setAttribute('instance_url', ctx.props.instanceUrl);
+            span.setAttribute('instance_url', (ctx as any).props?.instanceUrl || 'unknown');
             span.setAttribute('request_url', request.url);
             span.setAttribute('request_method', request.method);
         }
