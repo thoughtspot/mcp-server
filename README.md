@@ -17,19 +17,22 @@ Join our [Discord](https://developers.thoughtspot.com/join-discord) to get suppo
 
 ## Table of Contents
 
-- [MCP Client Configuration](#mcp-client-configuration)
+- [Usage](#mcp-client-configuration)
 - [Demo video](#demo)
+- [Usage in APIs](#usage-in-apis)
+  - [OpenAI / ChatGPT](#openai-responses-api)
+  - [Claude](#claude-mcp-connector)
 - [Features](#features)
   - [Supported transports](#supported-transports)
-- [Contributing](#contributing)
-  - [Local Development](#local-development)
-  - [Endpoints](#endpoints)
-- [Configuration](#configuration)
 - [Stdio support (fallback)](#stdio-support-fallback)
   - [How to obtain a TS_AUTH_TOKEN](#how-to-obtain-a-ts_auth_token)
 - [Troubleshooting](#troubleshooting)
+- [Contributing](#contributing)
+  - [Local Development](#local-development)
+  - [Endpoints](#endpoints)
 
-## MCP Client Configuration
+
+## Usage
 
 To configure this MCP server in your MCP client (such as Claude Desktop, Windsurf, Cursor, etc.), add the following configuration to your MCP client settings:
 
@@ -57,98 +60,13 @@ https://github.com/user-attachments/assets/72a5383a-7b2a-4987-857a-b6218d7eea22
 
 Watch on [Loom](https://www.loom.com/share/433988d98a7b41fb8df2239da014169a?sid=ef2032a2-6e9b-4902-bef0-57df5623963e)
 
-## Features
-
-- **OAuth Authentication**: Access your data, as yourself.
-- **Tools**:
-  - `ping`: Test connectivity and authentication.
-  - `getRelevantQuestions`: Get relevant data questions from ThoughtSpot analytics based on a user query.
-  - `getAnswer`: Get the answer to a specific question from ThoughtSpot analytics.
-  - `createLiveboard`: Create a liveboard from a list of answers.
-- **MCP Resources**:
-   - `datasources`: List of ThoughtSpot Data models the user has access to.
-
-### Supported transports
-
-- SSE [/sse]()
-- Streamed HTTP [/mcp]()
-
-## Contributing
-
-### Local Development
-
-1. **Install dependencies**:
-   ```sh
-   npm install
-   ```
-2. **Set up environment variables**:
-   - Copy `.dev.vars` and fill in your ThoughtSpot instance URL and access token.
-3. **Start the development server**:
-   ```sh
-   npm run dev
-   ```
-
-### Endpoints
-
-- `/mcp`: MCP HTTP Streaming endpoint
-- `/sse`: Server-sent events for MCP
-- `/api`: MCP tools exposed as HTTP endpoints
-- `/authorize`, `/token`, `/register`: OAuth endpoints
-- `/bearer/mcp`, `/bearer/sse`: MCP endpoints as bearer auth instead of Oauth, mainly for use in APIs or in cases where Oauth is not working.
-
-## Configuration
-
-- **wrangler.jsonc**: Configure bindings, secrets, and compatibility.
-
-
-## Stdio support (fallback)
-
-If you are unable to use the remote MCP server due to connectivity restrictions on your Thoughtspot instance. You could use the `stdio` local transport using the `npm` package.
-
-Here is how to configure `stdio` with MCP Client:
-
-```json 
-{
-  "mcpServers": {
-    "ThoughtSpot": {
-      "command": "npx",
-      "args": [
-         "@thoughtspot/mcp-server"
-      ],
-      "env": {
-         "TS_INSTANCE": "<your Thoughtspot Instance URL>",
-         "TS_AUTH_TOKEN": "<ThoughtSpot Access Token>"
-      }
-    }
-  }
-}
-```
-
-#### How to obtain a `TS_AUTH_TOKEN` ?
-
-- Go to ThoughtSpot => _Develop_ => _Rest Playground v2.0_
-- _Authentication_ => _Get Full access token_
-- Scroll down and expand the "body"
-- Add your "username" and "password".
-- Put whatever "validity_time" you want the token to be.
-- Click on "Try it out" on the bottom right.
-- You should get a token in the response, thats the bearer token.
-
-#### Alternative way to get `TS_AUTH_TOKEN`
-- Login to the ThoughtSpot instance as you would normally.
-- Opem in a new tab this URL:
-  - https://your-ts-instance/api/rest/2.0/auth/session/token
-- You will see a JSON response, copy the "token" value (without the quotes).
-- This is the token you could use.
-
-
-### Usage in APIs
+## Usage in APIs
 
 ThoughtSpot's remote MCP server can be used in LLM APIs which support calling MCP tools. 
 
 Here are examples with the common LLM providers:
 
-#### OpenAI Responses API
+### OpenAI Responses API
 
 ```bash
 curl https://api.openai.com/v1/responses \
@@ -174,7 +92,7 @@ curl https://api.openai.com/v1/responses \
 More details on how can you use OpenAI API with MCP tool calling can be found [here](https://platform.openai.com/docs/guides/tools-remote-mcp).
 
 
-#### Claude MCP Connector
+### Claude MCP Connector
 
 ```bash
 curl https://api.anthropic.com/v1/messages \
@@ -204,9 +122,66 @@ Note: In the `authorization_token` field we have suffixed the ThoughtSpot instan
 
 More details on Claude MCP connector [here](https://docs.anthropic.com/en/docs/agents-and-tools/mcp-connector).
 
-#### How to get TS_AUTH_TOKEN for APIs ?
+### How to get TS_AUTH_TOKEN for APIs ?
 
 For API usage, you would the token endpoints with a `secret_key` to generate the `API_TOKEN` for a specific user/role, more details [here](https://developers.thoughtspot.com/docs/api-authv2#trusted-auth-v2). 
+
+
+## Features
+
+- **OAuth Authentication**: Access your data, as yourself.
+- **Tools**:
+  - `ping`: Test connectivity and authentication.
+  - `getRelevantQuestions`: Get relevant data questions from ThoughtSpot analytics based on a user query.
+  - `getAnswer`: Get the answer to a specific question from ThoughtSpot analytics.
+  - `createLiveboard`: Create a liveboard from a list of answers.
+- **MCP Resources**:
+   - `datasources`: List of ThoughtSpot Data models the user has access to.
+
+### Supported transports
+
+- SSE [/sse]()
+- Streamed HTTP [/mcp]()
+
+## Stdio support (fallback)
+
+If you are unable to use the remote MCP server due to connectivity restrictions on your Thoughtspot instance. You could use the `stdio` local transport using the `npm` package.
+
+Here is how to configure `stdio` with MCP Client:
+
+```json 
+{
+  "mcpServers": {
+    "ThoughtSpot": {
+      "command": "npx",
+      "args": [
+         "@thoughtspot/mcp-server"
+      ],
+      "env": {
+         "TS_INSTANCE": "<your Thoughtspot Instance URL>",
+         "TS_AUTH_TOKEN": "<ThoughtSpot Access Token>"
+      }
+    }
+  }
+}
+```
+
+### How to obtain a `TS_AUTH_TOKEN` ?
+
+- Go to ThoughtSpot => _Develop_ => _Rest Playground v2.0_
+- _Authentication_ => _Get Full access token_
+- Scroll down and expand the "body"
+- Add your "username" and "password".
+- Put whatever "validity_time" you want the token to be.
+- Click on "Try it out" on the bottom right.
+- You should get a token in the response, thats the bearer token.
+
+#### Alternative way to get `TS_AUTH_TOKEN`
+- Login to the ThoughtSpot instance as you would normally.
+- Opem in a new tab this URL:
+  - https://your-ts-instance/api/rest/2.0/auth/session/token
+- You will see a JSON response, copy the "token" value (without the quotes).
+- This is the token you could use.
 
 ### Troubleshooting
 
@@ -228,6 +203,27 @@ Make sure to add the following entries in your ThoughtSpot instance:
 - Click "Edit"
 - Add "agent.thoughtspot.app" to the the "SAML redirect domains". 
 
+## Contributing
 
+### Local Development
+
+1. **Install dependencies**:
+   ```sh
+   npm install
+   ```
+2. **Set up environment variables**:
+   - Copy `.dev.vars` and fill in your ThoughtSpot instance URL and access token.
+3. **Start the development server**:
+   ```sh
+   npm run dev
+   ```
+
+### Endpoints
+
+- `/mcp`: MCP HTTP Streaming endpoint
+- `/sse`: Server-sent events for MCP
+- `/api`: MCP tools exposed as HTTP endpoints
+- `/authorize`, `/token`, `/register`: OAuth endpoints
+- `/bearer/mcp`, `/bearer/sse`: MCP endpoints as bearer auth instead of Oauth, mainly for use in APIs or in cases where Oauth is not working.
 
 MCP Server, © ThoughtSpot, Inc. 2025
