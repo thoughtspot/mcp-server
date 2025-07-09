@@ -11,12 +11,6 @@ import { zodToJsonSchema } from "zod-to-json-schema";
 import type { Props } from "../utils";
 import { getThoughtSpotClient } from "../thoughtspot/thoughtspot-client";
 import {
-    type DataSource,
-    fetchTMLAndCreateLiveboard,
-    getAnswerForQuestion,
-    getDataSources,
-    getRelevantQuestions,
-    getSessionInfo,
     ThoughtSpotService
 } from "../thoughtspot/thoughtspot-service";
 import { MixpanelTracker } from "../metrics/mixpanel/mixpanel";
@@ -66,7 +60,8 @@ interface Context {
 
 export class MCPServer extends Server {
     private trackers: Trackers = new Trackers();
-    public constructor(private ctx: Context) {
+    private sessionInfo: any;
+    constructor(private ctx: Context) {
         super({
             name: "ThoughtSpot",
             version: "1.0.0",
@@ -85,9 +80,9 @@ export class MCPServer extends Server {
     }
 
     async init() {
-        const sessionInfo = await this.getThoughtSpotService().getSessionInfo();
+        this.sessionInfo = await this.getThoughtSpotService().getSessionInfo();
         const mixpanel = new MixpanelTracker(
-            sessionInfo,
+            this.sessionInfo,
             this.ctx.props.clientName
         );
         this.addTracker(mixpanel);
@@ -113,6 +108,9 @@ export class MCPServer extends Server {
 
     @WithSpan('list-tools')
     async listTools() {
+        const span = trace.getSpan(context.active());
+        span?.setAttribute("user_guid", this.sessionInfo.userGUID);
+        span?.setAttribute("instance_url", this.ctx.props.instanceUrl);
         return {
             tools: [
                 {
@@ -141,6 +139,9 @@ export class MCPServer extends Server {
 
     @WithSpan('list-datasources')
     async listResources() {
+        const span = trace.getSpan(context.active());
+        span?.setAttribute("user_guid", this.sessionInfo.userGUID);
+        span?.setAttribute("instance_url", this.ctx.props.instanceUrl);
         const sources = await this.getDatasources();
         return {
             resources: sources.list.map((s) => ({
@@ -154,6 +155,9 @@ export class MCPServer extends Server {
 
     @WithSpan('read-datasources')
     async readResource(request: z.infer<typeof ReadResourceRequestSchema>) {
+        const span = trace.getSpan(context.active());
+        span?.setAttribute("user_guid", this.sessionInfo.userGUID);
+        span?.setAttribute("instance_url", this.ctx.props.instanceUrl);
         const { uri } = request.params;
         const sourceId = uri.split("///").pop();
         if (!sourceId) {
@@ -184,11 +188,13 @@ export class MCPServer extends Server {
         const { name } = request.params;
         this.trackers.track(TrackEvent.CallTool, { toolName: name });
 
+        const span = trace.getSpan(context.active());
+        span?.setAttribute("instance_url", this.ctx.props.instanceUrl);
+        span?.setAttribute("user_guid", this.sessionInfo.userGUID);
+
         switch (name) {
             case ToolName.Ping: {
                 console.log("Received Ping request");
-                const span = trace.getSpan(context.active());
-                span?.setAttribute("instanceUrl", this.ctx.props.instanceUrl);
                 if (this.ctx.props.accessToken && this.ctx.props.instanceUrl) {
                     span?.setStatus({ code: SpanStatusCode.OK, message: "Ping successful" });
                     return {
@@ -221,7 +227,9 @@ export class MCPServer extends Server {
     @WithSpan('call-get-relevant-questions')
     async callGetRelevantQuestions(request: z.infer<typeof CallToolRequestSchema>) {
         const { query, datasourceIds: sourceIds, additionalContext } = GetRelevantQuestionsSchema.parse(request.params.arguments);
-        console.log("[DEBUG] Getting relevant questions for query: ", query, " and datasource: ", sourceIds);
+        console.log("[DEBUG] Getting relevant questions for datasource: ", sourceIds);
+        const span = trace.getSpan(context.active());
+        span?.setAttribute("datasource_ids", sourceIds);
 
         const relevantQuestions = await this.getThoughtSpotService().getRelevantQuestions(
             query,
@@ -230,6 +238,7 @@ export class MCPServer extends Server {
         );
 
         if (relevantQuestions.error) {
+            span?.setStatus({ code: SpanStatusCode.ERROR, message: `Error getting relevant questions ${relevantQuestions.error.message}` });
             return {
                 isError: true,
                 content: [{ type: "text", text: `ERROR: ${relevantQuestions.error.message}` }],
@@ -237,11 +246,12 @@ export class MCPServer extends Server {
         }
 
         if (relevantQuestions.questions.length === 0) {
+            span?.setStatus({ code: SpanStatusCode.OK, message: "No relevant questions found" });
             return {
                 content: [{ type: "text", text: "No relevant questions found" }],
             };
         }
-        
+        span?.setStatus({ code: SpanStatusCode.OK, message: "Relevant questions found" });
         return {
             content: relevantQuestions.questions.map(q => ({
                 type: "text",
@@ -255,14 +265,18 @@ export class MCPServer extends Server {
         const { question, datasourceId: sourceId } = GetAnswerSchema.parse(request.params.arguments);
 
         const answer = await this.getThoughtSpotService().getAnswerForQuestion(question, sourceId, false);
+        const span = trace.getSpan(context.active());
+        span?.setAttribute("datasource_id", sourceId);
 
         if (answer.error) {
+            span?.setStatus({ code: SpanStatusCode.ERROR, message: `Error getting answer ${answer.error.message}` });
             return {
                 isError: true,
                 content: [{ type: "text", text: `ERROR: ${answer.error.message}` }],
             };
         }
 
+        span?.setStatus({ code: SpanStatusCode.OK, message: "Answer found" });
         return {
             content: [
                 { type: "text", text: answer.data },
@@ -278,12 +292,15 @@ export class MCPServer extends Server {
     async callCreateLiveboard(request: z.infer<typeof CallToolRequestSchema>) {
         const { name, answers } = CreateLiveboardSchema.parse(request.params.arguments);
         const liveboard = await this.getThoughtSpotService().fetchTMLAndCreateLiveboard(name, answers);
+        const span = trace.getSpan(context.active());
         if (liveboard.error) {
+            span?.setStatus({ code: SpanStatusCode.ERROR, message: `Error creating liveboard ${liveboard.error.message}` });
             return {
                 isError: true,
                 content: [{ type: "text", text: `ERROR: ${liveboard.error.message}` }],
             };
         }
+        span?.setStatus({ code: SpanStatusCode.OK, message: "Liveboard created successfully" });
         return {
             content: [{
                 type: "text",

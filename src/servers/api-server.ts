@@ -3,6 +3,7 @@ import type { Props } from '../utils';
 import { ThoughtSpotService } from '../thoughtspot/thoughtspot-service';
 import { getThoughtSpotClient } from '../thoughtspot/thoughtspot-client';
 import { WithSpan } from '../metrics/tracing/tracing-utils';
+import { context, type Span, SpanStatusCode, trace } from "@opentelemetry/api";
 
 const apiServer = new Hono<{ Bindings: Env & { props: Props } }>()
 
@@ -38,6 +39,10 @@ class ApiHandler {
 
     @WithSpan('api-proxy-post')
     async proxyPost(props: Props, path: string, body: any) {
+        const span = trace.getSpan(context.active());
+        span?.setAttribute("instance_url", props.instanceUrl);
+        span?.setAttribute("path", path);
+        span?.addEvent("proxy-post");
         return fetch(props.instanceUrl + path, {
             method: 'POST',
             headers: {
@@ -52,6 +57,10 @@ class ApiHandler {
 
     @WithSpan('api-proxy-get')
     async proxyGet(props: Props, path: string) {
+        const span = trace.getSpan(context.active());
+        span?.setAttribute("instance_url", props.instanceUrl);
+        span?.setAttribute("path", path);
+        span?.addEvent("proxy-get");
         return fetch(props.instanceUrl + path, {
             method: 'GET',
             headers: {
