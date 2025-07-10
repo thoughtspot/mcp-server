@@ -6,6 +6,7 @@ import { withSpan } from './metrics/tracing/tracing-utils';
 export function withBearerHandler(app: typeof honoApp, MCPServer: typeof ThoughtSpotMCP): typeof honoApp {
     app.mount("/bearer", async (req, env, ctx) => {
         return withSpan('with-bearer-mcp', async (span) => {
+            console.log("getting bearer handler for honeycomb dataset", process.env.HONEYCOMB_DATASET);
             const authHeader = req.headers.get("authorization");
             if (!authHeader) {
                 span.setAttributes({
