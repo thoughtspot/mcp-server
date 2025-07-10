@@ -19,7 +19,7 @@ const config: ResolveConfigFn = (env: Env, _trigger) => {
     };
 };
 
-class ThoughtSpotMCPWrapper extends McpAgent<Env, any, Props> {
+class ThoughtSpotMCPCore extends McpAgent<Env, any, Props> {
     server = new MCPServer(this);
 
 
@@ -37,7 +37,7 @@ class ThoughtSpotMCPWrapper extends McpAgent<Env, any, Props> {
 }
 
 // Create the instrumented ThoughtSpotMCP for the main export
-export const ThoughtSpotMCP = instrumentDO(ThoughtSpotMCPWrapper, config);
+export const ThoughtSpotMCP = instrumentDO(ThoughtSpotMCPCore, config);
 
 // Create the OAuth provider instance
 const oauthProvider = new OAuthProvider({
@@ -58,10 +58,12 @@ const oauthHandler = {
         // Add OpenTelemetry tracing attributes
         const span = trace.getActiveSpan();
         if (span) {
-            span.setAttribute('component', 'OAuthProvider');
-            span.setAttribute('instance_url', (ctx as any).props?.instanceUrl || 'unknown');
-            span.setAttribute('request_url', request.url);
-            span.setAttribute('request_method', request.method);
+            span.setAttributes({
+                component: 'OAuthProvider',
+                instance_url: (ctx as any).props?.instanceUrl || 'unknown',
+                request_url: request.url,
+                request_method: request.method,
+            });
         }
 
         return oauthProvider.fetch(request, env, ctx);

@@ -1,7 +1,8 @@
 import type { ThoughtSpotRestApi } from "@thoughtspot/rest-api-sdk";
 import type { Span } from "@opentelemetry/api";
 import { SpanStatusCode, trace, context } from "@opentelemetry/api";
-import { withSpan, WithSpan } from "../metrics/tracing/tracing-utils";
+import { getActiveSpan, WithSpan } from "../metrics/tracing/tracing-utils";
+import { McpServerError } from "../utils";
 
 
 /**
@@ -69,11 +70,13 @@ export class ThoughtSpotService {
         session_identifier: string,
         generation_number: number
     ): Promise<string> {
-        const span = trace.getSpan(context.active());
+        const span = getActiveSpan();
         
         try {
-            span?.setAttribute("session_identifier", session_identifier);
-            span?.setAttribute("generation_number", generation_number);
+            span?.setAttributes({
+                session_identifier,
+                generation_number,
+            })
             
             console.log("[DEBUG] Getting Data for session_identifier: ", session_identifier, "generation_number: ", generation_number, "instanceUrl: ", (this.client as any).instanceUrl);
             span?.addEvent("get-answer-data");
@@ -104,7 +107,7 @@ export class ThoughtSpotService {
         session_identifier: string,
         generation_number: number
     ): Promise<any> {
-        const span = trace.getSpan(context.active());
+        const span = getActiveSpan();
         
         try {
             span?.setAttribute("session_identifier", session_identifier);
@@ -131,10 +134,12 @@ export class ThoughtSpotService {
         sourceId: string,
         shouldGetTML: boolean
     ): Promise<any> {
-        const span = trace.getSpan(context.active());
+        const span = getActiveSpan();
         
-        span?.setAttribute("datasource_id", sourceId);
-        span?.setAttribute("shouldGetTML", shouldGetTML);
+        span?.setAttributes({
+            datasource_id: sourceId,
+            should_get_tml: shouldGetTML,
+        });
         span?.addEvent("get-answer-for-question");
         
         console.log("[DEBUG] Getting answer for sourceId: ", sourceId, "shouldGetTML: ", shouldGetTML);
@@ -146,8 +151,10 @@ export class ThoughtSpotService {
             })
 
             const { session_identifier, generation_number } = answer as any;
-            span?.setAttribute("session_identifier", session_identifier);
-            span?.setAttribute("generation_number", generation_number);
+            span?.setAttributes({
+                session_identifier,
+                generation_number,
+            });
 
             const [data, tml] = await Promise.all([
                 this.getAnswerData(question, session_identifier, generation_number),
@@ -177,11 +184,13 @@ export class ThoughtSpotService {
      */
     @WithSpan('fetch-tml-and-create-liveboard')
     async fetchTMLAndCreateLiveboard(name: string, answers: any[]): Promise<{ url?: string; error: Error | null }> {
-        const span = trace.getSpan(context.active());
+        const span = getActiveSpan();
         
         try {
-            span?.setAttribute("liveboard_name", name);
-            span?.setAttribute("answers_count", answers.length);
+            span?.setAttributes({
+                liveboard_name: name,
+                answers_count: answers.length,
+            });
             span?.addEvent("create-answer-tmls");
 
             const tmls = await Promise.all(answers.map((answer) => 
@@ -213,11 +222,13 @@ export class ThoughtSpotService {
      */
     @WithSpan('create-liveboard')
     async createLiveboard(name: string, answers: any[]): Promise<string> {
-        const span = trace.getSpan(context.active());
+        const span = getActiveSpan();
         
         span?.addEvent("createLiveboard");
-        span?.setAttribute("liveboard_name", name);
-        span?.setAttribute("total_answers", answers.length);
+        span?.setAttributes({
+            liveboard_name: name,
+            total_answers: answers.length,
+        });
         
         answers = answers.filter((answer) => answer.tml);
         
@@ -255,7 +266,7 @@ export class ThoughtSpotService {
      */
     @WithSpan('get-data-sources')
     async getDataSources(): Promise<DataSource[]> {
-        const span = trace.getSpan(context.active());
+        const span = getActiveSpan();
         
         span?.addEvent("get-data-sources");
         
@@ -286,7 +297,7 @@ export class ThoughtSpotService {
      */
     @WithSpan('get-session-info')
     async getSessionInfo(): Promise<SessionInfo> {
-        const span = trace.getSpan(context.active());
+        const span = getActiveSpan();
         
         const info = await (this.client as any).getSessionInfo();
         const devMixpanelToken = info.configInfo.mixpanelConfig.devSdkKey;
@@ -317,10 +328,8 @@ export class ThoughtSpotService {
      */
     @WithSpan('search-worksheets')
     async searchWorksheets(searchTerm: string): Promise<DataSource[]> {
-        const span = trace.getSpan(context.active());
+        const span = getActiveSpan();
         
-        span?.setAttribute('search_type', 'worksheets');
-
         const resp = await this.client.searchMetadata({
             metadata: [{
                 type: "LOGICAL_TABLE",
@@ -411,22 +420,3 @@ export async function getSessionInfo(client: ThoughtSpotRestApi): Promise<Sessio
     const service = new ThoughtSpotService(client);
     return service.getSessionInfo();
 }
-
-/**
- * Usage examples:
- * 
- * // Create service instance
- * const service = new ThoughtSpotService(client);
- * 
- * // All method calls are automatically traced with meaningful span names
- * const questions = await service.getRelevantQuestions('sales data', ['ws1', 'ws2'], 'context');
- * const answer = await service.getAnswerForQuestion('What is total sales?', 'ws1', true);
- * const dataSources = await service.getDataSources();
- * const sessionInfo = await service.getSessionInfo();
- * const worksheets = await service.searchWorksheets('sales');
- * const isConnected = await service.validateConnection();
- * 
- * // Creating liveboards
- * const liveboard = await service.createLiveboard('My Dashboard', answers);
- * const liveboardResult = await service.fetchTMLAndCreateLiveboard('My Dashboard', answers);
- */

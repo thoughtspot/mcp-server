@@ -1,14 +1,24 @@
 import { Hono } from 'hono'
 import type { Props } from '../utils';
+import { McpServerError } from '../utils';
 import { getDataSources, ThoughtSpotService } from '../thoughtspot/thoughtspot-service';
 import { getThoughtSpotClient } from '../thoughtspot/thoughtspot-client';
-import { WithSpan } from '../metrics/tracing/tracing-utils';
+import { getActiveSpan, WithSpan } from '../metrics/tracing/tracing-utils';
 import { context, type Span, SpanStatusCode, trace } from "@opentelemetry/api";
 
 const apiServer = new Hono<{ Bindings: Env & { props: Props } }>()
 
 class ApiHandler {
+
+    private initSpan(props: Props) {
+        const span = getActiveSpan();
+        span?.setAttributes({
+            instance_url: props.instanceUrl,
+        });
+    }
+
     private getThoughtSpotService(props: Props): ThoughtSpotService {
+        this.initSpan(props);
         return new ThoughtSpotService(getThoughtSpotClient(props.instanceUrl, props.accessToken));
     }
 
@@ -39,9 +49,11 @@ class ApiHandler {
 
     @WithSpan('api-proxy-post')
     async proxyPost(props: Props, path: string, body: any) {
-        const span = trace.getSpan(context.active());
-        span?.setAttribute("instance_url", props.instanceUrl);
-        span?.setAttribute("path", path);
+        const span = getActiveSpan();
+        span?.setAttributes({
+            instance_url: props.instanceUrl,
+            path: path,
+        });
         span?.addEvent("proxy-post");
         return fetch(props.instanceUrl + path, {
             method: 'POST',
@@ -57,9 +69,11 @@ class ApiHandler {
 
     @WithSpan('api-proxy-get')
     async proxyGet(props: Props, path: string) {
-        const span = trace.getSpan(context.active());
-        span?.setAttribute("instance_url", props.instanceUrl);
-        span?.setAttribute("path", path);
+        const span = getActiveSpan();
+        span?.setAttributes({
+            instance_url: props.instanceUrl,
+            path: path,
+        });
         span?.addEvent("proxy-get");
         return fetch(props.instanceUrl + path, {
             method: 'GET',

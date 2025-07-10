@@ -1,16 +1,17 @@
 import type { AuthRequest, OAuthHelpers } from '@cloudflare/workers-oauth-provider'
 import { Hono } from 'hono'
 import type { Props } from './utils';
+import { McpServerError } from './utils';
 import { parseRedirectApproval, renderApprovalDialog, buildSamlRedirectUrl } from './oauth-manager/oauth-utils';
 import { renderTokenCallback } from './oauth-manager/token-utils';
 import { any } from 'zod';
 import { encodeBase64Url, decodeBase64Url } from 'hono/utils/encode';
-import { WithSpan } from './metrics/tracing/tracing-utils';
+import { getActiveSpan, WithSpan } from './metrics/tracing/tracing-utils';
 import { context, type Span, SpanStatusCode, trace } from "@opentelemetry/api";
 
 const app = new Hono<{ Bindings: Env & { OAUTH_PROVIDER: OAuthHelpers } }>()
 
-class OAuthHandler {
+class Handler {
     @WithSpan('serve-index')
     async serveIndex(env: Env) {
         return env.ASSETS.fetch('/index.html');
@@ -23,15 +24,14 @@ class OAuthHandler {
 
     @WithSpan('authorize-get')
     async getAuthorize(request: Request, oauthProvider: OAuthHelpers) {
-        const span = trace.getSpan(context.active());        
+        const span = getActiveSpan();
         const oauthReqInfo = await oauthProvider.parseAuthRequest(request);
         const { clientId } = oauthReqInfo;
         
         span?.setAttribute("client_id", clientId || "unknown");
         
         if (!clientId) {
-            span?.setStatus({ code: SpanStatusCode.ERROR, message: "Missing client ID" });
-            throw new Error('Invalid request');
+            throw new McpServerError(span, { message: "Missing client ID" }, 400);
         }
         const client = await oauthProvider.lookupClient(clientId);
         return renderApprovalDialog(request, {
@@ -47,20 +47,18 @@ class OAuthHandler {
 
     @WithSpan('authorize-post')
     async postAuthorize(request: Request, requestUrl: string) {
-        const span = trace.getSpan(context.active());        
+        const span = getActiveSpan();   
         try {
             const { state, instanceUrl } = await parseRedirectApproval(request);
             
             span?.setAttribute("instance_url", instanceUrl || "unknown");
             
             if (!state.oauthReqInfo) {
-                span?.setStatus({ code: SpanStatusCode.ERROR, message: "Missing OAuth request info" });
-                throw new Error('Invalid request');
+                throw new McpServerError(span, { message: "Missing OAuth request info" }, 400);
             }
 
             if (!instanceUrl) {
-                span?.setStatus({ code: SpanStatusCode.ERROR, message: "Missing instance URL" });
-                throw new Error('Missing instance URL');
+                throw new McpServerError(span, { message: "Missing instance URL" }, 400);
             }
 
             const redirectUrl = buildSamlRedirectUrl(
@@ -73,15 +71,13 @@ class OAuthHandler {
 
             return redirectUrl;
         } catch (error) {
-            span?.setStatus({ code: SpanStatusCode.ERROR, message: `Error in POST /authorize: ${error}` });
-            console.error('Error in POST /authorize:', error);
-            throw error;
+            throw new McpServerError(span, error, 500);
         }
     }
 
     @WithSpan('oauth-callback')
     async handleCallback(request: Request, assets: any, requestUrl: string) {
-        const span = trace.getSpan(context.active());
+        const span = getActiveSpan();
         
         const url = new URL(request.url);
         const instanceUrl = url.searchParams.get('instanceUrl');
@@ -89,25 +85,23 @@ class OAuthHandler {
             // Added as a workaround for https://thoughtspot.atlassian.net/browse/SCAL-258056
             ?.replace('/10023.html', '');
 
-        span?.setAttribute("instance_url", instanceUrl || "unknown");
-        span?.setAttribute("has_oauth_req_info", !!encodedOauthReqInfo);
+        span?.setAttributes({
+            instance_url: instanceUrl || "unknown",
+            has_oauth_req_info: !!encodedOauthReqInfo,
+        });
 
         if (!instanceUrl) {
-            span?.setStatus({ code: SpanStatusCode.ERROR, message: "Missing instance URL" });
-            throw new Error('Missing instance URL');
+            throw new McpServerError(span, { message: "Missing instance URL" }, 400);
         }
         if (!encodedOauthReqInfo) {
-            span?.setStatus({ code: SpanStatusCode.ERROR, message: "Missing OAuth request info" });
-            throw new Error('Missing OAuth request info');
+            throw new McpServerError(span, { message: "Missing OAuth request info" }, 400);
         }
 
         let decodedOAuthReqInfo: any;
         try {
             decodedOAuthReqInfo = JSON.parse(new TextDecoder().decode(decodeBase64Url(encodedOauthReqInfo)));
         } catch (error) {
-            span?.setStatus({ code: SpanStatusCode.ERROR, message: `Error decoding OAuth request info: ${error}` });
-            console.error('Error decoding OAuth request info:', error);
-            throw new Error('Invalid OAuth request info format');
+            throw new McpServerError(span, { message: "Invalid OAuth request info format", details: error }, 400);
         }
         const origin = new URL(requestUrl).origin;
         try {
@@ -115,9 +109,7 @@ class OAuthHandler {
             span?.setStatus({ code: SpanStatusCode.OK, message: "Token callback rendered successfully" });
             return htmlContent;
         } catch (error) {
-            span?.setStatus({ code: SpanStatusCode.ERROR, message: `Error rendering token callback: ${error}` });
-            console.error('Error rendering token callback:', error);
-            throw new Error('Error rendering token callback');
+            throw new McpServerError(span, { message: "Error rendering token callback", details: error }, 500);
         }
     }
 
@@ -125,7 +117,7 @@ class OAuthHandler {
 
     @WithSpan('store-token')
     async storeToken(request: Request, oauthProvider: OAuthHelpers) {
-        const span = trace.getSpan(context.active());
+        const span = getActiveSpan();
         
         let token: any;
         let oauthReqInfo: any;
@@ -137,18 +129,16 @@ class OAuthHandler {
             oauthReqInfo = body.oauthReqInfo;
             instanceUrl = body.instanceUrl;
         } catch (error) {
-            span?.setStatus({ code: SpanStatusCode.ERROR, message: `Error parsing JSON: ${error}` });
-            console.error('Error parsing JSON in store-token:', error);
-            throw new Error('Invalid JSON format');
+            throw new McpServerError(span, { message: "Invalid JSON format", details: error }, 400);
         }
-        
-        span?.setAttribute("instance_url", instanceUrl || "unknown");
-        span?.setAttribute("has_token", !!token);
-        span?.setAttribute("has_oauth_req_info", !!oauthReqInfo);
+        span?.setAttributes({
+            instance_url: instanceUrl || "unknown",
+            has_token: !!token,
+            has_oauth_req_info: !!oauthReqInfo,
+        });
         
         if (!token || !oauthReqInfo || !instanceUrl) {
-            span?.setStatus({ code: SpanStatusCode.ERROR, message: "Missing required fields" });
-            throw new Error('Missing token or OAuth request info or instanceUrl');
+            throw new McpServerError(span, { message: "Missing token or OAuth request info or instanceUrl" }, 400);
         }
 
         const { clientId } = oauthReqInfo;
@@ -178,7 +168,7 @@ class OAuthHandler {
     }
 }
 
-const handler = new OAuthHandler();
+const handler = new Handler();
 
 app.get("/", async (c) => {
     const response = await handler.serveIndex(c.env);

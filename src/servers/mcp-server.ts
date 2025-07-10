@@ -9,14 +9,16 @@ import {
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import type { Props } from "../utils";
+import { McpServerError } from "../utils";
 import { getThoughtSpotClient } from "../thoughtspot/thoughtspot-client";
 import {
-    ThoughtSpotService
+    ThoughtSpotService,
+    type DataSource
 } from "../thoughtspot/thoughtspot-service";
 import { MixpanelTracker } from "../metrics/mixpanel/mixpanel";
 import { Trackers, type Tracker, TrackEvent } from "../metrics";
 import { context, type Span, SpanStatusCode, trace } from "@opentelemetry/api";
-import { WithSpan } from "../metrics/tracing/tracing-utils";
+import { getActiveSpan, WithSpan } from "../metrics/tracing/tracing-utils";
 
 const ToolInputSchema = ToolSchema.shape.inputSchema;
 type ToolInput = z.infer<typeof ToolInputSchema>;
@@ -58,6 +60,23 @@ interface Context {
     props: Props;
 }
 
+// Response utility types
+type ContentItem = {
+    type: "text";
+    text: string;
+};
+
+type SuccessResponse = {
+    content: ContentItem[];
+};
+
+type ErrorResponse = {
+    isError: true;
+    content: ContentItem[];
+};
+
+type ToolResponse = SuccessResponse | ErrorResponse;
+
 export class MCPServer extends Server {
     private trackers: Trackers = new Trackers();
     private sessionInfo: any;
@@ -77,6 +96,57 @@ export class MCPServer extends Server {
 
     private getThoughtSpotService() {
         return new ThoughtSpotService(getThoughtSpotClient(this.ctx.props.instanceUrl, this.ctx.props.accessToken));
+    }
+
+    /**
+     * Initialize span with common attributes (user_guid and instance_url)
+     */
+    private initSpanWithCommonAttributes(span: Span | undefined): void {
+        span?.setAttributes({
+            user_guid: this.sessionInfo.userGUID,
+            instance_url: this.ctx.props.instanceUrl,
+        });
+    }
+
+    /**
+     * Create a standardized error response
+     */
+        private createErrorResponse(span: Span | undefined, message: string, statusMessage?: string): ErrorResponse {
+        span?.setStatus({ code: SpanStatusCode.ERROR, message: statusMessage || message });
+        return {
+            isError: true,
+            content: [{ type: "text", text: `ERROR: ${message}` }],
+        };
+    }
+
+    /**
+     * Create a standardized success response with a single message
+     */
+    private createSuccessResponse(span: Span | undefined, message: string, statusMessage?: string): SuccessResponse {
+        span?.setStatus({ code: SpanStatusCode.OK, message: statusMessage || message });
+        return {
+            content: [{ type: "text", text: message }],
+        };
+    }
+
+    /**
+     * Create a standardized success response with multiple content items
+     */
+    private createMultiContentSuccessResponse(span: Span | undefined, content: ContentItem[], statusMessage: string): SuccessResponse {
+        span?.setStatus({ code: SpanStatusCode.OK, message: statusMessage });
+        return {
+            content,
+        };
+    }
+
+    /**
+     * Create a standardized success response with an array of text items
+     */
+    private createArraySuccessResponse(span: Span | undefined, texts: string[], statusMessage: string): SuccessResponse {
+        span?.setStatus({ code: SpanStatusCode.OK, message: statusMessage });
+        return {
+            content: texts.map(text => ({ type: "text", text })),
+        };
     }
 
     async init() {
@@ -108,9 +178,9 @@ export class MCPServer extends Server {
 
     @WithSpan('list-tools')
     async listTools() {
-        const span = trace.getSpan(context.active());
-        span?.setAttribute("user_guid", this.sessionInfo.userGUID);
-        span?.setAttribute("instance_url", this.ctx.props.instanceUrl);
+        const span = getActiveSpan();
+        this.initSpanWithCommonAttributes(span);
+        
         return {
             tools: [
                 {
@@ -139,9 +209,9 @@ export class MCPServer extends Server {
 
     @WithSpan('list-datasources')
     async listResources() {
-        const span = trace.getSpan(context.active());
-        span?.setAttribute("user_guid", this.sessionInfo.userGUID);
-        span?.setAttribute("instance_url", this.ctx.props.instanceUrl);
+        const span = getActiveSpan();
+        this.initSpanWithCommonAttributes(span);
+        
         const sources = await this.getDatasources();
         return {
             resources: sources.list.map((s) => ({
@@ -155,18 +225,18 @@ export class MCPServer extends Server {
 
     @WithSpan('read-datasources')
     async readResource(request: z.infer<typeof ReadResourceRequestSchema>) {
-        const span = trace.getSpan(context.active());
-        span?.setAttribute("user_guid", this.sessionInfo.userGUID);
-        span?.setAttribute("instance_url", this.ctx.props.instanceUrl);
+        const span = getActiveSpan();
+        this.initSpanWithCommonAttributes(span);
+        
         const { uri } = request.params;
         const sourceId = uri.split("///").pop();
         if (!sourceId) {
-            throw new Error("Invalid datasource uri");
+            throw new McpServerError(span, { message: "Invalid datasource uri" }, 400);
         }
         const { map: sourceMap } = await this.getDatasources();
         const source = sourceMap.get(sourceId);
         if (!source) {
-            throw new Error("Datasource not found");
+            throw new McpServerError(span, { message: "Datasource not found" }, 404);
         }
         return {
             contents: [{
@@ -188,24 +258,17 @@ export class MCPServer extends Server {
         const { name } = request.params;
         this.trackers.track(TrackEvent.CallTool, { toolName: name });
 
-        const span = trace.getSpan(context.active());
-        span?.setAttribute("instance_url", this.ctx.props.instanceUrl);
-        span?.setAttribute("user_guid", this.sessionInfo.userGUID);
+        const span = getActiveSpan();
+        this.initSpanWithCommonAttributes(span);
 
+        let response: ToolResponse | undefined;
         switch (name) {
             case ToolName.Ping: {
                 console.log("Received Ping request");
                 if (this.ctx.props.accessToken && this.ctx.props.instanceUrl) {
-                    span?.setStatus({ code: SpanStatusCode.OK, message: "Ping successful" });
-                    return {
-                        content: [{ type: "text", text: "Pong" }],
-                    };
+                    return this.createSuccessResponse(span, "Pong", "Ping successful");
                 }
-                span?.setStatus({ code: SpanStatusCode.ERROR, message: "Ping failed" });
-                return {
-                    isError: true,
-                    content: [{ type: "text", text: "ERROR: Not authenticated" }],
-                };
+                return this.createErrorResponse(span, "Not authenticated", "Ping failed");
             }
             case ToolName.GetRelevantQuestions: {
                 return this.callGetRelevantQuestions(request);
@@ -228,8 +291,7 @@ export class MCPServer extends Server {
     async callGetRelevantQuestions(request: z.infer<typeof CallToolRequestSchema>) {
         const { query, datasourceIds: sourceIds, additionalContext } = GetRelevantQuestionsSchema.parse(request.params.arguments);
         console.log("[DEBUG] Getting relevant questions for datasource: ", sourceIds);
-        const span = trace.getSpan(context.active());
-        span?.setAttribute("datasource_ids", sourceIds);
+        const span = getActiveSpan();
 
         const relevantQuestions = await this.getThoughtSpotService().getRelevantQuestions(
             query,
@@ -238,77 +300,56 @@ export class MCPServer extends Server {
         );
 
         if (relevantQuestions.error) {
-            span?.setStatus({ code: SpanStatusCode.ERROR, message: `Error getting relevant questions ${relevantQuestions.error.message}` });
-            return {
-                isError: true,
-                content: [{ type: "text", text: `ERROR: ${relevantQuestions.error.message}` }],
-            };
+            return this.createErrorResponse(span, relevantQuestions.error.message, `Error getting relevant questions ${relevantQuestions.error.message}`);
         }
 
         if (relevantQuestions.questions.length === 0) {
-            span?.setStatus({ code: SpanStatusCode.OK, message: "No relevant questions found" });
-            return {
-                content: [{ type: "text", text: "No relevant questions found" }],
-            };
+            return this.createSuccessResponse(span, "No relevant questions found");
         }
-        span?.setStatus({ code: SpanStatusCode.OK, message: "Relevant questions found" });
-        return {
-            content: relevantQuestions.questions.map(q => ({
-                type: "text",
-                text: `Question: ${q.question}\nDatasourceId: ${q.datasourceId}`,
-            })),
-        };
+
+        const questionTexts = relevantQuestions.questions.map(q => 
+            `Question: ${q.question}\nDatasourceId: ${q.datasourceId}`
+        );
+        
+        return this.createArraySuccessResponse(span, questionTexts, "Relevant questions found");
     }
 
     @WithSpan('call-get-answer')
     async callGetAnswer(request: z.infer<typeof CallToolRequestSchema>) {
         const { question, datasourceId: sourceId } = GetAnswerSchema.parse(request.params.arguments);
+        const span = getActiveSpan();
 
         const answer = await this.getThoughtSpotService().getAnswerForQuestion(question, sourceId, false);
-        const span = trace.getSpan(context.active());
-        span?.setAttribute("datasource_id", sourceId);
 
         if (answer.error) {
-            span?.setStatus({ code: SpanStatusCode.ERROR, message: `Error getting answer ${answer.error.message}` });
-            return {
-                isError: true,
-                content: [{ type: "text", text: `ERROR: ${answer.error.message}` }],
-            };
+            return this.createErrorResponse(span, answer.error.message, `Error getting answer ${answer.error.message}`);
         }
 
-        span?.setStatus({ code: SpanStatusCode.OK, message: "Answer found" });
-        return {
-            content: [
-                { type: "text", text: answer.data },
-                {
-                    type: "text",
-                    text: `Question: ${question}\nSession Identifier: ${answer.session_identifier}\nGeneration Number: ${answer.generation_number}\n\nUse this information to create a liveboard with the createLiveboard tool, if the user asks.`,
-                },
-            ],
-        };
+        const content: ContentItem[] = [
+            { type: "text", text: answer.data },
+            {
+                type: "text",
+                text: `Question: ${question}\nSession Identifier: ${answer.session_identifier}\nGeneration Number: ${answer.generation_number}\n\nUse this information to create a liveboard with the createLiveboard tool, if the user asks.`,
+            },
+        ];
+        return this.createMultiContentSuccessResponse(span, content, "Answer found");
     }
 
     @WithSpan('call-create-liveboard')
     async callCreateLiveboard(request: z.infer<typeof CallToolRequestSchema>) {
         const { name, answers } = CreateLiveboardSchema.parse(request.params.arguments);
         const liveboard = await this.getThoughtSpotService().fetchTMLAndCreateLiveboard(name, answers);
-        const span = trace.getSpan(context.active());
+        const span = getActiveSpan();
+        
         if (liveboard.error) {
-            span?.setStatus({ code: SpanStatusCode.ERROR, message: `Error creating liveboard ${liveboard.error.message}` });
-            return {
-                isError: true,
-                content: [{ type: "text", text: `ERROR: ${liveboard.error.message}` }],
-            };
+            return this.createErrorResponse(span, liveboard.error.message, `Error creating liveboard ${liveboard.error.message}`);
         }
-        span?.setStatus({ code: SpanStatusCode.OK, message: "Liveboard created successfully" });
-        return {
-            content: [{
-                type: "text",
-                text: `Liveboard created successfully, you can view it at ${liveboard.url}
+
+        const successMessage = `Liveboard created successfully, you can view it at ${liveboard.url}
                 
-                Provide this url to the user as a link to view the liveboard in ThoughtSpot.`,
-            }],
-        };
+Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
+
+        return this.createSuccessResponse(span, successMessage, "Liveboard created successfully");
     }
 
     private _sources: {
