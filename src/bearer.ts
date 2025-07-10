@@ -60,7 +60,7 @@ export function withBearerHandler(app: typeof honoApp, MCPServer: typeof Thought
 
             span.setAttributes({
                 error: true,
-                error_message: "Route not found"
+                error_message: "Route not found for bearer handler"
             });
             return new Response("Not found", { status: 404 });
         });
