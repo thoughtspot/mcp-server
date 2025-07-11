@@ -88,7 +88,7 @@ describe("Handlers", () => {
             });
 
             expect(result.status).toBe(500);
-            expect(await result.text()).toBe('Internal Server Error Error: Invalid request');
+            expect(await result.text()).toBe("Internal Server Error McpServerError: Missing client ID");
         });
 
         it("should render approval dialog for valid client ID", async () => {
@@ -162,7 +162,7 @@ describe("Handlers", () => {
             });
 
             expect(result.status).toBe(500);
-            expect(await result.text()).toBe('Internal Server Error Error: Failed to parse approval form: Could not extract clientId from state object.');
+            expect(await result.text()).toBe("Internal Server Error McpServerError: Failed to parse approval form: Could not extract clientId from state object.");
         });
 
         it("should return 500 for null oauthReqInfo in state", async () => {
@@ -182,7 +182,7 @@ describe("Handlers", () => {
             });
 
             expect(result.status).toBe(500);
-            expect(await result.text()).toBe('Internal Server Error Error: Failed to parse approval form: Could not extract clientId from state object.');
+            expect(await result.text()).toBe('Internal Server Error McpServerError: Failed to parse approval form: Could not extract clientId from state object.');
         });
 
         it("should return 500 for undefined oauthReqInfo in state", async () => {
@@ -202,7 +202,7 @@ describe("Handlers", () => {
             });
 
             expect(result.status).toBe(500);
-            expect(await result.text()).toBe('Internal Server Error Error: Failed to parse approval form: Could not extract clientId from state object.');
+            expect(await result.text()).toBe('Internal Server Error McpServerError: Failed to parse approval form: Could not extract clientId from state object.');
         });
 
         it("should return 400 for empty string instanceUrl", async () => {
@@ -242,7 +242,7 @@ describe("Handlers", () => {
             });
 
             expect(result.status).toBe(500);
-            expect(await result.text()).toBe('Internal Server Error Error: Failed to parse approval form: Invalid URL: Invalid URL string.');
+            expect(await result.text()).toBe('Internal Server Error McpServerError: Failed to parse approval form: Invalid URL: Invalid URL string.');
         });
 
         it.skip("should return 400 for null instanceUrl", async () => {
@@ -445,7 +445,7 @@ describe("Handlers", () => {
             });
 
             expect(result.status).toBe(400);
-            expect(await result.text()).toBe('Missing instance URL Error: Missing instance URL');
+            expect(await result.text()).toBe('Missing instance URL McpServerError: Missing instance URL');
         });
 
         it("should return 400 for missing OAuth request info", async () => {
@@ -460,7 +460,7 @@ describe("Handlers", () => {
             });
 
             expect(result.status).toBe(400);
-            expect(await result.text()).toBe('Missing OAuth request info Error: Missing OAuth request info');
+            expect(await result.text()).toBe('Missing OAuth request info McpServerError: Missing OAuth request info');
         });
 
         it("should return 400 for invalid OAuth request info format", async () => {
@@ -476,7 +476,7 @@ describe("Handlers", () => {
             });
 
             expect(result.status).toBe(400);
-            expect(await result.text()).toBe('Invalid OAuth request info format Error: Invalid OAuth request info format');
+            expect(await result.text()).toBe('Invalid OAuth request info format McpServerError: Invalid OAuth request info format');
         });
 
         it("should render token callback page for valid parameters", async () => {
@@ -525,7 +525,7 @@ describe("Handlers", () => {
             });
 
             expect(result.status).toBe(400);
-            expect(await result.text()).toBe('Missing token or OAuth request info or instanceUrl Error: Missing token or OAuth request info or instanceUrl');
+            expect(await result.text()).toBe('Missing token or OAuth request info or instanceUrl McpServerError: Missing token or OAuth request info or instanceUrl');
         });
 
         it("should return 400 for missing OAuth request info", async () => {
@@ -545,7 +545,7 @@ describe("Handlers", () => {
             });
 
             expect(result.status).toBe(400);
-            expect(await result.text()).toBe('Missing token or OAuth request info or instanceUrl Error: Missing token or OAuth request info or instanceUrl');
+            expect(await result.text()).toBe('Missing token or OAuth request info or instanceUrl McpServerError: Missing token or OAuth request info or instanceUrl');
         });
 
         it("should return 400 for missing instance URL", async () => {
@@ -565,7 +565,7 @@ describe("Handlers", () => {
             });
 
             expect(result.status).toBe(400);
-            expect(await result.text()).toBe('Missing token or OAuth request info or instanceUrl Error: Missing token or OAuth request info or instanceUrl');
+            expect(await result.text()).toBe('Missing token or OAuth request info or instanceUrl McpServerError: Missing token or OAuth request info or instanceUrl');
         });
 
         it("should complete authorization and return redirect URL", async () => {
@@ -640,7 +640,7 @@ describe("Handlers", () => {
             });
 
             expect(result.status).toBe(400);
-            expect(await result.text()).toBe('Invalid JSON format Error: Invalid JSON format');
+            expect(await result.text()).toBe('Invalid JSON format McpServerError: Invalid JSON format');
         });
 
         it("should handle malformed form data in authorize", async () => {

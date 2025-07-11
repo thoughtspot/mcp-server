@@ -31,7 +31,7 @@ class Handler {
         span?.setAttribute("client_id", clientId || "unknown");
         
         if (!clientId) {
-            throw new McpServerError(span, { message: "Missing client ID" }, 400);
+            throw new McpServerError({ message: "Missing client ID" }, 400);
         }
         const client = await oauthProvider.lookupClient(clientId);
         return renderApprovalDialog(request, {
@@ -54,11 +54,11 @@ class Handler {
             span?.setAttribute("instance_url", instanceUrl || "unknown");
             
             if (!state.oauthReqInfo) {
-                throw new McpServerError(span, { message: "Missing OAuth request info" }, 400);
+                throw new McpServerError({ message: "Missing OAuth request info" }, 400);
             }
 
             if (!instanceUrl) {
-                throw new McpServerError(span, { message: "Missing instance URL" }, 400);
+                throw new McpServerError({ message: "Missing instance URL" }, 400);
             }
 
             const redirectUrl = buildSamlRedirectUrl(
@@ -71,7 +71,7 @@ class Handler {
 
             return redirectUrl;
         } catch (error) {
-            throw new McpServerError(span, error, 500);
+            throw new McpServerError(error, 500);
         }
     }
 
@@ -91,17 +91,17 @@ class Handler {
         });
 
         if (!instanceUrl) {
-            throw new McpServerError(span, { message: "Missing instance URL" }, 400);
+            throw new McpServerError({ message: "Missing instance URL" }, 400);
         }
         if (!encodedOauthReqInfo) {
-            throw new McpServerError(span, { message: "Missing OAuth request info" }, 400);
+            throw new McpServerError({ message: "Missing OAuth request info" }, 400);
         }
 
         let decodedOAuthReqInfo: any;
         try {
             decodedOAuthReqInfo = JSON.parse(new TextDecoder().decode(decodeBase64Url(encodedOauthReqInfo)));
         } catch (error) {
-            throw new McpServerError(span, { message: "Invalid OAuth request info format", details: error }, 400);
+            throw new McpServerError({ message: "Invalid OAuth request info format", details: error }, 400);
         }
         const origin = new URL(requestUrl).origin;
         try {
@@ -109,7 +109,7 @@ class Handler {
             span?.setStatus({ code: SpanStatusCode.OK, message: "Token callback rendered successfully" });
             return htmlContent;
         } catch (error) {
-            throw new McpServerError(span, { message: "Error rendering token callback", details: error }, 500);
+            throw new McpServerError({ message: "Error rendering token callback", details: error }, 500);
         }
     }
 
@@ -129,7 +129,7 @@ class Handler {
             oauthReqInfo = body.oauthReqInfo;
             instanceUrl = body.instanceUrl;
         } catch (error) {
-            throw new McpServerError(span, { message: "Invalid JSON format", details: error }, 400);
+            throw new McpServerError({ message: "Invalid JSON format", details: error }, 400);
         }
         span?.setAttributes({
             instance_url: instanceUrl || "unknown",
@@ -138,7 +138,7 @@ class Handler {
         });
         
         if (!token || !oauthReqInfo || !instanceUrl) {
-            throw new McpServerError(span, { message: "Missing token or OAuth request info or instanceUrl" }, 400);
+            throw new McpServerError({ message: "Missing token or OAuth request info or instanceUrl" }, 400);
         }
 
         const { clientId } = oauthReqInfo;

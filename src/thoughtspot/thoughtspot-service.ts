@@ -2,7 +2,6 @@ import type { ThoughtSpotRestApi } from "@thoughtspot/rest-api-sdk";
 import type { Span } from "@opentelemetry/api";
 import { SpanStatusCode, trace, context } from "@opentelemetry/api";
 import { getActiveSpan, WithSpan } from "../metrics/tracing/tracing-utils";
-import { McpServerError } from "../utils";
 
 
 /**

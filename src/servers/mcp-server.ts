@@ -231,12 +231,12 @@ export class MCPServer extends Server {
         const { uri } = request.params;
         const sourceId = uri.split("///").pop();
         if (!sourceId) {
-            throw new McpServerError(span, { message: "Invalid datasource uri" }, 400);
+            throw new McpServerError({ message: "Invalid datasource uri" }, 400);
         }
         const { map: sourceMap } = await this.getDatasources();
         const source = sourceMap.get(sourceId);
         if (!source) {
-            throw new McpServerError(span, { message: "Datasource not found" }, 404);
+            throw new McpServerError({ message: "Datasource not found" }, 404);
         }
         return {
             contents: [{

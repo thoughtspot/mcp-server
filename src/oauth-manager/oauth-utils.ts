@@ -423,11 +423,6 @@ export function validateAndSanitizeUrl(url: string): string {
     // Remove any whitespace
     const trimmedUrl = url.trim();
 
-    // Reject 'null' as an invalid URL
-    if (trimmedUrl.toLowerCase() === 'null') {
-      throw new Error('Invalid URL string.');
-    }
-
     // Add https:// if no protocol is specified
     const urlWithProtocol = trimmedUrl.startsWith('http://') || trimmedUrl.startsWith('https://')
       ? trimmedUrl

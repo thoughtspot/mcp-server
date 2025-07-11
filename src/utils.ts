@@ -1,4 +1,5 @@
 import { type Span, SpanStatusCode } from '@opentelemetry/api';
+import { getActiveSpan } from './metrics/tracing/tracing-utils';
 
 export type Props = {
     accessToken: string;
@@ -15,7 +16,7 @@ export class McpServerError extends Error {
     public readonly errorJson: any;
     public readonly statusCode: number;
 
-    constructor(span: Span | undefined, errorJson: any, statusCode: number) {
+    constructor(errorJson: any, statusCode: number) {
         // Extract message from error JSON or use a default message
         const message = typeof errorJson === 'string' 
             ? errorJson 
@@ -24,7 +25,7 @@ export class McpServerError extends Error {
         super(message);
         
         this.name = 'McpServerError';
-        this.span = span;
+        this.span = getActiveSpan();
         this.errorJson = errorJson;
         this.statusCode = statusCode;
         
