@@ -3,6 +3,7 @@ import type { RequestContext, ResponseContext } from "@thoughtspot/rest-api-sdk"
 import YAML from "yaml";
 import type { Observable } from "rxjs";
 import { of } from "rxjs";
+import type { SessionInfo } from "./thoughtspot-service";
 
 export const getThoughtSpotClient = (instanceUrl: string, bearerToken: string) => {
     const config = createBearerAuthenticationConfig(
@@ -54,7 +55,7 @@ const PROXY_URL = "https://plugin-party-vercel.vercel.app/api/proxy";
 
 // This is a workaround until we get the public API for this
 function addExportUnsavedAnswerTML(client: any, instanceUrl: string, token: string) {
-    (client as any).exportUnsavedAnswerTML = async ({ session_identifier, generation_number }) => {
+    (client as any).exportUnsavedAnswerTML = async ({ session_identifier, generation_number }: { session_identifier: string, generation_number: number }) => {
         const endpoint = "/prism/?op=GetUnsavedAnswerTML";
         // make a graphql request to `ThoughtspotHost/prism endpoint.
         const response = await fetch(PROXY_URL, {

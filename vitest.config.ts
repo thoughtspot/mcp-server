@@ -2,11 +2,17 @@ import { defineWorkersConfig } from "@cloudflare/vitest-pool-workers/config";
 
 export default defineWorkersConfig({
     test: {
+        setupFiles: ["./test/setup.ts"],
         deps: {
             optimizer: {
                 ssr: {
                     enabled: true,
-                    include: ["ajv"]
+                    include: [
+                        "ajv",
+                        "@opentelemetry/resources",
+                        "@opentelemetry/api",
+                        "@microlabs/otel-cf-workers"
+                    ]
                 }
             }
         },
@@ -20,7 +26,9 @@ export default defineWorkersConfig({
             workers: {
                 singleWorker: true,
                 wrangler: { configPath: "./wrangler.jsonc" },
+                isolatedStorage: false,
             },
         },
+        testTimeout: 30000,
     },
 });

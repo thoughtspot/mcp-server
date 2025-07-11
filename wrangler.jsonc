@@ -15,7 +15,8 @@
 			{
 				"class_name": "ThoughtSpotMCP",
 				"name": "MCP_OBJECT"
-			}
+			},
+
 		]
 	},
 	"migrations": [{

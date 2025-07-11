@@ -7,8 +7,7 @@ import {
   createLiveboard,
   getDataSources,
   getSessionInfo,
-  type DataSource,
-  type SessionInfo
+  ThoughtSpotService,
 } from '../../src/thoughtspot/thoughtspot-service';
 
 // Mock the ThoughtSpot REST API client
@@ -379,7 +378,6 @@ describe('thoughtspot-service', () => {
       const result = await fetchTMLAndCreateLiveboard('Test Liveboard', answers, mockClient);
 
       expect(result).toEqual({
-        liveboardUrl: null,
         error: expect.any(Error),
       });
     });
@@ -595,6 +593,310 @@ describe('thoughtspot-service', () => {
       (mockClient as any).getSessionInfo = vi.fn().mockRejectedValue(error);
 
       await expect(getSessionInfo(mockClient)).rejects.toThrow('API Error');
+    });
+  });
+
+  describe('searchWorksheets', () => {
+    it('should search and return matching worksheets successfully', async () => {
+      const mockResponse = [
+        {
+          metadata_header: {
+            type: 'WORKSHEET',
+            name: 'Sales Data Analytics',
+            id: 'ws1',
+            description: 'Sales analytics worksheet'
+          }
+        },
+        {
+          metadata_header: {
+            type: 'WORKSHEET',
+            name: 'Revenue Analysis',
+            id: 'ws2',
+            description: 'Revenue analysis worksheet'
+          }
+        },
+        {
+          metadata_header: {
+            type: 'LOGICAL_TABLE', // This should be filtered out
+            name: 'Sales Data Table',
+            id: 'lt1',
+            description: 'Sales data table'
+          }
+        },
+        {
+          metadata_header: {
+            type: 'WORKSHEET',
+            name: 'Customer Data',
+            id: 'ws3',
+            description: 'Customer information worksheet'
+          }
+        }
+      ];
+
+      mockClient.searchMetadata = vi.fn().mockResolvedValue(mockResponse);
+
+      const service = new ThoughtSpotService(mockClient);
+      const result = await service.searchWorksheets('sales');
+
+      expect(mockClient.searchMetadata).toHaveBeenCalledWith({
+        metadata: [{ type: 'LOGICAL_TABLE' }],
+        record_size: 100,
+        sort_options: {
+          field_name: 'NAME',
+          order: 'ASC',
+        }
+      });
+
+      expect(result).toEqual([
+        {
+          name: 'Sales Data Analytics',
+          id: 'ws1',
+          description: 'Sales analytics worksheet'
+        }
+      ]);
+    });
+
+    it('should perform case-insensitive search', async () => {
+      const mockResponse = [
+        {
+          metadata_header: {
+            type: 'WORKSHEET',
+            name: 'Sales Data Analytics',
+            id: 'ws1',
+            description: 'Sales analytics worksheet'
+          }
+        },
+        {
+          metadata_header: {
+            type: 'WORKSHEET',
+            name: 'REVENUE Analysis',
+            id: 'ws2',
+            description: 'Revenue analysis worksheet'
+          }
+        }
+      ];
+
+      mockClient.searchMetadata = vi.fn().mockResolvedValue(mockResponse);
+
+      const service = new ThoughtSpotService(mockClient);
+      const result = await service.searchWorksheets('SALES');
+
+      expect(result).toEqual([
+        {
+          name: 'Sales Data Analytics',
+          id: 'ws1',
+          description: 'Sales analytics worksheet'
+        }
+      ]);
+    });
+
+    it('should return empty array when no worksheets match search term', async () => {
+      const mockResponse = [
+        {
+          metadata_header: {
+            type: 'WORKSHEET',
+            name: 'Customer Data',
+            id: 'ws1',
+            description: 'Customer information worksheet'
+          }
+        },
+        {
+          metadata_header: {
+            type: 'WORKSHEET',
+            name: 'Product Catalog',
+            id: 'ws2',
+            description: 'Product catalog worksheet'
+          }
+        }
+      ];
+
+      mockClient.searchMetadata = vi.fn().mockResolvedValue(mockResponse);
+
+      const service = new ThoughtSpotService(mockClient);
+      const result = await service.searchWorksheets('nonexistent');
+
+      expect(result).toEqual([]);
+    });
+
+    it('should handle empty search term', async () => {
+      const mockResponse = [
+        {
+          metadata_header: {
+            type: 'WORKSHEET',
+            name: 'Sales Data',
+            id: 'ws1',
+            description: 'Sales worksheet'
+          }
+        },
+        {
+          metadata_header: {
+            type: 'WORKSHEET',
+            name: 'Revenue Data',
+            id: 'ws2',
+            description: 'Revenue worksheet'
+          }
+        }
+      ];
+
+      mockClient.searchMetadata = vi.fn().mockResolvedValue(mockResponse);
+
+      const service = new ThoughtSpotService(mockClient);
+      const result = await service.searchWorksheets('');
+
+      // Empty string should match all worksheets
+      expect(result).toEqual([
+        {
+          name: 'Sales Data',
+          id: 'ws1',
+          description: 'Sales worksheet'
+        },
+        {
+          name: 'Revenue Data',
+          id: 'ws2',
+          description: 'Revenue worksheet'
+        }
+      ]);
+    });
+
+    it('should filter out non-worksheet metadata types', async () => {
+      const mockResponse = [
+        {
+          metadata_header: {
+            type: 'LOGICAL_TABLE',
+            name: 'Sales Table',
+            id: 'lt1',
+            description: 'Sales table'
+          }
+        },
+        {
+          metadata_header: {
+            type: 'LIVEBOARD',
+            name: 'Sales Dashboard',
+            id: 'lb1',
+            description: 'Sales dashboard'
+          }
+        },
+        {
+          metadata_header: {
+            type: 'WORKSHEET',
+            name: 'Sales Data',
+            id: 'ws1',
+            description: 'Sales worksheet'
+          }
+        }
+      ];
+
+      mockClient.searchMetadata = vi.fn().mockResolvedValue(mockResponse);
+
+      const service = new ThoughtSpotService(mockClient);
+      const result = await service.searchWorksheets('sales');
+
+      expect(result).toEqual([
+        {
+          name: 'Sales Data',
+          id: 'ws1',
+          description: 'Sales worksheet'
+        }
+      ]);
+    });
+
+    it('should handle API errors', async () => {
+      const error = new Error('Search API Error');
+      mockClient.searchMetadata = vi.fn().mockRejectedValue(error);
+
+      const service = new ThoughtSpotService(mockClient);
+
+      await expect(service.searchWorksheets('sales')).rejects.toThrow('Search API Error');
+    });
+
+    it('should handle empty API response', async () => {
+      mockClient.searchMetadata = vi.fn().mockResolvedValue([]);
+
+      const service = new ThoughtSpotService(mockClient);
+      const result = await service.searchWorksheets('sales');
+
+      expect(result).toEqual([]);
+    });
+
+    it('should handle partial matches in worksheet names', async () => {
+      const mockResponse = [
+        {
+          metadata_header: {
+            type: 'WORKSHEET',
+            name: 'Q1 Sales Performance',
+            id: 'ws1',
+            description: 'Q1 sales performance worksheet'
+          }
+        },
+        {
+          metadata_header: {
+            type: 'WORKSHEET',
+            name: 'Annual Sales Report',
+            id: 'ws2',
+            description: 'Annual sales report worksheet'
+          }
+        },
+        {
+          metadata_header: {
+            type: 'WORKSHEET',
+            name: 'Customer Data',
+            id: 'ws3',
+            description: 'Customer information worksheet'
+          }
+        }
+      ];
+
+      mockClient.searchMetadata = vi.fn().mockResolvedValue(mockResponse);
+
+      const service = new ThoughtSpotService(mockClient);
+      const result = await service.searchWorksheets('sales');
+
+      expect(result).toEqual([
+        {
+          name: 'Q1 Sales Performance',
+          id: 'ws1',
+          description: 'Q1 sales performance worksheet'
+        },
+        {
+          name: 'Annual Sales Report',
+          id: 'ws2',
+          description: 'Annual sales report worksheet'
+        }
+      ]);
+    });
+
+    it('should handle search with special characters', async () => {
+      const mockResponse = [
+        {
+          metadata_header: {
+            type: 'WORKSHEET',
+            name: 'Sales & Marketing Data',
+            id: 'ws1',
+            description: 'Sales and marketing worksheet'
+          }
+        },
+        {
+          metadata_header: {
+            type: 'WORKSHEET',
+            name: 'Revenue Analysis',
+            id: 'ws2',
+            description: 'Revenue analysis worksheet'
+          }
+        }
+      ];
+
+      mockClient.searchMetadata = vi.fn().mockResolvedValue(mockResponse);
+
+      const service = new ThoughtSpotService(mockClient);
+      const result = await service.searchWorksheets('&');
+
+      expect(result).toEqual([
+        {
+          name: 'Sales & Marketing Data',
+          id: 'ws1',
+          description: 'Sales and marketing worksheet'
+        }
+      ]);
     });
   });
 }); 

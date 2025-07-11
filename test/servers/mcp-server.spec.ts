@@ -20,17 +20,83 @@ describe("MCP Server", () => {
         // Reset all mocks
         vi.clearAllMocks();
 
-        // Mock getSessionInfo to return valid session info
-        vi.spyOn(thoughtspotService, "getSessionInfo").mockResolvedValue({
-            clusterId: "test-cluster-123",
-            clusterName: "test-cluster",
-            releaseVersion: "1.0.0",
-            userGUID: "test-user-123",
-            mixpanelToken: "test-token-123",
-        } as any);
+        // Remove service mocks - using real service with mocked client
 
         // Mock getThoughtSpotClient
-        vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({} as any);
+        vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
+            getSessionInfo: vi.fn().mockResolvedValue({
+                clusterId: "test-cluster-123",
+                clusterName: "test-cluster",
+                releaseVersion: "1.0.0",
+                userGUID: "test-user-123",
+                configInfo: {
+                    mixpanelConfig: {
+                        devSdkKey: "test-dev-token",
+                        prodSdkKey: "test-prod-token",
+                        production: false,
+                    },
+                    selfClusterName: "test-cluster",
+                    selfClusterId: "test-cluster-123",
+                },
+                userName: "test-user",
+                currentOrgId: "test-org",
+                privileges: [],
+            }),
+            searchMetadata: vi.fn().mockResolvedValue([
+                {
+                    metadata_header: {
+                        id: "ds-123",
+                        name: "Sales Data",
+                        description: "Sales data for the current year",
+                        type: "WORKSHEET",
+                    },
+                },
+                {
+                    metadata_header: {
+                        id: "ds-456",
+                        name: "Customer Data",
+                        description: "Customer information and demographics",
+                        type: "WORKSHEET",
+                    },
+                },
+            ]),
+            queryGetDecomposedQuery: vi.fn().mockResolvedValue({
+                decomposedQueryResponse: {
+                    decomposedQueries: [
+                        {
+                            query: "What is the total revenue?",
+                            worksheetId: "ds-123",
+                        },
+                        {
+                            query: "How many customers do we have?",
+                            worksheetId: "ds-456",
+                        },
+                    ],
+                },
+            }),
+            singleAnswer: vi.fn().mockResolvedValue({
+                session_identifier: "session-123",
+                generation_number: 1,
+            }),
+            exportAnswerReport: vi.fn().mockResolvedValue({
+                text: vi.fn().mockResolvedValue("The total revenue is $1,000,000"),
+            }),
+            exportUnsavedAnswerTML: vi.fn().mockResolvedValue({
+                answer: {
+                    name: "Test Answer",
+                },
+            }),
+            importMetadataTML: vi.fn().mockResolvedValue([
+                {
+                    response: {
+                        header: {
+                            id_guid: "liveboard-123",
+                        },
+                    },
+                },
+            ]),
+            instanceUrl: "https://test.thoughtspot.cloud",
+        } as any);
 
         // Mock props with correct structure
         mockProps = {
@@ -61,7 +127,10 @@ describe("MCP Server", () => {
                     clusterName: "test-cluster",
                     releaseVersion: "1.0.0",
                     userGUID: "test-user-123",
-                    mixpanelToken: "test-token-123",
+                    mixpanelToken: "test-dev-token",
+                    userName: "test-user",
+                    currentOrgId: "test-org",
+                    privileges: [],
                 },
                 {
                     clientId: "test-client-id",
@@ -142,21 +211,7 @@ describe("MCP Server", () => {
     });
 
     describe("Get Relevant Questions Tool", () => {
-        beforeEach(() => {
-            vi.spyOn(thoughtspotService, "getRelevantQuestions").mockResolvedValue({
-                questions: [
-                    {
-                        question: "What is the total revenue?",
-                        datasourceId: "ds-123",
-                    },
-                    {
-                        question: "How many customers do we have?",
-                        datasourceId: "ds-456",
-                    },
-                ],
-                error: null,
-            });
-        });
+        // Using real service with mocked client, no service method mocks needed
 
         it("should return relevant questions for a query", async () => {
             await server.init();
@@ -174,10 +229,29 @@ describe("MCP Server", () => {
         });
 
         it("should handle error from service", async () => {
-            vi.spyOn(thoughtspotService, "getRelevantQuestions").mockResolvedValue({
-                questions: [],
-                error: new Error("Service unavailable"),
-            });
+            // Mock client to return error
+            vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
+                getSessionInfo: vi.fn().mockResolvedValue({
+                    clusterId: "test-cluster-123",
+                    clusterName: "test-cluster",
+                    releaseVersion: "1.0.0",
+                    userGUID: "test-user-123",
+                    configInfo: {
+                        mixpanelConfig: {
+                            devSdkKey: "test-dev-token",
+                            prodSdkKey: "test-prod-token",
+                            production: false,
+                        },
+                        selfClusterName: "test-cluster",
+                        selfClusterId: "test-cluster-123",
+                    },
+                    userName: "test-user",
+                    currentOrgId: "test-org",
+                    privileges: [],
+                }),
+                queryGetDecomposedQuery: vi.fn().mockRejectedValue(new Error("Service unavailable")),
+                instanceUrl: "https://test.thoughtspot.cloud",
+            } as any);
 
             await server.init();
             const { callTool } = connect(server);
@@ -192,10 +266,33 @@ describe("MCP Server", () => {
         });
 
         it("should handle empty questions response", async () => {
-            vi.spyOn(thoughtspotService, "getRelevantQuestions").mockResolvedValue({
-                questions: [],
-                error: null,
-            });
+            // Mock client to return empty questions
+            vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
+                getSessionInfo: vi.fn().mockResolvedValue({
+                    clusterId: "test-cluster-123",
+                    clusterName: "test-cluster",
+                    releaseVersion: "1.0.0",
+                    userGUID: "test-user-123",
+                    configInfo: {
+                        mixpanelConfig: {
+                            devSdkKey: "test-dev-token",
+                            prodSdkKey: "test-prod-token",
+                            production: false,
+                        },
+                        selfClusterName: "test-cluster",
+                        selfClusterId: "test-cluster-123",
+                    },
+                    userName: "test-user",
+                    currentOrgId: "test-org",
+                    privileges: [],
+                }),
+                queryGetDecomposedQuery: vi.fn().mockResolvedValue({
+                    decomposedQueryResponse: {
+                        decomposedQueries: [],
+                    },
+                }),
+                instanceUrl: "https://test.thoughtspot.cloud",
+            } as any);
 
             await server.init();
             const { callTool } = connect(server);
@@ -220,26 +317,14 @@ describe("MCP Server", () => {
             });
 
             expect(result.isError).toBeUndefined();
-            expect(thoughtspotService.getRelevantQuestions).toHaveBeenCalledWith(
-                "Show me revenue data",
-                ["ds-123"],
-                "Previous data showed declining trends",
-                expect.any(Object)
-            );
+            expect((result.content as any[])).toHaveLength(2);
+            expect((result.content as any[])[0].text).toContain("What is the total revenue?");
+            expect((result.content as any[])[1].text).toContain("How many customers do we have?");
         });
     });
 
     describe("Get Answer Tool", () => {
-        beforeEach(() => {
-            vi.spyOn(thoughtspotService, "getAnswerForQuestion").mockResolvedValue({
-                question: "What is the total revenue?",
-                data: "The total revenue is $1,000,000",
-                session_identifier: "session-123",
-                generation_number: 1,
-                tml: null,
-                error: null,
-            } as any);
-        });
+        // Using real service with mocked client, no service method mocks needed
 
         it("should return answer for a question", async () => {
             await server.init();
@@ -259,9 +344,29 @@ describe("MCP Server", () => {
         });
 
         it("should handle error from service", async () => {
-            vi.spyOn(thoughtspotService, "getAnswerForQuestion").mockResolvedValue({
-                error: new Error("Question not found"),
-            });
+            // Mock client to return error
+            vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
+                getSessionInfo: vi.fn().mockResolvedValue({
+                    clusterId: "test-cluster-123",
+                    clusterName: "test-cluster",
+                    releaseVersion: "1.0.0",
+                    userGUID: "test-user-123",
+                    configInfo: {
+                        mixpanelConfig: {
+                            devSdkKey: "test-dev-token",
+                            prodSdkKey: "test-prod-token",
+                            production: false,
+                        },
+                        selfClusterName: "test-cluster",
+                        selfClusterId: "test-cluster-123",
+                    },
+                    userName: "test-user",
+                    currentOrgId: "test-org",
+                    privileges: [],
+                }),
+                singleAnswer: vi.fn().mockRejectedValue(new Error("Question not found")),
+                instanceUrl: "https://test.thoughtspot.cloud",
+            } as any);
 
             await server.init();
             const { callTool } = connect(server);
@@ -277,12 +382,7 @@ describe("MCP Server", () => {
     });
 
     describe("Create Liveboard Tool", () => {
-        beforeEach(() => {
-            vi.spyOn(thoughtspotService, "fetchTMLAndCreateLiveboard").mockResolvedValue({
-                url: "https://test.thoughtspot.cloud/liveboard/123",
-                error: null,
-            });
-        });
+        // Using real service with mocked client, no service method mocks needed
 
         it("should create liveboard successfully", async () => {
             await server.init();
@@ -301,14 +401,38 @@ describe("MCP Server", () => {
 
             expect(result.isError).toBeUndefined();
             expect((result.content as any[])[0].text).toContain("Liveboard created successfully");
-            expect((result.content as any[])[0].text).toContain("https://test.thoughtspot.cloud/liveboard/123");
+            expect((result.content as any[])[0].text).toContain("https://test.thoughtspot.cloud/#/pinboard/liveboard-123");
         });
 
         it("should handle error from service", async () => {
-            vi.spyOn(thoughtspotService, "fetchTMLAndCreateLiveboard").mockResolvedValue({
-                liveboardUrl: null,
-                error: new Error("Failed to create liveboard"),
-            });
+            // Mock client to return error
+            vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
+                getSessionInfo: vi.fn().mockResolvedValue({
+                    clusterId: "test-cluster-123",
+                    clusterName: "test-cluster",
+                    releaseVersion: "1.0.0",
+                    userGUID: "test-user-123",
+                    configInfo: {
+                        mixpanelConfig: {
+                            devSdkKey: "test-dev-token",
+                            prodSdkKey: "test-prod-token",
+                            production: false,
+                        },
+                        selfClusterName: "test-cluster",
+                        selfClusterId: "test-cluster-123",
+                    },
+                    userName: "test-user",
+                    currentOrgId: "test-org",
+                    privileges: [],
+                }),
+                exportUnsavedAnswerTML: vi.fn().mockResolvedValue({
+                    answer: {
+                        name: "Test Answer",
+                    },
+                }),
+                importMetadataTML: vi.fn().mockRejectedValue(new Error("Failed to create liveboard")),
+                instanceUrl: "https://test.thoughtspot.cloud",
+            } as any);
 
             await server.init();
             const { callTool } = connect(server);
@@ -330,20 +454,7 @@ describe("MCP Server", () => {
     });
 
     describe("List Resources", () => {
-        beforeEach(() => {
-            vi.spyOn(thoughtspotService, "getDataSources").mockResolvedValue([
-                {
-                    id: "ds-123",
-                    name: "Sales Data",
-                    description: "Sales data for the current year",
-                },
-                {
-                    id: "ds-456",
-                    name: "Customer Data",
-                    description: "Customer information and demographics",
-                },
-            ]);
-        });
+        // Using real service with mocked client, no service method mocks needed
 
         it("should return list of datasources as resources", async () => {
             await server.init();
@@ -374,11 +485,13 @@ describe("MCP Server", () => {
 
             // First call should fetch from service
             await listResources();
-            expect(thoughtspotService.getDataSources).toHaveBeenCalledTimes(1);
+            const mockGetClient = vi.mocked(thoughtspotClient.getThoughtSpotClient);
+            const mockClientInstance = mockGetClient.mock.results[0].value;
+            expect(mockClientInstance.searchMetadata).toHaveBeenCalledTimes(1);
 
             // Second call should use cached data
             await listResources();
-            expect(thoughtspotService.getDataSources).toHaveBeenCalledTimes(1);
+            expect(mockClientInstance.searchMetadata).toHaveBeenCalledTimes(1);
         });
     });
 }); 
