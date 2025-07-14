@@ -397,6 +397,7 @@ describe("MCP Server", () => {
                         generation_number: 1,
                     },
                 ],
+                summary: "This liveboard shows the total revenue for the current period.",
             });
 
             expect(result.isError).toBeUndefined();
@@ -446,6 +447,7 @@ describe("MCP Server", () => {
                         generation_number: 1,
                     },
                 ],
+                summary: "This liveboard shows the total revenue for the current period.",
             });
 
             expect(result.isError).toBe(true);
@@ -474,9 +476,112 @@ describe("MCP Server", () => {
                 name: "Customer Data",
                 description: "Customer information and demographics",
                 mimeType: "text/plain",
+                    });
+    });
+
+    describe("Read Resource", () => {
+        it("should return resource content for valid datasource URI", async () => {
+            await server.init();
+
+            const result = await server.readResource({ 
+                method: "resources/read",
+                params: { uri: "datasource:///ds-123" } 
             });
+
+            expect(result.contents).toHaveLength(1);
+            expect(result.contents[0]).toEqual({
+                uri: "datasource:///ds-123",
+                mimeType: "text/plain",
+                text: expect.stringContaining("Sales data for the current year"),
+            });
+            expect(result.contents[0].text).toContain("The id of the datasource is ds-123");
+            expect(result.contents[0].text).toContain("Use ThoughtSpot's getRelevantQuestions tool");
+        });
+
+        it("should return resource content for second datasource", async () => {
+            await server.init();
+
+            const result = await server.readResource({ 
+                method: "resources/read",
+                params: { uri: "datasource:///ds-456" } 
+            });
+
+            expect(result.contents).toHaveLength(1);
+            expect(result.contents[0]).toEqual({
+                uri: "datasource:///ds-456",
+                mimeType: "text/plain",
+                text: expect.stringContaining("Customer information and demographics"),
+            });
+            expect(result.contents[0].text).toContain("The id of the datasource is ds-456");
+            expect(result.contents[0].text).toContain("Use ThoughtSpot's getRelevantQuestions tool");
+        });
+
+        it("should throw 404 error for invalid datasource URI format", async () => {
+            await server.init();
+
+            await expect(server.readResource({ 
+                method: "resources/read",
+                params: { uri: "invalid-uri" } 
+            })).rejects.toThrow("Datasource not found");
+        });
+
+        it("should throw 400 error for URI without datasource ID", async () => {
+            await server.init();
+
+            await expect(server.readResource({ 
+                method: "resources/read",
+                params: { uri: "datasource:///" } 
+            })).rejects.toThrow("Invalid datasource uri");
+        });
+
+        it("should throw 404 error for non-existent datasource", async () => {
+            await server.init();
+
+            await expect(server.readResource({ 
+                method: "resources/read",
+                params: { uri: "datasource:///non-existent-id" } 
+            })).rejects.toThrow("Datasource not found");
+        });
+
+        it("should throw 404 error for malformed URI", async () => {
+            await server.init();
+
+            await expect(server.readResource({ 
+                method: "resources/read",
+                params: { uri: "datasource://" } 
+            })).rejects.toThrow("Datasource not found");
+        });
+
+        it("should throw 400 error for empty URI", async () => {
+            await server.init();
+
+            await expect(server.readResource({ 
+                method: "resources/read",
+                params: { uri: "" } 
+            })).rejects.toThrow("Invalid datasource uri");
+        });
+
+        it("should use cached datasources for resource lookup", async () => {
+            await server.init();
+
+            // First call should fetch from service
+            await server.readResource({ 
+                method: "resources/read",
+                params: { uri: "datasource:///ds-123" } 
+            });
+            const mockGetClient = vi.mocked(thoughtspotClient.getThoughtSpotClient);
+            const mockClientInstance = mockGetClient.mock.results[0].value;
+            expect(mockClientInstance.searchMetadata).toHaveBeenCalledTimes(1);
+
+            // Second call should use cached data
+            await server.readResource({ 
+                method: "resources/read",
+                params: { uri: "datasource:///ds-456" } 
+            });
+            expect(mockClientInstance.searchMetadata).toHaveBeenCalledTimes(1);
         });
     });
+}); 
 
     describe("Caching", () => {
         it("should cache datasources after first call", async () => {

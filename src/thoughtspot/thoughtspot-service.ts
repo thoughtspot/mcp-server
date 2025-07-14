@@ -182,7 +182,7 @@ export class ThoughtSpotService {
      * Fetch TML and create liveboard
      */
     @WithSpan('fetch-tml-and-create-liveboard')
-    async fetchTMLAndCreateLiveboard(name: string, answers: any[]): Promise<{ url?: string; error: Error | null }> {
+    async fetchTMLAndCreateLiveboard(name: string, answers: any[], summary: string): Promise<{ url?: string; error: Error | null }> {
         const span = getActiveSpan();
         
         try {
@@ -195,12 +195,29 @@ export class ThoughtSpotService {
             const tmls = await Promise.all(answers.map((answer) => 
                 this.getAnswerTML(answer.question, answer.session_identifier, answer.generation_number)
             ));
-            
-            answers.forEach((answer, idx) => {
-                answer.tml = tmls[idx];
-            });
 
+            // Add note tile first
+            const noteTitle = {
+                id: "Viz_0",
+                note_tile: {
+                    html_parsed_string: `<h2 class="theme-module__editor-h2" dir="ltr" style="text-align: center;"><span style="white-space: pre-wrap;">Summary of the liveboard</span></h2><p class="theme-module__editor-paragraph" dir="ltr"><span style="white-space: pre-wrap;">${summary}</span></p><div class="pinboard-note-tile-module__noteTileBg editor-module__bgNode" style="background-color: rgb(255, 255, 255);"></div>`
+                }
+            };
+
+            // Update answers with TML data to match TML visualization format
+            const visualizationAnswers = answers.map((answer, idx) => ({
+                id: `Viz_${idx + 1}`,
+                answer: {
+                    ...tmls[idx]?.answer,
+                    name: answer.question,
+                },
+            }));
+
+            // Combine note tile first, then visualization answers
+            answers = [noteTitle, ...visualizationAnswers];
+            
             span?.addEvent("create-liveboard");
+
 
             const liveboardUrl = await this.createLiveboard(name, answers);
             return {
@@ -229,21 +246,15 @@ export class ThoughtSpotService {
             total_answers: answers.length,
         });
         
-        answers = answers.filter((answer) => answer.tml);
+        answers = answers.filter((answer) => answer.answer || answer.note_tile);
         
         const tml = {
             liveboard: {
                 name,
-                visualizations: answers.map((answer, idx) => ({
-                    id: `Viz_${idx}`,
-                    answer: {
-                        ...answer.tml.answer,
-                        name: answer.question,
-                    },
-                })),
+                visualizations: answers,
                 layout: {
                     tiles: answers.map((answer, idx) => ({
-                        visualization_id: `Viz_${idx}`,
+                        visualization_id: answer.id,
                         size: 'MEDIUM_SMALL'
                     }))
                 },
@@ -393,10 +404,11 @@ export async function getAnswerForQuestion(
 export async function fetchTMLAndCreateLiveboard(
     name: string,
     answers: any[],
+    summary: string,
     client: ThoughtSpotRestApi,
 ) {
     const service = new ThoughtSpotService(client);
-    return service.fetchTMLAndCreateLiveboard(name, answers);
+    return service.fetchTMLAndCreateLiveboard(name, answers, summary);
 }
 
 export async function createLiveboard(
