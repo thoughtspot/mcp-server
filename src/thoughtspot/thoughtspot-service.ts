@@ -253,10 +253,18 @@ export class ThoughtSpotService {
                 name,
                 visualizations: answers,
                 layout: {
-                    tiles: answers.map((answer, idx) => ({
-                        visualization_id: answer.id,
-                        size: 'MEDIUM_SMALL'
-                    }))
+                    tiles: answers.map((answer, idx) => 
+                        answer.note_tile ? {
+                            visualization_id: answer.id,
+                            x: 0,
+                            y: 0,
+                            height: 2,
+                            width: 12
+                        } : {
+                            visualization_id: answer.id,
+                            size: 'MEDIUM_SMALL'
+                        }
+                    )
                 },
             }
         };
