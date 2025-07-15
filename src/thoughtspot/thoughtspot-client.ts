@@ -3,7 +3,7 @@ import type { RequestContext, ResponseContext } from "@thoughtspot/rest-api-sdk"
 import YAML from "yaml";
 import type { Observable } from "rxjs";
 import { of } from "rxjs";
-import type { SessionInfo } from "./thoughtspot-service";
+import type { SessionInfo } from "./types";
 
 export const getThoughtSpotClient = (instanceUrl: string, bearerToken: string) => {
     const config = createBearerAuthenticationConfig(

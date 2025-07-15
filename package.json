@@ -10,7 +10,7 @@
   "type": "module",
   "scripts": {
     "cf-typegen": "wrangler types",
-    "start": "wrangler dev",
+    "start": "wrangler dev --local-protocol https",
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "format": "biome format --write",
@@ -44,9 +44,9 @@
   "dependencies": {
     "@cloudflare/workers-oauth-provider": "^0.0.5",
     "@microlabs/otel-cf-workers": "^1.0.0-rc.52",
-    "@modelcontextprotocol/sdk": "^1.12.1",
+    "@modelcontextprotocol/sdk": "^1.15.1",
     "@thoughtspot/rest-api-sdk": "^2.13.1",
-    "agents": "^0.0.95",
+    "agents": "^0.0.105",
     "hono": "^4.7.8",
     "rxjs": "^7.8.2",
     "yaml": "^2.7.1",

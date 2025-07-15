@@ -3,10 +3,11 @@ import { instrument, type ResolveConfigFn, instrumentDO } from '@microlabs/otel-
 import OAuthProvider from "@cloudflare/workers-oauth-provider";
 import { McpAgent } from "agents/mcp";
 import handler from "./handlers";
-import type { Props } from "./utils";
+import { type Props, instrumentedMCPServer } from "./utils";
 import { MCPServer } from "./servers/mcp-server";
 import { apiServer } from "./servers/api-server";
 import { withBearerHandler } from "./bearer";
+import { OpenAIDeepResearchMCPServer } from './servers/openai-mcp-server';
 
 // OTEL configuration function
 const config: ResolveConfigFn = (env: Env, _trigger) => {
@@ -19,31 +20,22 @@ const config: ResolveConfigFn = (env: Env, _trigger) => {
     };
 };
 
-class ThoughtSpotMCPCore extends McpAgent<Env, any, Props> {
-    server = new MCPServer(this);
-
-
-    // Argument of type 'typeof ThoughtSpotMCPWrapper' is not assignable to parameter of type 'DOClass'.
-    // Cannot assign a 'protected' constructor type to a 'public' constructor type.
-    // Created to satisfy the DOClass type.
-    // biome-ignore lint/complexity/noUselessConstructor: required for DOClass
-    public constructor(state: DurableObjectState, env: Env) {
-        super(state, env);
-    }
-
-    async init() {
-        await this.server.init();
-    }
-}
-
 // Create the instrumented ThoughtSpotMCP for the main export
-export const ThoughtSpotMCP = instrumentDO(ThoughtSpotMCPCore, config);
+export const ThoughtSpotMCP = instrumentedMCPServer(MCPServer, config);
+
+export const ThoughtSpotOpenAIDeepResearchMCP = instrumentedMCPServer(OpenAIDeepResearchMCPServer, config);
 
 // Create the OAuth provider instance
 const oauthProvider = new OAuthProvider({
     apiHandlers: {
         "/mcp": ThoughtSpotMCP.serve("/mcp") as any, // TODO: Remove 'any'
         "/sse": ThoughtSpotMCP.serveSSE("/sse") as any, // TODO: Remove 'any'
+        '/openai/mcp': ThoughtSpotOpenAIDeepResearchMCP.serve("/openai/mcp", {
+            binding: "OPENAI_DEEP_RESEARCH_MCP_OBJECT"
+        }) as any, // TODO: Remove 'any'
+        '/openai/sse': ThoughtSpotOpenAIDeepResearchMCP.serveSSE("/openai/sse", {
+            binding: "OPENAI_DEEP_RESEARCH_MCP_OBJECT"
+        }) as any, // TODO: Remove 'any'
         "/api": apiServer as any, // TODO: Remove 'any'
     },
     defaultHandler: withBearerHandler(handler, ThoughtSpotMCP) as any, // TODO: Remove 'any'

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { MixpanelTracker } from "../../../src/metrics/mixpanel/mixpanel";
 import { MixpanelClient } from "../../../src/metrics/mixpanel/mixpanel-client";
-import type { SessionInfo } from "../../../src/thoughtspot/thoughtspot-service";
+import type { SessionInfo } from "../../../src/thoughtspot/types";
 
 // Mock the MixpanelClient
 vi.mock("../../../src/metrics/mixpanel/mixpanel-client");
@@ -32,7 +32,7 @@ describe("MixpanelTracker", () => {
     beforeEach(() => {
         // Clear all mocks
         vi.clearAllMocks();
-        
+
         // Create mock MixpanelClient instance
         mockMixpanelClient = {
             identify: vi.fn(),
@@ -44,8 +44,8 @@ describe("MixpanelTracker", () => {
         (MixpanelClient as any).mockImplementation(() => mockMixpanelClient);
 
         // Mock console methods properly
-        consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-        consoleDebugSpy = vi.spyOn(console, "debug").mockImplementation(() => {});
+        consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => { });
+        consoleDebugSpy = vi.spyOn(console, "debug").mockImplementation(() => { });
     });
 
     afterEach(() => {
@@ -55,26 +55,26 @@ describe("MixpanelTracker", () => {
     describe("constructor", () => {
         it("should create MixpanelTracker instance", () => {
             tracker = new MixpanelTracker(mockSessionInfo, mockClient);
-            
+
             expect(tracker).toBeInstanceOf(MixpanelTracker);
             expect(MixpanelClient).toHaveBeenCalledWith(mockSessionInfo.mixpanelToken);
         });
 
         it("should initialize MixpanelClient with correct token", () => {
             tracker = new MixpanelTracker(mockSessionInfo, mockClient);
-            
+
             expect(MixpanelClient).toHaveBeenCalledWith(mockSessionInfo.mixpanelToken);
         });
 
         it("should call identify with userGUID", () => {
             tracker = new MixpanelTracker(mockSessionInfo, mockClient);
-            
+
             expect(mockMixpanelClient.identify).toHaveBeenCalledWith(mockSessionInfo.userGUID);
         });
 
         it("should register super properties with session and client info", () => {
             tracker = new MixpanelTracker(mockSessionInfo, mockClient);
-            
+
             expect(mockMixpanelClient.register).toHaveBeenCalledWith({
                 clusterId: mockSessionInfo.clusterId,
                 clusterName: mockSessionInfo.clusterName,
@@ -87,7 +87,7 @@ describe("MixpanelTracker", () => {
 
         it("should work with empty client object", () => {
             tracker = new MixpanelTracker(mockSessionInfo, {});
-            
+
             expect(mockMixpanelClient.register).toHaveBeenCalledWith({
                 clusterId: mockSessionInfo.clusterId,
                 clusterName: mockSessionInfo.clusterName,
@@ -100,7 +100,7 @@ describe("MixpanelTracker", () => {
 
         it("should work without client parameter", () => {
             tracker = new MixpanelTracker(mockSessionInfo);
-            
+
             expect(mockMixpanelClient.register).toHaveBeenCalledWith({
                 clusterId: mockSessionInfo.clusterId,
                 clusterName: mockSessionInfo.clusterName,
@@ -114,7 +114,7 @@ describe("MixpanelTracker", () => {
         it("should handle partial client object", () => {
             const partialClient = { clientName: "partial-client" };
             tracker = new MixpanelTracker(mockSessionInfo, partialClient);
-            
+
             expect(mockMixpanelClient.register).toHaveBeenCalledWith({
                 clusterId: mockSessionInfo.clusterId,
                 clusterName: mockSessionInfo.clusterName,
@@ -127,7 +127,7 @@ describe("MixpanelTracker", () => {
 
         it("should handle null client object", () => {
             tracker = new MixpanelTracker(mockSessionInfo, null as any);
-            
+
             expect(mockMixpanelClient.register).toHaveBeenCalledWith({
                 clusterId: mockSessionInfo.clusterId,
                 clusterName: mockSessionInfo.clusterName,
@@ -325,7 +325,7 @@ describe("MixpanelTracker", () => {
 
             // Simulate async delay
             let resolved = false;
-            mockMixpanelClient.track.mockImplementation(() => 
+            mockMixpanelClient.track.mockImplementation(() =>
                 new Promise(resolve => {
                     setTimeout(() => {
                         resolved = true;
@@ -344,7 +344,7 @@ describe("MixpanelTracker", () => {
     describe("integration with Tracker interface", () => {
         it("should implement Tracker interface correctly", () => {
             tracker = new MixpanelTracker(mockSessionInfo, mockClient);
-            
+
             // Check that the track method exists and is callable
             expect(typeof tracker.track).toBe("function");
             expect(tracker.track).toBeInstanceOf(Function);
@@ -352,10 +352,10 @@ describe("MixpanelTracker", () => {
 
         it("should handle TrackEvent enum values", async () => {
             tracker = new MixpanelTracker(mockSessionInfo, mockClient);
-            
+
             // Import TrackEvent enum
             const { TrackEvent } = await import("../../../src/metrics");
-            
+
             await tracker.track(TrackEvent.CallTool, { toolName: "test-tool" });
             await tracker.track(TrackEvent.Init, { version: "1.0.0" });
 

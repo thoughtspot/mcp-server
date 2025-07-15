@@ -1,24 +1,18 @@
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import {
-    CallToolRequestSchema,
-    ListToolsRequestSchema,
+    type CallToolRequestSchema,
     ToolSchema,
-    ListResourcesRequestSchema,
-    ReadResourceRequestSchema
+    type ReadResourceRequestSchema
 } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
-import type { Props } from "../utils";
+
 import { McpServerError } from "../utils";
-import { getThoughtSpotClient } from "../thoughtspot/thoughtspot-client";
-import {
-    ThoughtSpotService,
-    type DataSource
+import type {
+    DataSource
 } from "../thoughtspot/thoughtspot-service";
-import { MixpanelTracker } from "../metrics/mixpanel/mixpanel";
-import { Trackers, type Tracker, TrackEvent } from "../metrics";
-import { context, type Span, SpanStatusCode, trace } from "@opentelemetry/api";
-import { getActiveSpan, WithSpan } from "../metrics/tracing/tracing-utils";
+import { TrackEvent } from "../metrics";
+import { WithSpan } from "../metrics/tracing/tracing-utils";
+import { BaseMCPServer, type Context, type ToolResponse } from "./mcp-server-base";
 
 const ToolInputSchema = ToolSchema.shape.inputSchema;
 type ToolInput = z.infer<typeof ToolInputSchema>;
@@ -79,131 +73,12 @@ enum ToolName {
     CreateLiveboard = "createLiveboard",
 }
 
-interface Context {
-    props: Props;
-}
-
-// Response utility types
-type ContentItem = {
-    type: "text";
-    text: string;
-};
-
-type SuccessResponse = {
-    content: ContentItem[];
-};
-
-type ErrorResponse = {
-    isError: true;
-    content: ContentItem[];
-};
-
-type ToolResponse = SuccessResponse | ErrorResponse;
-
-export class MCPServer extends Server {
-    private trackers: Trackers = new Trackers();
-    private sessionInfo: any;
-    constructor(private ctx: Context) {
-        super({
-            name: "ThoughtSpot",
-            version: "1.0.0",
-        }, {
-            capabilities: {
-                tools: {},
-                logging: {},
-                completion: {},
-                resources: {},
-            }
-        });
+export class MCPServer extends BaseMCPServer {
+    constructor(ctx: Context) {
+        super(ctx, "ThoughtSpot", "1.0.0");
     }
 
-    private getThoughtSpotService() {
-        return new ThoughtSpotService(getThoughtSpotClient(this.ctx.props.instanceUrl, this.ctx.props.accessToken));
-    }
-
-    /**
-     * Initialize span with common attributes (user_guid and instance_url)
-     */
-    private initSpanWithCommonAttributes(span: Span | undefined): void {
-        span?.setAttributes({
-            user_guid: this.sessionInfo.userGUID,
-            instance_url: this.ctx.props.instanceUrl,
-        });
-    }
-
-    /**
-     * Create a standardized error response
-     */
-    private createErrorResponse(span: Span | undefined, message: string, statusMessage?: string): ErrorResponse {
-        span?.setStatus({ code: SpanStatusCode.ERROR, message: statusMessage || message });
-        return {
-            isError: true,
-            content: [{ type: "text", text: `ERROR: ${message}` }],
-        };
-    }
-
-    /**
-     * Create a standardized success response with a single message
-     */
-    private createSuccessResponse(span: Span | undefined, message: string, statusMessage?: string): SuccessResponse {
-        span?.setStatus({ code: SpanStatusCode.OK, message: statusMessage || message });
-        return {
-            content: [{ type: "text", text: message }],
-        };
-    }
-
-    /**
-     * Create a standardized success response with multiple content items
-     */
-    private createMultiContentSuccessResponse(span: Span | undefined, content: ContentItem[], statusMessage: string): SuccessResponse {
-        span?.setStatus({ code: SpanStatusCode.OK, message: statusMessage });
-        return {
-            content,
-        };
-    }
-
-    /**
-     * Create a standardized success response with an array of text items
-     */
-    private createArraySuccessResponse(span: Span | undefined, texts: string[], statusMessage: string): SuccessResponse {
-        span?.setStatus({ code: SpanStatusCode.OK, message: statusMessage });
-        return {
-            content: texts.map(text => ({ type: "text", text })),
-        };
-    }
-
-    async init() {
-        this.sessionInfo = await this.getThoughtSpotService().getSessionInfo();
-        const mixpanel = new MixpanelTracker(
-            this.sessionInfo,
-            this.ctx.props.clientName
-        );
-        this.addTracker(mixpanel);
-        this.trackers.track(TrackEvent.Init);
-
-        this.setRequestHandler(ListToolsRequestSchema, async () => {
-            return this.listTools();
-        });
-
-        this.setRequestHandler(ListResourcesRequestSchema, async () => {
-            return this.listResources();
-        });
-
-        this.setRequestHandler(ReadResourceRequestSchema, async (request: z.infer<typeof ReadResourceRequestSchema>) => {
-            return this.readResource(request);
-        });
-
-        // Handle call tool request
-        this.setRequestHandler(CallToolRequestSchema, async (request: z.infer<typeof CallToolRequestSchema>) => {
-            return this.callTool(request);
-        });
-    }
-
-    @WithSpan('list-tools')
-    async listTools() {
-        const span = getActiveSpan();
-        this.initSpanWithCommonAttributes(span);
-
+    protected async listTools() {
         return {
             tools: [
                 {
@@ -250,11 +125,7 @@ export class MCPServer extends Server {
         };
     }
 
-    @WithSpan('list-datasources')
-    async listResources() {
-        const span = getActiveSpan();
-        this.initSpanWithCommonAttributes(span);
-
+    protected async listResources() {
         const sources = await this.getDatasources();
         return {
             resources: sources.list.map((s) => ({
@@ -266,11 +137,7 @@ export class MCPServer extends Server {
         };
     }
 
-    @WithSpan('read-datasources')
-    async readResource(request: z.infer<typeof ReadResourceRequestSchema>) {
-        const span = getActiveSpan();
-        this.initSpanWithCommonAttributes(span);
-
+    protected async readResource(request: z.infer<typeof ReadResourceRequestSchema>) {
         const { uri } = request.params;
         const sourceId = uri.split("///").pop();
         if (!sourceId) {
@@ -296,22 +163,18 @@ export class MCPServer extends Server {
         };
     }
 
-    @WithSpan('call-tool')
-    async callTool(request: z.infer<typeof CallToolRequestSchema>) {
+    protected async callTool(request: z.infer<typeof CallToolRequestSchema>) {
         const { name } = request.params;
         this.trackers.track(TrackEvent.CallTool, { toolName: name });
-
-        const span = getActiveSpan();
-        this.initSpanWithCommonAttributes(span);
 
         let response: ToolResponse | undefined;
         switch (name) {
             case ToolName.Ping: {
                 console.log("Received Ping request");
                 if (this.ctx.props.accessToken && this.ctx.props.instanceUrl) {
-                    return this.createSuccessResponse(span, "Pong", "Ping successful");
+                    return this.createSuccessResponse("Pong", "Ping successful");
                 }
-                return this.createErrorResponse(span, "Not authenticated", "Ping failed");
+                return this.createErrorResponse("Not authenticated", "Ping failed");
             }
             case ToolName.GetRelevantQuestions: {
                 return this.callGetRelevantQuestions(request);
@@ -334,7 +197,6 @@ export class MCPServer extends Server {
     async callGetRelevantQuestions(request: z.infer<typeof CallToolRequestSchema>) {
         const { query, datasourceIds: sourceIds, additionalContext } = GetRelevantQuestionsSchema.parse(request.params.arguments);
         console.log("[DEBUG] Getting relevant questions for datasource: ", sourceIds);
-        const span = getActiveSpan();
 
         const relevantQuestions = await this.getThoughtSpotService().getRelevantQuestions(
             query,
@@ -343,56 +205,54 @@ export class MCPServer extends Server {
         );
 
         if (relevantQuestions.error) {
-            return this.createErrorResponse(span, relevantQuestions.error.message, `Error getting relevant questions ${relevantQuestions.error.message}`);
+            return this.createErrorResponse(relevantQuestions.error.message, `Error getting relevant questions ${relevantQuestions.error.message}`);
         }
 
         if (relevantQuestions.questions.length === 0) {
-            return this.createSuccessResponse(span, "No relevant questions found");
+            return this.createSuccessResponse("No relevant questions found");
         }
 
         const questionTexts = relevantQuestions.questions.map(q =>
             `Question: ${q.question}\nDatasourceId: ${q.datasourceId}`
         );
 
-        return this.createArraySuccessResponse(span, questionTexts, "Relevant questions found");
+        return this.createArraySuccessResponse(questionTexts, "Relevant questions found");
     }
 
     @WithSpan('call-get-answer')
     async callGetAnswer(request: z.infer<typeof CallToolRequestSchema>) {
         const { question, datasourceId: sourceId } = GetAnswerSchema.parse(request.params.arguments);
-        const span = getActiveSpan();
 
         const answer = await this.getThoughtSpotService().getAnswerForQuestion(question, sourceId, false);
 
         if (answer.error) {
-            return this.createErrorResponse(span, answer.error.message, `Error getting answer ${answer.error.message}`);
+            return this.createErrorResponse(answer.error.message, `Error getting answer ${answer.error.message}`);
         }
 
-        const content: ContentItem[] = [
-            { type: "text", text: answer.data },
+        const content = [
+            { type: "text" as const, text: answer.data },
             {
-                type: "text",
+                type: "text" as const,
                 text: `Question: ${question}\nSession Identifier: ${answer.session_identifier}\nGeneration Number: ${answer.generation_number}\n\nUse this information to create a liveboard with the createLiveboard tool, if the user asks.`,
             },
         ];
-        return this.createMultiContentSuccessResponse(span, content, "Answer found");
+        return this.createMultiContentSuccessResponse(content, "Answer found");
     }
 
     @WithSpan('call-create-liveboard')
     async callCreateLiveboard(request: z.infer<typeof CallToolRequestSchema>) {
         const { name, answers, noteTile } = CreateLiveboardSchema.parse(request.params.arguments);
         const liveboard = await this.getThoughtSpotService().fetchTMLAndCreateLiveboard(name, answers, noteTile);
-        const span = getActiveSpan();
-
+        
         if (liveboard.error) {
-            return this.createErrorResponse(span, liveboard.error.message, `Error creating liveboard ${liveboard.error.message}`);
+            return this.createErrorResponse(liveboard.error.message, `Error creating liveboard ${liveboard.error.message}`);
         }
 
         const successMessage = `Liveboard created successfully, you can view it at ${liveboard.url}
                 
 Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 
-        return this.createSuccessResponse(span, successMessage, "Liveboard created successfully");
+        return this.createSuccessResponse(successMessage, "Liveboard created successfully");
     }
 
     private _sources: {
@@ -414,7 +274,5 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
         return this._sources;
     }
 
-    async addTracker(tracker: Tracker) {
-        this.trackers.add(tracker);
-    }
+
 }
