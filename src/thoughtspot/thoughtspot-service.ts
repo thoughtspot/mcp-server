@@ -2,13 +2,14 @@ import type { ThoughtSpotRestApi } from "@thoughtspot/rest-api-sdk";
 import type { Span } from "@opentelemetry/api";
 import { SpanStatusCode, trace, context } from "@opentelemetry/api";
 import { getActiveSpan, WithSpan } from "../metrics/tracing/tracing-utils";
+import type { DataSource, SessionInfo } from "./types";
 
 
 /**
  * Main ThoughtSpot service class using decorator pattern for tracing
  */
 export class ThoughtSpotService {
-    constructor(private client: ThoughtSpotRestApi) {}
+    constructor(private client: ThoughtSpotRestApi) { }
 
     /**
      * Get relevant questions for a given query and data sources
@@ -20,13 +21,13 @@ export class ThoughtSpotService {
         additionalContext: string
     ): Promise<{ questions: { question: string, datasourceId: string }[], error: Error | null }> {
         const span = trace.getSpan(context.active());
-        
+
         try {
             additionalContext = additionalContext || '';
             span?.setAttribute("datasource_ids", sourceIds.join(","));
             console.log("[DEBUG] Getting relevant questions with datasource: ", sourceIds);
             span?.addEvent("get-decomposed-query");
-            
+
             const resp = await this.client.queryGetDecomposedQuery({
                 nlsRequest: {
                     query: query,
@@ -37,15 +38,15 @@ export class ThoughtSpotService {
                 worksheetIds: sourceIds,
                 maxDecomposedQueries: 5,
             })
-            
+
             const questions = resp.decomposedQueryResponse?.decomposedQueries?.map((q) => ({
                 question: q.query!,
                 datasourceId: q.worksheetId!,
             })) || [];
-            
+
             span?.setStatus({ code: SpanStatusCode.OK, message: "Relevant questions found" });
             span?.setAttribute("questions_count", questions.length);
-            
+
             return {
                 questions,
                 error: null,
@@ -70,13 +71,13 @@ export class ThoughtSpotService {
         generation_number: number
     ): Promise<string> {
         const span = getActiveSpan();
-        
+
         try {
             span?.setAttributes({
                 session_identifier,
                 generation_number,
             })
-            
+
             console.log("[DEBUG] Getting Data for session_identifier: ", session_identifier, "generation_number: ", generation_number, "instanceUrl: ", (this.client as any).instanceUrl);
             span?.addEvent("get-answer-data");
             const data = await this.client.exportAnswerReport({
@@ -84,11 +85,11 @@ export class ThoughtSpotService {
                 generation_number,
                 file_format: "CSV",
             })
-            
+
             let csvData = await data.text();
             // get only the first 100 lines of the csv data
             csvData = csvData.split('\n').slice(0, 100).join('\n');
-            
+
             return csvData;
         } catch (error) {
             span?.setStatus({ code: SpanStatusCode.ERROR, message: `Error getting answer Data ${error}` });
@@ -107,7 +108,7 @@ export class ThoughtSpotService {
         generation_number: number
     ): Promise<any> {
         const span = getActiveSpan();
-        
+
         try {
             span?.setAttribute("session_identifier", session_identifier);
             span?.addEvent("get-answer-tml");
@@ -134,15 +135,15 @@ export class ThoughtSpotService {
         shouldGetTML: boolean
     ): Promise<any> {
         const span = getActiveSpan();
-        
+
         span?.setAttributes({
             datasource_id: sourceId,
             should_get_tml: shouldGetTML,
         });
         span?.addEvent("get-answer-for-question");
-        
+
         console.log("[DEBUG] Getting answer for sourceId: ", sourceId, "shouldGetTML: ", shouldGetTML);
-        
+
         try {
             const answer = await this.client.singleAnswer({
                 query: question,
@@ -184,7 +185,7 @@ export class ThoughtSpotService {
     @WithSpan('fetch-tml-and-create-liveboard')
     async fetchTMLAndCreateLiveboard(name: string, answers: any[]): Promise<{ url?: string; error: Error | null }> {
         const span = getActiveSpan();
-        
+
         try {
             span?.setAttributes({
                 liveboard_name: name,
@@ -192,10 +193,10 @@ export class ThoughtSpotService {
             });
             span?.addEvent("create-answer-tmls");
 
-            const tmls = await Promise.all(answers.map((answer) => 
+            const tmls = await Promise.all(answers.map((answer) =>
                 this.getAnswerTML(answer.question, answer.session_identifier, answer.generation_number)
             ));
-            
+
             answers.forEach((answer, idx) => {
                 answer.tml = tmls[idx];
             });
@@ -222,15 +223,15 @@ export class ThoughtSpotService {
     @WithSpan('create-liveboard')
     async createLiveboard(name: string, answers: any[]): Promise<string> {
         const span = getActiveSpan();
-        
+
         span?.addEvent("createLiveboard");
         span?.setAttributes({
             liveboard_name: name,
             total_answers: answers.length,
         });
-        
+
         answers = answers.filter((answer) => answer.tml);
-        
+
         const tml = {
             liveboard: {
                 name,
@@ -266,9 +267,9 @@ export class ThoughtSpotService {
     @WithSpan('get-data-sources')
     async getDataSources(): Promise<DataSource[]> {
         const span = getActiveSpan();
-        
+
         span?.addEvent("get-data-sources");
-        
+
         const resp = await this.client.searchMetadata({
             metadata: [{
                 type: "LOGICAL_TABLE",
@@ -279,7 +280,7 @@ export class ThoughtSpotService {
                 order: "DESC",
             }
         });
-        
+
         const results = resp
             .filter(d => d.metadata_header.type === "WORKSHEET")
             .map(d => ({
@@ -287,7 +288,7 @@ export class ThoughtSpotService {
                 id: d.metadata_header.id,
                 description: d.metadata_header.description,
             }));
-            
+
         return results;
     }
 
@@ -297,19 +298,19 @@ export class ThoughtSpotService {
     @WithSpan('get-session-info')
     async getSessionInfo(): Promise<SessionInfo> {
         const span = getActiveSpan();
-        
+
         const info = await (this.client as any).getSessionInfo();
         const devMixpanelToken = info.configInfo.mixpanelConfig.devSdkKey;
         const prodMixpanelToken = info.configInfo.mixpanelConfig.prodSdkKey;
         const mixpanelToken = info.configInfo.mixpanelConfig.production
             ? prodMixpanelToken
             : devMixpanelToken;
-            
+
         span?.setAttribute("user_guid", info.userGUID);
         span?.setAttribute("user_name", info.userName);
         span?.setAttribute("cluster_name", info.configInfo.selfClusterName);
         span?.setAttribute("release_version", info.releaseVersion);
-        
+
         return {
             mixpanelToken,
             userGUID: info.userGUID,
@@ -328,7 +329,7 @@ export class ThoughtSpotService {
     @WithSpan('search-worksheets')
     async searchWorksheets(searchTerm: string): Promise<DataSource[]> {
         const span = getActiveSpan();
-        
+
         const resp = await this.client.searchMetadata({
             metadata: [{
                 type: "LOGICAL_TABLE",
@@ -350,7 +351,7 @@ export class ThoughtSpotService {
             }));
 
         span?.setAttribute('results_count', results.length);
-        
+
         return results;
     }
 
@@ -419,3 +420,6 @@ export async function getSessionInfo(client: ThoughtSpotRestApi): Promise<Sessio
     const service = new ThoughtSpotService(client);
     return service.getSessionInfo();
 }
+
+// Export types
+export type { DataSource, SessionInfo } from "./types";

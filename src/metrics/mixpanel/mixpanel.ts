@@ -1,5 +1,5 @@
 import { MixpanelClient } from "./mixpanel-client";
-import type { SessionInfo } from "../../thoughtspot/thoughtspot-service";
+import type { SessionInfo } from "../../thoughtspot/types";
 import type { Tracker } from "../index";
 
 
