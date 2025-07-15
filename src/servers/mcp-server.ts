@@ -111,7 +111,7 @@ export class MCPServer extends Server {
     /**
      * Create a standardized error response
      */
-        private createErrorResponse(span: Span | undefined, message: string, statusMessage?: string): ErrorResponse {
+    private createErrorResponse(span: Span | undefined, message: string, statusMessage?: string): ErrorResponse {
         span?.setStatus({ code: SpanStatusCode.ERROR, message: statusMessage || message });
         return {
             isError: true,
@@ -180,28 +180,48 @@ export class MCPServer extends Server {
     async listTools() {
         const span = getActiveSpan();
         this.initSpanWithCommonAttributes(span);
-        
+
         return {
             tools: [
                 {
                     name: ToolName.Ping,
                     description: "Simple ping tool to test connectivity and Auth",
                     inputSchema: zodToJsonSchema(PingSchema) as ToolInput,
+                    annotations: {
+                        title: "Test Connection",
+                        readOnlyHint: true,
+                        destructiveHint: false,
+                    },
                 },
                 {
                     name: ToolName.GetRelevantQuestions,
                     description: "Get relevant data questions from ThoughtSpot database",
                     inputSchema: zodToJsonSchema(GetRelevantQuestionsSchema) as ToolInput,
+                    annotations: {
+                        title: "Get Relevant Questions for a Query",
+                        readOnlyHint: true,
+                        destructiveHint: false,
+                    },
                 },
                 {
                     name: ToolName.GetAnswer,
                     description: "Get the answer to a question from ThoughtSpot database",
                     inputSchema: zodToJsonSchema(GetAnswerSchema) as ToolInput,
+                    annotations: {
+                        title: "Get Answer for a Question",
+                        readOnlyHint: true,
+                        destructiveHint: false,
+                    },
                 },
                 {
                     name: ToolName.CreateLiveboard,
                     description: "Create a liveboard from a list of answers",
                     inputSchema: zodToJsonSchema(CreateLiveboardSchema) as ToolInput,
+                    annotations: {
+                        title: "Create Liveboard from Answers",
+                        readOnlyHint: true,
+                        destructiveHint: false,
+                    },
                 }
             ]
         };
@@ -211,7 +231,7 @@ export class MCPServer extends Server {
     async listResources() {
         const span = getActiveSpan();
         this.initSpanWithCommonAttributes(span);
-        
+
         const sources = await this.getDatasources();
         return {
             resources: sources.list.map((s) => ({
@@ -227,7 +247,7 @@ export class MCPServer extends Server {
     async readResource(request: z.infer<typeof ReadResourceRequestSchema>) {
         const span = getActiveSpan();
         this.initSpanWithCommonAttributes(span);
-        
+
         const { uri } = request.params;
         const sourceId = uri.split("///").pop();
         if (!sourceId) {
@@ -307,10 +327,10 @@ export class MCPServer extends Server {
             return this.createSuccessResponse(span, "No relevant questions found");
         }
 
-        const questionTexts = relevantQuestions.questions.map(q => 
+        const questionTexts = relevantQuestions.questions.map(q =>
             `Question: ${q.question}\nDatasourceId: ${q.datasourceId}`
         );
-        
+
         return this.createArraySuccessResponse(span, questionTexts, "Relevant questions found");
     }
 
@@ -340,7 +360,7 @@ export class MCPServer extends Server {
         const { name, answers } = CreateLiveboardSchema.parse(request.params.arguments);
         const liveboard = await this.getThoughtSpotService().fetchTMLAndCreateLiveboard(name, answers);
         const span = getActiveSpan();
-        
+
         if (liveboard.error) {
             return this.createErrorResponse(span, liveboard.error.message, `Error creating liveboard ${liveboard.error.message}`);
         }
