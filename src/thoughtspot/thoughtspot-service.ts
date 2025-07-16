@@ -3,6 +3,23 @@ import type { Span } from "@opentelemetry/api";
 import { SpanStatusCode, trace, context } from "@opentelemetry/api";
 import { getActiveSpan, WithSpan } from "../metrics/tracing/tracing-utils";
 
+export interface DataSource {
+    name: string;
+    id: string;
+    description: string;
+}
+
+export interface SessionInfo {
+    mixpanelToken: string;
+    userGUID: string;
+    userName: string;
+    clusterName: string;
+    clusterId: string;
+    releaseVersion: string;
+    currentOrgId: string;
+    privileges?: any;
+}
+
 
 /**
  * Main ThoughtSpot service class using decorator pattern for tracing
@@ -182,7 +199,7 @@ export class ThoughtSpotService {
      * Fetch TML and create liveboard
      */
     @WithSpan('fetch-tml-and-create-liveboard')
-    async fetchTMLAndCreateLiveboard(name: string, answers: any[], summary: string): Promise<{ url?: string; error: Error | null }> {
+    async fetchTMLAndCreateLiveboard(name: string, answers: any[], noteTileParsedHtml: string): Promise<{ url?: string; error: Error | null }> {
         const span = getActiveSpan();
         
         try {
@@ -200,7 +217,7 @@ export class ThoughtSpotService {
             const noteTitle = {
                 id: "Viz_0",
                 note_tile: {
-                    html_parsed_string: `<h2 class="theme-module__editor-h2" dir="ltr" style="text-align: center;"><span style="white-space: pre-wrap;">Summary of the liveboard</span></h2><p class="theme-module__editor-paragraph" dir="ltr"><span style="white-space: pre-wrap;">${summary}</span></p><div class="pinboard-note-tile-module__noteTileBg editor-module__bgNode" style="background-color: rgb(255, 255, 255);"></div>`
+                    html_parsed_string: noteTileParsedHtml
                 }
             };
 
@@ -253,21 +270,23 @@ export class ThoughtSpotService {
                 name,
                 visualizations: answers,
                 layout: {
-                    tiles: answers.map((answer, idx) => 
-                        answer.note_tile ? {
-                            visualization_id: answer.id,
-                            x: 0,
-                            y: 0,
-                            height: 2,
-                            width: 12
-                        } : {
-                            visualization_id: answer.id,
+                    tiles: answers.map((answer, idx) => {
+                        if (answer.note_tile) {
+                            return {
+                                visualization_id: `Viz_${idx}`,
+                                size: 'LARGE_SMALL'
+                            }
+                        }
+                        return {
+                            visualization_id: `Viz_${idx}`,
                             size: 'MEDIUM_SMALL'
                         }
-                    )
+                    })
                 },
             }
         };
+
+        console.log("[DEBUG] TML: ", JSON.stringify(tml));
 
         const resp = await this.client.importMetadataTML({
             metadata_tmls: [JSON.stringify(tml)],

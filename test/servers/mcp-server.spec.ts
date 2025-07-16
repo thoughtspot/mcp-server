@@ -397,7 +397,15 @@ describe("MCP Server", () => {
                         generation_number: 1,
                     },
                 ],
-                summary: "This liveboard shows the total revenue for the current period.",
+                noteTile: `<h2 class="theme-module__editor-h2" dir="ltr" style="text-align: center;">
+                    <span style="white-space: pre-wrap;">Revenue Analysis Dashboard</span>
+                </h2>
+                <p class="theme-module__editor-paragraph" dir="ltr">
+                    <span style="white-space: pre-wrap;">
+                        This liveboard shows the total revenue for the current period. Generated on ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}
+                    </span>
+                </p>
+                <div class="pinboard-note-tile-module__noteTileBg editor-module__bgNode"></div>`,
             });
 
             expect(result.isError).toBeUndefined();
@@ -447,7 +455,15 @@ describe("MCP Server", () => {
                         generation_number: 1,
                     },
                 ],
-                summary: "This liveboard shows the total revenue for the current period.",
+                noteTile: `<h2 class="theme-module__editor-h2" dir="ltr" style="text-align: center;">
+                    <span style="white-space: pre-wrap;">Revenue Analysis Dashboard</span>
+                </h2>
+                <p class="theme-module__editor-paragraph" dir="ltr">
+                    <span style="white-space: pre-wrap;">
+                        This liveboard shows the total revenue for the current period. Generated on ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}
+                    </span>
+                </p>
+                <div class="pinboard-note-tile-module__noteTileBg editor-module__bgNode"></div>`,
             });
 
             expect(result.isError).toBe(true);
