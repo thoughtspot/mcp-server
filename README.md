@@ -47,7 +47,7 @@ To configure this MCP server in your MCP client (such as Claude Desktop, Windsur
       "command": "npx",
       "args": [
          "mcp-remote",
-         "https://agent.thoughtspot.app/sse"
+         "https://agent.thoughtspot.app/mcp"
       ]
     }
   }
@@ -152,8 +152,8 @@ For API usage, you would the token endpoints with a `secret_key` to generate the
 
 ### Supported transports
 
-- SSE [/sse]()
-- Streamed HTTP [/mcp]()
+- SSE [https://agent.thoughtspot.app/sse]()
+- Streamed HTTP [https://agent.thoughtspot.app/mcp]()
 
 ## Stdio support (fallback)
 
