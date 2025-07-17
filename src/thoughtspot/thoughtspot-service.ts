@@ -274,7 +274,7 @@ export class ThoughtSpotService {
                         if (answer.note_tile) {
                             return {
                                 visualization_id: `Viz_${idx}`,
-                                size: 'LARGE_SMALL'
+                                size: 'LARGE'
                             }
                         }
                         return {
@@ -285,8 +285,6 @@ export class ThoughtSpotService {
                 },
             }
         };
-
-        console.log("[DEBUG] TML: ", JSON.stringify(tml));
 
         const resp = await this.client.importMetadataTML({
             metadata_tmls: [JSON.stringify(tml)],
