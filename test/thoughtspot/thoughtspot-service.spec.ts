@@ -420,12 +420,7 @@ describe('thoughtspot-service', () => {
         {
           id: 'Viz_2',
           question: 'Question 2',
-          tml: null
-        },
-        {
-          id: 'Viz_3',
-          question: 'Question 3',
-          answer: { name: 'Answer 3' }
+          answer: { name: 'Answer 2' }
         }
       ];
 

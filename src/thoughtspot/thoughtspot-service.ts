@@ -205,13 +205,19 @@ export class ThoughtSpotService {
             };
 
             // Update answers with TML data to match TML visualization format
-            const visualizationAnswers = answers.map((answer, idx) => ({
-                id: `Viz_${idx + 1}`,
-                answer: {
-                    ...tmls[idx]?.answer,
-                    name: answer.question,
-                },
-            }));
+            const visualizationAnswers = answers
+                .map((answer, idx) => {
+                    const tml = tmls[idx];
+                    if (!tml) return null;
+                    return {
+                        id: `Viz_${idx + 1}`,
+                        answer: {
+                            ...tml.answer,
+                            name: answer.question,
+                        },
+                    };
+                })
+                .filter((viz) => viz !== null);
 
             // Combine note tile first, then visualization answers
             answers = [noteTitle, ...visualizationAnswers];
@@ -245,9 +251,7 @@ export class ThoughtSpotService {
             liveboard_name: name,
             total_answers: answers.length,
         });
-        
-        answers = answers.filter((answer) => answer.answer || answer.note_tile);
-        
+                
         const tml = {
             liveboard: {
                 name,
