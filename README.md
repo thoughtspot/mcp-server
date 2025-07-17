@@ -215,6 +215,25 @@ Make sure to add the following entries in your ThoughtSpot instance:
 - Click "Edit"
 - Add "agent.thoughtspot.app" to the the "SAML redirect domains". 
 
+> MCP server install error due to node issues
+
+- Make sure node is installed on your machine.
+- Make sure the node version is >=18
+- Check the node version by using the command `node -v`
+
+> 500 error from MCP server
+
+- Make sure the ThoughtSpot cluster the MCP server is connected to is up and running.
+- If the error persists, please collect the logs that you get from the MCP client and the approximate time when the issue occurred.
+- Reach out on [Discord](https://developers.thoughtspot.com/join-discord) to get support.
+- Create a issue on this repository to get help.
+- Submit a [ThoughtSpot support case](https://community.thoughtspot.com/s/article/How-to-submit-a-ThoughtSpot-Support-Case) with all the artifacts.
+
+> Stale MCP auth
+
+- If for some reason the ThoughtSpot MCP server is failing authentication repeatedly, you can do `rm -rf ~/.mcp-auth`.
+- This will remove all stale authentication info, and restart the auth flow again.
+
 ## Contributing
 
 ### Local Development
