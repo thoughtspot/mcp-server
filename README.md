@@ -17,7 +17,8 @@ Join our [Discord](https://developers.thoughtspot.com/join-discord) to get suppo
 
 ## Table of Contents
 
-- [Usage](#mcp-client-configuration)
+- [Connect](#connect)
+- [Usage](#usage)
 - [Demo video](#demo)
 - [Usage in APIs](#usage-in-apis)
   - [OpenAI / ChatGPT](#openai-responses-api)
@@ -32,9 +33,12 @@ Join our [Discord](https://developers.thoughtspot.com/join-discord) to get suppo
   - [Endpoints](#endpoints)
 
 
-## Usage
+## Connect
 
-To configure this MCP server in your MCP client (such as Claude Desktop, Windsurf, Cursor, etc.), add the following configuration to your MCP client settings:
+If using a client which supports remote MCPs natively (Claude.ai etc) then just enter:
+MCP Server URL: `https://agent.thoughtspot.app/mcp`
+
+To configure this MCP server in your MCP client (such as Claude Desktop, Windsurf, Cursor, etc.) which do not support remote MCPs, add the following configuration to your MCP client settings:
 
 ```json
 {
@@ -50,7 +54,15 @@ To configure this MCP server in your MCP client (such as Claude Desktop, Windsur
 }
 ```
 
-See the [Troubleshooting](#troubleshooting) section for any errors.
+See the [Troubleshooting](#troubleshooting) section for any errors / more details.
+
+## Usage
+
+1. Once the connection is done, ThoughtSpot datasources would show under the resources section.
+2. Select a datasource (resource), to set the context of your query.
+3. Now you could ask analytical questions, which claude can decide to use the relevant ThoughtSpot tools for.
+
+See the video below for a complete demo.
 
 ## Demo
 
