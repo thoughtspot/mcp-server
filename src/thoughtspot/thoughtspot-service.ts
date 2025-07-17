@@ -3,23 +3,6 @@ import type { Span } from "@opentelemetry/api";
 import { SpanStatusCode, trace, context } from "@opentelemetry/api";
 import { getActiveSpan, WithSpan } from "../metrics/tracing/tracing-utils";
 
-export interface DataSource {
-    name: string;
-    id: string;
-    description: string;
-}
-
-export interface SessionInfo {
-    mixpanelToken: string;
-    userGUID: string;
-    userName: string;
-    clusterName: string;
-    clusterId: string;
-    releaseVersion: string;
-    currentOrgId: string;
-    privileges?: any;
-}
-
 
 /**
  * Main ThoughtSpot service class using decorator pattern for tracing
