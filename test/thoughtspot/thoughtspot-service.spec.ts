@@ -350,7 +350,7 @@ describe('thoughtspot-service', () => {
         { response: { header: { id_guid: 'liveboard123' } } }
       ]);
 
-      const result = await fetchTMLAndCreateLiveboard('Test Liveboard', answers, mockClient);
+      const result = await fetchTMLAndCreateLiveboard('Test Liveboard', answers, 'Test summary', mockClient);
 
       expect((mockClient as any).exportUnsavedAnswerTML).toHaveBeenCalledTimes(2);
       expect(mockClient.importMetadataTML).toHaveBeenCalledWith({
@@ -375,7 +375,7 @@ describe('thoughtspot-service', () => {
 
       (mockClient as any).exportUnsavedAnswerTML = vi.fn().mockRejectedValue(new Error('TML Error'));
 
-      const result = await fetchTMLAndCreateLiveboard('Test Liveboard', answers, mockClient);
+      const result = await fetchTMLAndCreateLiveboard('Test Liveboard', answers, 'Test summary', mockClient);
 
       expect(result).toEqual({
         error: expect.any(Error),
@@ -413,16 +413,14 @@ describe('thoughtspot-service', () => {
     it('should filter out answers without TML', async () => {
       const answers = [
         {
+          id: 'Viz_1',
           question: 'Question 1',
-          tml: { answer: { name: 'Answer 1' } }
+          answer: { name: 'Answer 1' }
         },
         {
+          id: 'Viz_2',
           question: 'Question 2',
-          tml: null
-        },
-        {
-          question: 'Question 3',
-          tml: { answer: { name: 'Answer 3' } }
+          answer: { name: 'Answer 2' }
         }
       ];
 
