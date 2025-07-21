@@ -22,13 +22,20 @@
 			}
 		]
 	},
-	"migrations": [{
-		"tag": "v1",
-		"new_sqlite_classes": [
-			"ThoughtSpotMCP",
-			"ThoughtSpotOpenAIDeepResearchMCP"
-		]
-    }],
+	"migrations": [
+		{
+			"tag": "v1",
+			"new_sqlite_classes": [
+				"ThoughtSpotMCP"
+			]
+		},
+		{
+			"tag": "v2",
+			"new_sqlite_classes": [
+				"ThoughtSpotOpenAIDeepResearchMCP"
+			]
+		}
+	],
 	"kv_namespaces": [{
 		"binding": "OAUTH_KV",
 		"id": "05ca6fed380e4fe48dbfc5c3d03b4070"
