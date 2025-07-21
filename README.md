@@ -54,6 +54,11 @@ To configure this MCP server in your MCP client (such as Claude Desktop, Windsur
 }
 ```
 
+- For OpenAI Deep Research:
+```
+https://agent.thoughtspot.app/openai/mcp
+```
+
 See the [Troubleshooting](#troubleshooting) section for any errors / more details.
 
 ## Usage
