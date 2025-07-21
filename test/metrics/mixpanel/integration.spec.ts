@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { MixpanelTracker } from "../../../src/metrics/mixpanel/mixpanel";
-import type { SessionInfo } from "../../../src/thoughtspot/thoughtspot-service";
+import type { SessionInfo } from "../../../src/thoughtspot/types";
 
 // Mock fetch globally for integration tests
 global.fetch = vi.fn();
@@ -29,10 +29,10 @@ describe("Mixpanel Integration Tests", () => {
 
     beforeEach(() => {
         vi.clearAllMocks();
-        
+
         // Mock console methods properly
-        consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-        consoleDebugSpy = vi.spyOn(console, "debug").mockImplementation(() => {});
+        consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => { });
+        consoleDebugSpy = vi.spyOn(console, "debug").mockImplementation(() => { });
     });
 
     afterEach(() => {
@@ -47,7 +47,7 @@ describe("Mixpanel Integration Tests", () => {
         it("should send correct payload to Mixpanel API", async () => {
             const eventName = "test-event";
             const props = { action: "click", page: "home" };
-            
+
             const mockResponse = {
                 ok: true,
                 text: vi.fn().mockResolvedValue("1")
@@ -70,7 +70,7 @@ describe("Mixpanel Integration Tests", () => {
 
             const fetchCall = (fetch as any).mock.calls[0];
             const body = JSON.parse(fetchCall[1].body);
-            
+
             expect(body).toHaveLength(1);
             expect(body[0]).toEqual({
                 event: eventName,
@@ -93,7 +93,7 @@ describe("Mixpanel Integration Tests", () => {
         it("should handle API errors gracefully", async () => {
             const eventName = "test-event";
             const props = { action: "click" };
-            
+
             const mockResponse = {
                 ok: false,
                 status: 400,
@@ -122,7 +122,7 @@ describe("Mixpanel Integration Tests", () => {
         it("should handle network errors gracefully", async () => {
             const eventName = "test-event";
             const props = { action: "click" };
-            
+
             const networkError = new Error("Network error");
             (fetch as any).mockRejectedValue(networkError);
 
@@ -150,7 +150,7 @@ describe("Mixpanel Integration Tests", () => {
                 { name: "event2", props: { action: "submit" } },
                 { name: "event3", props: { action: "scroll" } }
             ];
-            
+
             const mockResponse = {
                 ok: true,
                 text: vi.fn().mockResolvedValue("1")
@@ -162,7 +162,7 @@ describe("Mixpanel Integration Tests", () => {
             }
 
             expect(fetch).toHaveBeenCalledTimes(3);
-            
+
             // Verify each call
             const fetchCalls = (fetch as any).mock.calls;
             events.forEach((event, index) => {
@@ -175,7 +175,7 @@ describe("Mixpanel Integration Tests", () => {
         it("should include all required properties in payload", async () => {
             const eventName = "test-event";
             const props = { action: "click" };
-            
+
             const mockResponse = {
                 ok: true,
                 text: vi.fn().mockResolvedValue("1")
@@ -216,7 +216,7 @@ describe("Mixpanel Integration Tests", () => {
                     timestamp: Date.now()
                 }
             };
-            
+
             const mockResponse = {
                 ok: true,
                 text: vi.fn().mockResolvedValue("1")
@@ -257,10 +257,10 @@ describe("Mixpanel Integration Tests", () => {
             };
 
             tracker = new MixpanelTracker(minimalSessionInfo);
-            
+
             const eventName = "test-event";
             const props = { action: "click" };
-            
+
             const mockResponse = {
                 ok: true,
                 text: vi.fn().mockResolvedValue("1")
@@ -280,7 +280,7 @@ describe("Mixpanel Integration Tests", () => {
             expect(properties.clusterName).toBe(minimalSessionInfo.clusterName);
             expect(properties.releaseVersion).toBe(minimalSessionInfo.releaseVersion);
             expect(properties.action).toBe("click");
-            
+
             // Check that client properties are undefined when not provided
             expect(properties.clientName).toBeUndefined();
             expect(properties.clientId).toBeUndefined();
@@ -290,10 +290,10 @@ describe("Mixpanel Integration Tests", () => {
         it("should work with partial client info", async () => {
             const partialClient = { clientName: "partial-client" };
             tracker = new MixpanelTracker(mockSessionInfo, partialClient);
-            
+
             const eventName = "test-event";
             const props = { action: "click" };
-            
+
             const mockResponse = {
                 ok: true,
                 text: vi.fn().mockResolvedValue("1")
@@ -309,7 +309,7 @@ describe("Mixpanel Integration Tests", () => {
             // Check that the properties contain the expected values
             expect(properties.clientName).toBe("partial-client");
             expect(properties.action).toBe("click");
-            
+
             // Check that missing client properties are undefined
             expect(properties.clientId).toBeUndefined();
             expect(properties.registrationDate).toBeUndefined();
@@ -324,7 +324,7 @@ describe("Mixpanel Integration Tests", () => {
         it("should handle malformed JSON response", async () => {
             const eventName = "test-event";
             const props = { action: "click" };
-            
+
             const mockResponse = {
                 ok: true,
                 text: vi.fn().mockRejectedValue(new Error("Invalid JSON"))
@@ -346,10 +346,10 @@ describe("Mixpanel Integration Tests", () => {
         it("should handle timeout scenarios", async () => {
             const eventName = "test-event";
             const props = { action: "click" };
-            
+
             // Simulate a timeout by never resolving the promise
-            (fetch as any).mockImplementation(() => 
-                new Promise(() => {}) // Never resolves
+            (fetch as any).mockImplementation(() =>
+                new Promise(() => { }) // Never resolves
             );
 
             // We can't easily test actual timeouts in unit tests, but we can verify the error handling
@@ -390,12 +390,12 @@ describe("Mixpanel Integration Tests", () => {
             (fetch as any).mockResolvedValue(mockResponse);
 
             const startTime = Date.now();
-            
+
             // Send 10 rapid requests
             for (let i = 0; i < 10; i++) {
                 await tracker.track(`event${i}`, { index: i });
             }
-            
+
             const endTime = Date.now();
 
             expect(fetch).toHaveBeenCalledTimes(10);
@@ -410,14 +410,14 @@ describe("Mixpanel Integration Tests", () => {
             (fetch as any).mockResolvedValue(mockResponse);
 
             const events: string[] = [];
-            
+
             // Track events and record their order
             await tracker.track("event1", { order: 1 });
             events.push("event1");
-            
+
             await tracker.track("event2", { order: 2 });
             events.push("event2");
-            
+
             await tracker.track("event3", { order: 3 });
             events.push("event3");
 

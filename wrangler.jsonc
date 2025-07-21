@@ -16,13 +16,17 @@
 				"class_name": "ThoughtSpotMCP",
 				"name": "MCP_OBJECT"
 			},
-
+			{
+				"class_name": "ThoughtSpotOpenAIDeepResearchMCP",
+				"name": "OPENAI_DEEP_RESEARCH_MCP_OBJECT"
+			}
 		]
 	},
 	"migrations": [{
 		"tag": "v1",
 		"new_sqlite_classes": [
-			"ThoughtSpotMCP"
+			"ThoughtSpotMCP",
+			"ThoughtSpotOpenAIDeepResearchMCP"
 		]
     }],
 	"kv_namespaces": [{
@@ -36,5 +40,9 @@
 	"analytics_engine_datasets": [
         { "binding": "ANALYTICS", "dataset": "mcp_events" }
     ],
+	"vars": {
+		"HONEYCOMB_DATASET": "",
+		"HONEYCOMB_API_KEY": ""
+	},
 	"assets": { "directory": "./static/", "binding": "ASSETS" },
 }
