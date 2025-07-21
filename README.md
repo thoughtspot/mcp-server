@@ -54,8 +54,8 @@ To configure this MCP server in your MCP client (such as Claude Desktop, Windsur
 }
 ```
 
-- For OpenAI Deep Research:
-```
+- For OpenAI Deep Research, add the URL as:
+```js
 https://agent.thoughtspot.app/openai/mcp
 ```
 
