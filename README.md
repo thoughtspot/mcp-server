@@ -36,7 +36,7 @@ Join our [Discord](https://developers.thoughtspot.com/join-discord) to get suppo
 ## Connect
 
 If using a client which supports remote MCPs natively (Claude.ai etc) then just enter:
-MCP Server URL: `https://agent.thoughtspot.app/mcp`
+MCP Server URL: `https://agent.thoughtspot.app/mcp` (see below for ChatGPT Deep research)
 
 To configure this MCP server in your MCP client (such as Claude Desktop, Windsurf, Cursor, etc.) which do not support remote MCPs, add the following configuration to your MCP client settings:
 
@@ -54,7 +54,7 @@ To configure this MCP server in your MCP client (such as Claude Desktop, Windsur
 }
 ```
 
-- For OpenAI Deep Research, add the URL as:
+- For OpenAI ChatGPT Deep Research, add the URL as:
 ```js
 https://agent.thoughtspot.app/openai/mcp
 ```
