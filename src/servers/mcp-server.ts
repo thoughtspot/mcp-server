@@ -66,11 +66,16 @@ const CreateLiveboardSchema = z.object({
     
 });
 
+const GetDataSourceSuggestionsSchema = z.object({
+    query: z.string().describe("The query to get data source suggestions for, this could be a high level task or question the user is asking or hoping to get answered. Use this query to get the data source suggestions. This data source will be used to get the data for the user's query using the other tools getRelevantQuestions and getAnswer."),
+});
+
 enum ToolName {
     Ping = "ping",
     GetRelevantQuestions = "getRelevantQuestions",
     GetAnswer = "getAnswer",
     CreateLiveboard = "createLiveboard",
+    GetDataSourceSuggestions = "getDataSourceSuggestions",
 }
 
 export class MCPServer extends BaseMCPServer {
@@ -120,7 +125,17 @@ export class MCPServer extends BaseMCPServer {
                         readOnlyHint: true,
                         destructiveHint: false,
                     },
-                }
+                },
+                {
+                    name: ToolName.GetDataSourceSuggestions,
+                    description: "Get data source suggestions for a query",
+                    inputSchema: zodToJsonSchema(GetDataSourceSuggestionsSchema) as ToolInput,
+                    annotations: {
+                        title: "Get Data Source Suggestions for a Query",
+                        readOnlyHint: true,
+                        destructiveHint: false,
+                    },
+                },
             ]
         };
     }
@@ -188,6 +203,10 @@ export class MCPServer extends BaseMCPServer {
                 return this.callCreateLiveboard(request);
             }
 
+            case ToolName.GetDataSourceSuggestions: {
+                return this.callGetDataSourceSuggestions(request);
+            }
+
             default:
                 throw new Error(`Unknown tool: ${name}`);
         }
@@ -253,6 +272,18 @@ export class MCPServer extends BaseMCPServer {
 Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 
         return this.createSuccessResponse(successMessage, "Liveboard created successfully");
+    }
+
+    @WithSpan('call-get-data-source-suggestions')
+    async callGetDataSourceSuggestions(request: z.infer<typeof CallToolRequestSchema>) {
+        const { query } = GetDataSourceSuggestionsSchema.parse(request.params.arguments);
+        const dataSources = await this.getThoughtSpotService().getDataSourceSuggestions(query);
+
+        if (!dataSources) {
+            return this.createErrorResponse("No data source suggestions found", "No data source suggestions found");
+        }
+
+        return this.createSuccessResponse(dataSources.header.toString(), "Data source suggestions found");
     }
 
     private _sources: {
