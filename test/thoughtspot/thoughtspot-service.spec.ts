@@ -7,6 +7,7 @@ import {
   createLiveboard,
   getDataSources,
   getSessionInfo,
+  getDataSourceSuggestions,
   ThoughtSpotService,
 } from '../../src/thoughtspot/thoughtspot-service';
 
