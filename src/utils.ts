@@ -159,7 +159,6 @@ export async function getFromKV(key: string, env: Env) {
     if (env?.OAUTH_KV) {
         const value = await env.OAUTH_KV.get(key, { type: "json" });
         if (value) {
-            console.log("[DEBUG] Value", value);
             return value;
         }
         return null;
