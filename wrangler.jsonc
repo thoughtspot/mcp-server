@@ -50,7 +50,8 @@
     ],
 	"vars": {
 		"HONEYCOMB_DATASET": "",
-		"HONEYCOMB_API_KEY": ""
+		"HONEYCOMB_API_KEY": "",
+		"HOST_NAME": "https://mcp.thoughtspot.com"
 	},
 	"assets": { "directory": "./static/", "binding": "ASSETS" },
 }
