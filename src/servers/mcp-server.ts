@@ -252,7 +252,7 @@ export class MCPServer extends BaseMCPServer {
             },
             ...(tokenUrl ? [{
                 type: "text" as const,
-                text: `URL to download the answer's PNG image visualization: ${tokenUrl}. Use this URL to download the visualization associated with the data. Use this PNG image of the visualization to do a graphical analysis of the data.`,
+                text: `Use this URL : ${tokenUrl} to GET the images associated with the data. It might take time to get the image but use this PNG image of the visualization to do a graphical analysis of the data.`,
             }] : []),
         ];
         return this.createMultiContentSuccessResponse(content, "Answer found");
