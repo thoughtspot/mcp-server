@@ -3,6 +3,7 @@
  * https://developers.cloudflare.com/workers/wrangler/configuration/
  */
 {
+	"keep_vars": true,
 	"$schema": "node_modules/wrangler/config-schema.json",
 	"name": "thoughtspot-mcp-server",
 	"main": "src/index.ts",
