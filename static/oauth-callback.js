@@ -6,9 +6,16 @@
     const manualSection = document.getElementById('manual-token-section');
     const container = document.querySelector('.container');
     manualSection.style.display = 'none';
-    
+
     try {
-        const tokenUrl = new URL('callosum/v1/v2/auth/token/fetch?validity_time_in_sec=2592000', window.INSTANCE_URL);
+        // Check if INSTANCE_URL is available and valid
+        if (!window.INSTANCE_URL) {
+            throw new Error('Instance URL not available. Please ensure you accessed this page through the proper OAuth flow.');
+        }
+
+        // Ensure INSTANCE_URL ends with '/' for proper URL construction
+        const instanceUrl = window.INSTANCE_URL.endsWith('/') ? window.INSTANCE_URL : window.INSTANCE_URL + '/';
+        const tokenUrl = new URL('callosum/v1/v2/auth/token/fetch?validity_time_in_sec=2592000', instanceUrl);
         console.log('Fetching token from:', tokenUrl.toString());
         
         document.getElementById('status').textContent = 'Retrieving authentication token...';
@@ -30,6 +37,10 @@
                     e.preventDefault();
                     window.open(tokenUrl.toString(), '_blank');
                 };
+                
+                // Also set the href attribute as a fallback
+                document.getElementById('manual-token-url-link').href = tokenUrl.toString();
+                
                 document.getElementById('manual-back-btn').onclick = function() {
                     window.history.back();
                 };
