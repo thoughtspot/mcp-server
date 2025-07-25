@@ -34,14 +34,10 @@
                 document.getElementById('status').textContent = '';
                 container.style.display = 'none';
                 
-                // Set up event handlers after showing the section
-                document.getElementById('manual-token-url-link').onclick = function(e) {
-                    e.preventDefault();
-                    window.open(tokenUrl.toString(), '_blank');
-                };
-                
-                // Also set the href attribute as a fallback
-                document.getElementById('manual-token-url-link').href = tokenUrl.toString();
+                // Set up the token URL link to open in a new tab
+                const tokenLink = document.getElementById('manual-token-url-link');
+                tokenLink.href = tokenUrl.toString();
+                tokenLink.target = '_blank';
                 
                 document.getElementById('manual-back-btn').onclick = function() {
                     window.history.back();
