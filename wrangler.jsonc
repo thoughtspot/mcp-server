@@ -15,10 +15,6 @@
 			{
 				"class_name": "ThoughtSpotMCP",
 				"name": "MCP_OBJECT"
-			},
-			{
-				"class_name": "ThoughtSpotOpenAIDeepResearchMCP",
-				"name": "OPENAI_DEEP_RESEARCH_MCP_OBJECT"
 			}
 		]
 	},
@@ -30,7 +26,7 @@
 			]
 		},
 		{
-			"tag": "v2",
+			"tag": "v3",
 			"deleted_classes": [
 				"ThoughtSpotOpenAIDeepResearchMCP"
 			]
