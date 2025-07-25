@@ -8,6 +8,7 @@ import { zodToJsonSchema } from "zod-to-json-schema";
 import { BaseMCPServer, type Context } from "./mcp-server-base";
 import { z } from "zod";
 import { WithSpan } from "../metrics/tracing/tracing-utils";
+import { putInKV } from "../utils";
 
 const ToolInputSchema = ToolSchema.shape.inputSchema;
 type ToolInput = z.infer<typeof ToolInputSchema>;
@@ -136,11 +137,33 @@ export class OpenAIDeepResearchMCPServer extends BaseMCPServer {
             return this.createErrorResponse(answer.error.message, `Error getting answer ${answer.error.message}`);
         }
 
+        let tokenUrl = "";
+        
+        // Generate token and store in KV store
+        if (!answer.error && this.ctx.env?.OAUTH_KV) {
+            console.log("[DEBUG] Storing token in KV");
+            const token = crypto.randomUUID();
+            const tokenData = {
+                sessionId: answer.session_identifier,
+                generationNo: answer.generation_number,
+                instanceURL: this.ctx.props.instanceUrl,
+                accessToken: this.ctx.props.accessToken
+            };
+            await putInKV(token, tokenData, this.ctx.env);
+            tokenUrl = `${this.ctx.env?.HOST_NAME}/data/img?token=${token}`;
+        }
+        const content = [
+            { type: "text" as const, text: answer.data },
+            ...(tokenUrl ? [{
+                type: "text" as const,
+                text: "Use the URL to GET the images associated with the data. It might take time to get the image but use this PNG image of the visualization to do a graphical analysis of the data.",
+            }] : []),
+        ];
         const result = {
             id,
             title: question,
-            text: answer.data,
-            url: `${this.ctx.props.instanceUrl}/#/insights/conv-assist?query=${question.trim()}&worksheet=${datasourceId}&executeSearch=true`,
+            text: content,
+            url: tokenUrl,
         }
 
         return this.createStructuredContentSuccessResponse(result, "Answer found");

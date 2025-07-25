@@ -39,6 +39,7 @@ export type ToolResponse = SuccessResponse | ErrorResponse;
 
 export interface Context {
     props: Props;
+    env?: Env; // Add access to Cloudflare Workers environment
 }
 
 export abstract class BaseMCPServer extends Server {

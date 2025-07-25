@@ -1,13 +1,15 @@
 import type { AuthRequest, OAuthHelpers } from '@cloudflare/workers-oauth-provider'
 import { Hono } from 'hono'
 import type { Props } from './utils';
-import { McpServerError } from './utils';
+import { getFromKV, McpServerError } from './utils';
 import { parseRedirectApproval, renderApprovalDialog, buildSamlRedirectUrl } from './oauth-manager/oauth-utils';
 import { renderTokenCallback } from './oauth-manager/token-utils';
 import { any } from 'zod';
 import { encodeBase64Url, decodeBase64Url } from 'hono/utils/encode';
 import { getActiveSpan, WithSpan } from './metrics/tracing/tracing-utils';
 import { context, type Span, SpanStatusCode, trace } from "@opentelemetry/api";
+import { ThoughtSpotService } from './thoughtspot/thoughtspot-service';
+import { getThoughtSpotClient } from './thoughtspot/thoughtspot-client';
 
 const app = new Hono<{ Bindings: Env & { OAUTH_PROVIDER: OAuthHelpers } }>()
 
@@ -171,6 +173,7 @@ class Handler {
 const handler = new Handler();
 
 app.get("/", async (c) => {
+    console.log("[DEBUG] Serving index", c.env);
     const response = await handler.serveIndex(c.env);
     return response;
 });
@@ -245,6 +248,34 @@ app.post("/store-token", async (c) => {
         }
         return c.text(`Internal server error ${error}`, 500);
     }
+});
+
+app.get("/data/img", async (c) => {
+    const token = c.req.query("token") || '';
+    if (token === '') {
+        return c.json({ error: "Token not found" }, 404);
+    }
+    console.log("[DEBUG] Token", token);
+
+    const tokenData = await getFromKV(token, c.env);
+    if (!tokenData) {
+        return c.json({ error: "Token not found" }, 404);
+    }
+    console.log("[DEBUG] Token found", token);
+    
+    // Extract values from token data
+    const sessionId = (tokenData as any).sessionId;
+    const generationNo = (tokenData as any).GenNo || (tokenData as any).generationNo; // Handle both field names
+    const instanceURL = (tokenData as any).instanceURL;
+    const accessToken = (tokenData as any).accessToken;
+    
+    console.log("[DEBUG] Session ID", sessionId);
+    console.log("[DEBUG] Generation No", generationNo);
+    console.log("[DEBUG] Instance URL", instanceURL);
+    
+    const thoughtSpotService = new ThoughtSpotService(getThoughtSpotClient(instanceURL, accessToken));
+    const image = await thoughtSpotService.getAnswerImagePNG(sessionId, generationNo);
+    return c.body(await image.arrayBuffer());
 });
 
 export default app;
