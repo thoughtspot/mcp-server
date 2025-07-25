@@ -13,9 +13,11 @@
             throw new Error('Instance URL not available. Please ensure you accessed this page through the proper OAuth flow.');
         }
 
-        // Ensure INSTANCE_URL ends with '/' for proper URL construction
-        const instanceUrl = window.INSTANCE_URL.endsWith('/') ? window.INSTANCE_URL : window.INSTANCE_URL + '/';
-        const tokenUrl = new URL('callosum/v1/v2/auth/token/fetch?validity_time_in_sec=2592000', instanceUrl);
+        const base = new URL(window.INSTANCE_URL);
+        if (!base.pathname.endsWith('/')) {
+            base.pathname += '/';
+        }
+        const tokenUrl = new URL('callosum/v1/v2/auth/token/fetch?validity_time_in_sec=2592000', base.toString());
         console.log('Fetching token from:', tokenUrl.toString());
         
         document.getElementById('status').textContent = 'Retrieving authentication token...';
