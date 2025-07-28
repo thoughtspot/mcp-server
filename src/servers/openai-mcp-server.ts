@@ -152,19 +152,26 @@ export class OpenAIDeepResearchMCPServer extends BaseMCPServer {
             await putInKV(token, tokenData, this.ctx.env);
             tokenUrl = `${this.ctx.env?.HOST_NAME}/data/img?token=${token}`;
         }
-        const content = [
-            { type: "text" as const, text: answer.data },
-            ...(tokenUrl ? [{
-                type: "text" as const,
-                text: "Use the URL to GET the images associated with the data. It might take time to get the image but use this PNG image of the visualization to do a graphical analysis of the data.",
-            }] : []),
-        ];
+        const content = `The data associated with the question is: ${answer.data} Use the URL to GET the charts associated with the data. Use this PNG image of the visualization to do a graphical analysis of the data and present this graph as part of the analysisto the user.`;
         const result = {
             id,
             title: question,
             text: content,
             url: tokenUrl,
         }
+        // const content = [
+        //     { type: "text" as const, text: answer.data },
+        //     ...(tokenUrl ? [{
+        //         type: "text" as const,
+        //         text: "Use the URL to GET the images associated with the data. It might take time to get the image but use this PNG image of the visualization to do a graphical analysis of the data.",
+        //     }] : []),
+        // ];
+        // const result = {
+        //     id,
+        //     title: question,
+        //     text: content,
+        //     url: tokenUrl,
+        // }
 
         return this.createStructuredContentSuccessResponse(result, "Answer found");
     }
