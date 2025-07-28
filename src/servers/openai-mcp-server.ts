@@ -152,24 +152,16 @@ export class OpenAIDeepResearchMCPServer extends BaseMCPServer {
             await putInKV(token, tokenData, this.ctx.env);
             tokenUrl = `${this.ctx.env?.HOST_NAME}/data/img?token=${token}`;
         }
-        const content = `The data associated with the question is: ${answer.data}
+        let content = answer.data;
+        if (tokenUrl) {
+                content = `Data: ${answer.data}
 
-IMPORTANT: You must fetch and display the visualization chart for this data:
-1. Make an HTTP GET request to this URL: ${tokenUrl}
-2. Use these headers for the request:
-   - Accept: image/png, image/*, */*
-3. The response will be a PNG image containing a data visualization chart
-4. Download the image and display it to the user as part of your response
-5. You can use this chart image to provide a comprehensive graphical analysis of the data as well
+**CHART VISUALIZATION AVAILABLE:**
+There is a data visualization chart for this query available at: ${tokenUrl}
 
-URL to fetch the chart image: ${tokenUrl}
-
-Example request:
-GET ${tokenUrl}
-Accept: image/png, image/*, */*
-
-Please fetch this image now and show it to the user along with your analysis of both the data and the visualization.`;
-
+This URL contains a PNG image showing the visual representation of the above data. Please fetch and display this image to provide a complete analysis with both the data and its visual representation.`;
+        }
+        console.log(`[DEBUG] question: ${question} tokenUrl: ${tokenUrl}`);
         const result = {
             id,
             title: question,
