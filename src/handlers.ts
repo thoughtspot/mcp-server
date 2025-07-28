@@ -267,6 +267,7 @@ app.post("/store-token", async (c) => {
 });
 
 app.get("/data/img", async (c) => {
+    console.log("[DEBUG] Serving data/img", c.env);
     const token = c.req.query("token") || '';
     if (token === '') {
         return c.json({ error: "Token not found" }, 404);
