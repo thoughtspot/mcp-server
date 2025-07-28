@@ -152,12 +152,12 @@ export class OpenAIDeepResearchMCPServer extends BaseMCPServer {
             await putInKV(token, tokenData, this.ctx.env);
             tokenUrl = `${this.ctx.env?.HOST_NAME}/data/img?token=${token}`;
         }
-        const content = `The data associated with the question is: ${answer.data} Use the URL to GET the charts associated with the data. Use this PNG image of the visualization to do a graphical analysis of the data and present this graph as part of the analysisto the user.`;
+        const content = `The data associated with the question is: ${answer.data} Use this URL : ${tokenUrl} to GET the charts associated with the data. Use this PNG image of the visualization to do a graphical analysis of the data and present this graph as part of the analysis to the user. Show the graph to the user in the response, not just the URL.`;
         const result = {
             id,
             title: question,
             text: content,
-            url: tokenUrl,
+            url: `${this.ctx.props.instanceUrl}/#/insights/conv-assist?query=${question.trim()}&worksheet=${datasourceId}&executeSearch=true`,
         }
         // const content = [
         //     { type: "text" as const, text: answer.data },
