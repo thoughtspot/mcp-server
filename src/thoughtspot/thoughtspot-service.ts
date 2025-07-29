@@ -283,6 +283,7 @@ export class ThoughtSpotService {
         return liveboardUrl;
     }
 
+    @WithSpan('get-answer-image')
     async getAnswerImagePNG(sessionId: string, GenNo: number): Promise<HttpFile> {
         const span = getActiveSpan();
         span?.addEvent("get-answer-image");

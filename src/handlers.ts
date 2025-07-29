@@ -183,6 +183,43 @@ class Handler {
 
         return { redirectTo };
     }
+
+    @WithSpan('get-answer-image')
+    async getAnswerImage(request: Request, env: Env) {
+        const span = getActiveSpan();
+        const url = new URL(request.url);
+        const token = url.searchParams.get('token') || '';
+        if (token === '') {
+            return new Response("Token not found", { status: 404 });
+        }
+        console.log("[DEBUG] Token", token);
+
+        const tokenData = await getFromKV(token, env);
+        if (!tokenData) {
+            span?.setStatus({ code: SpanStatusCode.ERROR, message: "Token not found" });
+            return new Response("Token not found", { status: 404 });
+        }
+        console.log("[DEBUG] Token found", token);
+        
+        // Extract values from token data
+        const sessionId = (tokenData as any).sessionId;
+        const generationNo = (tokenData as any).GenNo || (tokenData as any).generationNo; // Handle both field names
+        const instanceURL = (tokenData as any).instanceURL;
+        const accessToken = (tokenData as any).accessToken;
+        
+        console.log("[DEBUG] Session ID", sessionId);
+        console.log("[DEBUG] Generation No", generationNo);
+        console.log("[DEBUG] Instance URL", instanceURL);
+        
+        const thoughtSpotService = new ThoughtSpotService(getThoughtSpotClient(instanceURL, accessToken));
+        const image = await thoughtSpotService.getAnswerImagePNG(sessionId, generationNo);
+        span?.setStatus({ code: SpanStatusCode.OK, message: "Image fetched successfully" });
+        return new Response(await image.arrayBuffer(), {
+            headers: {
+                'Content-Type': 'image/png',
+            },
+        });
+    }
 }
 
 const handler = new Handler();
@@ -267,32 +304,7 @@ app.post("/store-token", async (c) => {
 });
 
 app.get("/data/img", async (c) => {
-    console.log("[DEBUG] Serving data/img", c.env);
-    const token = c.req.query("token") || '';
-    if (token === '') {
-        return c.json({ error: "Token not found" }, 404);
-    }
-    console.log("[DEBUG] Token", token);
-
-    const tokenData = await getFromKV(token, c.env);
-    if (!tokenData) {
-        return c.json({ error: "Token not found" }, 404);
-    }
-    console.log("[DEBUG] Token found", token);
-    
-    // Extract values from token data
-    const sessionId = (tokenData as any).sessionId;
-    const generationNo = (tokenData as any).GenNo || (tokenData as any).generationNo; // Handle both field names
-    const instanceURL = (tokenData as any).instanceURL;
-    const accessToken = (tokenData as any).accessToken;
-    
-    console.log("[DEBUG] Session ID", sessionId);
-    console.log("[DEBUG] Generation No", generationNo);
-    console.log("[DEBUG] Instance URL", instanceURL);
-    
-    const thoughtSpotService = new ThoughtSpotService(getThoughtSpotClient(instanceURL, accessToken));
-    const image = await thoughtSpotService.getAnswerImagePNG(sessionId, generationNo);
-    return c.body(await image.arrayBuffer());
+    return handler.getAnswerImage(c.req.raw, c.env);
 });
 
 export default app;
