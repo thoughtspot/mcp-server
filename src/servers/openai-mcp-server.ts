@@ -157,10 +157,10 @@ export class OpenAIDeepResearchMCPServer extends BaseMCPServer {
                 content = `Data: ${answer.data}
 
 **CHART VISUALIZATION AVAILABLE:**
-There is a data visualization chart for this query available at: ${tokenUrl}
+There is a data visualization chart for this query available at: "${tokenUrl}".
 
-This URL contains a PNG image showing the visual representation of the above data for the question: ${question}. Please fetch and display this image to provide a complete analysis with both the data and its visual representation. The image must be displayed in the response for the user to see in the response of this question. 
-Use just this image in the response, do not use any other images or visualizations or charts. It may take time to get the image, so please wait for the image to be fetched and displayed in the response. This image is very important and must be displayed in the response.`;
+This URL contains a PNG image showing the visual representation of the above data for the question: "${question}". Please fetch and display this image to provide a complete analysis with both the data and its visual representation. The image must be displayed in the response for the user to see in the response of this question. 
+Use just this image in the response, do not use any other images or visualizations or charts. It may take time to get the image, so please wait for the image to be fetched and displayed in the response. This image is very important and must be displayed in the response. If the image cannot be opened, log the error that you are getting.`;
         }
         console.log(`[DEBUG] question: ${question} tokenUrl: ${tokenUrl}`);
         const result = {
