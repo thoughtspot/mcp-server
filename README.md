@@ -36,6 +36,7 @@ Join our [Discord](https://developers.thoughtspot.com/join-discord) to get suppo
 ## Connect
 
 If using a client which supports remote MCPs natively (Claude.ai etc) then just enter:
+
 MCP Server URL: 
 
 ```
