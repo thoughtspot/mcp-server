@@ -897,4 +897,177 @@ describe('thoughtspot-service', () => {
       ]);
     });
   });
+
+  describe('getAnswerImagePNG', () => {
+    it('should return PNG image data successfully', async () => {
+      const sessionId = 'session123';
+      const genNo = 1;
+      const mockImageFile = {
+        blob: vi.fn().mockResolvedValue(new Blob(['mock image data'], { type: 'image/png' })),
+        arrayBuffer: vi.fn().mockResolvedValue(new ArrayBuffer(8)),
+        text: vi.fn().mockResolvedValue('mock image text')
+      };
+
+      mockClient.exportAnswerReport = vi.fn().mockResolvedValue(mockImageFile);
+
+      const service = new ThoughtSpotService(mockClient);
+      const result = await service.getAnswerImagePNG(sessionId, genNo);
+
+      expect(mockClient.exportAnswerReport).toHaveBeenCalledWith({
+        session_identifier: sessionId,
+        generation_number: genNo,
+        file_format: 'PNG',
+      });
+
+      expect(result).toBe(mockImageFile);
+    });
+
+    it('should handle API errors when exporting PNG', async () => {
+      const sessionId = 'session456';
+      const genNo = 2;
+      const error = new Error('PNG Export Error');
+
+      mockClient.exportAnswerReport = vi.fn().mockRejectedValue(error);
+
+      const service = new ThoughtSpotService(mockClient);
+
+      await expect(service.getAnswerImagePNG(sessionId, genNo))
+        .rejects.toThrow('PNG Export Error');
+
+      expect(mockClient.exportAnswerReport).toHaveBeenCalledWith({
+        session_identifier: sessionId,
+        generation_number: genNo,
+        file_format: 'PNG',
+      });
+    });
+
+    it('should handle different session identifiers and generation numbers', async () => {
+      const testCases = [
+        { sessionId: 'session-abc-123', genNo: 0 },
+        { sessionId: 'session-def-456', genNo: 5 },
+        { sessionId: 'session-xyz-789', genNo: 100 }
+      ];
+
+      const mockImageFile = {
+        blob: vi.fn().mockResolvedValue(new Blob(['mock image data'], { type: 'image/png' }))
+      };
+
+      for (const { sessionId, genNo } of testCases) {
+        mockClient.exportAnswerReport = vi.fn().mockResolvedValue(mockImageFile);
+
+        const service = new ThoughtSpotService(mockClient);
+        const result = await service.getAnswerImagePNG(sessionId, genNo);
+
+        expect(mockClient.exportAnswerReport).toHaveBeenCalledWith({
+          session_identifier: sessionId,
+          generation_number: genNo,
+          file_format: 'PNG',
+        });
+
+        expect(result).toBe(mockImageFile);
+      }
+    });
+
+    it('should handle empty session identifier', async () => {
+      const sessionId = '';
+      const genNo = 1;
+      const mockImageFile = {
+        blob: vi.fn().mockResolvedValue(new Blob(['mock image data'], { type: 'image/png' }))
+      };
+
+      mockClient.exportAnswerReport = vi.fn().mockResolvedValue(mockImageFile);
+
+      const service = new ThoughtSpotService(mockClient);
+      const result = await service.getAnswerImagePNG(sessionId, genNo);
+
+      expect(mockClient.exportAnswerReport).toHaveBeenCalledWith({
+        session_identifier: '',
+        generation_number: genNo,
+        file_format: 'PNG',
+      });
+
+      expect(result).toBe(mockImageFile);
+    });
+
+    it('should handle negative generation numbers', async () => {
+      const sessionId = 'session123';
+      const genNo = -1;
+      const mockImageFile = {
+        blob: vi.fn().mockResolvedValue(new Blob(['mock image data'], { type: 'image/png' }))
+      };
+
+      mockClient.exportAnswerReport = vi.fn().mockResolvedValue(mockImageFile);
+
+      const service = new ThoughtSpotService(mockClient);
+      const result = await service.getAnswerImagePNG(sessionId, genNo);
+
+      expect(mockClient.exportAnswerReport).toHaveBeenCalledWith({
+        session_identifier: sessionId,
+        generation_number: genNo,
+        file_format: 'PNG',
+      });
+
+      expect(result).toBe(mockImageFile);
+    });
+
+    it('should handle network timeout errors', async () => {
+      const sessionId = 'session123';
+      const genNo = 1;
+      const timeoutError = new Error('Network timeout');
+      timeoutError.name = 'TimeoutError';
+
+      mockClient.exportAnswerReport = vi.fn().mockRejectedValue(timeoutError);
+
+      const service = new ThoughtSpotService(mockClient);
+
+      await expect(service.getAnswerImagePNG(sessionId, genNo))
+        .rejects.toThrow('Network timeout');
+
+      expect(mockClient.exportAnswerReport).toHaveBeenCalledWith({
+        session_identifier: sessionId,
+        generation_number: genNo,
+        file_format: 'PNG',
+      });
+    });
+
+    it('should handle authentication errors', async () => {
+      const sessionId = 'session123';
+      const genNo = 1;
+      const authError = new Error('Authentication failed');
+      authError.name = 'AuthenticationError';
+
+      mockClient.exportAnswerReport = vi.fn().mockRejectedValue(authError);
+
+      const service = new ThoughtSpotService(mockClient);
+
+      await expect(service.getAnswerImagePNG(sessionId, genNo))
+        .rejects.toThrow('Authentication failed');
+    });
+
+    it('should return the exact file object from the API', async () => {
+      const sessionId = 'session123';
+      const genNo = 1;
+      const mockImageFile = {
+        name: 'answer-image.png',
+        size: 1024,
+        type: 'image/png',
+        lastModified: Date.now(),
+        blob: vi.fn().mockResolvedValue(new Blob(['mock image data'], { type: 'image/png' })),
+        arrayBuffer: vi.fn().mockResolvedValue(new ArrayBuffer(1024)),
+        text: vi.fn().mockResolvedValue('mock image text'),
+        stream: vi.fn()
+      };
+
+      mockClient.exportAnswerReport = vi.fn().mockResolvedValue(mockImageFile);
+
+      const service = new ThoughtSpotService(mockClient);
+      const result = await service.getAnswerImagePNG(sessionId, genNo);
+
+      // Verify that the exact object is returned without modification
+      expect(result).toBe(mockImageFile);
+      expect(result).toHaveProperty('name', 'answer-image.png');
+      expect(result).toHaveProperty('size', 1024);
+      expect(result).toHaveProperty('type', 'image/png');
+    });
+  });
 }); 

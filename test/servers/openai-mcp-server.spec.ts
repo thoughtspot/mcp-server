@@ -4,6 +4,7 @@ import { OpenAIDeepResearchMCPServer } from "../../src/servers/openai-mcp-server
 import * as thoughtspotService from "../../src/thoughtspot/thoughtspot-service";
 import * as thoughtspotClient from "../../src/thoughtspot/thoughtspot-client";
 import { MixpanelTracker } from "../../src/metrics/mixpanel/mixpanel";
+import * as utils from "../../src/utils";
 
 // Mock the MixpanelTracker
 vi.mock("../../src/metrics/mixpanel/mixpanel", () => ({
@@ -412,11 +413,19 @@ describe("OpenAI Deep Research MCP Server", () => {
             // Mock the ThoughtSpot service to return answer
             const mockGetAnswerForQuestion = vi.fn().mockResolvedValue({
                 data: "The total revenue is $1,000,000",
-                error: null
+                error: null,
+                session_identifier: "session-123",
+                generation_number: 1
+            });
+
+            const mockGetAnswerImagePNG = vi.fn().mockResolvedValue({
+                arrayBuffer: () => Promise.resolve(new ArrayBuffer(8))
             });
 
             vi.spyOn(thoughtspotService.ThoughtSpotService.prototype, 'getAnswerForQuestion')
                 .mockImplementation(mockGetAnswerForQuestion);
+            vi.spyOn(thoughtspotService.ThoughtSpotService.prototype, 'getAnswerImagePNG')
+                .mockImplementation(mockGetAnswerImagePNG);
 
             await server.init();
             const { callTool } = connect(server);
@@ -441,11 +450,19 @@ describe("OpenAI Deep Research MCP Server", () => {
             // Mock the ThoughtSpot service to return error
             const mockGetAnswerForQuestion = vi.fn().mockResolvedValue({
                 data: null,
-                error: { message: "Question not found" }
+                error: { message: "Question not found" },
+                session_identifier: "session-123",
+                generation_number: 1
+            });
+
+            const mockGetAnswerImagePNG = vi.fn().mockResolvedValue({
+                arrayBuffer: () => Promise.resolve(new ArrayBuffer(8))
             });
 
             vi.spyOn(thoughtspotService.ThoughtSpotService.prototype, 'getAnswerForQuestion')
                 .mockImplementation(mockGetAnswerForQuestion);
+            vi.spyOn(thoughtspotService.ThoughtSpotService.prototype, 'getAnswerImagePNG')
+                .mockImplementation(mockGetAnswerImagePNG);
 
             await server.init();
             const { callTool } = connect(server);
@@ -462,11 +479,19 @@ describe("OpenAI Deep Research MCP Server", () => {
             // Mock the ThoughtSpot service to return answer
             const mockGetAnswerForQuestion = vi.fn().mockResolvedValue({
                 data: "The total revenue is $1,000,000",
-                error: null
+                error: null,
+                session_identifier: "session-123",
+                generation_number: 1
+            });
+
+            const mockGetAnswerImagePNG = vi.fn().mockResolvedValue({
+                arrayBuffer: () => Promise.resolve(new ArrayBuffer(8))
             });
 
             vi.spyOn(thoughtspotService.ThoughtSpotService.prototype, 'getAnswerForQuestion')
                 .mockImplementation(mockGetAnswerForQuestion);
+            vi.spyOn(thoughtspotService.ThoughtSpotService.prototype, 'getAnswerImagePNG')
+                .mockImplementation(mockGetAnswerImagePNG);
 
             await server.init();
             const { callTool } = connect(server);
@@ -488,11 +513,19 @@ describe("OpenAI Deep Research MCP Server", () => {
             // Mock the ThoughtSpot service to return answer
             const mockGetAnswerForQuestion = vi.fn().mockResolvedValue({
                 data: "The revenue increased by 15%",
-                error: null
+                error: null,
+                session_identifier: "session-123",
+                generation_number: 1
+            });
+
+            const mockGetAnswerImagePNG = vi.fn().mockResolvedValue({
+                arrayBuffer: () => Promise.resolve(new ArrayBuffer(8))
             });
 
             vi.spyOn(thoughtspotService.ThoughtSpotService.prototype, 'getAnswerForQuestion')
                 .mockImplementation(mockGetAnswerForQuestion);
+            vi.spyOn(thoughtspotService.ThoughtSpotService.prototype, 'getAnswerImagePNG')
+                .mockImplementation(mockGetAnswerImagePNG);
 
             await server.init();
             const { callTool } = connect(server);
@@ -509,6 +542,196 @@ describe("OpenAI Deep Research MCP Server", () => {
                 url: "https://test.thoughtspot.cloud/#/insights/conv-assist?query=How much did revenue increase? (in %)&worksheet=ds-123&executeSearch=true"
             });
         });
+
+        it("should generate token and store in KV when OAUTH_KV is available", async () => {
+            // Mock the ThoughtSpot service to return answer
+            const mockGetAnswerForQuestion = vi.fn().mockResolvedValue({
+                data: "The total revenue is $1,000,000",
+                error: null,
+                session_identifier: "session-123",
+                generation_number: 1
+            });
+
+            const mockGetAnswerImagePNG = vi.fn().mockResolvedValue({
+                arrayBuffer: () => Promise.resolve(new ArrayBuffer(8))
+            });
+
+            // Mock putInKV
+            const mockPutInKV = vi.fn().mockResolvedValue(undefined);
+            vi.spyOn(utils, 'putInKV').mockImplementation(mockPutInKV);
+
+            vi.spyOn(thoughtspotService.ThoughtSpotService.prototype, 'getAnswerForQuestion')
+                .mockImplementation(mockGetAnswerForQuestion);
+            vi.spyOn(thoughtspotService.ThoughtSpotService.prototype, 'getAnswerImagePNG')
+                .mockImplementation(mockGetAnswerImagePNG);
+
+            // Mock crypto.randomUUID
+            const mockToken = "test-token-123";
+            vi.spyOn(crypto, 'randomUUID').mockReturnValue(mockToken);
+
+            // Create server with environment that includes OAUTH_KV
+            const mockEnv = {
+                OAUTH_KV: {} as any,
+                HONEYCOMB_API_KEY: "test-key",
+                HONEYCOMB_DATASET: "test-dataset", 
+                HOST_NAME: "https://test-host.com",
+                MCP_OBJECT: {} as any,
+                OPENAI_DEEP_RESEARCH_MCP_OBJECT: {} as any,
+                ANALYTICS: {} as any,
+                ASSETS: {} as any
+            };
+
+            const serverWithKV = new OpenAIDeepResearchMCPServer({
+                props: mockProps,
+                env: mockEnv
+            });
+
+            await serverWithKV.init();
+            const { callTool } = connect(serverWithKV);
+
+            const result = await callTool("fetch", {
+                id: "test-ds: What is the total revenue?"
+            });
+
+            expect(result.isError).toBeUndefined();
+            
+            // Verify token generation and storage
+            expect(crypto.randomUUID).toHaveBeenCalled();
+            expect(mockPutInKV).toHaveBeenCalledWith(
+                mockToken,
+                {
+                    sessionId: "session-123",
+                    generationNo: 1,
+                    instanceURL: mockProps.instanceUrl,
+                    accessToken: mockProps.accessToken
+                },
+                mockEnv
+            );
+
+            // Verify the content includes visualization message
+            const structuredContent = result.structuredContent as any;
+            expect(structuredContent.text).toContain("**CHART VISUALIZATION AVAILABLE:**");
+            expect(structuredContent.text).toContain(`https://test-host.com/data/img?token=${mockToken}`);
+            expect(structuredContent.text).toContain("Data: The total revenue is $1,000,000");
+            expect(structuredContent.text).toContain("What is the total revenue?");
+        });
+
+        it("should not generate token when OAUTH_KV is not available", async () => {
+            // Mock the ThoughtSpot service to return answer
+            const mockGetAnswerForQuestion = vi.fn().mockResolvedValue({
+                data: "The total revenue is $1,000,000",
+                error: null,
+                session_identifier: "session-123",
+                generation_number: 1
+            });
+
+            const mockGetAnswerImagePNG = vi.fn().mockResolvedValue({
+                arrayBuffer: () => Promise.resolve(new ArrayBuffer(8))
+            });
+
+            // Mock putInKV
+            const mockPutInKV = vi.fn().mockResolvedValue(undefined);
+            vi.spyOn(utils, 'putInKV').mockImplementation(mockPutInKV);
+
+            vi.spyOn(thoughtspotService.ThoughtSpotService.prototype, 'getAnswerForQuestion')
+                .mockImplementation(mockGetAnswerForQuestion);
+            vi.spyOn(thoughtspotService.ThoughtSpotService.prototype, 'getAnswerImagePNG')
+                .mockImplementation(mockGetAnswerImagePNG);
+
+            // Mock crypto.randomUUID
+            vi.spyOn(crypto, 'randomUUID').mockReturnValue("test-token-123");
+
+            // Create server without OAUTH_KV in environment
+            const mockEnvWithoutKV = {
+                OAUTH_KV: undefined as any,
+                HONEYCOMB_API_KEY: "test-key",
+                HONEYCOMB_DATASET: "test-dataset", 
+                HOST_NAME: "https://test-host.com",
+                MCP_OBJECT: {} as any,
+                OPENAI_DEEP_RESEARCH_MCP_OBJECT: {} as any,
+                ANALYTICS: {} as any,
+                ASSETS: {} as any
+            };
+
+            const serverWithoutKV = new OpenAIDeepResearchMCPServer({
+                props: mockProps,
+                env: mockEnvWithoutKV
+            });
+
+            await serverWithoutKV.init();
+            const { callTool } = connect(serverWithoutKV);
+
+            const result = await callTool("fetch", {
+                id: "test-ds: What is the total revenue?"
+            });
+
+            expect(result.isError).toBeUndefined();
+            
+            // Verify token generation and storage were NOT called
+            expect(crypto.randomUUID).not.toHaveBeenCalled();
+            expect(mockPutInKV).not.toHaveBeenCalled();
+
+            // Verify the content does NOT include visualization message
+            const structuredContent = result.structuredContent as any;
+            expect(structuredContent.text).toBe("The total revenue is $1,000,000");
+            expect(structuredContent.text).not.toContain("**CHART VISUALIZATION AVAILABLE:**");
+        });
+
+        it("should not generate token when answer has error", async () => {
+            // Mock the ThoughtSpot service to return error
+            const mockGetAnswerForQuestion = vi.fn().mockResolvedValue({
+                data: null,
+                error: { message: "Service error" },
+                session_identifier: "session-123",
+                generation_number: 1
+            });
+
+            const mockGetAnswerImagePNG = vi.fn().mockResolvedValue({
+                arrayBuffer: () => Promise.resolve(new ArrayBuffer(8))
+            });
+
+            // Mock putInKV
+            const mockPutInKV = vi.fn().mockResolvedValue(undefined);
+            vi.spyOn(utils, 'putInKV').mockImplementation(mockPutInKV);
+
+            vi.spyOn(thoughtspotService.ThoughtSpotService.prototype, 'getAnswerForQuestion')
+                .mockImplementation(mockGetAnswerForQuestion);
+            vi.spyOn(thoughtspotService.ThoughtSpotService.prototype, 'getAnswerImagePNG')
+                .mockImplementation(mockGetAnswerImagePNG);
+
+            // Mock crypto.randomUUID
+            vi.spyOn(crypto, 'randomUUID').mockReturnValue("test-token-123");
+
+            // Create server with environment that includes OAUTH_KV
+            const mockEnv = {
+                OAUTH_KV: {} as any,
+                HONEYCOMB_API_KEY: "test-key",
+                HONEYCOMB_DATASET: "test-dataset", 
+                HOST_NAME: "https://test-host.com",
+                MCP_OBJECT: {} as any,
+                OPENAI_DEEP_RESEARCH_MCP_OBJECT: {} as any,
+                ANALYTICS: {} as any,
+                ASSETS: {} as any
+            };
+
+            const serverWithKV = new OpenAIDeepResearchMCPServer({
+                props: mockProps,
+                env: mockEnv
+            });
+
+            await serverWithKV.init();
+            const { callTool } = connect(serverWithKV);
+
+            const result = await callTool("fetch", {
+                id: "test-ds: What is the total revenue?"
+            });
+
+            expect(result.isError).toBe(true);
+            
+            // Verify token generation and storage were NOT called because of error
+            expect(crypto.randomUUID).not.toHaveBeenCalled();
+            expect(mockPutInKV).not.toHaveBeenCalled();
+        });
     });
 
     describe("Error Handling", () => {
@@ -516,11 +739,19 @@ describe("OpenAI Deep Research MCP Server", () => {
             // Mock the ThoughtSpot service to return answer for empty ID test
             const mockGetAnswerForQuestion = vi.fn().mockResolvedValue({
                 data: "The total revenue is $1,000,000",
-                error: null
+                error: null,
+                session_identifier: "session-123",
+                generation_number: 1
+            });
+
+            const mockGetAnswerImagePNG = vi.fn().mockResolvedValue({
+                arrayBuffer: () => Promise.resolve(new ArrayBuffer(8))
             });
 
             vi.spyOn(thoughtspotService.ThoughtSpotService.prototype, 'getAnswerForQuestion')
                 .mockImplementation(mockGetAnswerForQuestion);
+            vi.spyOn(thoughtspotService.ThoughtSpotService.prototype, 'getAnswerImagePNG')
+                .mockImplementation(mockGetAnswerImagePNG);
 
             await server.init();
             const { callTool } = connect(server);

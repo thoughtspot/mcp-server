@@ -160,9 +160,10 @@ export class OpenAIDeepResearchMCPServer extends BaseMCPServer {
                 content = `Data: ${answer.data}
 
 **CHART VISUALIZATION AVAILABLE:**
-For question ${question} here is a image blob format of the data visualization chart. Use this image to do a graphical analysis of the data and present this graph as part of the analysis to the user.
+There is a data visualization chart for this query available at: "${tokenUrl}".
 
-${imageBuffer}`;
+This URL contains a PNG image showing the visual representation of the above data for the question: "${question}". Please fetch and display this image to provide a complete analysis with both the data and its visual representation. The image must be displayed in the response of this question. 
+Use just this image in the response, do not use any other images or visualizations or charts. It may take time to get the image, so please wait for the image to be fetched and displayed in the response.`;
         }
         console.log(`[DEBUG] question: ${question} tokenUrl: ${tokenUrl}`);
         const result = {
@@ -171,19 +172,6 @@ ${imageBuffer}`;
             text: content,
             url: `${this.ctx.props.instanceUrl}/#/insights/conv-assist?query=${question.trim()}&worksheet=${datasourceId}&executeSearch=true`,
         }
-        // const content = [
-        //     { type: "text" as const, text: answer.data },
-        //     ...(tokenUrl ? [{
-        //         type: "text" as const,
-        //         text: "Use the URL to GET the images associated with the data. It might take time to get the image but use this PNG image of the visualization to do a graphical analysis of the data.",
-        //     }] : []),
-        // ];
-        // const result = {
-        //     id,
-        //     title: question,
-        //     text: content,
-        //     url: tokenUrl,
-        // }
 
         return this.createStructuredContentSuccessResponse(result, "Answer found");
     }
