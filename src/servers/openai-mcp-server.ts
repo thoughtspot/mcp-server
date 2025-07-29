@@ -132,7 +132,10 @@ export class OpenAIDeepResearchMCPServer extends BaseMCPServer {
         const { id } = fetchInputSchema.parse(request.params.arguments);
         // id is of the form "<datasource-id>:<question>"
         const [datasourceId, question = ""] = id.split(":");
-        const answer = await this.getThoughtSpotService().getAnswerForQuestion(question, datasourceId, false);
+        const thoughtSpotService = this.getThoughtSpotService();
+        const answer = await thoughtSpotService.getAnswerForQuestion(question, datasourceId, false);
+        const image = await thoughtSpotService.getAnswerImagePNG(answer.session_identifier, answer.generation_number);
+        const imageBuffer = await image.arrayBuffer();
         if (answer.error) {
             return this.createErrorResponse(answer.error.message, `Error getting answer ${answer.error.message}`);
         }
@@ -157,10 +160,9 @@ export class OpenAIDeepResearchMCPServer extends BaseMCPServer {
                 content = `Data: ${answer.data}
 
 **CHART VISUALIZATION AVAILABLE:**
-There is a data visualization chart for this query available at: "${tokenUrl}".
+For question ${question} here is a image blob format of the data visualization chart. Use this image to do a graphical analysis of the data and present this graph as part of the analysis to the user.
 
-This URL contains a PNG image showing the visual representation of the above data for the question: "${question}". Please fetch and display this image to provide a complete analysis with both the data and its visual representation. The image must be displayed in the response for the user to see in the response of this question. 
-Use just this image in the response, do not use any other images or visualizations or charts. It may take time to get the image, so please wait for the image to be fetched and displayed in the response. This image is very important and must be displayed in the response. If the image cannot be opened, log the error that you are getting.`;
+${imageBuffer}`;
         }
         console.log(`[DEBUG] question: ${question} tokenUrl: ${tokenUrl}`);
         const result = {
