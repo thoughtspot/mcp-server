@@ -159,7 +159,7 @@ export class OpenAIDeepResearchMCPServer extends BaseMCPServer {
 **CHART VISUALIZATION AVAILABLE:**
 There is a data visualization chart for this query available at: ${tokenUrl}
 
-This URL contains a PNG image showing the visual representation of the above data. Please fetch and display this image to provide a complete analysis with both the data and its visual representation.`;
+This URL contains a PNG image showing the visual representation of the above data for the question: ${question}. Please fetch and display this image to provide a complete analysis with both the data and its visual representation. The image must be displayed in the response for the user to see in the response of this question.`;
         }
         console.log(`[DEBUG] question: ${question} tokenUrl: ${tokenUrl}`);
         const result = {
