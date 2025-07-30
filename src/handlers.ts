@@ -27,9 +27,9 @@ class Handler {
         const span = getActiveSpan();
         const oauthReqInfo = await oauthProvider.parseAuthRequest(request);
         const { clientId } = oauthReqInfo;
-        
+
         span?.setAttribute("client_id", clientId || "unknown");
-        
+
         if (!clientId) {
             throw new McpServerError({ message: "Missing client ID" }, 400);
         }
@@ -47,12 +47,12 @@ class Handler {
 
     @WithSpan('authorize-post')
     async postAuthorize(request: Request, requestUrl: string) {
-        const span = getActiveSpan();   
+        const span = getActiveSpan();
         try {
             const { state, instanceUrl } = await parseRedirectApproval(request);
-            
+
             span?.setAttribute("instance_url", instanceUrl || "unknown");
-            
+
             if (!state.oauthReqInfo) {
                 throw new McpServerError({ message: "Missing OAuth request info" }, 400);
             }
@@ -61,12 +61,21 @@ class Handler {
                 throw new McpServerError({ message: "Missing instance URL" }, 400);
             }
 
+            const origin = new URL(requestUrl).origin;
+
+            // TODO: Remove this once we have a proper way to handle this
+            // This is a temporary fix to handle the case where the instance URL is a free trial instance URL
+            // Since, free trial does not support IAMv2, we will assume that the user is logged in.
+            if (instanceUrl.match(/https:\/\/team\d\.thoughtspot\.cloud/)) {
+                return new URL("/callback?instanceUrl=" + instanceUrl + "&oauthReqInfo=" + encodeBase64Url(new TextEncoder().encode(JSON.stringify(state.oauthReqInfo)).buffer), origin).toString();
+            }
+
             const redirectUrl = buildSamlRedirectUrl(
                 instanceUrl,
                 state.oauthReqInfo,
-                new URL(requestUrl).origin
+                origin
             );
-            
+
             console.log("redirectUrl", redirectUrl);
 
             return redirectUrl;
@@ -78,7 +87,7 @@ class Handler {
     @WithSpan('oauth-callback')
     async handleCallback(request: Request, assets: any, requestUrl: string) {
         const span = getActiveSpan();
-        
+
         const url = new URL(request.url);
         const instanceUrl = url.searchParams.get('instanceUrl');
         const encodedOauthReqInfo = url.searchParams.get('oauthReqInfo')
@@ -118,11 +127,11 @@ class Handler {
     @WithSpan('store-token')
     async storeToken(request: Request, oauthProvider: OAuthHelpers) {
         const span = getActiveSpan();
-        
+
         let token: any;
         let oauthReqInfo: any;
         let instanceUrl: string;
-        
+
         try {
             const body = await request.json() as any;
             token = body.token;
@@ -136,14 +145,14 @@ class Handler {
             has_token: !!token,
             has_oauth_req_info: !!oauthReqInfo,
         });
-        
+
         if (!token || !oauthReqInfo || !instanceUrl) {
             throw new McpServerError({ message: "Missing token or OAuth request info or instanceUrl" }, 400);
         }
 
         const { clientId } = oauthReqInfo;
         span?.setAttribute("client_id", clientId || "unknown");
-        
+
         const clientName = await oauthProvider.lookupClient(clientId);
 
         span?.addEvent("complete-authorization");
@@ -163,7 +172,7 @@ class Handler {
         });
 
         span?.setStatus({ code: SpanStatusCode.OK, message: "Token stored successfully" });
-        
+
         return { redirectTo };
     }
 }
@@ -191,6 +200,7 @@ app.get("/authorize", async (c) => {
 
 app.post("/authorize", async (c) => {
     try {
+
         const redirectUrl = await handler.postAuthorize(c.req.raw, c.req.url);
         return Response.redirect(redirectUrl);
     } catch (error) {

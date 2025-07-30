@@ -4,6 +4,7 @@
     
     // Ensure manual section is hidden initially
     const manualSection = document.getElementById('manual-token-section');
+    const freeTrialErrorSection = document.getElementById('free-trial-error-section');
     const container = document.querySelector('.container');
     manualSection.style.display = 'none';
 
@@ -29,6 +30,17 @@
         
         if (!response.ok) {
             if (response.status === 401) {
+                
+
+                // TODO: Remove this once we have a proper way to handle this
+                // This is a temporary fix to handle the case where the instance URL is a free trial instance URL
+                // Since, free trial does not support IAMv2, the user needs to login to the free trial instance in a separate tab manually.
+                if (base.toString().match(/https:\/\/team\d\.thoughtspot\.cloud/)) {
+                    freeTrialErrorSection.style.display = 'flex';
+                    document.getElementById('free-trial-error-text').innerHTML = `Click <a href="${base.toString()}" target="_blank">here</a> to login to your ThoughtSpot free trial instance in a separate tab and then refresh this page.`;
+                    return;
+                }
+
                 // 401 likely due to 3rd party cookies being blocked
                 manualSection.style.display = 'flex';
                 document.getElementById('status').textContent = '';

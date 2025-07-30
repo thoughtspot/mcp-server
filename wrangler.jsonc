@@ -25,6 +25,12 @@
 	},
 	"migrations": [
 		{
+			"tag": "v4",
+			"new_sqlite_classes": [
+				"ThoughtSpotMCP"
+			]
+		},
+		{
 			"tag": "v3",
 			"new_sqlite_classes": [
 				"ThoughtSpotOpenAIDeepResearchMCP"
