@@ -224,22 +224,17 @@ export class MCPServer extends BaseMCPServer {
         const { question, datasourceId: sourceId } = GetAnswerSchema.parse(request.params.arguments);
 
         const answer = await this.getThoughtSpotService().getAnswerForQuestion(question, sourceId, false);
-        const tokenUrl = await this.getTokenUrl(answer.session_identifier, answer.generation_number);
 
         if (answer.error) {
             return this.createErrorResponse(answer.error.message, `Error getting answer ${answer.error.message}`);
         }
 
         const content = [
-            { type: "text" as const, text: answer.data },
+            { type: "text" as const, text: this.getAnswerContent(answer, question) },
             {
                 type: "text" as const,
                 text: `Question: ${question}\nSession Identifier: ${answer.session_identifier}\nGeneration Number: ${answer.generation_number}\n\nUse this information to create a liveboard with the createLiveboard tool, if the user asks.`,
             },
-            ...(tokenUrl ? [{
-                type: "text" as const,
-                text: `Use this URL : ${tokenUrl} to GET the images associated with the data. It might take time to get the image but use this PNG image of the visualization to do a graphical analysis of the data.`,
-            }] : []),
         ];
         return this.createMultiContentSuccessResponse(content, "Answer found");
     }

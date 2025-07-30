@@ -176,6 +176,7 @@ class Handler {
                 accessToken: token.data.token,
                 instanceUrl: instanceUrl,
                 clientName: clientName,
+                hostName: request.headers.get('host') || 'localhost:8787',
             } as Props,
         });
 
@@ -198,18 +199,12 @@ class Handler {
         if (!tokenData) {
             span?.setStatus({ code: SpanStatusCode.ERROR, message: "Token not found" });
             return new Response("Token not found", { status: 404 });
-        }
-        console.log("[DEBUG] Token found", token);
-        
+        }        
         // Extract values from token data
         const sessionId = (tokenData as any).sessionId;
         const generationNo = (tokenData as any).GenNo || (tokenData as any).generationNo; // Handle both field names
         const instanceURL = (tokenData as any).instanceURL;
         const accessToken = (tokenData as any).accessToken;
-        
-        console.log("[DEBUG] Session ID", sessionId);
-        console.log("[DEBUG] Generation No", generationNo);
-        console.log("[DEBUG] Instance URL", instanceURL);
         
         const thoughtSpotService = new ThoughtSpotService(getThoughtSpotClient(instanceURL, accessToken));
         const image = await thoughtSpotService.getAnswerImagePNG(sessionId, generationNo);
@@ -225,7 +220,6 @@ class Handler {
 const handler = new Handler();
 
 app.get("/", async (c) => {
-    console.log("[DEBUG] Serving index", c.env);
     const response = await handler.serveIndex(c.env);
     return response;
 });
