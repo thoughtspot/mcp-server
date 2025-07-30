@@ -66,8 +66,14 @@ class Handler {
             // TODO: Remove this once we have a proper way to handle this
             // This is a temporary fix to handle the case where the instance URL is a free trial instance URL
             // Since, free trial does not support IAMv2, we will assume that the user is logged in.
-            if (instanceUrl.match(/https:\/\/team\d\.thoughtspot\.cloud/)) {
-                return new URL("/callback?instanceUrl=" + instanceUrl + "&oauthReqInfo=" + encodeBase64Url(new TextEncoder().encode(JSON.stringify(state.oauthReqInfo)).buffer), origin).toString();
+            if (instanceUrl.match(/https:\/\/team\d+\.thoughtspot\.cloud/)) {
+                const callbackUrl = new URL("/callback", origin);
+                callbackUrl.searchParams.set("instanceUrl", instanceUrl);
+                callbackUrl.searchParams.set(
+                    "oauthReqInfo",
+                    encodeBase64Url(new TextEncoder().encode(JSON.stringify(state.oauthReqInfo)).buffer)
+                );
+                return callbackUrl.toString();
             }
 
             const redirectUrl = buildSamlRedirectUrl(

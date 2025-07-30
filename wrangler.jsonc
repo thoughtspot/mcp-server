@@ -25,7 +25,7 @@
 	},
 	"migrations": [
 		{
-			"tag": "v4",
+			"tag": "v2",
 			"new_sqlite_classes": [
 				"ThoughtSpotMCP"
 			]
