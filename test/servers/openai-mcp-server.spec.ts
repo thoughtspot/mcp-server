@@ -438,12 +438,18 @@ describe("OpenAI Deep Research MCP Server", () => {
             expect(result.structuredContent).toEqual({
                 id: "asdhshd-123123-12dd: What is the total revenue?",
                 title: " What is the total revenue?",
-                text: "The total revenue is $1,000,000",
+                text: `Data: The total revenue is $1,000,000
+
+        **CHART VISUALIZATION AVAILABLE:**
+        There is a data visualization chart for this query available at: "".
+
+        This URL contains a PNG image showing the visual representation of the above data for the question: " What is the total revenue?". 
+        Please fetch and display this image to provide a complete analysis with both the data and its visual representation. `,
                 url: "https://test.thoughtspot.cloud/#/insights/conv-assist?query=What is the total revenue?&worksheet=asdhshd-123123-12dd&executeSearch=true"
             });
             // The text field contains the JSON stringified structured content
             expect((result.content as any[])[0].text).toContain('"id"');
-            expect((result.content as any[])[0].text).toContain('"The total revenue is $1,000,000"');
+            expect((result.content as any[])[0].text).toContain('Data: The total revenue is $1,000,000');
         });
 
         it("should handle error from ThoughtSpot service", async () => {
@@ -504,7 +510,13 @@ describe("OpenAI Deep Research MCP Server", () => {
             expect(result.structuredContent).toEqual({
                 id: "abc-123-def-456: What is the total revenue?",
                 title: " What is the total revenue?",
-                text: "The total revenue is $1,000,000",
+                text: `Data: The total revenue is $1,000,000
+
+        **CHART VISUALIZATION AVAILABLE:**
+        There is a data visualization chart for this query available at: "".
+
+        This URL contains a PNG image showing the visual representation of the above data for the question: " What is the total revenue?". 
+        Please fetch and display this image to provide a complete analysis with both the data and its visual representation. `,
                 url: "https://test.thoughtspot.cloud/#/insights/conv-assist?query=What is the total revenue?&worksheet=abc-123-def-456&executeSearch=true"
             });
         });
@@ -538,7 +550,13 @@ describe("OpenAI Deep Research MCP Server", () => {
             expect(result.structuredContent).toEqual({
                 id: "ds-123: How much did revenue increase? (in %)",
                 title: " How much did revenue increase? (in %)",
-                text: "The revenue increased by 15%",
+                text: `Data: The revenue increased by 15%
+
+        **CHART VISUALIZATION AVAILABLE:**
+        There is a data visualization chart for this query available at: "".
+
+        This URL contains a PNG image showing the visual representation of the above data for the question: " How much did revenue increase? (in %)". 
+        Please fetch and display this image to provide a complete analysis with both the data and its visual representation. `,
                 url: "https://test.thoughtspot.cloud/#/insights/conv-assist?query=How much did revenue increase? (in %)&worksheet=ds-123&executeSearch=true"
             });
         });
@@ -581,8 +599,14 @@ describe("OpenAI Deep Research MCP Server", () => {
                 ASSETS: {} as any
             };
 
+            // Update mockProps to include hostName
+            const mockPropsWithHost = {
+                ...mockProps,
+                hostName: "https://test-host.com"
+            };
+
             const serverWithKV = new OpenAIDeepResearchMCPServer({
-                props: mockProps,
+                props: mockPropsWithHost,
                 env: mockEnv
             });
 
@@ -602,16 +626,16 @@ describe("OpenAI Deep Research MCP Server", () => {
                 {
                     sessionId: "session-123",
                     generationNo: 1,
-                    instanceURL: mockProps.instanceUrl,
-                    accessToken: mockProps.accessToken
+                    instanceURL: mockPropsWithHost.instanceUrl,
+                    accessToken: mockPropsWithHost.accessToken
                 },
                 mockEnv
             );
 
-            // Verify the content includes visualization message
+            // Verify the content includes visualization message with correct URL
             const structuredContent = result.structuredContent as any;
             expect(structuredContent.text).toContain("**CHART VISUALIZATION AVAILABLE:**");
-            expect(structuredContent.text).toContain(`https://test-host.com/data/img?token=${mockToken}`);
+            expect(structuredContent.text).toContain(`https://test-host.com/data/img?uniqueId=${mockToken}`);
             expect(structuredContent.text).toContain("Data: The total revenue is $1,000,000");
             expect(structuredContent.text).toContain("What is the total revenue?");
         });
@@ -671,10 +695,11 @@ describe("OpenAI Deep Research MCP Server", () => {
             expect(crypto.randomUUID).not.toHaveBeenCalled();
             expect(mockPutInKV).not.toHaveBeenCalled();
 
-            // Verify the content does NOT include visualization message
+            // Verify the content includes visualization message but with empty URL
             const structuredContent = result.structuredContent as any;
-            expect(structuredContent.text).toBe("The total revenue is $1,000,000");
-            expect(structuredContent.text).not.toContain("**CHART VISUALIZATION AVAILABLE:**");
+            expect(structuredContent.text).toContain("**CHART VISUALIZATION AVAILABLE:**");
+            expect(structuredContent.text).toContain('There is a data visualization chart for this query available at: "".');
+            expect(structuredContent.text).toContain("Data: The total revenue is $1,000,000");
         });
 
         it("should not generate token when answer has error", async () => {
@@ -765,7 +790,13 @@ describe("OpenAI Deep Research MCP Server", () => {
             expect(result.structuredContent).toEqual({
                 id: "",
                 title: "",
-                text: "The total revenue is $1,000,000",
+                text: `Data: The total revenue is $1,000,000
+
+        **CHART VISUALIZATION AVAILABLE:**
+        There is a data visualization chart for this query available at: "".
+
+        This URL contains a PNG image showing the visual representation of the above data for the question: "". 
+        Please fetch and display this image to provide a complete analysis with both the data and its visual representation. `,
                 url: "https://test.thoughtspot.cloud/#/insights/conv-assist?query=&worksheet=&executeSearch=true"
             });
         });

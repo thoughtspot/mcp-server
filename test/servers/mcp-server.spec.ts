@@ -107,6 +107,7 @@ describe("MCP Server", () => {
                 clientName: "test-client",
                 registrationDate: Date.now(),
             },
+            hostName: "https://test-host.com",
         };
 
         server = new MCPServer({
@@ -188,6 +189,7 @@ describe("MCP Server", () => {
                         clientName: "test-client",
                         registrationDate: Date.now(),
                     },
+                    hostName: "",
                 },
             });
             await unauthenticatedServer.init();
@@ -337,7 +339,8 @@ describe("MCP Server", () => {
 
             expect(result.isError).toBeUndefined();
             expect((result.content as any[])).toHaveLength(2);
-            expect((result.content as any[])[0].text).toBe("The total revenue is $1,000,000");
+            expect((result.content as any[])[0].text).toContain("Data: The total revenue is $1,000,000");
+            expect((result.content as any[])[0].text).toContain("**CHART VISUALIZATION AVAILABLE:**");
             expect((result.content as any[])[1].text).toContain("Question: What is the total revenue?");
             expect((result.content as any[])[1].text).toContain("Session Identifier: session-123");
             expect((result.content as any[])[1].text).toContain("Generation Number: 1");
@@ -492,112 +495,126 @@ describe("MCP Server", () => {
                 name: "Customer Data",
                 description: "Customer information and demographics",
                 mimeType: "text/plain",
-                    });
+            });
+        });
     });
 
     describe("Read Resource", () => {
         it("should return resource content for valid datasource URI", async () => {
             await server.init();
+            const { sendToServer } = connect(server);
 
-            const result = await server.readResource({ 
+            const result = await sendToServer({
                 method: "resources/read",
-                params: { uri: "datasource:///ds-123" } 
+                params: { uri: "datasource:///ds-123" }
             });
 
-            expect(result.contents).toHaveLength(1);
-            expect(result.contents[0]).toEqual({
-                uri: "datasource:///ds-123",
-                mimeType: "text/plain",
-                text: expect.stringContaining("Sales data for the current year"),
-            });
-            expect(result.contents[0].text).toContain("The id of the datasource is ds-123");
-            expect(result.contents[0].text).toContain("Use ThoughtSpot's getRelevantQuestions tool");
+            expect('result' in result).toBe(true);
+            if ('result' in result) {
+                const contents = (result.result as any).contents;
+                expect(contents).toHaveLength(1);
+                expect(contents[0]).toEqual({
+                    uri: "datasource:///ds-123",
+                    mimeType: "text/plain",
+                    text: expect.stringContaining("Sales data for the current year"),
+                });
+                expect(contents[0].text).toContain("The id of the datasource is ds-123");
+                expect(contents[0].text).toContain("Use ThoughtSpot's getRelevantQuestions tool");
+            }
         });
 
         it("should return resource content for second datasource", async () => {
             await server.init();
+            const { sendToServer } = connect(server);
 
-            const result = await server.readResource({ 
+            const result = await sendToServer({
                 method: "resources/read",
-                params: { uri: "datasource:///ds-456" } 
+                params: { uri: "datasource:///ds-456" }
             });
 
-            expect(result.contents).toHaveLength(1);
-            expect(result.contents[0]).toEqual({
-                uri: "datasource:///ds-456",
-                mimeType: "text/plain",
-                text: expect.stringContaining("Customer information and demographics"),
-            });
-            expect(result.contents[0].text).toContain("The id of the datasource is ds-456");
-            expect(result.contents[0].text).toContain("Use ThoughtSpot's getRelevantQuestions tool");
+            expect('result' in result).toBe(true);
+            if ('result' in result) {
+                const contents = (result.result as any).contents;
+                expect(contents).toHaveLength(1);
+                expect(contents[0]).toEqual({
+                    uri: "datasource:///ds-456",
+                    mimeType: "text/plain",
+                    text: expect.stringContaining("Customer information and demographics"),
+                });
+                expect(contents[0].text).toContain("The id of the datasource is ds-456");
+                expect(contents[0].text).toContain("Use ThoughtSpot's getRelevantQuestions tool");
+            }
         });
 
         it("should throw 404 error for invalid datasource URI format", async () => {
             await server.init();
 
-            await expect(server.readResource({ 
+            await expect((server as any).readResource({
                 method: "resources/read",
-                params: { uri: "invalid-uri" } 
+                params: { uri: "invalid-uri" }
             })).rejects.toThrow("Datasource not found");
         });
 
         it("should throw 400 error for URI without datasource ID", async () => {
             await server.init();
 
-            await expect(server.readResource({ 
+            await expect((server as any).readResource({
                 method: "resources/read",
-                params: { uri: "datasource:///" } 
+                params: { uri: "datasource:///" }
             })).rejects.toThrow("Invalid datasource uri");
         });
 
         it("should throw 404 error for non-existent datasource", async () => {
             await server.init();
 
-            await expect(server.readResource({ 
+            await expect((server as any).readResource({
                 method: "resources/read",
-                params: { uri: "datasource:///non-existent-id" } 
+                params: { uri: "datasource:///non-existent-id" }
             })).rejects.toThrow("Datasource not found");
         });
 
         it("should throw 404 error for malformed URI", async () => {
             await server.init();
 
-            await expect(server.readResource({ 
+            await expect((server as any).readResource({
                 method: "resources/read",
-                params: { uri: "datasource://" } 
+                params: { uri: "datasource://" }
             })).rejects.toThrow("Datasource not found");
         });
 
         it("should throw 400 error for empty URI", async () => {
             await server.init();
 
-            await expect(server.readResource({ 
+            await expect((server as any).readResource({
                 method: "resources/read",
-                params: { uri: "" } 
+                params: { uri: "" }
             })).rejects.toThrow("Invalid datasource uri");
         });
 
         it("should use cached datasources for resource lookup", async () => {
             await server.init();
+            const { sendToServer } = connect(server);
 
             // First call should fetch from service
-            await server.readResource({ 
+            const result1 = await sendToServer({
                 method: "resources/read",
-                params: { uri: "datasource:///ds-123" } 
+                params: { uri: "datasource:///ds-123" }
             });
+            expect('result' in result1).toBe(true);
+            
             const mockGetClient = vi.mocked(thoughtspotClient.getThoughtSpotClient);
             const mockClientInstance = mockGetClient.mock.results[0].value;
             expect(mockClientInstance.searchMetadata).toHaveBeenCalledTimes(1);
 
             // Second call should use cached data
-            await server.readResource({ 
+            const result2 = await sendToServer({
                 method: "resources/read",
-                params: { uri: "datasource:///ds-456" } 
+                params: { uri: "datasource:///ds-456" }
             });
+            expect('result' in result2).toBe(true);
             expect(mockClientInstance.searchMetadata).toHaveBeenCalledTimes(1);
         });
     });
-}); 
 
     describe("Caching", () => {
         it("should cache datasources after first call", async () => {
