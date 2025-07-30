@@ -188,7 +188,7 @@ class Handler {
     async getAnswerImage(request: Request, env: Env) {
         const span = getActiveSpan();
         const url = new URL(request.url);
-        const token = url.searchParams.get('token') || '';
+        const token = url.searchParams.get('token') || url.searchParams.get('uniqueId') || '';
         if (token === '') {
             return new Response("Token not found", { status: 404 });
         }
