@@ -11,7 +11,7 @@ import type { z } from "zod";
 import { context, type Span, SpanStatusCode } from "@opentelemetry/api";
 import { getActiveSpan, withSpan } from "../metrics/tracing/tracing-utils";
 import { Trackers, type Tracker, TrackEvent } from "../metrics";
-import type { Props } from "../utils";
+import { putInKV, type Props } from "../utils";
 import { MixpanelTracker } from "../metrics/mixpanel/mixpanel";
 import { getThoughtSpotClient } from "../thoughtspot/thoughtspot-client";
 import { ThoughtSpotService } from "../thoughtspot/thoughtspot-service";
@@ -146,6 +146,24 @@ export abstract class BaseMCPServer extends Server {
             this.ctx.props.clientName
         );
         this.addTracker(mixpanel);
+    }
+
+    protected async getTokenUrl(sessionId: string, generationNo: number) {
+        let tokenUrl = "";
+        // Generate token and store in KV store
+        if (this.ctx.env?.OAUTH_KV) {
+            console.log("[DEBUG] Storing token in KV");
+            const token = crypto.randomUUID();
+            const tokenData = {
+                sessionId: sessionId,
+                generationNo: generationNo,
+                instanceURL: this.ctx.props.instanceUrl,
+                accessToken: this.ctx.props.accessToken
+            };
+            await putInKV(token, tokenData, this.ctx.env);
+            tokenUrl = `${this.ctx.env?.HOST_NAME}/data/img?uniqueId=${token}`;
+        }
+        return tokenUrl;
     }
 
     /**

@@ -8,7 +8,6 @@ import { zodToJsonSchema } from "zod-to-json-schema";
 import { BaseMCPServer, type Context } from "./mcp-server-base";
 import { z } from "zod";
 import { WithSpan } from "../metrics/tracing/tracing-utils";
-import { putInKV } from "../utils";
 
 const ToolInputSchema = ToolSchema.shape.inputSchema;
 type ToolInput = z.infer<typeof ToolInputSchema>;
@@ -134,37 +133,20 @@ export class OpenAIDeepResearchMCPServer extends BaseMCPServer {
         const [datasourceId, question = ""] = id.split(":");
         const thoughtSpotService = this.getThoughtSpotService();
         const answer = await thoughtSpotService.getAnswerForQuestion(question, datasourceId, false);
-        const image = await thoughtSpotService.getAnswerImagePNG(answer.session_identifier, answer.generation_number);
-        const imageBuffer = await image.arrayBuffer();
         if (answer.error) {
             return this.createErrorResponse(answer.error.message, `Error getting answer ${answer.error.message}`);
         }
 
-        let tokenUrl = "";
+        const tokenUrl = await this.getTokenUrl(answer.session_identifier, answer.generation_number);
         
-        // Generate token and store in KV store
-        if (!answer.error && this.ctx.env?.OAUTH_KV) {
-            console.log("[DEBUG] Storing token in KV");
-            const token = crypto.randomUUID();
-            const tokenData = {
-                sessionId: answer.session_identifier,
-                generationNo: answer.generation_number,
-                instanceURL: this.ctx.props.instanceUrl,
-                accessToken: this.ctx.props.accessToken
-            };
-            await putInKV(token, tokenData, this.ctx.env);
-            tokenUrl = `${this.ctx.env?.HOST_NAME}/data/img?token=${token}`;
-        }
-        let content = answer.data;
-        if (tokenUrl) {
-                content = `Data: ${answer.data}
+        const content = `Data: ${answer.data}
 
-**CHART VISUALIZATION AVAILABLE:**
-There is a data visualization chart for this query available at: "${tokenUrl}".
+        **CHART VISUALIZATION AVAILABLE:**
+        There is a data visualization chart for this query available at: "${tokenUrl}".
 
-This URL contains a PNG image showing the visual representation of the above data for the question: "${question}". Please fetch and display this image to provide a complete analysis with both the data and its visual representation. The image must be displayed in the response of this question. 
-Use just this image in the response, do not use any other images or visualizations or charts. It may take time to get the image, so please wait for the image to be fetched and displayed in the response.`;
-        }
+        This URL contains a PNG image showing the visual representation of the above data for the question: "${question}". Please fetch and display this image to provide a complete analysis with both the data and its visual representation. The image must be displayed in the response of this question. 
+        Use just this image in the response, do not use any other images or visualizations or charts. It may take time to get the image, so please wait for the image to be fetched and displayed in the response.`;
+                
         console.log(`[DEBUG] question: ${question} tokenUrl: ${tokenUrl}`);
         const result = {
             id,
