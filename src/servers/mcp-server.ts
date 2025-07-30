@@ -230,7 +230,7 @@ export class MCPServer extends BaseMCPServer {
         }
 
         const content = [
-            { type: "text" as const, text: this.getAnswerContent(answer, question) },
+            { type: "text" as const, text: await this.getAnswerContent(answer, question) },
             {
                 type: "text" as const,
                 text: `Question: ${question}\nSession Identifier: ${answer.session_identifier}\nGeneration Number: ${answer.generation_number}\n\nUse this information to create a liveboard with the createLiveboard tool, if the user asks.`,
