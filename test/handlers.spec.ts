@@ -6,6 +6,7 @@ import {
 } from "cloudflare:test";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import worker, { ThoughtSpotMCP } from "../src";
+import app from "../src/handlers";
 
 // Type assertion for worker to have fetch method
 const typedWorker = worker as { fetch: (request: Request, env: any, ctx: any) => Promise<Response> };
@@ -37,10 +38,10 @@ describe("Handlers", () => {
 
     describe("GET /", () => {
         it("should serve index.html from assets", async () => {
-            
+
             const request = new IncomingRequest("https://example.com/");
-            const testEnv = { 
-                ...env, 
+            const testEnv = {
+                ...env,
                 ASSETS: {
                     fetch: vi.fn().mockImplementation((url) => {
                         // Handle relative paths by creating a proper URL
@@ -52,7 +53,7 @@ describe("Handlers", () => {
                     connect: vi.fn()
                 }
             };
-            
+
             const result = await typedWorker.fetch(request, testEnv, mockCtx);
 
             expect(result.status).toBe(200);
@@ -65,7 +66,7 @@ describe("Handlers", () => {
         it("should return hello world message", async () => {
             const id = env.MCP_OBJECT.idFromName("test");
             const object = env.MCP_OBJECT.get(id);
-            
+
             const result = await runInDurableObject(object, async (instance) => {
                 const request = new IncomingRequest("https://example.com/hello");
                 return typedWorker.fetch(request, env, mockCtx);
@@ -81,7 +82,7 @@ describe("Handlers", () => {
         it("should return 500 for invalid client ID", async () => {
             const id = env.MCP_OBJECT.idFromName("test");
             const object = env.MCP_OBJECT.get(id);
-            
+
             const result = await runInDurableObject(object, async (instance) => {
                 const request = new IncomingRequest("https://example.com/authorize");
                 return typedWorker.fetch(request, env, mockCtx);
@@ -94,7 +95,7 @@ describe("Handlers", () => {
         it("should render approval dialog for valid client ID", async () => {
             const id = env.MCP_OBJECT.idFromName("test");
             const object = env.MCP_OBJECT.get(id);
-            
+
             // Mock the OAUTH_PROVIDER to return valid client info
             const mockOAuthProvider = {
                 parseAuthRequest: vi.fn().mockResolvedValue({ clientId: 'test-client' }),
@@ -118,7 +119,7 @@ describe("Handlers", () => {
             expect(result.status).toBe(200);
             const contentType = result.headers.get('content-type');
             expect(contentType).toContain('text/html');
-            
+
             // Consume the response body to prevent storage cleanup issues
             await result.text();
         });
@@ -128,12 +129,12 @@ describe("Handlers", () => {
         it("should return 400 for missing instance URL", async () => {
             const id = env.MCP_OBJECT.idFromName("test");
             const object = env.MCP_OBJECT.get(id);
-            
+
             const result = await runInDurableObject(object, async (instance) => {
                 const formData = new FormData();
                 formData.append('state', btoa(JSON.stringify({ oauthReqInfo: { clientId: 'test' } })));
                 // Intentionally not adding instanceUrl
-                
+
                 const request = new IncomingRequest("https://example.com/authorize", {
                     method: 'POST',
                     body: formData
@@ -148,12 +149,12 @@ describe("Handlers", () => {
         it("should return 500 for missing oauthReqInfo in state", async () => {
             const id = env.MCP_OBJECT.idFromName("test");
             const object = env.MCP_OBJECT.get(id);
-            
+
             const result = await runInDurableObject(object, async (instance) => {
                 const formData = new FormData();
                 formData.append('state', btoa(JSON.stringify({ someOtherData: 'test' })));
                 formData.append('instanceUrl', 'https://test.thoughtspot.cloud');
-                
+
                 const request = new IncomingRequest("https://example.com/authorize", {
                     method: 'POST',
                     body: formData
@@ -168,12 +169,12 @@ describe("Handlers", () => {
         it("should return 500 for null oauthReqInfo in state", async () => {
             const id = env.MCP_OBJECT.idFromName("test");
             const object = env.MCP_OBJECT.get(id);
-            
+
             const result = await runInDurableObject(object, async (instance) => {
                 const formData = new FormData();
                 formData.append('state', btoa(JSON.stringify({ oauthReqInfo: null })));
                 formData.append('instanceUrl', 'https://test.thoughtspot.cloud');
-                
+
                 const request = new IncomingRequest("https://example.com/authorize", {
                     method: 'POST',
                     body: formData
@@ -188,12 +189,12 @@ describe("Handlers", () => {
         it("should return 500 for undefined oauthReqInfo in state", async () => {
             const id = env.MCP_OBJECT.idFromName("test");
             const object = env.MCP_OBJECT.get(id);
-            
+
             const result = await runInDurableObject(object, async (instance) => {
                 const formData = new FormData();
                 formData.append('state', btoa(JSON.stringify({ oauthReqInfo: undefined })));
                 formData.append('instanceUrl', 'https://test.thoughtspot.cloud');
-                
+
                 const request = new IncomingRequest("https://example.com/authorize", {
                     method: 'POST',
                     body: formData
@@ -205,15 +206,28 @@ describe("Handlers", () => {
             expect(await result.text()).toBe('Internal Server Error McpServerError: Failed to parse approval form: Could not extract clientId from state object.');
         });
 
+        it("Should redirect to callback for free trial instance URL", async () => {
+            const formData = new FormData();
+            formData.append('state', btoa(JSON.stringify({ oauthReqInfo: { clientId: 'test' } })));
+            formData.append('instanceUrl', 'https://team1.thoughtspot.cloud');
+            const result = await app.fetch(new Request("https://example.com/authorize", {
+                method: 'POST',
+                body: formData
+            }), mockEnv);
+            expect(result.status).toBe(302);
+            expect(result.headers.get('location')).toContain('https://example.com/callback');
+            expect(result.headers.get('location')).toContain('instanceUrl=https%3A%2F%2Fteam1.thoughtspot.cloud');
+        });
+
         it("should return 400 for empty string instanceUrl", async () => {
             const id = env.MCP_OBJECT.idFromName("test");
             const object = env.MCP_OBJECT.get(id);
-            
+
             const result = await runInDurableObject(object, async (instance) => {
                 const formData = new FormData();
                 formData.append('state', btoa(JSON.stringify({ oauthReqInfo: { clientId: 'test' } })));
                 formData.append('instanceUrl', '');
-                
+
                 const request = new IncomingRequest("https://example.com/authorize", {
                     method: 'POST',
                     body: formData
@@ -228,12 +242,12 @@ describe("Handlers", () => {
         it.skip("should return 500 for whitespace-only instanceUrl", async () => {
             const id = env.MCP_OBJECT.idFromName("test");
             const object = env.MCP_OBJECT.get(id);
-            
+
             const result = await runInDurableObject(object, async (instance) => {
                 const formData = new FormData();
                 formData.append('state', btoa(JSON.stringify({ oauthReqInfo: { clientId: 'test' } })));
                 formData.append('instanceUrl', '   ');
-                
+
                 const request = new IncomingRequest("https://example.com/authorize", {
                     method: 'POST',
                     body: formData
@@ -251,12 +265,12 @@ describe("Handlers", () => {
             // but the URL constructor behavior in the test environment is inconsistent
             const id = env.MCP_OBJECT.idFromName("test");
             const object = env.MCP_OBJECT.get(id);
-            
+
             const result = await runInDurableObject(object, async (instance) => {
                 const formData = new FormData();
                 formData.append('state', btoa(JSON.stringify({ oauthReqInfo: { clientId: 'test' } })));
                 formData.append('instanceUrl', 'null');
-                
+
                 const request = new IncomingRequest("https://example.com/authorize", {
                     method: 'POST',
                     body: formData
@@ -271,7 +285,7 @@ describe("Handlers", () => {
         it("should return 500 for malformed form data", async () => {
             const id = env.MCP_OBJECT.idFromName("test");
             const object = env.MCP_OBJECT.get(id);
-            
+
             const result = await runInDurableObject(object, async (instance) => {
                 const request = new IncomingRequest("https://example.com/authorize", {
                     method: 'POST',
@@ -292,18 +306,18 @@ describe("Handlers", () => {
             // Handler works as expected in production.
             const id = env.MCP_OBJECT.idFromName("test");
             const object = env.MCP_OBJECT.get(id);
-            
-            const oauthReqInfo = { 
+
+            const oauthReqInfo = {
                 clientId: 'test-client',
                 scope: 'read',
                 redirectUri: 'https://example.com/callback'
             };
-            
+
             const result = await runInDurableObject(object, async (instance) => {
                 const formData = new FormData();
                 formData.append('state', btoa(JSON.stringify({ oauthReqInfo })));
                 formData.append('instanceUrl', 'https://test.thoughtspot.cloud');
-                
+
                 const request = new IncomingRequest("https://example.com/authorize", {
                     method: 'POST',
                     body: formData
@@ -317,7 +331,7 @@ describe("Handlers", () => {
             // We can verify the handler logic by checking that the response is not an error
             expect(result.status).not.toBe(400);
             expect(result.status).not.toBe(500);
-            
+
             // The console.log in the handler shows the redirect URL is correctly formed
             // This test verifies the handler doesn't throw errors and processes the request
             // Consume the response body to prevent storage cleanup issues
@@ -331,24 +345,24 @@ describe("Handlers", () => {
             // Handler works as expected in production.
             const id = env.MCP_OBJECT.idFromName("test");
             const object = env.MCP_OBJECT.get(id);
-            
+
             const testCases = [
                 'https://test.thoughtspot.cloud',
                 'https://mycompany.thoughtspot.cloud',
                 'https://thoughtspot.company.com'
             ];
-            
+
             for (const instanceUrl of testCases) {
-                const oauthReqInfo = { 
+                const oauthReqInfo = {
                     clientId: 'test-client',
                     scope: 'read'
                 };
-                
+
                 const result = await runInDurableObject(object, async (instance) => {
                     const formData = new FormData();
                     formData.append('state', btoa(JSON.stringify({ oauthReqInfo })));
                     formData.append('instanceUrl', instanceUrl);
-                    
+
                     const request = new IncomingRequest("https://example.com/authorize", {
                         method: 'POST',
                         body: formData
@@ -361,7 +375,7 @@ describe("Handlers", () => {
                 // doesn't properly handle the redirect response
                 expect(result.status).not.toBe(400);
                 expect(result.status).not.toBe(500);
-                
+
                 // The console.log in the handler shows the redirect URL is correctly formed
                 // This test verifies the handler doesn't throw errors for different URL formats
                 // Consume the response body to prevent storage cleanup issues
@@ -376,8 +390,8 @@ describe("Handlers", () => {
             // Handler works as expected in production.
             const id = env.MCP_OBJECT.idFromName("test");
             const object = env.MCP_OBJECT.get(id);
-            
-            const complexOauthReqInfo = { 
+
+            const complexOauthReqInfo = {
                 clientId: 'test-client',
                 scope: 'read write admin',
                 redirectUri: 'https://example.com/callback',
@@ -385,12 +399,12 @@ describe("Handlers", () => {
                 state: 'random-state-string',
                 nonce: 'random-nonce-string'
             };
-            
+
             const result = await runInDurableObject(object, async (instance) => {
                 const formData = new FormData();
                 formData.append('state', btoa(JSON.stringify({ oauthReqInfo: complexOauthReqInfo })));
                 formData.append('instanceUrl', 'https://test.thoughtspot.cloud');
-                
+
                 const request = new IncomingRequest("https://example.com/authorize", {
                     method: 'POST',
                     body: formData
@@ -403,7 +417,7 @@ describe("Handlers", () => {
             // doesn't properly handle the redirect response
             expect(result.status).not.toBe(400);
             expect(result.status).not.toBe(500);
-            
+
             // The console.log in the handler shows the redirect URL is correctly formed
             // and the complex oauthReqInfo is properly encoded
             // This test verifies the handler can handle complex objects without errors
@@ -414,13 +428,13 @@ describe("Handlers", () => {
         it("should handle errors gracefully and return 500", async () => {
             const id = env.MCP_OBJECT.idFromName("test");
             const object = env.MCP_OBJECT.get(id);
-            
+
             // Test with invalid base64 in state
             const result = await runInDurableObject(object, async (instance) => {
                 const formData = new FormData();
                 formData.append('state', 'invalid-base64-data');
                 formData.append('instanceUrl', 'https://test.thoughtspot.cloud');
-                
+
                 const request = new IncomingRequest("https://example.com/authorize", {
                     method: 'POST',
                     body: formData
@@ -438,7 +452,7 @@ describe("Handlers", () => {
         it("should return 400 for missing instance URL", async () => {
             const id = env.MCP_OBJECT.idFromName("test");
             const object = env.MCP_OBJECT.get(id);
-            
+
             const result = await runInDurableObject(object, async (instance) => {
                 const request = new IncomingRequest("https://example.com/callback");
                 return typedWorker.fetch(request, env, mockCtx);
@@ -451,7 +465,7 @@ describe("Handlers", () => {
         it("should return 400 for missing OAuth request info", async () => {
             const id = env.MCP_OBJECT.idFromName("test");
             const object = env.MCP_OBJECT.get(id);
-            
+
             const result = await runInDurableObject(object, async (instance) => {
                 const url = new URL("https://example.com/callback");
                 url.searchParams.append('instanceUrl', 'https://test.thoughtspot.cloud');
@@ -466,7 +480,7 @@ describe("Handlers", () => {
         it("should return 400 for invalid OAuth request info format", async () => {
             const id = env.MCP_OBJECT.idFromName("test");
             const object = env.MCP_OBJECT.get(id);
-            
+
             const result = await runInDurableObject(object, async (instance) => {
                 const url = new URL("https://example.com/callback");
                 url.searchParams.append('instanceUrl', 'https://test.thoughtspot.cloud');
@@ -482,14 +496,14 @@ describe("Handlers", () => {
         it("should render token callback page for valid parameters", async () => {
             const id = env.MCP_OBJECT.idFromName("test");
             const object = env.MCP_OBJECT.get(id);
-            
-            const oauthReqInfo = { 
+
+            const oauthReqInfo = {
                 clientId: 'test-client',
                 scope: 'read',
                 redirectUri: 'https://example.com/callback'
             };
             const encodedOauthReqInfo = btoa(JSON.stringify(oauthReqInfo));
-            
+
             const result = await runInDurableObject(object, async (instance) => {
                 const url = new URL("https://example.com/callback");
                 url.searchParams.append('instanceUrl', 'https://test.thoughtspot.cloud');
@@ -501,7 +515,7 @@ describe("Handlers", () => {
             expect(result.status).toBe(200);
             const contentType = result.headers.get('content-type');
             expect(contentType).toContain('text/html');
-            
+
             // Consume the response body to prevent storage cleanup issues
             await result.text();
         });
@@ -511,7 +525,7 @@ describe("Handlers", () => {
         it("should return 400 for missing token", async () => {
             const id = env.MCP_OBJECT.idFromName("test");
             const object = env.MCP_OBJECT.get(id);
-            
+
             const result = await runInDurableObject(object, async (instance) => {
                 const request = new IncomingRequest("https://example.com/store-token", {
                     method: 'POST',
@@ -531,7 +545,7 @@ describe("Handlers", () => {
         it("should return 400 for missing OAuth request info", async () => {
             const id = env.MCP_OBJECT.idFromName("test");
             const object = env.MCP_OBJECT.get(id);
-            
+
             const result = await runInDurableObject(object, async (instance) => {
                 const request = new IncomingRequest("https://example.com/store-token", {
                     method: 'POST',
@@ -551,7 +565,7 @@ describe("Handlers", () => {
         it("should return 400 for missing instance URL", async () => {
             const id = env.MCP_OBJECT.idFromName("test");
             const object = env.MCP_OBJECT.get(id);
-            
+
             const result = await runInDurableObject(object, async (instance) => {
                 const request = new IncomingRequest("https://example.com/store-token", {
                     method: 'POST',
@@ -571,7 +585,7 @@ describe("Handlers", () => {
         it("should complete authorization and return redirect URL", async () => {
             const id = env.MCP_OBJECT.idFromName("test");
             const object = env.MCP_OBJECT.get(id);
-            
+
             // Mock the OAUTH_PROVIDER
             const mockOAuthProvider = {
                 lookupClient: vi.fn().mockResolvedValue({
@@ -592,7 +606,7 @@ describe("Handlers", () => {
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         token: { data: { token: 'test-token' } },
-                        oauthReqInfo: { 
+                        oauthReqInfo: {
                             clientId: 'test-client',
                             scope: 'read'
                         },
@@ -615,8 +629,8 @@ describe("Handlers", () => {
             const id = env.MCP_OBJECT.idFromName("test");
             const object = env.MCP_OBJECT.get(id);
 
-             // Mock the OAUTH_PROVIDER
-             const mockOAuthProvider = {
+            // Mock the OAUTH_PROVIDER
+            const mockOAuthProvider = {
                 lookupClient: vi.fn().mockResolvedValue({
                     clientId: 'test-client',
                     clientName: 'Test Client',
@@ -628,7 +642,7 @@ describe("Handlers", () => {
                     redirectTo: 'https://example.com/success'
                 })
             };
-            
+
             const result = await runInDurableObject(object, async (instance) => {
                 const request = new IncomingRequest("https://example.com/store-token", {
                     method: 'POST',
@@ -647,8 +661,8 @@ describe("Handlers", () => {
             const id = env.MCP_OBJECT.idFromName("test");
             const object = env.MCP_OBJECT.get(id);
 
-             // Mock the OAUTH_PROVIDER
-             const mockOAuthProvider = {
+            // Mock the OAUTH_PROVIDER
+            const mockOAuthProvider = {
                 lookupClient: vi.fn().mockResolvedValue({
                     clientId: 'test-client',
                     clientName: 'Test Client',
@@ -660,7 +674,7 @@ describe("Handlers", () => {
                     redirectTo: 'https://example.com/success'
                 })
             };
-            
+
             const result = await runInDurableObject(object, async (instance) => {
                 const request = new IncomingRequest("https://example.com/authorize", {
                     method: 'POST',
@@ -678,12 +692,12 @@ describe("Handlers", () => {
         it("should verify redirect URL construction logic", async () => {
             // This test verifies the URL construction logic without relying on the redirect response
             const instanceUrl = 'https://test.thoughtspot.cloud';
-            const oauthReqInfo = { 
+            const oauthReqInfo = {
                 clientId: 'test-client',
                 scope: 'read',
                 redirectUri: 'https://example.com/callback'
             };
-            
+
             // Test the URL construction logic that the handler uses
             const redirectUrl = new URL('callosum/v1/saml/login', instanceUrl);
             const targetURLPath = new URL("/callback", "https://example.com");
@@ -691,21 +705,21 @@ describe("Handlers", () => {
             const encodedState = encodeBase64Url(new TextEncoder().encode(JSON.stringify(oauthReqInfo)).buffer);
             targetURLPath.searchParams.append('oauthReqInfo', encodedState);
             redirectUrl.searchParams.append('targetURLPath', targetURLPath.href);
-            
+
             // Verify the constructed URL has the expected structure
             expect(redirectUrl.origin).toBe('https://test.thoughtspot.cloud');
             expect(redirectUrl.pathname).toBe('/callosum/v1/saml/login');
-            
+
             const targetURLPathParam = redirectUrl.searchParams.get('targetURLPath');
             expect(targetURLPathParam).toBeTruthy();
-            
+
             const targetURL = new URL(targetURLPathParam!);
             expect(targetURL.pathname).toBe('/callback');
             expect(targetURL.searchParams.get('instanceUrl')).toBe(instanceUrl);
-            
+
             const encodedOauthReqInfo = targetURL.searchParams.get('oauthReqInfo');
             expect(encodedOauthReqInfo).toBeTruthy();
-            
+
             // Verify the encoding is correct by decoding it
             const decodedOauthReqInfo = JSON.parse(
                 new TextDecoder().decode(decodeBase64Url(encodedOauthReqInfo!))
@@ -723,12 +737,12 @@ describe("Handlers", () => {
                 state: 'random-state-string',
                 nonce: 'random-nonce-string'
             };
-            
+
             // Test encoding/decoding preserves complex objects
             const encodedState = btoa(JSON.stringify({ oauthReqInfo: complexOauthReqInfo }));
             const decodedState = JSON.parse(atob(encodedState));
             expect(decodedState.oauthReqInfo).toEqual(complexOauthReqInfo);
-            
+
             // Test URL construction with complex object
             const instanceUrl = 'https://test.thoughtspot.cloud';
             const redirectUrl = new URL('callosum/v1/saml/login', instanceUrl);
@@ -737,7 +751,7 @@ describe("Handlers", () => {
             const encodedOauthReqInfo = encodeBase64Url(new TextEncoder().encode(JSON.stringify(complexOauthReqInfo)).buffer);
             targetURLPath.searchParams.append('oauthReqInfo', encodedOauthReqInfo);
             redirectUrl.searchParams.append('targetURLPath', targetURLPath.href);
-            
+
             // Verify the complex object is preserved through the URL construction
             const targetURLPathParam = redirectUrl.searchParams.get('targetURLPath');
             const targetURL = new URL(targetURLPathParam!);
@@ -755,12 +769,12 @@ describe("Handlers", () => {
                 'https://mycompany.thoughtspot.cloud',
                 'https://thoughtspot.company.com'
             ];
-            
-            const oauthReqInfo = { 
+
+            const oauthReqInfo = {
                 clientId: 'test-client',
                 scope: 'read'
             };
-            
+
             for (const instanceUrl of testCases) {
                 const redirectUrl = new URL('callosum/v1/saml/login', instanceUrl);
                 const targetURLPath = new URL("/callback", "https://example.com");
@@ -768,15 +782,15 @@ describe("Handlers", () => {
                 const encodedState = encodeBase64Url(new TextEncoder().encode(JSON.stringify(oauthReqInfo)).buffer);
                 targetURLPath.searchParams.append('oauthReqInfo', encodedState);
                 redirectUrl.searchParams.append('targetURLPath', targetURLPath.href);
-                
+
                 // Verify each instance URL is properly handled
                 expect(redirectUrl.origin).toBe(instanceUrl);
                 expect(redirectUrl.pathname).toBe('/callosum/v1/saml/login');
-                
+
                 const targetURLPathParam = redirectUrl.searchParams.get('targetURLPath');
                 const targetURL = new URL(targetURLPathParam!);
                 expect(targetURL.searchParams.get('instanceUrl')).toBe(instanceUrl);
-                
+
                 const encodedOauthReqInfo = targetURL.searchParams.get('oauthReqInfo');
                 const decodedOauthReqInfo = JSON.parse(
                     new TextDecoder().decode(decodeBase64Url(encodedOauthReqInfo!))

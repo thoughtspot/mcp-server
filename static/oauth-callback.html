@@ -44,6 +44,20 @@
             </div>
         </div>
     </div>
+    <div id="free-trial-error-section" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: #f4f5f7; z-index: 9999; flex-direction: column; justify-content: center; align-items: center; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+        <div style="background: #fff; border-radius: 16px; box-shadow: 0 2px 12px 0 rgba(16,30,54,0.08); padding: 2.5rem 2rem 2rem 2rem; max-width: 440px; width: 100%; margin: 0 auto; display: flex; flex-direction: column; align-items: stretch;">
+            <div class="warning-banner">
+                <svg class="warning-icon" width="15" height="15" viewBox="0 0 24 24" fill="none">
+                    <circle cx="12" cy="12" r="12" fill="#FFE082"/>
+                    <path d="M12 8v4m0 4h.01" stroke="#FF9800" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    <circle cx="12" cy="12" r="9" stroke="#FF9800" stroke-width="2" fill="none"/>
+                </svg>
+                <p id="free-trial-error-text" class="warning-text">
+                    
+                </p>
+            </div>
+        </div>
+    </div>
     <script type="application/json" id="oauth-req-info">{{OAUTH_REQ_INFO}}</script>
     <script src="oauth-callback.js"></script>
 </body>
