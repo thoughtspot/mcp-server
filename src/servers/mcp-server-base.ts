@@ -11,7 +11,7 @@ import type { z } from "zod";
 import { context, type Span, SpanStatusCode } from "@opentelemetry/api";
 import { getActiveSpan, withSpan } from "../metrics/tracing/tracing-utils";
 import { Trackers, type Tracker, TrackEvent } from "../metrics";
-import type { Props } from "../utils";
+import { putInKV, type Props } from "../utils";
 import { MixpanelTracker } from "../metrics/mixpanel/mixpanel";
 import { getThoughtSpotClient } from "../thoughtspot/thoughtspot-client";
 import { ThoughtSpotService } from "../thoughtspot/thoughtspot-service";
@@ -39,6 +39,7 @@ export type ToolResponse = SuccessResponse | ErrorResponse;
 
 export interface Context {
     props: Props;
+    env?: Env;
 }
 
 export abstract class BaseMCPServer extends Server {
@@ -145,6 +146,41 @@ export abstract class BaseMCPServer extends Server {
             this.ctx.props.clientName
         );
         this.addTracker(mixpanel);
+    }
+
+    protected async getTokenUrl(sessionId: string, generationNo: number) {
+        let tokenUrl = "";
+        // Generate token and store in KV store
+        if (this.ctx.env?.OAUTH_KV) {
+            console.log("[DEBUG] Storing token in KV");
+            const token = crypto.randomUUID();
+            const tokenData = {
+                sessionId: sessionId,
+                generationNo: generationNo,
+                instanceURL: this.ctx.props.instanceUrl,
+                accessToken: this.ctx.props.accessToken
+            };
+            await putInKV(token, tokenData, this.ctx.env);
+            const hostName = this.ctx.props.hostName;
+            if (hostName && (hostName.startsWith("http") || hostName.startsWith("https"))) {
+                tokenUrl = `${hostName}/data/img?uniqueId=${token}`;
+            } else {
+                tokenUrl = `https://${hostName}/data/img?uniqueId=${token}`;
+            }
+        }
+        return tokenUrl;
+    }
+
+    protected async getAnswerContent(answer: any, question: string) {
+        const tokenUrl = await this.getTokenUrl(answer.session_identifier, answer.generation_number);
+        console.log(`[DEBUG] question: ${question} tokenUrl: ${tokenUrl}`);
+        return `Data: ${answer.data}
+
+        **CHART VISUALIZATION AVAILABLE:**
+        There is a data visualization chart for this query available at: "${tokenUrl}".
+
+        This URL contains a PNG image showing the visual representation of the above data for the question: "${question}". 
+        Please fetch and display this image to provide a complete analysis with both the data and its visual representation. `;
     }
 
     /**

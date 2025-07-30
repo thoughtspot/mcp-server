@@ -135,11 +135,11 @@ export class OpenAIDeepResearchMCPServer extends BaseMCPServer {
         if (answer.error) {
             return this.createErrorResponse(answer.error.message, `Error getting answer ${answer.error.message}`);
         }
-
+        const content = await this.getAnswerContent(answer, question);
         const result = {
             id,
             title: question,
-            text: answer.data,
+            text: content,
             url: `${this.ctx.props.instanceUrl}/#/insights/conv-assist?query=${question.trim()}&worksheet=${datasourceId}&executeSearch=true`,
         }
 
