@@ -6,7 +6,7 @@ import {
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 
-import { McpServerError, putInKV } from "../utils";
+import { McpServerError } from "../utils";
 import type {
     DataSource
 } from "../thoughtspot/thoughtspot-service";
@@ -224,21 +224,7 @@ export class MCPServer extends BaseMCPServer {
         const { question, datasourceId: sourceId } = GetAnswerSchema.parse(request.params.arguments);
 
         const answer = await this.getThoughtSpotService().getAnswerForQuestion(question, sourceId, false);
-        let tokenUrl = "";
-        
-        // Generate token and store in KV store
-        if (!answer.error && this.ctx.env?.OAUTH_KV) {
-            console.log("[DEBUG] Storing token in KV");
-            const token = crypto.randomUUID();
-            const tokenData = {
-                sessionId: answer.session_identifier,
-                generationNo: answer.generation_number,
-                instanceURL: this.ctx.props.instanceUrl,
-                accessToken: this.ctx.props.accessToken
-            };
-            await putInKV(token, tokenData, this.ctx.env);
-            tokenUrl = `${this.ctx.env?.HOST_NAME}/data/img?token=${token}`;
-        }
+        const tokenUrl = await this.getTokenUrl(answer.session_identifier, answer.generation_number);
 
         if (answer.error) {
             return this.createErrorResponse(answer.error.message, `Error getting answer ${answer.error.message}`);
