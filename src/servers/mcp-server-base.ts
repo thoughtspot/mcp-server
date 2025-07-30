@@ -171,8 +171,8 @@ export abstract class BaseMCPServer extends Server {
         return tokenUrl;
     }
 
-    protected getAnswerContent = (answer: any, question: string) => {
-        const tokenUrl = this.getTokenUrl(answer.session_identifier, answer.generation_number);
+    protected async getAnswerContent(answer: any, question: string) {
+        const tokenUrl = await this.getTokenUrl(answer.session_identifier, answer.generation_number);
         console.log(`[DEBUG] question: ${question} tokenUrl: ${tokenUrl}`);
         return `Data: ${answer.data}
 

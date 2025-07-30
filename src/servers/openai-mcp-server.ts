@@ -131,12 +131,11 @@ export class OpenAIDeepResearchMCPServer extends BaseMCPServer {
         const { id } = fetchInputSchema.parse(request.params.arguments);
         // id is of the form "<datasource-id>:<question>"
         const [datasourceId, question = ""] = id.split(":");
-        const thoughtSpotService = this.getThoughtSpotService();
-        const answer = await thoughtSpotService.getAnswerForQuestion(question, datasourceId, false);
+        const answer = await this.getThoughtSpotService().getAnswerForQuestion(question, datasourceId, false);
         if (answer.error) {
             return this.createErrorResponse(answer.error.message, `Error getting answer ${answer.error.message}`);
         }
-        const content = this.getAnswerContent(answer, question);
+        const content = await this.getAnswerContent(answer, question);
         const result = {
             id,
             title: question,
