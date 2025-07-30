@@ -66,7 +66,7 @@ class Handler {
             // TODO: Remove this once we have a proper way to handle this
             // This is a temporary fix to handle the case where the instance URL is a free trial instance URL
             // Since, free trial does not support IAMv2, we will assume that the user is logged in.
-            if (instanceUrl.match(/https:\/\/team\d+\.thoughtspot\.cloud/)) {
+            if (instanceUrl.match(/https:\/\/team\d+\.thoughtspot\.cloud|https:\/\/my\d+\.thoughtspot\.cloud/)) {
                 const callbackUrl = new URL("/callback", origin);
                 callbackUrl.searchParams.set("instanceUrl", instanceUrl);
                 callbackUrl.searchParams.set(
