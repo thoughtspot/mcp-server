@@ -304,7 +304,7 @@ export class ThoughtSpotService {
         });
 
         const results = resp
-            .filter(d => d.metadata_header.type === "WORKSHEET")
+            .filter(d => d.metadata_header.type === "WORKSHEET" ||  d.metadata_header.subType === "WORKSHEET")
             .map(d => ({
                 name: d.metadata_header.name,
                 id: d.metadata_header.id,

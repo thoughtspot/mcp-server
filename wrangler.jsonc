@@ -48,9 +48,5 @@
 	"analytics_engine_datasets": [
         { "binding": "ANALYTICS", "dataset": "mcp_events" }
     ],
-	"vars": {
-		"HONEYCOMB_DATASET": "",
-		"HONEYCOMB_API_KEY": ""
-	},
 	"assets": { "directory": "./static/", "binding": "ASSETS" },
 }
