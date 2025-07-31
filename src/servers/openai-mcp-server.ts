@@ -1,50 +1,12 @@
 
-import {
-    type CallToolRequestSchema,
-    ToolSchema,
-    type ReadResourceRequestSchema
+import type {
+    CallToolRequestSchema,
+    ReadResourceRequestSchema
 } from "@modelcontextprotocol/sdk/types.js";
-import { zodToJsonSchema } from "zod-to-json-schema";
 import { BaseMCPServer, type Context } from "./mcp-server-base";
-import { z } from "zod";
+import type { z } from "zod";
 import { WithSpan } from "../metrics/tracing/tracing-utils";
-
-const ToolInputSchema = ToolSchema.shape.inputSchema;
-type ToolInput = z.infer<typeof ToolInputSchema>;
-
-const ToolOutputSchema = ToolSchema.shape.outputSchema;
-type ToolOutput = z.infer<typeof ToolOutputSchema>;
-
-const SearchInputSchema = z.object({
-    query: z.string().describe(`The question/task to search for relevant data queries to answer. Use the fetch tool to retrieve the data for individual queries. The datasource id should be passed as part of the query. With the syntax 
-    datasource:<id> <search-query>. The search-query can be any textual question.
-        
-        For example:
-                    datasource:asdhshd-123123-12dd How to reduce customer churn?
-                    datasource:abc-123123-12dd How to increase sales?
-                
-                If the datasource id is not available, ask the user to supply one explicitly.`),
-});
-
-const SearchOutputSchema = z.object({
-    results: z.array(z.object({
-        id: z.string().describe("The id of the search result."),
-        title: z.string().describe("The title of the search result."),
-        text: z.string().describe("The text of the search result."),
-        url: z.string().describe("The url of the search result."),
-    })),
-});
-
-const fetchInputSchema = z.object({
-    id: z.string().describe("The id of the search result to fetch."),
-});
-
-const fetchOutputSchema = z.object({
-    id: z.string().describe("The id of the search result."),
-    title: z.string().describe("The title of the search result."),
-    text: z.string().describe("The text of the search result."),
-    url: z.string().describe("The url of the search result."),
-});
+import { SearchInputSchema, fetchInputSchema, toolDefinitionsOpenAIMCPServer } from "../api-schemas/schemas";
 
 export class OpenAIDeepResearchMCPServer extends BaseMCPServer {
     constructor(ctx: Context) {
@@ -53,20 +15,11 @@ export class OpenAIDeepResearchMCPServer extends BaseMCPServer {
 
     protected async listTools() {
         return {
-            tools: [
-                {
-                    name: "search",
-                    description: "Tool to search for relevant data queries to answer the given question based on the datasource passed to this tool, which is a datasource id, see the query description for the syntax. The datasource id is mandatory and should be passed as part of the query. Any textual question can be passed to this tool, and it will do its best to find relevant data queries to answer the question.",
-                    inputSchema: zodToJsonSchema(SearchInputSchema) as ToolInput,
-                    outputSchema: zodToJsonSchema(SearchOutputSchema) as ToolOutput,
-                },
-                {
-                    name: "fetch",
-                    description: "Tool to retrieve data from the retail sales dataset for a given query.",
-                    inputSchema: zodToJsonSchema(fetchInputSchema) as ToolInput,
-                    outputSchema: zodToJsonSchema(fetchOutputSchema) as ToolOutput,
-                },
-            ],
+            tools: toolDefinitionsOpenAIMCPServer.map((tool) => ({
+                name: tool.name,
+                inputSchema: tool.inputSchema,
+                outputSchema: tool.outputSchema,
+            })),
         };
     }
 
