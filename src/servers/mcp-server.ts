@@ -3,7 +3,7 @@ import {
     ToolSchema,
     type ReadResourceRequestSchema
 } from "@modelcontextprotocol/sdk/types.js";
-import { z } from "zod";
+import type { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 
 import { McpServerError } from "../utils";
@@ -78,7 +78,6 @@ enum ToolName {
     CreateLiveboard = "createLiveboard",
     GetDataSourceSuggestions = "getDataSourceSuggestions",
 }
-
 export class MCPServer extends BaseMCPServer {
     constructor(ctx: Context) {
         super(ctx, "ThoughtSpot", "1.0.0");

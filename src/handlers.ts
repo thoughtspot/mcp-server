@@ -8,6 +8,7 @@ import { any } from 'zod';
 import { encodeBase64Url, decodeBase64Url } from 'hono/utils/encode';
 import { getActiveSpan, WithSpan } from './metrics/tracing/tracing-utils';
 import { context, type Span, SpanStatusCode, trace } from "@opentelemetry/api";
+import { openApiSpecHandler } from './api-schemas/open-api-spec';
 
 const app = new Hono<{ Bindings: Env & { OAUTH_PROVIDER: OAuthHelpers } }>()
 
@@ -262,5 +263,7 @@ app.post("/store-token", async (c) => {
         return c.text(`Internal server error ${error}`, 500);
     }
 });
+
+app.route('/openapi-spec', openApiSpecHandler);
 
 export default app;
