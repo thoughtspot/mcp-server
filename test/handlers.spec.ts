@@ -446,6 +446,146 @@ describe("Handlers", () => {
             // Consume the response body to prevent storage cleanup issues
             await result.text();
         });
+
+        describe("Instance URL regex pattern matching", () => {
+            it("should redirect to callback for team URLs with numbers", async () => {
+                const testCases = [
+                    'https://team1.thoughtspot.cloud',
+                    'https://team2.thoughtspot.cloud',
+                    'https://team3.thoughtspot.cloud'
+                ];
+
+                for (const instanceUrl of testCases) {
+                    const formData = new FormData();
+                    formData.append('state', btoa(JSON.stringify({ oauthReqInfo: { clientId: 'test' } })));
+                    formData.append('instanceUrl', instanceUrl);
+                    
+                    const result = await app.fetch(new Request("https://example.com/authorize", {
+                        method: 'POST',
+                        body: formData
+                    }), mockEnv);
+                    
+                    expect(result.status).toBe(302);
+                    expect(result.headers.get('location')).toContain('https://example.com/callback');
+                    expect(result.headers.get('location')).toContain(`instanceUrl=${encodeURIComponent(instanceUrl)}`);
+                }
+            });
+
+            it("should redirect to callback for my URLs with numbers", async () => {
+                const testCases = [
+                    'https://my1.thoughtspot.cloud',
+                    'https://my2.thoughtspot.cloud',
+                    'https://my3.thoughtspot.cloud',
+                ];
+
+                for (const instanceUrl of testCases) {
+                    const formData = new FormData();
+                    formData.append('state', btoa(JSON.stringify({ oauthReqInfo: { clientId: 'test' } })));
+                    formData.append('instanceUrl', instanceUrl);
+                    
+                    const result = await app.fetch(new Request("https://example.com/authorize", {
+                        method: 'POST',
+                        body: formData
+                    }), mockEnv);
+                    
+                    expect(result.status).toBe(302);
+                    expect(result.headers.get('location')).toContain('https://example.com/callback');
+                    expect(result.headers.get('location')).toContain(`instanceUrl=${encodeURIComponent(instanceUrl)}`);
+                }
+            });
+
+            it("should NOT redirect to callback for URLs that don't match the pattern", async () => {
+                const testCases = [
+                    'https://company.thoughtspot.cloud', // no team/my prefix
+                    'https://team.thoughtspot.cloud', // no number after team
+                    'https://my.thoughtspot.cloud', // no number after my
+                    'https://teamabc.thoughtspot.cloud', // non-numeric after team
+                    'https://myabc.thoughtspot.cloud', // non-numeric after my
+                    'https://team1test.thoughtspot.cloud', // extra characters after number
+                    'https://my1test.thoughtspot.cloud', // extra characters after number
+                    'https://test-team1.thoughtspot.cloud', // prefix before team
+                    'https://test-my1.thoughtspot.cloud', // prefix before my
+                    'https://team1.test.cloud', // different domain
+                    'https://my1.test.cloud', // different domain
+                    'https://team123.thoughtspot.com', // wrong TLD
+                    'https://my123.thoughtspot.com', // wrong TLD
+                    'http://team1.thoughtspot.cloud', // http instead of https
+                    'http://my1.thoughtspot.cloud', // http instead of https
+                ];
+
+                for (const instanceUrl of testCases) {
+                    const formData = new FormData();
+                    formData.append('state', btoa(JSON.stringify({ oauthReqInfo: { clientId: 'test' } })));
+                    formData.append('instanceUrl', instanceUrl);
+                    
+                    const result = await app.fetch(new Request("https://example.com/authorize", {
+                        method: 'POST',
+                        body: formData
+                    }), mockEnv);
+                    
+                    // These should not redirect to callback (should go through SAML redirect)
+                    expect(result.status).not.toBe(400);
+                    if (result.status === 302) {
+                        const location = result.headers.get('location');
+                        // Should redirect to SAML login, not directly to callback
+                        // SAML redirects contain '/callosum/v1/saml/login' 
+                        // Direct callback redirects start with 'https://example.com/callback'
+                        expect(location).not.toMatch(/^https:\/\/example\.com\/callback/);
+                        expect(location).toContain('/callosum/v1/saml/login');
+                    }
+                }
+            });
+
+            it("should verify the exact regex pattern behavior", () => {
+                // Test the actual regex pattern used in the code
+                const regex = /^https:\/\/(?:team|my)\d+\.thoughtspot\.cloud$/;
+                
+                // URLs that should match
+                const matchingUrls = [
+                    'https://team1.thoughtspot.cloud',
+                    'https://my1.thoughtspot.cloud',
+                    'https://team123.thoughtspot.cloud',
+                    'https://my456.thoughtspot.cloud',
+                    'https://team999999.thoughtspot.cloud',
+                    'https://my999999.thoughtspot.cloud',
+                    'https://team01.thoughtspot.cloud', // leading zeros match \d+
+                    'https://my01.thoughtspot.cloud',
+                    'https://team001.thoughtspot.cloud',
+                    'https://my001.thoughtspot.cloud'
+                ];
+
+                // URLs that should not match
+                const nonMatchingUrls = [
+                    'https://company.thoughtspot.cloud',
+                    'https://team.thoughtspot.cloud',
+                    'https://my.thoughtspot.cloud',
+                    'https://teamabc.thoughtspot.cloud',
+                    'https://myabc.thoughtspot.cloud',
+                    'https://team1test.thoughtspot.cloud',
+                    'https://my1test.thoughtspot.cloud',
+                    'https://test-team1.thoughtspot.cloud',
+                    'https://test-my1.thoughtspot.cloud',
+                    'https://team1.test.cloud',
+                    'https://my1.test.cloud',
+                    'https://team123.thoughtspot.com',
+                    'https://my123.thoughtspot.com',
+                    'http://team1.thoughtspot.cloud',
+                    'http://my1.thoughtspot.cloud',
+                    'https://TEAM1.thoughtspot.cloud', // case sensitive
+                    'https://MY1.thoughtspot.cloud' // case sensitive
+                ];
+
+                // Test matching URLs
+                for (const url of matchingUrls) {
+                    expect(regex.test(url)).toBe(true);
+                }
+
+                // Test non-matching URLs
+                for (const url of nonMatchingUrls) {
+                    expect(regex.test(url)).toBe(false);
+                }
+            });
+        });
     });
 
     describe("GET /callback", () => {
