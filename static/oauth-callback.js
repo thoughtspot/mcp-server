@@ -35,7 +35,7 @@
                 // TODO: Remove this once we have a proper way to handle this
                 // This is a temporary fix to handle the case where the instance URL is a free trial instance URL
                 // Since, free trial does not support IAMv2, the user needs to login to the free trial instance in a separate tab manually.
-                if (base.toString().match(/https:\/\/team\d+\.thoughtspot\.cloud/)) {
+                if (base.toString().match(/^https:\/\/(?:team|my)\d+\.thoughtspot\.cloud$/)) {
                     freeTrialErrorSection.style.display = 'flex';
                     const errorTextEl = document.getElementById('free-trial-error-text');
                     errorTextEl.textContent = 'Click ';
