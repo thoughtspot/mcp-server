@@ -6,7 +6,23 @@ import type {
 import { BaseMCPServer, type Context } from "./mcp-server-base";
 import type { z } from "zod";
 import { WithSpan } from "../metrics/tracing/tracing-utils";
-import { SearchInputSchema, fetchInputSchema, toolDefinitionsOpenAIMCPServer } from "../api-schemas/schemas";
+import { FetchInputSchema, FetchOutputSchema, SearchInputSchema, SearchOutputSchema, type ToolInput, type ToolOutput } from "../api-schemas/schemas";
+import zodToJsonSchema from "zod-to-json-schema";
+
+export const toolDefinitionsOpenAIMCPServer = [
+    {
+        name: "search",
+        description: "Tool to search for relevant data queries to answer the given question based on the datasource passed to this tool, which is a datasource id, see the query description for the syntax. The datasource id is mandatory and should be passed as part of the query. Any textual question can be passed to this tool, and it will do its best to find relevant data queries to answer the question.",
+        inputSchema: zodToJsonSchema(SearchInputSchema) as ToolInput,
+        outputSchema: zodToJsonSchema(SearchOutputSchema) as ToolOutput,
+    },
+    {
+        name: "fetch",
+        description: "Tool to retrieve data from the retail sales dataset for a given query.",
+        inputSchema: zodToJsonSchema(FetchInputSchema) as ToolInput,
+        outputSchema: zodToJsonSchema(FetchOutputSchema) as ToolOutput,
+    },
+];
 
 export class OpenAIDeepResearchMCPServer extends BaseMCPServer {
     constructor(ctx: Context) {
@@ -17,6 +33,7 @@ export class OpenAIDeepResearchMCPServer extends BaseMCPServer {
         return {
             tools: toolDefinitionsOpenAIMCPServer.map((tool) => ({
                 name: tool.name,
+                description: tool.description,
                 inputSchema: tool.inputSchema,
                 outputSchema: tool.outputSchema,
             })),
@@ -81,7 +98,7 @@ export class OpenAIDeepResearchMCPServer extends BaseMCPServer {
 
     @WithSpan('call-fetch')
     protected async callFetch(request: z.infer<typeof CallToolRequestSchema>) {
-        const { id } = fetchInputSchema.parse(request.params.arguments);
+        const { id } = FetchInputSchema.parse(request.params.arguments);
         // id is of the form "<datasource-id>:<question>"
         const [datasourceId, question = ""] = id.split(":");
         const answer = await this.getThoughtSpotService().getAnswerForQuestion(question, datasourceId, false);

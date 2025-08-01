@@ -1,6 +1,5 @@
 import { Hono } from 'hono';
-import { zodToJsonSchema } from 'zod-to-json-schema';
-import { toolDefinitionsMCPServer } from './schemas';
+import { toolDefinitionsMCPServer } from '../servers/mcp-server';
 import { capitalize } from '../utils';
 
 export const openApiSpecHandler = new Hono();

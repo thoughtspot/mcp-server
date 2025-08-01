@@ -31,11 +31,11 @@ export const SearchOutputSchema = z.object({
     })),
 });
 
-export const fetchInputSchema = z.object({
+export const FetchInputSchema = z.object({
     id: z.string().describe("The id of the search result to fetch."),
 });
 
-export const fetchOutputSchema = z.object({
+export const FetchOutputSchema = z.object({
     id: z.string().describe("The id of the search result."),
     title: z.string().describe("The title of the search result."),
     text: z.string().describe("The text of the search result."),
@@ -86,63 +86,3 @@ export const CreateLiveboardSchema = z.object({
         <div class=\"pinboard-note-tile-module__noteTileBg editor-module__bgNode\"></div>
         ` ),
 });
-
-
-
-export const toolDefinitionsMCPServer = [
-    {
-        name: ToolName.Ping,
-        description: "Simple ping tool to test connectivity and Auth",
-        inputSchema: zodToJsonSchema(PingSchema) as ToolInput,
-        annotations: {
-            title: "Test Connection",
-            readOnlyHint: true,
-            destructiveHint: false,
-        },
-    },
-    {
-        name: ToolName.GetRelevantQuestions,
-        description: "Get relevant data questions from ThoughtSpot database",
-        inputSchema: zodToJsonSchema(GetRelevantQuestionsSchema) as ToolInput,
-        annotations: {
-            title: "Get Relevant Questions for a Query",
-            readOnlyHint: true,
-            destructiveHint: false,
-        },
-    },
-    {
-        name: ToolName.GetAnswer,
-        description: "Get the answer to a question from ThoughtSpot database",
-        inputSchema: zodToJsonSchema(GetAnswerSchema) as ToolInput,
-        annotations: {
-            title: "Get Answer for a Question",
-            readOnlyHint: true,
-            destructiveHint: false,
-        },
-    },
-    {
-        name: ToolName.CreateLiveboard,
-        description: "Create a liveboard from a list of answers",
-        inputSchema: zodToJsonSchema(CreateLiveboardSchema) as ToolInput,
-        annotations: {
-            title: "Create Liveboard from Answers",
-            readOnlyHint: true,
-            destructiveHint: false,
-        },
-    }
-];
-
-export const toolDefinitionsOpenAIMCPServer = [
-    {
-        name: "search",
-        description: "Tool to search for relevant data queries to answer the given question based on the datasource passed to this tool, which is a datasource id, see the query description for the syntax. The datasource id is mandatory and should be passed as part of the query. Any textual question can be passed to this tool, and it will do its best to find relevant data queries to answer the question.",
-        inputSchema: zodToJsonSchema(SearchInputSchema) as ToolInput,
-        outputSchema: zodToJsonSchema(SearchOutputSchema) as ToolOutput,
-    },
-    {
-        name: "fetch",
-        description: "Tool to retrieve data from the retail sales dataset for a given query.",
-        inputSchema: zodToJsonSchema(fetchInputSchema) as ToolInput,
-        outputSchema: zodToJsonSchema(fetchOutputSchema) as ToolOutput,
-    },
-];

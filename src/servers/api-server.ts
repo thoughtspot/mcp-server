@@ -1,10 +1,8 @@
 import { Hono } from 'hono'
 import type { Props } from '../utils';
-import { McpServerError } from '../utils';
-import { getDataSources, ThoughtSpotService } from '../thoughtspot/thoughtspot-service';
+import { ThoughtSpotService } from '../thoughtspot/thoughtspot-service';
 import { getThoughtSpotClient } from '../thoughtspot/thoughtspot-client';
 import { getActiveSpan, WithSpan } from '../metrics/tracing/tracing-utils';
-import { context, type Span, SpanStatusCode, trace } from "@opentelemetry/api";
 import { CreateLiveboardSchema, GetAnswerSchema, GetRelevantQuestionsSchema } from '../api-schemas/schemas';
 
 const apiServer = new Hono<{ Bindings: Env & { props: Props } }>()
@@ -118,7 +116,6 @@ apiServer.post("/api/tools/create-liveboard", async (c) => {
 
 apiServer.get("/api/tools/ping", async (c) => {
     const { props } = c.executionCtx;
-    console.log("Received Ping request");
     if (props.accessToken && props.instanceUrl) {
         return c.json({
             content: [{ type: "text", text: "Pong" }],

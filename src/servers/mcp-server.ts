@@ -13,7 +13,7 @@ import type {
 import { TrackEvent } from "../metrics";
 import { WithSpan } from "../metrics/tracing/tracing-utils";
 import { BaseMCPServer, type Context, type ToolResponse } from "./mcp-server-base";
-import { GetRelevantQuestionsSchema, GetAnswerSchema, CreateLiveboardSchema, toolDefinitionsMCPServer } from "../api-schemas/schemas";
+import { GetRelevantQuestionsSchema, GetAnswerSchema, CreateLiveboardSchema, type ToolInput, PingSchema } from "../api-schemas/schemas";
 
 export enum ToolName {
     Ping = "ping",
@@ -21,6 +21,49 @@ export enum ToolName {
     GetAnswer = "getAnswer",
     CreateLiveboard = "createLiveboard",
 }
+
+export const toolDefinitionsMCPServer = [
+    {
+        name: ToolName.Ping,
+        description: "Simple ping tool to test connectivity and Auth",
+        inputSchema: zodToJsonSchema(PingSchema) as ToolInput,
+        annotations: {
+            title: "Test Connection",
+            readOnlyHint: true,
+            destructiveHint: false,
+        },
+    },
+    {
+        name: ToolName.GetRelevantQuestions,
+        description: "Get relevant data questions from ThoughtSpot database",
+        inputSchema: zodToJsonSchema(GetRelevantQuestionsSchema) as ToolInput,
+        annotations: {
+            title: "Get Relevant Questions for a Query",
+            readOnlyHint: true,
+            destructiveHint: false,
+        },
+    },
+    {
+        name: ToolName.GetAnswer,
+        description: "Get the answer to a question from ThoughtSpot database",
+        inputSchema: zodToJsonSchema(GetAnswerSchema) as ToolInput,
+        annotations: {
+            title: "Get Answer for a Question",
+            readOnlyHint: true,
+            destructiveHint: false,
+        },
+    },
+    {
+        name: ToolName.CreateLiveboard,
+        description: "Create a liveboard from a list of answers",
+        inputSchema: zodToJsonSchema(CreateLiveboardSchema) as ToolInput,
+        annotations: {
+            title: "Create Liveboard from Answers",
+            readOnlyHint: true,
+            destructiveHint: false,
+        },
+    }
+];
 export class MCPServer extends BaseMCPServer {
     constructor(ctx: Context) {
         super(ctx, "ThoughtSpot", "1.0.0");
@@ -30,6 +73,7 @@ export class MCPServer extends BaseMCPServer {
         return {
             tools: toolDefinitionsMCPServer.map((tool) => ({
                 name: tool.name,
+                description: tool.description,
                 inputSchema: tool.inputSchema,
                 annotations: tool.annotations,
             })),
