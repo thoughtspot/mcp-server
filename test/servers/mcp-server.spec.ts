@@ -499,7 +499,7 @@ describe("MCP Server", () => {
         it("should return resource content for valid datasource URI", async () => {
             await server.init();
 
-            const result = await server.readResource({ 
+            const result = await (server as any).readResource({ 
                 method: "resources/read",
                 params: { uri: "datasource:///ds-123" } 
             });
@@ -517,7 +517,7 @@ describe("MCP Server", () => {
         it("should return resource content for second datasource", async () => {
             await server.init();
 
-            const result = await server.readResource({ 
+            const result = await (server as any).readResource({ 
                 method: "resources/read",
                 params: { uri: "datasource:///ds-456" } 
             });
@@ -535,7 +535,7 @@ describe("MCP Server", () => {
         it("should throw 404 error for invalid datasource URI format", async () => {
             await server.init();
 
-            await expect(server.readResource({ 
+            await expect((server as any).readResource({ 
                 method: "resources/read",
                 params: { uri: "invalid-uri" } 
             })).rejects.toThrow("Datasource not found");
@@ -544,7 +544,7 @@ describe("MCP Server", () => {
         it("should throw 400 error for URI without datasource ID", async () => {
             await server.init();
 
-            await expect(server.readResource({ 
+            await expect((server as any).readResource({ 
                 method: "resources/read",
                 params: { uri: "datasource:///" } 
             })).rejects.toThrow("Invalid datasource uri");
@@ -553,7 +553,7 @@ describe("MCP Server", () => {
         it("should throw 404 error for non-existent datasource", async () => {
             await server.init();
 
-            await expect(server.readResource({ 
+            await expect((server as any).readResource({ 
                 method: "resources/read",
                 params: { uri: "datasource:///non-existent-id" } 
             })).rejects.toThrow("Datasource not found");
@@ -562,7 +562,7 @@ describe("MCP Server", () => {
         it("should throw 404 error for malformed URI", async () => {
             await server.init();
 
-            await expect(server.readResource({ 
+            await expect((server as any).readResource({ 
                 method: "resources/read",
                 params: { uri: "datasource://" } 
             })).rejects.toThrow("Datasource not found");
@@ -571,7 +571,7 @@ describe("MCP Server", () => {
         it("should throw 400 error for empty URI", async () => {
             await server.init();
 
-            await expect(server.readResource({ 
+            await expect((server as any).readResource({ 
                 method: "resources/read",
                 params: { uri: "" } 
             })).rejects.toThrow("Invalid datasource uri");
@@ -581,7 +581,7 @@ describe("MCP Server", () => {
             await server.init();
 
             // First call should fetch from service
-            await server.readResource({ 
+            await (server as any).readResource({ 
                 method: "resources/read",
                 params: { uri: "datasource:///ds-123" } 
             });
@@ -590,7 +590,7 @@ describe("MCP Server", () => {
             expect(mockClientInstance.searchMetadata).toHaveBeenCalledTimes(1);
 
             // Second call should use cached data
-            await server.readResource({ 
+            await (server as any).readResource({ 
                 method: "resources/read",
                 params: { uri: "datasource:///ds-456" } 
             });
