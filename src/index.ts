@@ -1,13 +1,13 @@
 import { trace } from '@opentelemetry/api';
 import { instrument, type ResolveConfigFn, instrumentDO } from '@microlabs/otel-cf-workers';
 import OAuthProvider from "@cloudflare/workers-oauth-provider";
-import { McpAgent } from "agents/mcp";
 import handler from "./handlers";
-import { type Props, instrumentedMCPServer } from "./utils";
+import { instrumentedMCPServer } from "./utils";
 import { MCPServer } from "./servers/mcp-server";
 import { apiServer } from "./servers/api-server";
 import { withBearerHandler } from "./bearer";
 import { OpenAIDeepResearchMCPServer } from './servers/openai-mcp-server';
+import { a2aHandler } from './a2a/agent-executor';
 
 // OTEL configuration function
 const config: ResolveConfigFn = (env: Env, _trigger) => {
@@ -36,12 +36,14 @@ const oauthProvider = new OAuthProvider({
         '/openai/sse': ThoughtSpotOpenAIDeepResearchMCP.serveSSE("/openai/sse", {
             binding: "OPENAI_DEEP_RESEARCH_MCP_OBJECT"
         }) as any, // TODO: Remove 'any'
+        "/a2a": a2aHandler as any, // TODO: Remove 'any'
         "/api": apiServer as any, // TODO: Remove 'any'
     },
     defaultHandler: withBearerHandler(handler, ThoughtSpotMCP) as any, // TODO: Remove 'any'
     authorizeEndpoint: "/authorize",
     tokenEndpoint: "/token",
     clientRegistrationEndpoint: "/register",
+
 });
 
 // Wrap the OAuth provider with a handler that includes tracing
@@ -57,7 +59,6 @@ const oauthHandler = {
                 request_method: request.method,
             });
         }
-
         return oauthProvider.fetch(request, env, ctx);
     }
 };
