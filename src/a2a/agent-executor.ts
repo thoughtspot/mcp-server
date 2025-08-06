@@ -6,6 +6,10 @@ import type {
   import { ThoughtSpotService } from "../thoughtspot/thoughtspot-service";
   import { getThoughtSpotClient } from "../thoughtspot/thoughtspot-client";
   import type { Props } from "../utils";
+  import { thoughtSpotAgentCard } from './agent-card';
+  import { DefaultRequestHandler, InMemoryTaskStore, type TaskStore } from '@a2a-js/sdk/server';
+  import { JsonRpcTransportHandler } from '@a2a-js/sdk/server';
+  import type { JSONRPCSuccessResponse } from '@a2a-js/sdk';
   
   // 1. Define your agent's logic as a AgentExecutor
   export class MyAgentExecutor implements AgentExecutor {
@@ -169,9 +173,7 @@ Please ensure you are properly authenticated through OAuth.`;
       console.log(
         `[MyAgentExecutor] Processing message ${userMessage.messageId} for task ${taskId} (context: ${contextId})`
       );
-      console.log("thoughtspot props in agent executor", this.thoughtSpotProps);
-
-              // Check if this is a ping request
+        // Check if this is a ping request
         if (this.isPingRequest(userText)) {
             console.log(`[MyAgentExecutor] Handling ping request for task ${taskId}`);
             
@@ -312,4 +314,60 @@ Please ensure you are properly authenticated through OAuth.`;
       eventBus.publish(finalUpdate);
       eventBus.finished();
     }
+  }
+
+  const taskStore: TaskStore = new InMemoryTaskStore();
+  const agentExecutor: AgentExecutor = new MyAgentExecutor();
+  
+  const basicRequestHandler = new DefaultRequestHandler(
+      thoughtSpotAgentCard,
+      taskStore,
+      agentExecutor
+    );
+  
+  async function handleA2ARequest(req: Request, env: Env, ctx: ExecutionContext) {
+      (agentExecutor as MyAgentExecutor).setThoughtSpotContext(ctx.props as Props);
+  
+      const jsonHandler = new JsonRpcTransportHandler(basicRequestHandler);
+      const requestBody = await req.json();
+      try {
+          const rpcResponseOrStream = await jsonHandler.handle(requestBody);
+  
+          if (typeof (rpcResponseOrStream as any)?.[Symbol.asyncIterator] === 'function') {
+              const stream = new ReadableStream({
+                  async start(controller) {
+                    try {
+                      for await (const event of rpcResponseOrStream as AsyncGenerator<JSONRPCSuccessResponse, void, undefined>) {
+                        const sseData = `id: ${new Date().getTime()}\ndata: ${JSON.stringify(event)}\n\n`;
+                        controller.enqueue(new TextEncoder().encode(sseData));
+                      }
+                      controller.close();
+                    } catch (error) {
+                      // Handle errors by enqueueing error event and closing
+                      const errorEvent = `id: ${new Date().getTime()}\nevent: error\ndata: ${JSON.stringify(error)}\n\n`;
+                      controller.enqueue(new TextEncoder().encode(errorEvent));
+                      controller.close();
+                    }
+                  }
+                });
+                
+                return new Response(stream, {
+                  headers: {
+                    'Content-Type': 'text/event-stream',
+                  }
+                });
+              }
+      } catch (error) {
+          console.error('Error in A2A handler:', error);
+          return new Response('Internal Server Error', { status: 500, headers: {
+            'Content-Type': 'text/event-stream',
+          }
+          });
+      }
+  }
+  
+  export const a2aHandler = {
+      async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+          return await handleA2ARequest(request, env, ctx) as Response;
+      }
   }

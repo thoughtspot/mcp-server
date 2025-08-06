@@ -1,17 +1,8 @@
-import { AgentExecutor, DefaultRequestHandler, InMemoryTaskStore, TaskStore, JsonRpcTransportHandler } from '@a2a-js/sdk/server';
 import type { ThoughtSpotMCP } from '.';
 import type honoApp from './handlers';
 import { validateAndSanitizeUrl } from './oauth-manager/oauth-utils';
-import { MyAgentExecutor } from './a2a/agent-executor';
-import { Props } from './utils';
-import { JSONRPCSuccessResponse } from '@a2a-js/sdk';
-import { thoughtSpotAgentCard } from './a2a/agent-card';
 
 export function withBearerHandler(app: typeof honoApp, MCPServer: typeof ThoughtSpotMCP) {
-
-    app.mount("/agent-card", (req, env, ctx) => {
-          return new Response(JSON.stringify(thoughtSpotAgentCard), { status: 200 });
-    });
 
     app.mount("/bearer", (req, env, ctx) => {
         const authHeader = req.headers.get("authorization");

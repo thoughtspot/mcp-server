@@ -8,6 +8,7 @@ import { any } from 'zod';
 import { encodeBase64Url, decodeBase64Url } from 'hono/utils/encode';
 import { getActiveSpan, WithSpan } from './metrics/tracing/tracing-utils';
 import { context, type Span, SpanStatusCode, trace } from "@opentelemetry/api";
+import { thoughtSpotAgentCard } from './a2a/agent-card';
 
 const app = new Hono<{ Bindings: Env & { OAUTH_PROVIDER: OAuthHelpers } }>()
 
@@ -261,6 +262,10 @@ app.post("/store-token", async (c) => {
         }
         return c.text(`Internal server error ${error}`, 500);
     }
+});
+
+app.get("/agent-card", async () => {
+    return new Response(JSON.stringify(thoughtSpotAgentCard), { status: 200 });
 });
 
 export default app;
