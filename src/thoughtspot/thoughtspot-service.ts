@@ -11,7 +11,7 @@ export class ThoughtSpotService {
     constructor(private client: ThoughtSpotRestApi) { }
 
     @WithSpan('discover-data-sources')
-    async discoverDataSources(query?: string): Promise<DataSource[] | DataSourceSuggestion | null> {
+    async discoverDataSources(query?: string): Promise<DataSource[] | DataSourceSuggestion[] | null> {
         const span = getActiveSpan();
         span?.addEvent("discover-data-sources");
         
@@ -28,10 +28,9 @@ export class ThoughtSpotService {
 
     /**
      * Get intelligent data source suggestions based on a query using GraphQL
-     * Returns the data source with the highest confidence score
      */
     @WithSpan('get-data-source-suggestions')
-    async getDataSourceSuggestions(query: string): Promise<DataSourceSuggestion | null> {
+    async getDataSourceSuggestions(query: string): Promise<DataSourceSuggestion[] | null> {
         const span = getActiveSpan();
         
         try {
@@ -41,21 +40,36 @@ export class ThoughtSpotService {
             const response = await (this.client as any).queryGetDataSourceSuggestions(query);
             
             span?.setStatus({ code: SpanStatusCode.OK, message: "Data source suggestions retrieved" });
-            span?.setAttribute("suggestions_count", response.dataSources.length);
             
-            // Find the data source with the highest confidence
+            // Check if we have any data sources
             if (!response.dataSources || response.dataSources.length === 0) {
+                span?.setAttribute("suggestions_count", 0);
                 return null;
             }
             
-            const highestConfidenceDataSource = response.dataSources.reduce((prev: DataSourceSuggestion, current: DataSourceSuggestion) => {
-                return current.confidence > prev.confidence ? current : prev;
-            });
+            span?.setAttribute("suggestions_count", response.dataSources.length);
             
+            // Sort data sources by confidence in descending order
+            const sortedDataSources = [...response.dataSources].sort((a, b) => b.confidence - a.confidence);
+            
+            const highestConfidenceDataSource = sortedDataSources[0];
             span?.setAttribute("highest_confidence", highestConfidenceDataSource.confidence);
             span?.setAttribute("selected_datasource_id", highestConfidenceDataSource.header.guid);
             
-            return highestConfidenceDataSource;
+            // If only one data source, return it
+            if (sortedDataSources.length === 1) {
+                return [highestConfidenceDataSource];
+            }
+            
+            // Check confidence difference between top two
+            const secondHighestConfidenceDataSource = sortedDataSources[1];
+            const confidenceDifference = highestConfidenceDataSource.confidence - secondHighestConfidenceDataSource.confidence;
+            
+            span?.setAttribute("second_highest_confidence", secondHighestConfidenceDataSource.confidence);
+            span?.setAttribute("confidence_difference", confidenceDifference);
+            
+            return [highestConfidenceDataSource, secondHighestConfidenceDataSource];
+            
         } catch (error) {
             span?.setStatus({ code: SpanStatusCode.ERROR, message: (error as Error).message });
             console.error("Error getting data source suggestions: ", error);
@@ -495,7 +509,7 @@ export async function getDataSources(
 export async function getDataSourceSuggestions(
     query: string,
     client: ThoughtSpotRestApi,
-): Promise<DataSourceSuggestion | null> {
+): Promise<DataSourceSuggestion[] | null> {
     const service = new ThoughtSpotService(client);
     return service.getDataSourceSuggestions(query);
 }

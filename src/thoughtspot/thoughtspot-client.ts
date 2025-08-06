@@ -149,6 +149,7 @@ function addQueryGetDataSourceSuggestions(client: any, instanceUrl: string, toke
         const response = await fetch(`${instanceUrl}${endpoint}`, fetchOptions);
         console.log("response", response);
         const data = await response.json() as any;
+        console.log("data", data);
         return data.data.queryGetDataSourceSuggestions;
     };
 }

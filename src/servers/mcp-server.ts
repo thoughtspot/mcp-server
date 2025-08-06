@@ -67,7 +67,8 @@ const CreateLiveboardSchema = z.object({
 });
 
 const GetDataSourceSuggestionsSchema = z.object({
-    query: z.string().describe("The query to get data source suggestions for, this could be a high level task or question the user is asking or hoping to get answered. Use this query to get the data source suggestions. This data source will be used to get the data for the user's query using the other tools getRelevantQuestions and getAnswer."),
+    query: z.string().describe(`The query to get data source suggestions for, this could be a high level task or question the user is asking or hoping to get answered.
+         There can be multiple data sources. Each data source can be used to get the data for the user's query using the other tools getRelevantQuestions and getAnswer.`),
 });
 
 enum ToolName {
@@ -126,16 +127,16 @@ export class MCPServer extends BaseMCPServer {
                         destructiveHint: false,
                     },
                 },
-                {
+                ...(this.isVersionGreaterThan1013() ? [{
                     name: ToolName.GetDataSourceSuggestions,
-                    description: "Get data source suggestions for a query",
+                    description: "Get data source suggestions for a query. Use this tool only if there is not datasource id provided in the context or the users query. If mulitple data sources are returned, and the confidence difference between the top two data sources is less than 0.3, ask the user to select the most relevant data source. Otherwise use the data source with the highest confidence to get the relevant questions and answers for the query.",
                     inputSchema: zodToJsonSchema(GetDataSourceSuggestionsSchema) as ToolInput,
                     annotations: {
                         title: "Get Data Source Suggestions for a Query",
                         readOnlyHint: true,
                         destructiveHint: false,
                     },
-                },
+                }] : []),
             ]
         };
     }
@@ -279,11 +280,18 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
         const { query } = GetDataSourceSuggestionsSchema.parse(request.params.arguments);
         const dataSources = await this.getThoughtSpotService().getDataSourceSuggestions(query);
 
-        if (!dataSources) {
+        if (!dataSources || dataSources.length === 0) {
             return this.createErrorResponse("No data source suggestions found", "No data source suggestions found");
         }
 
-        return this.createSuccessResponse(dataSources.header.toString(), "Data source suggestions found");
+        // Return information for all suggested data sources
+        const dataSourcesInfo = dataSources.map(ds => ({
+            header: ds.header,
+            confidence: ds.confidence,
+            llmReasoning: ds.llmReasoning
+        }));
+
+        return this.createSuccessResponse(JSON.stringify(dataSourcesInfo), `${dataSources.length} data source suggestion(s) found`);
     }
 
     private _sources: {

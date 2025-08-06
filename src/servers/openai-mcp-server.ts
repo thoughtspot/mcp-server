@@ -99,10 +99,21 @@ export class OpenAIDeepResearchMCPServer extends BaseMCPServer {
         // First check if the query is of the form "datasource:<id> <query-with-spaces>. The id is a string of numbers, letters, and hyphens."
         const re = /^(?:datasource:(?<id>[A-Za-z0-9-]+)\s+)?(.+)$/;
         const match = re.exec(query);
-        const datasourceId = match?.groups?.id;
         const queryWithoutDatasourceId = match![2];
-        if (datasourceId) {
-            const relevantQuestions = await this.getThoughtSpotService().getRelevantQuestions(queryWithoutDatasourceId, [datasourceId], "");
+        let datasourceIdToUse = match?.groups?.id;
+        // If the datasource id is not provided, get the data source suggestions given the version of the ThoughtSpot instance is greater than 10.13
+        if (!datasourceIdToUse && this.isVersionGreaterThan1013()) {
+            const dataSources = await this.getThoughtSpotService().getDataSourceSuggestions(query);
+            if (!dataSources || dataSources.length === 0) {
+                return this.createErrorResponse("No data source suggestions found", "No data source suggestions found");
+            }
+            // Use the first (highest confidence) data source for getting relevant questions
+            const primaryDataSource = dataSources[0];
+            datasourceIdToUse = primaryDataSource.header.guid;
+        }
+        // If the datasource id is present, get the relevant questions for the query
+        if (datasourceIdToUse) {
+            const relevantQuestions = await this.getThoughtSpotService().getRelevantQuestions(queryWithoutDatasourceId, [datasourceIdToUse], "");
             if (relevantQuestions.error) {
                 return this.createErrorResponse(relevantQuestions.error.message, `Error getting relevant questions ${relevantQuestions.error.message}`);
             }
@@ -112,7 +123,7 @@ export class OpenAIDeepResearchMCPServer extends BaseMCPServer {
             }
 
             const results = relevantQuestions.questions.map(q => ({
-                id: `${datasourceId}: ${q.question}`,
+                id: `${datasourceIdToUse}: ${q.question}`,
                 title: q.question,
                 text: q.question,
                 url: "",
@@ -120,9 +131,7 @@ export class OpenAIDeepResearchMCPServer extends BaseMCPServer {
 
             return this.createStructuredContentSuccessResponse({ results }, "Relevant questions found");
         }
-
-        // Search for datasources in case the query is not of the form "datasource:<id> <query-with-spaces>"
-        // TODO: Implement this
+        // If the datasource id is not present, return an error
         return this.createStructuredContentSuccessResponse({ results: [] }, "No relevant questions found");
     }
 

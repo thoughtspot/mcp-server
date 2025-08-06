@@ -27,7 +27,7 @@ describe("MCP Server", () => {
             getSessionInfo: vi.fn().mockResolvedValue({
                 clusterId: "test-cluster-123",
                 clusterName: "test-cluster",
-                releaseVersion: "1.0.0",
+                releaseVersion: "10.13.0.cl-110",
                 userGUID: "test-user-123",
                 configInfo: {
                     mixpanelConfig: {
@@ -125,7 +125,7 @@ describe("MCP Server", () => {
                 {
                     clusterId: "test-cluster-123",
                     clusterName: "test-cluster",
-                    releaseVersion: "1.0.0",
+                    releaseVersion: "10.13.0.cl-110",
                     userGUID: "test-user-123",
                     mixpanelToken: "test-dev-token",
                     userName: "test-user",
@@ -148,12 +148,13 @@ describe("MCP Server", () => {
 
             const result = await listTools();
 
-            expect(result.tools).toHaveLength(4);
+            expect(result.tools).toHaveLength(5);
             expect(result.tools?.map(t => t.name)).toEqual([
                 "ping",
                 "getRelevantQuestions",
                 "getAnswer",
-                "createLiveboard"
+                "createLiveboard",
+                "getDataSourceSuggestions"
             ]);
         });
 
@@ -174,6 +175,122 @@ describe("MCP Server", () => {
 
             const liveboardTool = result.tools?.find(t => t.name === "createLiveboard");
             expect(liveboardTool?.description).toBe("Create a liveboard from a list of answers");
+        });
+
+        it("should not include getDataSourceSuggestions tool for version 10.12", async () => {
+            // Mock version to be less than 10.13
+            vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
+                getSessionInfo: vi.fn().mockResolvedValue({
+                    clusterId: "test-cluster-123",
+                    clusterName: "test-cluster",
+                    releaseVersion: "10.12.0.cl-144",
+                    userGUID: "test-user-123",
+                    configInfo: {
+                        mixpanelConfig: {
+                            devSdkKey: "test-dev-token",
+                            prodSdkKey: "test-prod-token",
+                            production: false,
+                        },
+                        selfClusterName: "test-cluster",
+                        selfClusterId: "test-cluster-123",
+                    },
+                    userName: "test-user",
+                    currentOrgId: "test-org",
+                    privileges: [],
+                }),
+                getDataSources: vi.fn().mockResolvedValue([
+                    { id: "ds1", name: "DataSource 1" },
+                    { id: "ds2", name: "DataSource 2" }
+                ])
+            } as any);
+
+            const versionSpecificServer = new MCPServer({
+                props: {
+                    instanceUrl: "https://test.thoughtspot.cloud",
+                    accessToken: "test-access-token",
+                    clientName: {
+                        clientId: "test-client-id",
+                        clientName: "test-client",
+                        registrationDate: Date.now(),
+                    },
+                },
+            });
+
+            await versionSpecificServer.init();
+            const { listTools } = connect(versionSpecificServer);
+
+            const result = await listTools();
+
+            expect(result.tools).toHaveLength(4);
+            expect(result.tools?.map(t => t.name)).toEqual([
+                "ping",
+                "getRelevantQuestions",
+                "getAnswer",
+                "createLiveboard"
+            ]);
+
+            // Ensure getDataSourceSuggestions is NOT included
+            const getDataSourceSuggestionsTool = result.tools?.find(t => t.name === "getDataSourceSuggestions");
+            expect(getDataSourceSuggestionsTool).toBeUndefined();
+        });
+
+        it("should include getDataSourceSuggestions tool for version 10.14", async () => {
+            // Mock version to be greater than 10.13
+            vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
+                getSessionInfo: vi.fn().mockResolvedValue({
+                    clusterId: "test-cluster-123",
+                    clusterName: "test-cluster",
+                    releaseVersion: "10.14.0.cl-155",
+                    userGUID: "test-user-123",
+                    configInfo: {
+                        mixpanelConfig: {
+                            devSdkKey: "test-dev-token",
+                            prodSdkKey: "test-prod-token",
+                            production: false,
+                        },
+                        selfClusterName: "test-cluster",
+                        selfClusterId: "test-cluster-123",
+                    },
+                    userName: "test-user",
+                    currentOrgId: "test-org",
+                    privileges: [],
+                }),
+                getDataSources: vi.fn().mockResolvedValue([
+                    { id: "ds1", name: "DataSource 1" },
+                    { id: "ds2", name: "DataSource 2" }
+                ])
+            } as any);
+
+            const versionSpecificServer = new MCPServer({
+                props: {
+                    instanceUrl: "https://test.thoughtspot.cloud",
+                    accessToken: "test-access-token",
+                    clientName: {
+                        clientId: "test-client-id",
+                        clientName: "test-client",
+                        registrationDate: Date.now(),
+                    },
+                },
+            });
+
+            await versionSpecificServer.init();
+            const { listTools } = connect(versionSpecificServer);
+
+            const result = await listTools();
+
+            expect(result.tools).toHaveLength(5);
+            expect(result.tools?.map(t => t.name)).toEqual([
+                "ping",
+                "getRelevantQuestions",
+                "getAnswer",
+                "createLiveboard",
+                "getDataSourceSuggestions"
+            ]);
+
+            // Ensure getDataSourceSuggestions IS included
+            const getDataSourceSuggestionsTool = result.tools?.find(t => t.name === "getDataSourceSuggestions");
+            expect(getDataSourceSuggestionsTool).toBeDefined();
+            expect(getDataSourceSuggestionsTool?.description).toBe("Get data source suggestions for a query. Use this tool only if there is not datasource id provided in the context or the users query. If mulitple data sources are returned, and the confidence difference between the top two data sources is less than 0.3, ask the user to select the most relevant data source. Otherwise use the data source with the highest confidence to get the relevant questions and answers for the query.");
         });
     });
 
@@ -598,6 +715,177 @@ describe("MCP Server", () => {
         });
     });
 }); 
+
+    describe("getDataSourceSuggestions Tool", () => {
+        it("should return data source suggestions successfully", async () => {
+            // Mock queryGetDataSourceSuggestions method
+            vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
+                getSessionInfo: vi.fn().mockResolvedValue({
+                    clusterId: "test-cluster-123",
+                    clusterName: "test-cluster",
+                    releaseVersion: "10.13.0",
+                    userGUID: "test-user-123",
+                    configInfo: {
+                        mixpanelConfig: {
+                            devSdkKey: "test-dev-token",
+                            prodSdkKey: "test-prod-token",
+                            production: false,
+                        },
+                        selfClusterName: "test-cluster",
+                        selfClusterId: "test-cluster-123",
+                    },
+                    userName: "test-user",
+                    currentOrgId: "test-org",
+                    privileges: [],
+                }),
+                queryGetDataSourceSuggestions: vi.fn().mockResolvedValue({
+                    dataSources: [
+                        {
+                            confidence: 0.85,
+                            header: {
+                                description: "Sales data for the current year",
+                                displayName: "Sales Data",
+                                guid: "ds-123"
+                            },
+                            llmReasoning: "This data source contains sales information relevant to your query"
+                        },
+                        {
+                            confidence: 0.75,
+                            header: {
+                                description: "Revenue analysis data",
+                                displayName: "Revenue Data",
+                                guid: "ds-456"
+                            },
+                            llmReasoning: "This data source contains revenue information"
+                        }
+                    ]
+                }),
+                instanceUrl: "https://test.thoughtspot.cloud",
+            } as any);
+
+            await server.init();
+            const { callTool } = connect(server);
+
+            const result = await callTool("getDataSourceSuggestions", {
+                query: "show me sales revenue data"
+            });
+
+            expect(result.isError).toBeUndefined();
+            
+            const suggestionsData = JSON.parse((result.content as any[])[0].text);
+            expect(suggestionsData).toHaveLength(2);
+            expect(suggestionsData[0]).toEqual({
+                header: {
+                    description: "Sales data for the current year",
+                    displayName: "Sales Data",
+                    guid: "ds-123"
+                },
+                confidence: 0.85,
+                llmReasoning: "This data source contains sales information relevant to your query"
+            });
+            expect(suggestionsData[1]).toEqual({
+                header: {
+                    description: "Revenue analysis data",
+                    displayName: "Revenue Data",
+                    guid: "ds-456"
+                },
+                confidence: 0.75,
+                llmReasoning: "This data source contains revenue information"
+            });
+        });
+
+        it("should handle empty data source suggestions", async () => {
+            // Mock empty response
+            vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
+                getSessionInfo: vi.fn().mockResolvedValue({
+                    clusterId: "test-cluster-123",
+                    clusterName: "test-cluster",
+                    releaseVersion: "10.13.0",
+                    userGUID: "test-user-123",
+                    configInfo: {
+                        mixpanelConfig: {
+                            devSdkKey: "test-dev-token",
+                            prodSdkKey: "test-prod-token",
+                            production: false,
+                        },
+                        selfClusterName: "test-cluster",
+                        selfClusterId: "test-cluster-123",
+                    },
+                    userName: "test-user",
+                    currentOrgId: "test-org",
+                    privileges: [],
+                }),
+                queryGetDataSourceSuggestions: vi.fn().mockResolvedValue({
+                    dataSources: []
+                }),
+                instanceUrl: "https://test.thoughtspot.cloud",
+            } as any);
+
+            await server.init();
+            const { callTool } = connect(server);
+
+            const result = await callTool("getDataSourceSuggestions", {
+                query: "nonexistent data query"
+            });
+
+            expect(result.isError).toBe(true);
+            expect((result.content as any[])[0].text).toBe("ERROR: No data source suggestions found");
+        });
+
+        it("should handle single data source suggestion", async () => {
+            // Mock single suggestion response
+            vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
+                getSessionInfo: vi.fn().mockResolvedValue({
+                    clusterId: "test-cluster-123",
+                    clusterName: "test-cluster",
+                    releaseVersion: "10.13.0",
+                    userGUID: "test-user-123",
+                    configInfo: {
+                        mixpanelConfig: {
+                            devSdkKey: "test-dev-token",
+                            prodSdkKey: "test-prod-token",
+                            production: false,
+                        },
+                        selfClusterName: "test-cluster",
+                        selfClusterId: "test-cluster-123",
+                    },
+                    userName: "test-user",
+                    currentOrgId: "test-org",
+                    privileges: [],
+                }),
+                queryGetDataSourceSuggestions: vi.fn().mockResolvedValue({
+                    dataSources: [
+                        {
+                            confidence: 0.95,
+                            header: {
+                                description: "Customer analytics data",
+                                displayName: "Customer Data",
+                                guid: "ds-789"
+                            },
+                            llmReasoning: "Perfect match for customer-related queries"
+                        }
+                    ]
+                }),
+                instanceUrl: "https://test.thoughtspot.cloud",
+            } as any);
+
+            await server.init();
+            const { callTool } = connect(server);
+
+            const result = await callTool("getDataSourceSuggestions", {
+                query: "customer analytics"
+            });
+
+            expect(result.isError).toBeUndefined();
+            
+            const suggestionsData = JSON.parse((result.content as any[])[0].text);
+            expect(suggestionsData).toHaveLength(1);
+            expect(suggestionsData[0].header.guid).toBe("ds-789");
+            expect(suggestionsData[0].confidence).toBe(0.95);
+        });
+
+
+    });
 
     describe("Caching", () => {
         it("should cache datasources after first call", async () => {

@@ -64,6 +64,21 @@ export abstract class BaseMCPServer extends Server {
     }
 
     /**
+     * Check if release version is greater than 10.13
+     */
+    protected isVersionGreaterThan1013(): boolean {
+        const version = this.sessionInfo.releaseVersion;
+        if (!version) return false;
+        
+        // Extract major.minor from version string (e.g., "10.13.0.cl-1" -> [10, 13])
+        const versionParts = version.split('.cl-')[0].split('.').map(Number);
+        const major = versionParts[0] || 0;
+        const minor = versionParts[1] || 0;
+        
+        return major > 10 || (major === 10 && minor >= 13);
+    };
+
+    /**
      * Initialize span with common attributes (user_guid and instance_url)
      */
     protected initSpanWithCommonAttributes(): Span | undefined {

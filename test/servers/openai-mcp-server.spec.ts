@@ -25,7 +25,7 @@ describe("OpenAI Deep Research MCP Server", () => {
             getSessionInfo: vi.fn().mockResolvedValue({
                 clusterId: "test-cluster-123",
                 clusterName: "test-cluster",
-                releaseVersion: "1.0.0",
+                releaseVersion: "10.13.0.cl-10",
                 userGUID: "test-user-123",
                 configInfo: {
                     mixpanelConfig: {
@@ -77,7 +77,7 @@ describe("OpenAI Deep Research MCP Server", () => {
                 {
                     clusterId: "test-cluster-123",
                     clusterName: "test-cluster",
-                    releaseVersion: "1.0.0",
+                    releaseVersion: "10.13.0.cl-10",
                     userGUID: "test-user-123",
                     mixpanelToken: "test-dev-token",
                     userName: "test-user",
@@ -327,7 +327,37 @@ describe("OpenAI Deep Research MCP Server", () => {
             expect((result.content as any[])[0].text).toBe("No relevant questions found");
         });
 
-        it("should handle query without datasource ID", async () => {
+        it("should handle query without datasource ID when version < 10.13", async () => {
+            // Mock version to be less than 10.13
+            vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
+                getSessionInfo: vi.fn().mockResolvedValue({
+                    clusterId: "test-cluster-123",
+                    clusterName: "test-cluster",
+                    releaseVersion: "10.12.0", // Version less than 10.13
+                    userGUID: "test-user-123",
+                    configInfo: {
+                        mixpanelConfig: {
+                            devSdkKey: "test-dev-token",
+                            prodSdkKey: "test-prod-token",
+                            production: false,
+                        },
+                        selfClusterName: "test-cluster",
+                        selfClusterId: "test-cluster-123",
+                    },
+                    userName: "test-user",
+                    currentOrgId: "test-org",
+                    privileges: [],
+                }),
+                singleAnswer: vi.fn().mockResolvedValue({
+                    session_identifier: "session-123",
+                    generation_number: 1,
+                }),
+                exportAnswerReport: vi.fn().mockResolvedValue({
+                    text: vi.fn().mockResolvedValue("The total revenue is $1,000,000"),
+                }),
+                instanceUrl: "https://test.thoughtspot.cloud",
+            } as any);
+
             await server.init();
             const { callTool } = connect(server);
 
@@ -340,6 +370,77 @@ describe("OpenAI Deep Research MCP Server", () => {
             // The text field contains the JSON stringified structured content
             expect((result.content as any[])[0].text).toContain('"results"');
             expect((result.content as any[])[0].text).toContain('[]');
+        });
+
+        it("should use data source suggestions when version >= 10.13 and no datasource ID provided", async () => {
+            // Mock the ThoughtSpot service methods
+            const mockGetDataSourceSuggestions = vi.fn().mockResolvedValue([
+                {
+                    confidence: 0.85,
+                    header: {
+                        description: "Customer analytics data",
+                        displayName: "Customer Data",
+                        guid: "ds-suggested-123"
+                    },
+                    llmReasoning: "This data source contains customer information relevant to churn analysis"
+                }
+            ]);
+
+            const mockGetRelevantQuestions = vi.fn().mockResolvedValue({
+                questions: [
+                    { question: "What is the customer retention rate?" },
+                    { question: "Which customers are at risk of churning?" }
+                ],
+                error: null
+            });
+
+            vi.spyOn(thoughtspotService.ThoughtSpotService.prototype, 'getDataSourceSuggestions')
+                .mockImplementation(mockGetDataSourceSuggestions);
+            vi.spyOn(thoughtspotService.ThoughtSpotService.prototype, 'getRelevantQuestions')
+                .mockImplementation(mockGetRelevantQuestions);
+
+            await server.init();
+            const { callTool } = connect(server);
+
+            const result = await callTool("search", {
+                query: "How to reduce customer churn?"
+            });
+
+            expect(result.isError).toBeUndefined();
+            expect(result.structuredContent).toEqual({
+                results: [
+                    {
+                        id: "ds-suggested-123: What is the customer retention rate?",
+                        title: "What is the customer retention rate?",
+                        text: "What is the customer retention rate?",
+                        url: ""
+                    },
+                    {
+                        id: "ds-suggested-123: Which customers are at risk of churning?",
+                        title: "Which customers are at risk of churning?",
+                        text: "Which customers are at risk of churning?",
+                        url: ""
+                    }
+                ]
+            });
+        });
+
+        it("should handle error when data source suggestions fail for version >= 10.13", async () => {
+            // Mock the ThoughtSpot service methods to return empty suggestions
+            const mockGetDataSourceSuggestions = vi.fn().mockResolvedValue([]);
+
+            vi.spyOn(thoughtspotService.ThoughtSpotService.prototype, 'getDataSourceSuggestions')
+                .mockImplementation(mockGetDataSourceSuggestions);
+
+            await server.init();
+            const { callTool } = connect(server);
+
+            const result = await callTool("search", {
+                query: "How to reduce customer churn?"
+            });
+
+            expect(result.isError).toBe(true);
+            expect((result.content as any[])[0].text).toBe("ERROR: No data source suggestions found");
         });
 
         it("should handle query with complex datasource ID", async () => {
@@ -404,6 +505,147 @@ describe("OpenAI Deep Research MCP Server", () => {
                     }
                 ]
             });
+        });
+
+        it("should handle query without datasource ID for version 10.12 (no data source suggestions)", async () => {
+            // Mock version to be less than 10.13
+            vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
+                getSessionInfo: vi.fn().mockResolvedValue({
+                    clusterId: "test-cluster-123",
+                    clusterName: "test-cluster",
+                    releaseVersion: "10.12.0.cl-144", // Version < 10.13
+                    userGUID: "test-user-123",
+                    configInfo: {
+                        mixpanelConfig: {
+                            devSdkKey: "test-dev-token",
+                            prodSdkKey: "test-prod-token",
+                            production: false,
+                        },
+                        selfClusterName: "test-cluster",
+                        selfClusterId: "test-cluster-123",
+                    },
+                    userName: "test-user",
+                    currentOrgId: "test-org",
+                    privileges: [],
+                })
+            } as any);
+
+            const versionSpecificServer = new OpenAIDeepResearchMCPServer({
+                props: {
+                    instanceUrl: "https://test.thoughtspot.cloud",
+                    accessToken: "test-access-token",
+                    clientName: {
+                        clientId: "test-client-id",
+                        clientName: "test-client",
+                        registrationDate: Date.now(),
+                    },
+                },
+            });
+
+            await versionSpecificServer.init();
+            const { callTool } = connect(versionSpecificServer);
+
+            const result = await callTool("search", {
+                query: "How to reduce customer churn?"
+            });
+
+            expect(result.isError).toBeUndefined();
+            expect(result.structuredContent).toEqual({ results: [] });
+            expect((result.content as any[])[0].text).toContain('"results"');
+            expect((result.content as any[])[0].text).toContain('[]');
+        });
+
+        it("should use data source suggestions for version 10.14 when no datasource ID provided", async () => {
+            // Mock getDataSourceSuggestions to return a suggestion
+            const mockGetDataSourceSuggestions = vi.fn().mockResolvedValue([
+                {
+                    confidence: 0.85,
+                    header: {
+                        description: 'Customer data for analysis',
+                        displayName: 'Customer Data',
+                        guid: 'ds-suggested-456'
+                    },
+                    llmReasoning: 'This data source contains customer information relevant to churn analysis'
+                }
+            ]);
+
+            // Mock getRelevantQuestions to return questions for the suggested datasource
+            const mockGetRelevantQuestions = vi.fn().mockResolvedValue({
+                questions: [
+                    { question: "What is the customer retention rate?" },
+                    { question: "Which customers are at risk of churning?" }
+                ],
+                error: null
+            });
+
+            vi.spyOn(thoughtspotService.ThoughtSpotService.prototype, 'getDataSourceSuggestions')
+                .mockImplementation(mockGetDataSourceSuggestions);
+            vi.spyOn(thoughtspotService.ThoughtSpotService.prototype, 'getRelevantQuestions')
+                .mockImplementation(mockGetRelevantQuestions);
+
+            // Mock version to be greater than 10.13
+            vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
+                getSessionInfo: vi.fn().mockResolvedValue({
+                    clusterId: "test-cluster-123",
+                    clusterName: "test-cluster",
+                    releaseVersion: "10.14.0.cl-155", // Version > 10.13
+                    userGUID: "test-user-123",
+                    configInfo: {
+                        mixpanelConfig: {
+                            devSdkKey: "test-dev-token",
+                            prodSdkKey: "test-prod-token",
+                            production: false,
+                        },
+                        selfClusterName: "test-cluster",
+                        selfClusterId: "test-cluster-123",
+                    },
+                    userName: "test-user",
+                    currentOrgId: "test-org",
+                    privileges: [],
+                })
+            } as any);
+
+            const versionSpecificServer = new OpenAIDeepResearchMCPServer({
+                props: {
+                    instanceUrl: "https://test.thoughtspot.cloud",
+                    accessToken: "test-access-token",
+                    clientName: {
+                        clientId: "test-client-id",
+                        clientName: "test-client",
+                        registrationDate: Date.now(),
+                    },
+                },
+            });
+
+            await versionSpecificServer.init();
+            const { callTool } = connect(versionSpecificServer);
+
+            const result = await callTool("search", {
+                query: "How to reduce customer churn?"
+            });
+
+            expect(result.isError).toBeUndefined();
+            expect(result.structuredContent).toEqual({
+                results: [
+                    {
+                        id: "ds-suggested-456: What is the customer retention rate?",
+                        title: "What is the customer retention rate?",
+                        text: "What is the customer retention rate?",
+                        url: ""
+                    },
+                    {
+                        id: "ds-suggested-456: Which customers are at risk of churning?",
+                        title: "Which customers are at risk of churning?",
+                        text: "Which customers are at risk of churning?",
+                        url: ""
+                    }
+                ]
+            });
+
+            // Verify that getDataSourceSuggestions was called
+            expect(mockGetDataSourceSuggestions).toHaveBeenCalledWith("How to reduce customer churn?");
+            // Verify that getRelevantQuestions was called with the suggested datasource
+            expect(mockGetRelevantQuestions).toHaveBeenCalledWith("How to reduce customer churn?", ["ds-suggested-456"], "");
         });
     });
 
