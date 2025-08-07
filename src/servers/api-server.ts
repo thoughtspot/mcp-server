@@ -1,11 +1,16 @@
 import { Hono } from 'hono'
+import { zValidator } from '@hono/zod-validator'
 import type { Props } from '../utils';
 import { McpServerError } from '../utils';
 import { getDataSources, ThoughtSpotService } from '../thoughtspot/thoughtspot-service';
 import { getThoughtSpotClient } from '../thoughtspot/thoughtspot-client';
 import { getActiveSpan, WithSpan } from '../metrics/tracing/tracing-utils';
+<<<<<<< HEAD
 import { context, type Span, SpanStatusCode, trace } from "@opentelemetry/api";
 import { CreateLiveboardSchema, GetAnswerSchema, GetRelevantQuestionsSchema } from '../api-schemas/schemas';
+=======
+import { CreateLiveboardSchema, GetAnswerSchema, GetRelevantQuestionsSchema } from './mcp-server';
+>>>>>>> 33eca26 (address comments -  export tool schemas from respective servers)
 
 const apiServer = new Hono<{ Bindings: Env & { props: Props } }>()
 
@@ -89,32 +94,38 @@ class ApiHandler {
 
 const handler = new ApiHandler();
 
-apiServer.post("/api/tools/relevant-questions", async (c) => {
-    const { props } = c.executionCtx;
-    const body = await c.req.json();
-    const validatedData = GetRelevantQuestionsSchema.parse(body);
-    const { query, datasourceIds, additionalContext } = validatedData;
-    const questions = await handler.getRelevantQuestions(props, query, datasourceIds, additionalContext);
-    return c.json(questions);
-});
+apiServer.post(
+    "/api/tools/relevant-questions",
+    zValidator('json', GetRelevantQuestionsSchema),
+    async (c) => {
+        const { props } = c.executionCtx;
+        const { query, datasourceIds, additionalContext } = c.req.valid('json');
+        const questions = await handler.getRelevantQuestions(props, query, datasourceIds, additionalContext);
+        return c.json(questions);
+    }
+);
 
-apiServer.post("/api/tools/get-answer", async (c) => {
-    const { props } = c.executionCtx;
-    const body = await c.req.json();
-    const validatedData = GetAnswerSchema.parse(body);
-    const { question, datasourceId } = validatedData;
-    const answer = await handler.getAnswer(props, question, datasourceId);
-    return c.json(answer);
-});
+apiServer.post(
+    "/api/tools/get-answer",
+    zValidator('json', GetAnswerSchema),
+    async (c) => {
+        const { props } = c.executionCtx;
+        const { question, datasourceId } = c.req.valid('json');
+        const answer = await handler.getAnswer(props, question, datasourceId);
+        return c.json(answer);
+    }
+);
 
-apiServer.post("/api/tools/create-liveboard", async (c) => {
-    const { props } = c.executionCtx;
-    const body = await c.req.json();
-    const validatedData = CreateLiveboardSchema.parse(body);
-    const { name, answers, noteTile } = validatedData;
-    const liveboardUrl = await handler.createLiveboard(props, name, answers, noteTile);
-    return c.text(liveboardUrl);
-});
+apiServer.post(
+    "/api/tools/create-liveboard",
+    zValidator('json', CreateLiveboardSchema),
+    async (c) => {
+        const { props } = c.executionCtx;
+        const { name, answers, noteTile } = c.req.valid('json');
+        const liveboardUrl = await handler.createLiveboard(props, name, answers, noteTile);
+        return c.text(liveboardUrl);
+    }
+);
 
 apiServer.get("/api/tools/ping", async (c) => {
     const { props } = c.executionCtx;

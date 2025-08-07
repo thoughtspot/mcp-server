@@ -98,6 +98,8 @@ openApiSpecHandler.get('/', async (c) => {
     const paths: Record<string, any> = {};
     const schemas: Record<string, any> = {};
 
+    // any tool added to the toolDefinitionsMCPServer will be added to the openapi spec automatically
+    // the api server path should be /api/tools/<tool-name>
     for (const tool of toolDefinitionsMCPServer) {
         const { schemaName, schema } = generateToolSchema(tool);
         const responseSchema = generateResponseSchema();
