@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { apiServer } from "../../src/servers/api-server";
 import { ThoughtSpotService } from "../../src/thoughtspot/thoughtspot-service";
-import * as thoughtspotService from "../../src/thoughtspot/thoughtspot-service";
 import * as thoughtspotClient from "../../src/thoughtspot/thoughtspot-client";
 
 // Mock the ThoughtSpot service and client
@@ -510,8 +509,8 @@ describe("API Server", () => {
                 props: mockProps,
             }, createMockExecutionContext(mockProps));
 
-            // The API server returns 500 for JSON parsing errors
-            expect(response.status).toBe(500);
+            // The API server returns 400 for JSON parsing errors
+            expect(response.status).toBe(400);
         });
 
         it("should handle missing required fields", async () => {
@@ -530,7 +529,7 @@ describe("API Server", () => {
             }, createMockExecutionContext(mockProps));
 
             // The endpoint should return an error when required fields are missing
-            expect(response.status).toBe(500);
+            expect(response.status).toBe(400);
         });
     });
 }); 

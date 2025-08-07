@@ -4,10 +4,48 @@ import type {
     ReadResourceRequestSchema
 } from "@modelcontextprotocol/sdk/types.js";
 import { BaseMCPServer, type Context } from "./mcp-server-base";
-import type { z } from "zod";
+import { z } from "zod";
 import { WithSpan } from "../metrics/tracing/tracing-utils";
-import { FetchInputSchema, FetchOutputSchema, SearchInputSchema, SearchOutputSchema, type ToolInput, type ToolOutput } from "../api-schemas/schemas";
 import zodToJsonSchema from "zod-to-json-schema";
+import { ToolSchema } from "@modelcontextprotocol/sdk/types.js";
+
+const ToolInputSchema = ToolSchema.shape.inputSchema;
+export type ToolInput = z.infer<typeof ToolInputSchema>;
+
+const ToolOutputSchema = ToolSchema.shape.outputSchema;
+export type ToolOutput = z.infer<typeof ToolOutputSchema>;
+
+
+export const SearchInputSchema = z.object({
+    query: z.string().describe(`The question/task to search for relevant data queries to answer. Use the fetch tool to retrieve the data for individual queries. The datasource id should be passed as part of the query. With the syntax 
+    datasource:<id> <search-query>. The search-query can be any textual question.
+        
+        For example:
+                    datasource:asdhshd-123123-12dd How to reduce customer churn?
+                    datasource:abc-123123-12dd How to increase sales?
+                
+                If the datasource id is not available, ask the user to supply one explicitly.`),
+});
+
+export const SearchOutputSchema = z.object({
+    results: z.array(z.object({
+        id: z.string().describe("The id of the search result."),
+        title: z.string().describe("The title of the search result."),
+        text: z.string().describe("The text of the search result."),
+        url: z.string().describe("The url of the search result."),
+    })),
+});
+
+export const FetchInputSchema = z.object({
+    id: z.string().describe("The id of the search result to fetch."),
+});
+
+export const FetchOutputSchema = z.object({
+    id: z.string().describe("The id of the search result."),
+    title: z.string().describe("The title of the search result."),
+    text: z.string().describe("The text of the search result."),
+    url: z.string().describe("The url of the search result."),
+});
 
 export const toolDefinitionsOpenAIMCPServer = [
     {
