@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { apiServer } from "../../src/servers/api-server";
 import { ThoughtSpotService } from "../../src/thoughtspot/thoughtspot-service";
-import * as thoughtspotService from "../../src/thoughtspot/thoughtspot-service";
 import * as thoughtspotClient from "../../src/thoughtspot/thoughtspot-client";
 
 // Mock the ThoughtSpot service and client
@@ -183,6 +182,15 @@ describe("API Server", () => {
                         generation_number: 1,
                     },
                 ],
+                noteTile: `<h2 class="theme-module__editor-h2" dir="ltr" style="text-align: center;">
+                    <span style="white-space: pre-wrap;">Revenue Analysis Dashboard</span>
+                </h2>
+                <p class="theme-module__editor-paragraph" dir="ltr">
+                    <span style="white-space: pre-wrap;">
+                        This liveboard shows the total revenue for the current period. Generated on ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}
+                    </span>
+                </p>
+                <div class="pinboard-note-tile-module__noteTileBg editor-module__bgNode"></div>`,
             };
 
             const request = new Request("http://localhost/api/tools/create-liveboard", {
@@ -204,7 +212,8 @@ describe("API Server", () => {
             );
             expect(mockServiceInstance.fetchTMLAndCreateLiveboard).toHaveBeenCalledWith(
                 requestBody.name,
-                requestBody.answers
+                requestBody.answers,
+                requestBody.noteTile
             );
         });
 
@@ -222,6 +231,15 @@ describe("API Server", () => {
                         generation_number: 1,
                     },
                 ],
+                noteTile: `<h2 class="theme-module__editor-h2" dir="ltr" style="text-align: center;">
+                    <span style="white-space: pre-wrap;">Revenue Analysis Dashboard</span>
+                </h2>
+                <p class="theme-module__editor-paragraph" dir="ltr">
+                    <span style="white-space: pre-wrap;">
+                        This liveboard shows the total revenue for the current period. Generated on ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}
+                    </span>
+                </p>
+                <div class="pinboard-note-tile-module__noteTileBg editor-module__bgNode"></div>`,
             };
 
             const request = new Request("http://localhost/api/tools/create-liveboard", {
@@ -396,6 +414,89 @@ describe("API Server", () => {
         });
     });
 
+    describe("GET /api/tools/ping", () => {
+        it("should return pong when authenticated", async () => {
+            const request = new Request("http://localhost/api/tools/ping", {
+                method: "GET",
+            });
+
+            const response = await apiServer.fetch(request, {
+                props: mockProps,
+            }, createMockExecutionContext(mockProps));
+
+            expect(response.status).toBe(200);
+            const data = await response.json();
+            expect(data).toEqual({
+                content: [{ type: "text", text: "Pong" }],
+            });
+        });
+
+        it("should return error when not authenticated (missing accessToken)", async () => {
+            const unauthenticatedProps = {
+                instanceUrl: "https://test.thoughtspot.cloud",
+                // accessToken is missing
+            };
+
+            const request = new Request("http://localhost/api/tools/ping", {
+                method: "GET",
+            });
+
+            const response = await apiServer.fetch(request, {
+                props: unauthenticatedProps,
+            }, createMockExecutionContext(unauthenticatedProps));
+
+            expect(response.status).toBe(200);
+            const data = await response.json();
+            expect(data).toEqual({
+                isError: true,
+                content: [{ type: "text", text: "ERROR: Not authenticated" }],
+            });
+        });
+
+        it("should return error when not authenticated (missing instanceUrl)", async () => {
+            const unauthenticatedProps = {
+                accessToken: "test-access-token",
+                // instanceUrl is missing
+            };
+
+            const request = new Request("http://localhost/api/tools/ping", {
+                method: "GET",
+            });
+
+            const response = await apiServer.fetch(request, {
+                props: unauthenticatedProps,
+            }, createMockExecutionContext(unauthenticatedProps));
+
+            expect(response.status).toBe(200);
+            const data = await response.json();
+            expect(data).toEqual({
+                isError: true,
+                content: [{ type: "text", text: "ERROR: Not authenticated" }],
+            });
+        });
+
+        it("should return error when not authenticated (both missing)", async () => {
+            const unauthenticatedProps = {
+                // Both accessToken and instanceUrl are missing
+            };
+
+            const request = new Request("http://localhost/api/tools/ping", {
+                method: "GET",
+            });
+
+            const response = await apiServer.fetch(request, {
+                props: unauthenticatedProps,
+            }, createMockExecutionContext(unauthenticatedProps));
+
+            expect(response.status).toBe(200);
+            const data = await response.json();
+            expect(data).toEqual({
+                isError: true,
+                content: [{ type: "text", text: "ERROR: Not authenticated" }],
+            });
+        });
+    });
+
     describe("Error handling", () => {
         it("should handle malformed JSON in request body", async () => {
             const request = new Request("http://localhost/api/tools/relevant-questions", {
@@ -408,8 +509,8 @@ describe("API Server", () => {
                 props: mockProps,
             }, createMockExecutionContext(mockProps));
 
-            // The API server returns 500 for JSON parsing errors
-            expect(response.status).toBe(500);
+            // The API server returns 400 for JSON parsing errors
+            expect(response.status).toBe(400);
         });
 
         it("should handle missing required fields", async () => {
@@ -427,8 +528,8 @@ describe("API Server", () => {
                 props: mockProps,
             }, createMockExecutionContext(mockProps));
 
-            // The endpoint should handle missing fields gracefully
-            expect(response.status).toBe(200);
+            // The endpoint should return an error when required fields are missing
+            expect(response.status).toBe(400);
         });
     });
 }); 
