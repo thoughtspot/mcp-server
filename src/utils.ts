@@ -93,53 +93,22 @@ export class McpServerError extends Error {
 
 export function instrumentedMCPServer<T extends BaseMCPServer>(MCPServer: new (ctx: Context) => T, config: ResolveConfigFn) {
     const Agent = class extends McpAgent<Env, any, Props> {
-        private _server: T | undefined;
-        private _env: Env;
+        // added ! to satisfy the type checker
+        public server: T;
+        public env: Env;
 
-        // Lazy getter for server that creates it when first accessed
-        // 
-        // WHY THIS APPROACH:
-        // Originally we passed 'this' directly as Context: `server = new MCPServer(this)`
-        // This worked when Context was just { props: Props }, but broke when we added env.
-        // 
-        // PROBLEMS WITH ORIGINAL APPROACH:
-        // 1. McpAgent's 'env' property is protected, but Context expects public
-        // 2. TypeScript error: "Property 'env' is protected but public in Context"
-        // 
-        // WHY NOT CONSTRUCTOR CREATION:
-        // We tried creating server in constructor: `new MCPServer({ props: this.props, env })`
-        // But this.props is undefined during constructor - it gets set later by McpAgent._init()
-        // Runtime error: "Cannot read properties of undefined (reading 'instanceUrl')"
-        // 
-        // SOLUTION - LAZY INITIALIZATION:
-        // - Store env from constructor (available immediately)
-        // - Create server only when first accessed (after props are set by McpAgent lifecycle)
-        // - Combine both props and env into proper Context object
-        get server(): T {
-            if (!this._server) {
-                const context: Context = {
-                    props: this.props, // Available after McpAgent._init() sets it
-                    env: this._env     // Stored from constructor
-                };
-                this._server = new MCPServer(context);
-            }
-            return this._server;
-        }
-
-        // Argument of type 'typeof ThoughtSpotMCPWrapper' is not assignable to parameter of type 'DOClass'.
-        // Cannot assign a 'protected' constructor type to a 'public' constructor type.
-        // Created to satisfy the DOClass type.
-        // biome-ignore lint/complexity/noUselessConstructor: required for DOClass
         public constructor(state: DurableObjectState, env: Env) {
             super(state, env);
-            // Store env for later use - props aren't available yet in constructor
-            // McpAgent lifecycle: constructor → _init(props) → init()
-            this._env = env;
+            this.env = env;
         }
 
         async init() {
-            // Access the server property to trigger lazy initialization
-            // At this point, props have been set by McpAgent._init()
+            // Create the server directly here after props have been set by McpAgent._init()
+            const context: Context = {
+                props: this.props, // Available after McpAgent._init() sets it
+                env: this.env     // Stored from constructor
+            };
+            this.server = new MCPServer(context);
             await this.server.init();
         }
     }
@@ -152,6 +121,8 @@ export async function putInKV(key: string, value: any, env: Env) {
         await env.OAUTH_KV.put(key, JSON.stringify(value), {
             expirationTtl: 60 * 60 * 3 // 3 hours
         });
+    } else {
+        throw new McpServerError("OAUTH_KV is not available", 500);
     }
 }
 

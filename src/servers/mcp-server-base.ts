@@ -148,31 +148,35 @@ export abstract class BaseMCPServer extends Server {
         this.addTracker(mixpanel);
     }
 
-    protected async getTokenUrl(sessionId: string, generationNo: number) {
-        let tokenUrl = "";
-        // Generate token and store in KV store
-        if (this.ctx.env?.OAUTH_KV) {
-            console.log("[DEBUG] Storing token in KV");
-            const token = crypto.randomUUID();
-            const tokenData = {
-                sessionId: sessionId,
-                generationNo: generationNo,
-                instanceURL: this.ctx.props.instanceUrl,
-                accessToken: this.ctx.props.accessToken
-            };
-            await putInKV(token, tokenData, this.ctx.env);
-            const hostName = this.ctx.props.hostName;
-            if (hostName && (hostName.startsWith("http") || hostName.startsWith("https"))) {
-                tokenUrl = `${hostName}/data/img?uniqueId=${token}`;
-            } else {
-                tokenUrl = `https://${hostName}/data/img?uniqueId=${token}`;
-            }
+    protected async createImageUrl(sessionId: string, generationNo: number) {
+        const hostName = this.ctx.props.hostName;
+        console.log(`[DEBUG] hostName: ${hostName}`);
+        
+        // If hostName is undefined return empty string
+        if (!hostName) {
+            return "";
         }
-        return tokenUrl;
+        
+        // Generate token and store in KV store
+        const uniqueId = crypto.randomUUID();
+        const sessionData = {
+            sessionId: sessionId,
+            generationNo: generationNo,
+            instanceURL: this.ctx.props.instanceUrl,
+            accessToken: this.ctx.props.accessToken
+        };
+        try {
+            await putInKV(uniqueId, sessionData, this.ctx.env);
+        } catch (error) {
+            console.error(`[ERROR] Error storing session data in KV: ${error}`);
+            return "";
+        }
+        
+        return `${hostName}/data/img?uniqueId=${uniqueId}`;
     }
 
     protected async getAnswerContent(answer: any, question: string) {
-        const tokenUrl = await this.getTokenUrl(answer.session_identifier, answer.generation_number);
+        const tokenUrl = await this.createImageUrl(answer.session_identifier, answer.generation_number);
         console.log(`[DEBUG] question: ${question} tokenUrl: ${tokenUrl}`);
         return `Data: ${answer.data}
 

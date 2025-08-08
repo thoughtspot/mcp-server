@@ -284,12 +284,12 @@ export class ThoughtSpotService {
     }
 
     @WithSpan('get-answer-image')
-    async getAnswerImagePNG(sessionId: string, GenNo: number): Promise<HttpFile> {
+    async getAnswerImagePNG(sessionId: string, generationNo: number): Promise<HttpFile> {
         const span = getActiveSpan();
         span?.addEvent("get-answer-image");
         const data = await this.client.exportAnswerReport({
             session_identifier: sessionId,
-            generation_number: GenNo,
+            generation_number: generationNo,
             file_format: "PNG",
         })
         return data;

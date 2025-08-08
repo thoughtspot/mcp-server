@@ -357,7 +357,7 @@ describe("utils", () => {
             expect(typeof result).toBe("function");
         });
 
-        it("should create agent with lazy server initialization", () => {
+        it("should create agent without server initially", () => {
             class MockMCPServer {
                 public initCalled = false;
                 constructor(public ctx: any) {}
@@ -373,11 +373,11 @@ describe("utils", () => {
             const mockEnv = { OAUTH_KV: {} } as any;
             const agent = new InstrumentedClass(mockState, mockEnv);
 
-            // Server should not be created yet
-            expect((agent as any)._server).toBeUndefined();
+            // Server should not be created yet (will be created in init())
+            expect((agent as any).server).toBeUndefined();
         });
 
-        it("should initialize server when server property is accessed", () => {
+        it("should have undefined server before init is called", () => {
             class MockMCPServer {
                 public initCalled = false;
                 constructor(public ctx: any) {}
@@ -405,17 +405,11 @@ describe("utils", () => {
                 hostName: "test-host"
             };
 
-            // Access server property to trigger lazy initialization
-            const server = (agent as any).server;
-
-            // Due to the mocking setup, the actual server structure may be different
-            // But we can verify that accessing the server property works
-            expect(server).toBeDefined();
-            // The mocked McpAgent returns { init: [Function spy] } as server
-            expect(typeof server).toBe("object");
+            // Server should be undefined before init is called
+            expect((agent as any).server).toBeUndefined();
         });
 
-        it("should reuse server instance on subsequent access", () => {
+        it("should have server property defined after init is called", async () => {
             class MockMCPServer {
                 constructor(public ctx: any) {}
                 async init() {}
@@ -440,10 +434,12 @@ describe("utils", () => {
                 hostName: "test-host"
             };
 
-            const server1 = (agent as any).server;
-            const server2 = (agent as any).server;
+            // Call init which should create the server
+            await (agent as any).init();
 
-            expect(server1).toBe(server2);
+            // Server should now be defined
+            expect((agent as any).server).toBeDefined();
+            expect(typeof (agent as any).server).toBe("object");
         });
 
         it("should call server init when agent init is called", async () => {
@@ -504,14 +500,16 @@ describe("utils", () => {
             );
         });
 
-        it("should not throw when OAUTH_KV is not available", async () => {
+        it("should throw McpServerError when OAUTH_KV is not available", async () => {
             const mockEnv = {} as any;
 
-            await expect(putInKV("test-key", "test-value", mockEnv)).resolves.toBeUndefined();
+            await expect(putInKV("test-key", "test-value", mockEnv)).rejects.toThrow(McpServerError);
+            await expect(putInKV("test-key", "test-value", mockEnv)).rejects.toThrow("OAUTH_KV is not available");
         });
 
-        it("should not throw when env is undefined", async () => {
-            await expect(putInKV("test-key", "test-value", undefined as any)).resolves.toBeUndefined();
+        it("should throw McpServerError when env is undefined", async () => {
+            await expect(putInKV("test-key", "test-value", undefined as any)).rejects.toThrow(McpServerError);
+            await expect(putInKV("test-key", "test-value", undefined as any)).rejects.toThrow("OAUTH_KV is not available");
         });
     });
 

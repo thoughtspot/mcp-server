@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import type { Props } from '../utils';
-import { getFromKV, McpServerError } from '../utils';
+import { McpServerError } from '../utils';
 import { getDataSources, ThoughtSpotService } from '../thoughtspot/thoughtspot-service';
 import { getThoughtSpotClient } from '../thoughtspot/thoughtspot-client';
 import { getActiveSpan, WithSpan } from '../metrics/tracing/tracing-utils';
@@ -45,12 +45,6 @@ class ApiHandler {
     async getDataSources(props: Props) {
         const service = this.getThoughtSpotService(props);
         return await service.getDataSources();
-    }
-
-    @WithSpan('api-get-answer-image')
-    async getAnswerImage(props: Props, sessionId: string, generationNo: number) {
-        const service = this.getThoughtSpotService(props);
-        return await service.getAnswerImage(sessionId, generationNo);
     }
 
     @WithSpan('api-proxy-post')

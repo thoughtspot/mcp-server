@@ -74,13 +74,15 @@ describe("Handlers", () => {
             });
 
             expect(result.status).toBe(200);
-            const data = await result.json();
-            expect(data).toEqual({ message: "Hello, World!" });
+            const response = await result.json();
+            expect(response.success).toBe(true);
+            expect(response.data).toEqual({ message: "Hello, World!" });
+            expect(response.message).toBe("Hello world response generated successfully");
         });
     });
 
     describe("GET /authorize", () => {
-        it("should return 500 for invalid client ID", async () => {
+        it("should return 400 for invalid client ID", async () => {
             const id = env.MCP_OBJECT.idFromName("test");
             const object = env.MCP_OBJECT.get(id);
 
@@ -89,8 +91,10 @@ describe("Handlers", () => {
                 return typedWorker.fetch(request, env, mockCtx);
             });
 
-            expect(result.status).toBe(500);
-            expect(await result.text()).toBe("Internal Server Error McpServerError: Missing client ID");
+            expect(result.status).toBe(400);
+            const response = await result.json();
+            expect(response.success).toBe(false);
+            expect(response.error.message).toBe("Missing client ID");
         });
 
         it("should render approval dialog for valid client ID", async () => {
@@ -127,7 +131,7 @@ describe("Handlers", () => {
     });
 
     describe("POST /authorize", () => {
-        it("should return 400 for missing instance URL", async () => {
+        it("should return 500 for missing instance URL", async () => {
             const id = env.MCP_OBJECT.idFromName("test");
             const object = env.MCP_OBJECT.get(id);
 
@@ -143,8 +147,10 @@ describe("Handlers", () => {
                 return typedWorker.fetch(request, env, mockCtx);
             });
 
-            expect(result.status).toBe(400);
-            expect(await result.text()).toBe('Missing instance URL');
+            expect(result.status).toBe(500);
+            const response = await result.json();
+            expect(response.success).toBe(false);
+            expect(response.error.message).toBe('Failed to parse approval form: Missing instance URL');
         });
 
         it("should return 500 for missing oauthReqInfo in state", async () => {
@@ -164,7 +170,9 @@ describe("Handlers", () => {
             });
 
             expect(result.status).toBe(500);
-            expect(await result.text()).toBe("Internal Server Error McpServerError: Failed to parse approval form: Could not extract clientId from state object.");
+            const response = await result.json();
+            expect(response.success).toBe(false);
+            expect(response.error.message).toBe("Failed to parse approval form: Could not extract clientId from state object.");
         });
 
         it("should return 500 for null oauthReqInfo in state", async () => {
@@ -184,7 +192,9 @@ describe("Handlers", () => {
             });
 
             expect(result.status).toBe(500);
-            expect(await result.text()).toBe('Internal Server Error McpServerError: Failed to parse approval form: Could not extract clientId from state object.');
+            const response = await result.json();
+            expect(response.success).toBe(false);
+            expect(response.error.message).toBe('Failed to parse approval form: Could not extract clientId from state object.');
         });
 
         it("should return 500 for undefined oauthReqInfo in state", async () => {
@@ -204,7 +214,9 @@ describe("Handlers", () => {
             });
 
             expect(result.status).toBe(500);
-            expect(await result.text()).toBe('Internal Server Error McpServerError: Failed to parse approval form: Could not extract clientId from state object.');
+            const response = await result.json();
+            expect(response.success).toBe(false);
+            expect(response.error.message).toBe('Failed to parse approval form: Could not extract clientId from state object.');
         });
 
         it("Should redirect to callback for free trial instance URL", async () => {
@@ -220,7 +232,7 @@ describe("Handlers", () => {
             expect(result.headers.get('location')).toContain('instanceUrl=https%3A%2F%2Fteam1.thoughtspot.cloud');
         });
 
-        it("should return 400 for empty string instanceUrl", async () => {
+        it("should return 500 for empty string instanceUrl", async () => {
             const id = env.MCP_OBJECT.idFromName("test");
             const object = env.MCP_OBJECT.get(id);
 
@@ -236,8 +248,10 @@ describe("Handlers", () => {
                 return typedWorker.fetch(request, env, mockCtx);
             });
 
-            expect(result.status).toBe(400);
-            expect(await result.text()).toBe('Missing instance URL');
+            expect(result.status).toBe(500);
+            const response = await result.json();
+            expect(response.success).toBe(false);
+            expect(response.error.message).toBe('Failed to parse approval form: Missing instance URL');
         });
 
         it.skip("should return 500 for whitespace-only instanceUrl", async () => {
@@ -600,7 +614,9 @@ describe("Handlers", () => {
             });
 
             expect(result.status).toBe(400);
-            expect(await result.text()).toBe('Missing instance URL McpServerError: Missing instance URL');
+            const response = await result.json();
+            expect(response.success).toBe(false);
+            expect(response.error.message).toBe('Missing instance URL');
         });
 
         it("should return 400 for missing OAuth request info", async () => {
@@ -615,7 +631,9 @@ describe("Handlers", () => {
             });
 
             expect(result.status).toBe(400);
-            expect(await result.text()).toBe('Missing OAuth request info McpServerError: Missing OAuth request info');
+            const response = await result.json();
+            expect(response.success).toBe(false);
+            expect(response.error.message).toBe('Missing OAuth request info');
         });
 
         it("should return 400 for invalid OAuth request info format", async () => {
@@ -631,7 +649,9 @@ describe("Handlers", () => {
             });
 
             expect(result.status).toBe(400);
-            expect(await result.text()).toBe('Invalid OAuth request info format McpServerError: Invalid OAuth request info format');
+            const response = await result.json();
+            expect(response.success).toBe(false);
+            expect(response.error.message).toBe('Invalid OAuth request info format');
         });
 
         it("should render token callback page for valid parameters", async () => {
@@ -680,7 +700,9 @@ describe("Handlers", () => {
             });
 
             expect(result.status).toBe(400);
-            expect(await result.text()).toBe('Missing token or OAuth request info or instanceUrl McpServerError: Missing token or OAuth request info or instanceUrl');
+            const response = await result.json();
+            expect(response.success).toBe(false);
+            expect(response.error.message).toBe('Missing token or OAuth request info or instanceUrl');
         });
 
         it("should return 400 for missing OAuth request info", async () => {
@@ -700,7 +722,9 @@ describe("Handlers", () => {
             });
 
             expect(result.status).toBe(400);
-            expect(await result.text()).toBe('Missing token or OAuth request info or instanceUrl McpServerError: Missing token or OAuth request info or instanceUrl');
+            const response = await result.json();
+            expect(response.success).toBe(false);
+            expect(response.error.message).toBe('Missing token or OAuth request info or instanceUrl');
         });
 
         it("should return 400 for missing instance URL", async () => {
@@ -720,7 +744,9 @@ describe("Handlers", () => {
             });
 
             expect(result.status).toBe(400);
-            expect(await result.text()).toBe('Missing token or OAuth request info or instanceUrl McpServerError: Missing token or OAuth request info or instanceUrl');
+            const response = await result.json();
+            expect(response.success).toBe(false);
+            expect(response.error.message).toBe('Missing token or OAuth request info or instanceUrl');
         });
 
         it("should complete authorization and return redirect URL", async () => {
@@ -760,7 +786,9 @@ describe("Handlers", () => {
 
             expect(result.status).toBe(200);
             const data = await result.json();
-            expect(data).toEqual({ redirectTo: 'https://example.com/success' });
+            expect(data.success).toBe(true);
+            expect(data.data).toEqual({ redirectTo: 'https://example.com/success' });
+            expect(data.message).toBe('Token stored successfully');
             expect(result.headers.get('content-type')).toBe('application/json');
         });
     });
@@ -795,7 +823,9 @@ describe("Handlers", () => {
             });
 
             expect(result.status).toBe(400);
-            expect(await result.text()).toBe('Invalid JSON format McpServerError: Invalid JSON format');
+            const response = await result.json();
+            expect(response.success).toBe(false);
+            expect(response.error.message).toBe('Invalid JSON format');
         });
 
         it("should handle malformed form data in authorize", async () => {
@@ -962,7 +992,7 @@ describe("Handlers", () => {
             mockHttpFile = createMockHttpFile();
         });
 
-        it("should return 404 for missing token parameter", async () => {
+        it("should return 400 for missing uniqueId parameter", async () => {
             const id = env.MCP_OBJECT.idFromName("test");
             const object = env.MCP_OBJECT.get(id);
             
@@ -971,26 +1001,30 @@ describe("Handlers", () => {
                 return typedWorker.fetch(request, env, mockCtx);
             });
 
-            expect(result.status).toBe(404);
-            expect(await result.text()).toBe("Token not found");
+            expect(result.status).toBe(400);
+            const data = await result.json();
+            expect(data.success).toBe(false);
+            expect(data.error.message).toBe("Unique ID parameter is required");
         });
 
-        it("should return 404 for empty token parameter", async () => {
+        it("should return 400 for empty uniqueId parameter", async () => {
             const id = env.MCP_OBJECT.idFromName("test");
             const object = env.MCP_OBJECT.get(id);
             
             const result = await runInDurableObject(object, async (instance) => {
                 const url = new URL("https://example.com/data/img");
-                url.searchParams.append('token', '');
+                url.searchParams.append('uniqueId', '');
                 const request = new IncomingRequest(url.toString());
                 return typedWorker.fetch(request, env, mockCtx);
             });
 
-            expect(result.status).toBe(404);
-            expect(await result.text()).toBe("Token not found");
+            expect(result.status).toBe(400);
+            const data = await result.json();
+            expect(data.success).toBe(false);
+            expect(data.error.message).toBe("Unique ID parameter is required");
         });
 
-        it("should return 404 when token not found in KV storage", async () => {
+        it("should return 404 when session data not found in KV storage", async () => {
             const id = env.MCP_OBJECT.idFromName("test");
             const object = env.MCP_OBJECT.get(id);
             
@@ -1003,24 +1037,25 @@ describe("Handlers", () => {
 
             const result = await runInDurableObject(object, async (instance) => {
                 const url = new URL("https://example.com/data/img");
-                url.searchParams.append('token', 'non-existent-token');
+                url.searchParams.append('uniqueId', 'non-existent-id');
                 const request = new IncomingRequest(url.toString());
                 return typedWorker.fetch(request, mockEnvWithKV, mockCtx);
             });
 
             expect(result.status).toBe(404);
-            expect(await result.text()).toBe("Token not found");
-            expect(mockEnvWithKV.OAUTH_KV.get).toHaveBeenCalledWith('non-existent-token', { type: "json" });
+            const data = await result.json();
+            expect(data.success).toBe(false);
+            expect(data.error.message).toBe("Session data not found for the provided unique ID");
+            expect(mockEnvWithKV.OAUTH_KV.get).toHaveBeenCalledWith('non-existent-id', { type: "json" });
         });
 
-        it("should successfully return PNG image for valid token", async () => {
+        it("should successfully return PNG image for valid uniqueId", async () => {
             const id = env.MCP_OBJECT.idFromName("test");
             const object = env.MCP_OBJECT.get(id);
             
-            const mockTokenData = {
+            const mockSessionData = {
                 sessionId: 'test-session-123',
-                GenNo: 1,
-                generationNo: 1, // Also test the fallback field name
+                generationNo: 1,
                 instanceURL: 'https://test.thoughtspot.cloud',
                 accessToken: 'test-access-token'
             };
@@ -1028,7 +1063,7 @@ describe("Handlers", () => {
             const mockEnvWithKV = {
                 ...env,
                 OAUTH_KV: {
-                    get: vi.fn().mockResolvedValue(mockTokenData)
+                    get: vi.fn().mockResolvedValue(mockSessionData)
                 }
             };
 
@@ -1051,7 +1086,7 @@ describe("Handlers", () => {
 
             const result = await runInDurableObject(object, async (instance) => {
                 const url = new URL("https://example.com/data/img");
-                url.searchParams.append('token', 'valid-token');
+                url.searchParams.append('uniqueId', 'valid-id');
                 const request = new IncomingRequest(url.toString());
                 return typedWorker.fetch(request, mockEnvWithKV, mockCtx);
             });
@@ -1062,14 +1097,14 @@ describe("Handlers", () => {
             const responseBuffer = await result.arrayBuffer();
             expect(responseBuffer).toEqual(mockImageBuffer);
             
-            expect(mockEnvWithKV.OAUTH_KV.get).toHaveBeenCalledWith('valid-token', { type: "json" });
+            expect(mockEnvWithKV.OAUTH_KV.get).toHaveBeenCalledWith('valid-id', { type: "json" });
         });
 
-        it("should handle token data with GenNo field", async () => {
+        it("should handle session data with GenNo field", async () => {
             const id = env.MCP_OBJECT.idFromName("test");
             const object = env.MCP_OBJECT.get(id);
             
-            const mockTokenData = {
+            const mockSessionData = {
                 sessionId: 'test-session-456',
                 GenNo: 2, // Using GenNo instead of generationNo
                 instanceURL: 'https://test.thoughtspot.cloud',
@@ -1079,7 +1114,7 @@ describe("Handlers", () => {
             const mockEnvWithKV = {
                 ...env,
                 OAUTH_KV: {
-                    get: vi.fn().mockResolvedValue(mockTokenData)
+                    get: vi.fn().mockResolvedValue(mockSessionData)
                 }
             };
 
@@ -1087,7 +1122,7 @@ describe("Handlers", () => {
 
             const result = await runInDurableObject(object, async (instance) => {
                 const url = new URL("https://example.com/data/img");
-                url.searchParams.append('token', 'valid-token-genno');
+                url.searchParams.append('uniqueId', 'valid-id-genno');
                 const request = new IncomingRequest(url.toString());
                 return typedWorker.fetch(request, mockEnvWithKV, mockCtx);
             });
@@ -1096,11 +1131,11 @@ describe("Handlers", () => {
             expect(result.headers.get('Content-Type')).toBe('image/png');
         });
 
-        it("should handle token data with generationNo field", async () => {
+        it("should handle session data with generationNo field", async () => {
             const id = env.MCP_OBJECT.idFromName("test");
             const object = env.MCP_OBJECT.get(id);
             
-            const mockTokenData = {
+            const mockSessionData = {
                 sessionId: 'test-session-789',
                 generationNo: 3, // Using generationNo instead of GenNo
                 instanceURL: 'https://test.thoughtspot.cloud',
@@ -1110,7 +1145,7 @@ describe("Handlers", () => {
             const mockEnvWithKV = {
                 ...env,
                 OAUTH_KV: {
-                    get: vi.fn().mockResolvedValue(mockTokenData)
+                    get: vi.fn().mockResolvedValue(mockSessionData)
                 }
             };
 
@@ -1118,7 +1153,7 @@ describe("Handlers", () => {
 
             const result = await runInDurableObject(object, async (instance) => {
                 const url = new URL("https://example.com/data/img");
-                url.searchParams.append('token', 'valid-token-generation');
+                url.searchParams.append('uniqueId', 'valid-id-generation');
                 const request = new IncomingRequest(url.toString());
                 return typedWorker.fetch(request, mockEnvWithKV, mockCtx);
             });
@@ -1131,9 +1166,9 @@ describe("Handlers", () => {
             const id = env.MCP_OBJECT.idFromName("test");
             const object = env.MCP_OBJECT.get(id);
             
-            const mockTokenData = {
+            const mockSessionData = {
                 sessionId: 'test-session-error',
-                GenNo: 1,
+                generationNo: 1,
                 instanceURL: 'https://test.thoughtspot.cloud',
                 accessToken: 'test-access-token'
             };
@@ -1141,7 +1176,7 @@ describe("Handlers", () => {
             const mockEnvWithKV = {
                 ...env,
                 OAUTH_KV: {
-                    get: vi.fn().mockResolvedValue(mockTokenData)
+                    get: vi.fn().mockResolvedValue(mockSessionData)
                 }
             };
 
@@ -1150,7 +1185,7 @@ describe("Handlers", () => {
 
             const result = await runInDurableObject(object, async (instance) => {
                 const url = new URL("https://example.com/data/img");
-                url.searchParams.append('token', 'error-token');
+                url.searchParams.append('uniqueId', 'error-id');
                 const request = new IncomingRequest(url.toString());
                 
                 try {
@@ -1166,14 +1201,13 @@ describe("Handlers", () => {
             expect([500, 404]).toContain(result.status);
         });
 
-        it("should properly extract values from complex token data", async () => {
+        it("should properly extract values from complex session data", async () => {
             const id = env.MCP_OBJECT.idFromName("test");
             const object = env.MCP_OBJECT.get(id);
             
-            const mockTokenData = {
+            const mockSessionData = {
                 sessionId: 'complex-session-id',
-                GenNo: 5,
-                generationNo: 10, // Both fields present, GenNo should take precedence
+                generationNo: 5,
                 instanceURL: 'https://complex.thoughtspot.cloud',
                 accessToken: 'complex-access-token',
                 extraField: 'extra-value', // Extra fields should be ignored
@@ -1185,7 +1219,7 @@ describe("Handlers", () => {
             const mockEnvWithKV = {
                 ...env,
                 OAUTH_KV: {
-                    get: vi.fn().mockResolvedValue(mockTokenData)
+                    get: vi.fn().mockResolvedValue(mockSessionData)
                 }
             };
 
@@ -1193,7 +1227,7 @@ describe("Handlers", () => {
 
             const result = await runInDurableObject(object, async (instance) => {
                 const url = new URL("https://example.com/data/img");
-                url.searchParams.append('token', 'complex-token');
+                url.searchParams.append('uniqueId', 'complex-id');
                 const request = new IncomingRequest(url.toString());
                 return typedWorker.fetch(request, mockEnvWithKV, mockCtx);
             });
@@ -1202,15 +1236,14 @@ describe("Handlers", () => {
             expect(result.headers.get('Content-Type')).toBe('image/png');
             
             // Verify that the service was called with the correct parameters
-            // GenNo should take precedence over generationNo
             expect(getAnswerImagePNGSpy).toHaveBeenCalledWith('complex-session-id', 5);
         });
 
-        it("should handle token data without GenNo or generationNo fields", async () => {
+        it("should handle session data without GenNo or generationNo fields", async () => {
             const id = env.MCP_OBJECT.idFromName("test");
             const object = env.MCP_OBJECT.get(id);
             
-            const mockTokenData = {
+            const mockSessionData = {
                 sessionId: 'session-without-genno',
                 instanceURL: 'https://test.thoughtspot.cloud',
                 accessToken: 'test-access-token'
@@ -1220,7 +1253,7 @@ describe("Handlers", () => {
             const mockEnvWithKV = {
                 ...env,
                 OAUTH_KV: {
-                    get: vi.fn().mockResolvedValue(mockTokenData)
+                    get: vi.fn().mockResolvedValue(mockSessionData)
                 }
             };
 
@@ -1228,7 +1261,7 @@ describe("Handlers", () => {
 
             const result = await runInDurableObject(object, async (instance) => {
                 const url = new URL("https://example.com/data/img");
-                url.searchParams.append('token', 'token-no-genno');
+                url.searchParams.append('uniqueId', 'id-no-genno');
                 const request = new IncomingRequest(url.toString());
                 return typedWorker.fetch(request, mockEnvWithKV, mockCtx);
             });
@@ -1253,7 +1286,7 @@ describe("Handlers", () => {
 
             const result = await runInDurableObject(object, async (instance) => {
                 const url = new URL("https://example.com/data/img");
-                url.searchParams.append('token', 'error-token');
+                url.searchParams.append('uniqueId', 'error-id');
                 const request = new IncomingRequest(url.toString());
                 
                 try {
@@ -1280,13 +1313,152 @@ describe("Handlers", () => {
 
             const result = await runInDurableObject(object, async (instance) => {
                 const url = new URL("https://example.com/data/img");
-                url.searchParams.append('token', 'some-token');
+                url.searchParams.append('uniqueId', 'some-id');
                 const request = new IncomingRequest(url.toString());
                 return typedWorker.fetch(request, mockEnvWithoutKV, mockCtx);
             });
 
             expect(result.status).toBe(404);
-            expect(await result.text()).toBe("Token not found");
+            const data = await result.json();
+            expect(data.success).toBe(false);
+            expect(data.error.message).toBe("Session data not found for the provided unique ID");
+        });
+
+        it("should return 400 for invalid session data missing required fields", async () => {
+            const id = env.MCP_OBJECT.idFromName("test");
+            const object = env.MCP_OBJECT.get(id);
+            
+            const mockSessionData = {
+                sessionId: 'test-session',
+                // Missing instanceURL and accessToken
+                extraField: 'extra-value'
+            };
+
+            const mockEnvWithKV = {
+                ...env,
+                OAUTH_KV: {
+                    get: vi.fn().mockResolvedValue(mockSessionData)
+                }
+            };
+
+            const result = await runInDurableObject(object, async (instance) => {
+                const url = new URL("https://example.com/data/img");
+                url.searchParams.append('uniqueId', 'invalid-session-id');
+                const request = new IncomingRequest(url.toString());
+                return typedWorker.fetch(request, mockEnvWithKV, mockCtx);
+            });
+
+            expect(result.status).toBe(400);
+            const data = await result.json();
+            expect(data.success).toBe(false);
+            expect(data.error.message).toBe("Invalid session data");
+            expect(data.error.code).toBe("INVALID_SESSION_DATA");
+        });
+    });
+
+    describe("Additional uncovered scenarios", () => {
+        it("should handle OAuth callback with /10023.html workaround", async () => {
+            const id = env.MCP_OBJECT.idFromName("test");
+            const object = env.MCP_OBJECT.get(id);
+
+            const oauthReqInfo = {
+                clientId: 'test-client',
+                scope: 'read',
+                redirectUri: 'https://example.com/callback'
+            };
+            const encodedOauthReqInfo = `${btoa(JSON.stringify(oauthReqInfo))}/10023.html`;
+
+            const result = await runInDurableObject(object, async (instance) => {
+                const url = new URL("https://example.com/callback");
+                url.searchParams.append('instanceUrl', 'https://test.thoughtspot.cloud');
+                url.searchParams.append('oauthReqInfo', encodedOauthReqInfo);
+                const request = new IncomingRequest(url.toString());
+                return typedWorker.fetch(request, env, mockCtx);
+            });
+
+            expect(result.status).toBe(200);
+            const contentType = result.headers.get('content-type');
+            expect(contentType).toContain('text/html');
+
+            // Consume the response body to prevent storage cleanup issues
+            await result.text();
+        });
+
+
+
+        it("should handle host header normalization for HTTPS", async () => {
+            const id = env.MCP_OBJECT.idFromName("test");
+            const object = env.MCP_OBJECT.get(id);
+
+            const mockOAuthProvider = {
+                lookupClient: vi.fn().mockResolvedValue({
+                    clientId: 'test-client',
+                    clientName: 'Test Client',
+                    registrationDate: Date.now(),
+                    redirectUris: ['https://example.com/callback'],
+                    tokenEndpointAuthMethod: 'client_secret_basic'
+                }),
+                completeAuthorization: vi.fn().mockResolvedValue({
+                    redirectTo: 'https://example.com/success'
+                })
+            };
+
+            const result = await runInDurableObject(object, async (instance) => {
+                const request = new IncomingRequest("https://example.com/store-token", {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'host': 'example.com' // Host without protocol
+                    },
+                    body: JSON.stringify({
+                        token: { data: { token: 'test-token' } },
+                        oauthReqInfo: {
+                            clientId: 'test-client',
+                            scope: 'read'
+                        },
+                        instanceUrl: 'https://test.thoughtspot.cloud'
+                    })
+                });
+                const testEnv = { ...env, OAUTH_PROVIDER: mockOAuthProvider };
+                return typedWorker.fetch(request, testEnv, mockCtx);
+            });
+
+            expect(result.status).toBe(200);
+            const data = await result.json();
+            expect(data.success).toBe(true);
+            expect(data.data).toEqual({ redirectTo: 'https://example.com/success' });
+            
+            // Verify that completeAuthorization was called with normalized hostName
+            expect(mockOAuthProvider.completeAuthorization).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    props: expect.objectContaining({
+                        hostName: 'https://example.com'
+                    })
+                })
+            );
+        });
+
+        it("should handle generic errors in authorize GET endpoint", async () => {
+            const id = env.MCP_OBJECT.idFromName("test");
+            const object = env.MCP_OBJECT.get(id);
+
+            // Mock OAuth provider to throw a generic error (not McpServerError)
+            const mockOAuthProvider = {
+                parseAuthRequest: vi.fn().mockRejectedValue(new Error('Generic OAuth error')),
+                lookupClient: vi.fn()
+            };
+
+            const result = await runInDurableObject(object, async (instance) => {
+                const request = new IncomingRequest("https://example.com/authorize");
+                const testEnv = { ...env, OAUTH_PROVIDER: mockOAuthProvider };
+                return typedWorker.fetch(request, testEnv, mockCtx);
+            });
+
+            expect(result.status).toBe(500);
+            const response = await result.json();
+            expect(response.success).toBe(false);
+            expect(response.error.message).toBe('Generic OAuth error');
+            expect(response.error.code).toBe('GENERIC_ERROR');
         });
     });
 }); 
