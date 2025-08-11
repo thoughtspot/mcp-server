@@ -11,7 +11,7 @@ import type { z } from "zod";
 import { context, type Span, SpanStatusCode } from "@opentelemetry/api";
 import { getActiveSpan, withSpan } from "../metrics/tracing/tracing-utils";
 import { Trackers, type Tracker, TrackEvent } from "../metrics";
-import type { Props } from "../utils";
+import { putInKV, type Props } from "../utils";
 import { MixpanelTracker } from "../metrics/mixpanel/mixpanel";
 import { getThoughtSpotClient } from "../thoughtspot/thoughtspot-client";
 import { ThoughtSpotService } from "../thoughtspot/thoughtspot-service";
@@ -39,6 +39,7 @@ export type ToolResponse = SuccessResponse | ErrorResponse;
 
 export interface Context {
     props: Props;
+    env?: Env;
 }
 
 export abstract class BaseMCPServer extends Server {
@@ -145,6 +146,45 @@ export abstract class BaseMCPServer extends Server {
             this.ctx.props.clientName
         );
         this.addTracker(mixpanel);
+    }
+
+    protected async createImageUrl(sessionId: string, generationNo: number) {
+        const hostName = this.ctx.props.hostName;
+        console.log(`[DEBUG] hostName: ${hostName}`);
+        
+        // If hostName is undefined return empty string
+        if (!hostName) {
+            return "";
+        }
+        
+        // Generate token and store in KV store
+        const uniqueId = crypto.randomUUID();
+        const sessionData = {
+            sessionId: sessionId,
+            generationNo: generationNo,
+            instanceURL: this.ctx.props.instanceUrl,
+            accessToken: this.ctx.props.accessToken
+        };
+        try {
+            await putInKV(uniqueId, sessionData, this.ctx.env);
+        } catch (error) {
+            console.error(`[ERROR] Error storing session data in KV: ${error}`);
+            return "";
+        }
+        
+        return `${hostName}/data/img?uniqueId=${uniqueId}`;
+    }
+
+    protected async getAnswerContent(answer: any, question: string) {
+        const tokenUrl = await this.createImageUrl(answer.session_identifier, answer.generation_number);
+        console.log(`[DEBUG] question: ${question} tokenUrl: ${tokenUrl}`);
+        return `Data: ${answer.data}
+
+        **CHART VISUALIZATION AVAILABLE:**
+        There is a data visualization chart for this query available at: "${tokenUrl}".
+
+        This URL contains a PNG image showing the visual representation of the above data for the question: "${question}". 
+        Please fetch and display this image to provide a complete analysis with both the data and its visual representation. `;
     }
 
     /**

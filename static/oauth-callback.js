@@ -120,7 +120,7 @@
                             const errorText = await storeResponse.text();
                             throw new Error(`Failed to store token (Status: ${storeResponse.status}): ${errorText}`);
                         }
-                        window.location.href = responseData.redirectTo;
+                        window.location.href = responseData.data.redirectTo;
                     } catch (err) {
                         document.getElementById('status').textContent = err.message;
                         document.getElementById('status').style.color = '#dc3545';
@@ -149,14 +149,15 @@
             })
         });
         const responseData = await storeResponse.json();
+        console.log('Response data:', responseData);
 
         if (!storeResponse.ok) {
             const errorText = await storeResponse.text();
             throw new Error(`Failed to store token (Status: ${storeResponse.status}): ${errorText}`);
         }
 
-        console.log('Redirecting to:', responseData.redirectTo);
-        window.location.href = responseData.redirectTo;
+        console.log('Redirecting to:', responseData.data.redirectTo);
+        window.location.href = responseData.data.redirectTo;
         
     } catch (error) {
         console.error('Error:', error);

@@ -13,6 +13,7 @@ export type Props = {
         clientName: string;
         registrationDate: number;
     };
+    hostName: string;
 };
 
 export class McpServerError extends Error {
@@ -92,20 +93,46 @@ export class McpServerError extends Error {
 
 export function instrumentedMCPServer<T extends BaseMCPServer>(MCPServer: new (ctx: Context) => T, config: ResolveConfigFn) {
     const Agent = class extends McpAgent<Env, any, Props> {
-        server = new MCPServer(this);
+        // added ! to satisfy the type checker
+        public server: T;
+        public env: Env;
 
-        // Argument of type 'typeof ThoughtSpotMCPWrapper' is not assignable to parameter of type 'DOClass'.
-        // Cannot assign a 'protected' constructor type to a 'public' constructor type.
-        // Created to satisfy the DOClass type.
-        // biome-ignore lint/complexity/noUselessConstructor: required for DOClass
         public constructor(state: DurableObjectState, env: Env) {
             super(state, env);
+            this.env = env;
         }
 
         async init() {
+            // Create the server directly here after props have been set by McpAgent._init()
+            const context: Context = {
+                props: this.props, // Available after McpAgent._init() sets it
+                env: this.env     // Stored from constructor
+            };
+            this.server = new MCPServer(context);
             await this.server.init();
         }
     }
 
     return instrumentDO(Agent, config);
+}
+
+export async function putInKV(key: string, value: any, env: Env) {
+    if (env?.OAUTH_KV) {
+        await env.OAUTH_KV.put(key, JSON.stringify(value), {
+            expirationTtl: 60 * 60 * 3 // 3 hours
+        });
+    } else {
+        throw new McpServerError("OAUTH_KV is not available", 500);
+    }
+}
+
+export async function getFromKV(key: string, env: Env) {
+    console.log("[DEBUG] Getting from KV", key);
+    if (env?.OAUTH_KV) {
+        const value = await env.OAUTH_KV.get(key, { type: "json" });
+        if (value) {
+            return value;
+        }
+        return null;
+    }
 }

@@ -1,4 +1,4 @@
-import type { ThoughtSpotRestApi } from "@thoughtspot/rest-api-sdk";
+import type { HttpFile, ThoughtSpotRestApi } from "@thoughtspot/rest-api-sdk";
 import { SpanStatusCode, trace, context } from "@opentelemetry/api";
 import { getActiveSpan, WithSpan } from "../metrics/tracing/tracing-utils";
 import type { DataSource, SessionInfo } from "./types";
@@ -281,6 +281,18 @@ export class ThoughtSpotService {
         const liveboardUrl = `${(this.client as any).instanceUrl}/#/pinboard/${resp[0].response.header.id_guid}`;
         span?.setStatus({ code: SpanStatusCode.OK, message: "Liveboard created successfully" });
         return liveboardUrl;
+    }
+
+    @WithSpan('get-answer-image')
+    async getAnswerImagePNG(sessionId: string, generationNo: number): Promise<HttpFile> {
+        const span = getActiveSpan();
+        span?.addEvent("get-answer-image");
+        const data = await this.client.exportAnswerReport({
+            session_identifier: sessionId,
+            generation_number: generationNo,
+            file_format: "PNG",
+        })
+        return data;
     }
 
     /**

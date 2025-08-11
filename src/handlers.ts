@@ -1,13 +1,259 @@
 import type { AuthRequest, OAuthHelpers } from '@cloudflare/workers-oauth-provider'
 import { Hono } from 'hono'
 import type { Props } from './utils';
-import { McpServerError } from './utils';
+import { getFromKV, McpServerError } from './utils';
 import { parseRedirectApproval, renderApprovalDialog, buildSamlRedirectUrl } from './oauth-manager/oauth-utils';
 import { renderTokenCallback } from './oauth-manager/token-utils';
-import { any } from 'zod';
 import { encodeBase64Url, decodeBase64Url } from 'hono/utils/encode';
 import { getActiveSpan, WithSpan } from './metrics/tracing/tracing-utils';
-import { context, type Span, SpanStatusCode, trace } from "@opentelemetry/api";
+import { SpanStatusCode } from "@opentelemetry/api";
+import { ThoughtSpotService } from './thoughtspot/thoughtspot-service';
+import { getThoughtSpotClient } from './thoughtspot/thoughtspot-client';
+
+/**
+ * Uniform response structure for all handlers
+ * 
+ * Success Response Example:
+ * {
+ *   "success": true,
+ *   "statusCode": 200,
+ *   "timestamp": "2023-12-07T10:30:00.000Z",
+ *   "data": { ... },
+ *   "message": "Operation completed successfully"
+ * }
+ * 
+ * Error Response Example:
+ * {
+ *   "success": false,
+ *   "statusCode": 400,
+ *   "timestamp": "2023-12-07T10:30:00.000Z",
+ *   "error": {
+ *     "code": "BAD_REQUEST",
+ *     "message": "Invalid input provided",
+ *     "details": { ... }
+ *   }
+ * }
+ */
+interface ApiResponse<T = any> {
+    success: boolean;
+    data?: T;
+    error?: {
+        code: string;
+        message: string;
+        details?: any;
+    };
+    message?: string;
+    statusCode: number;
+    timestamp: string;
+}
+
+
+/**
+ * Create a uniform API response structure
+ */
+function createApiResponse<T = any>(
+    success: boolean,
+    statusCode: number,
+    data?: T,
+    message?: string,
+    errorCode?: string,
+    errorMessage?: string,
+    errorDetails?: any,
+    spanMessage?: string
+): Response {
+    const span = getActiveSpan();
+    
+    if (success) {
+        span?.setStatus({ 
+            code: SpanStatusCode.OK, 
+            message: spanMessage || message || 'Request completed successfully'
+        });
+    } else {
+        span?.setStatus({ 
+            code: SpanStatusCode.ERROR, 
+            message: spanMessage || errorMessage || 'Request failed'
+        });
+    }
+
+    const response: ApiResponse<T> = {
+        success,
+        statusCode,
+        timestamp: new Date().toISOString(),
+        ...(data !== undefined && { data }),
+        ...(message && { message }),
+        ...(!success && {
+            error: {
+                code: errorCode || 'UNKNOWN_ERROR',
+                message: errorMessage || 'An error occurred',
+                ...(errorDetails && { details: errorDetails })
+            }
+        })
+    };
+
+    return new Response(JSON.stringify(response), {
+        status: statusCode,
+        headers: {
+            'Content-Type': 'application/json'
+        }
+    });
+}
+
+/**
+ * Create a standardized success response
+ */
+function createSuccessResponse<T = any>(
+    data?: T, 
+    message?: string, 
+    statusCode = 200,
+    spanMessage?: string
+): Response {
+    return createApiResponse(
+        true,
+        statusCode,
+        data,
+        message,
+        undefined,
+        undefined,
+        undefined,
+        spanMessage
+    );
+}
+
+/**
+ * Create a standardized error response
+ */
+function createErrorResponse(
+    errorMessage: string,
+    statusCode = 500,
+    errorCode?: string,
+    errorDetails?: any,
+    spanMessage?: string
+): Response {
+    return createApiResponse(
+        false,
+        statusCode,
+        undefined,
+        undefined,
+        errorCode || getErrorCodeFromStatus(statusCode),
+        errorMessage,
+        errorDetails,
+        spanMessage
+    );
+}
+
+/**
+ * Get error code based on HTTP status code
+ */
+function getErrorCodeFromStatus(statusCode: number): string {
+    switch (statusCode) {
+        case 400: return 'BAD_REQUEST';
+        case 401: return 'UNAUTHORIZED';
+        case 403: return 'FORBIDDEN';
+        case 404: return 'NOT_FOUND';
+        case 409: return 'CONFLICT';
+        case 422: return 'UNPROCESSABLE_ENTITY';
+        case 500: return 'INTERNAL_SERVER_ERROR';
+        case 502: return 'BAD_GATEWAY';
+        case 503: return 'SERVICE_UNAVAILABLE';
+        default: return 'UNKNOWN_ERROR';
+    }
+}
+
+/**
+ * Create an HTML response (special case for OAuth flows)
+ */
+function createHtmlResponse(
+    htmlContent: string, 
+    statusCode = 200,
+    spanMessage?: string
+): Response {
+    const span = getActiveSpan();
+    span?.setStatus({ 
+        code: SpanStatusCode.OK, 
+        message: spanMessage || 'HTML response created successfully'
+    });
+
+    return new Response(htmlContent, {
+        status: statusCode,
+        headers: {
+            'Content-Type': 'text/html'
+        }
+    });
+}
+
+/**
+ * Create a redirect response (special case for OAuth flows)
+ */
+function createRedirectResponse(
+    redirectUrl: string, 
+    statusCode = 302,
+    spanMessage?: string
+): Response {
+    const span = getActiveSpan();
+    span?.setStatus({ 
+        code: SpanStatusCode.OK, 
+        message: spanMessage || `Redirecting to ${redirectUrl}`
+    });
+
+    return Response.redirect(redirectUrl, statusCode);
+}
+
+/**
+ * Create a binary response (for images, files, etc.)
+ */
+function createBinaryResponse(
+    data: ArrayBuffer, 
+    contentType: string,
+    statusCode = 200,
+    spanMessage?: string
+): Response {
+    const span = getActiveSpan();
+    span?.setStatus({ 
+        code: SpanStatusCode.OK, 
+        message: spanMessage || `Binary response created: ${contentType}`
+    });
+
+    return new Response(data, {
+        status: statusCode,
+        headers: {
+            'Content-Type': contentType
+        }
+    });
+}
+
+/**
+ * Handle McpServerError and create uniform response
+ */
+function handleMcpServerError(error: McpServerError): Response {
+    return createErrorResponse(
+        error.message,
+        error.statusCode,
+        'MCP_SERVER_ERROR',
+        error.errorJson,
+        `McpServerError: ${error.message}`
+    );
+}
+
+/**
+ * Handle generic error and create uniform response
+ */
+function handleGenericError(
+    error: any, 
+    defaultMessage = 'Internal server error',
+    defaultStatusCode = 500
+): Response {
+    const message = error instanceof Error ? error.message : defaultMessage;
+    const statusCode = error?.statusCode || defaultStatusCode;
+    
+    return createErrorResponse(
+        message,
+        statusCode,
+        'GENERIC_ERROR',
+        error instanceof Error ? { stack: error.stack } : error,
+        `Generic error: ${message}`
+    );
+}
+
 
 const app = new Hono<{ Bindings: Env & { OAUTH_PROVIDER: OAuthHelpers } }>()
 
@@ -174,12 +420,51 @@ class Handler {
                 accessToken: token.data.token,
                 instanceUrl: instanceUrl,
                 clientName: clientName,
+                hostName: (() => {
+                    const host = request.headers.get('host') || 'http://localhost:8787';
+                    if (host.startsWith('http://') || host.startsWith('https://')) {
+                        return host;
+                    }
+                    return `https://${host}`;
+                })(),
             } as Props,
         });
 
         span?.setStatus({ code: SpanStatusCode.OK, message: "Token stored successfully" });
 
         return { redirectTo };
+    }
+
+    @WithSpan('get-answer-image')
+    async getAnswerImage(request: Request, env: Env) {
+        const span = getActiveSpan();
+        const url = new URL(request.url);
+        const uniqueId = url.searchParams.get('uniqueId') || '';
+        if (uniqueId === '') {
+            return createErrorResponse("Unique ID parameter is required", 400, 'MISSING_UNIQUE_ID');
+        }
+
+        const sessionData = await getFromKV(uniqueId, env);
+        if (!sessionData) {
+            return createErrorResponse("Session data not found for the provided unique ID", 404, 'SESSION_NOT_FOUND');
+        }        
+        
+        // Extract values from session data
+        const { sessionId, generationNo, instanceURL, accessToken } = sessionData as any;
+        
+        if (!sessionId || !instanceURL || !accessToken) {
+            return createErrorResponse("Invalid session data", 400, 'INVALID_SESSION_DATA');
+        }
+        
+        const thoughtSpotService = new ThoughtSpotService(getThoughtSpotClient(instanceURL, accessToken));
+        const image = await thoughtSpotService.getAnswerImagePNG(sessionId, generationNo);
+        
+        return createBinaryResponse(
+            await image.arrayBuffer(), 
+            'image/png',
+            200,
+            "Image fetched successfully"
+        );
     }
 }
 
@@ -191,75 +476,73 @@ app.get("/", async (c) => {
 });
 
 app.get("/hello", async (c) => {
-    const result = await handler.helloWorld();
-    return c.json(result);
+    try {
+        const result = await handler.helloWorld();
+        return createSuccessResponse(result, "Hello world response generated successfully");
+    } catch (error) {
+        return handleGenericError(error, "Error generating hello world response");
+    }
 });
+
 
 app.get("/authorize", async (c) => {
     try {
         const response = await handler.getAuthorize(c.req.raw, c.env.OAUTH_PROVIDER);
         return response;
     } catch (error) {
-        return c.text(`Internal Server Error ${error}`, 500);
+        if (error instanceof McpServerError) {
+            return handleMcpServerError(error);
+        }
+        return handleGenericError(error, "Authorization error");
     }
 });
 
 app.post("/authorize", async (c) => {
     try {
-
         const redirectUrl = await handler.postAuthorize(c.req.raw, c.req.url);
-        return Response.redirect(redirectUrl);
+        // OAuth flows require redirect responses, not JSON
+            return createRedirectResponse(redirectUrl);
     } catch (error) {
-        if (error instanceof Error && error.message.includes('Missing instance URL')) {
-            return new Response('Missing instance URL', { status: 400 });
+        if (error instanceof McpServerError) {
+            return handleMcpServerError(error);
         }
-        return new Response(`Internal Server Error ${error}`, { status: 500 });
+        return handleGenericError(error, "Authorization error");
     }
 });
 
 app.get("/callback", async (c) => {
     try {
         const htmlContent = await handler.handleCallback(c.req.raw, c.env.ASSETS, c.req.url);
-        return new Response(htmlContent, {
-            headers: {
-                'Content-Type': 'text/html',
-            },
-        });
+        // OAuth callback returns HTML, so we keep the original response
+        return createHtmlResponse(htmlContent, 200, "Callback handled successfully");
     } catch (error) {
-        if (error instanceof Error) {
-            if (error.message.includes('Missing instance URL')) {
-                return c.text(`Missing instance URL ${error}`, 400);
-            }
-            if (error.message.includes('Missing OAuth request info')) {
-                return c.text(`Missing OAuth request info ${error}`, 400);
-            }
-            if (error.message.includes('Invalid OAuth request info format')) {
-                return c.text(`Invalid OAuth request info format ${error}`, 400);
-            }
+        if (error instanceof McpServerError) {
+            return handleMcpServerError(error);
         }
-        return c.text(`Internal server error ${error}`, 500);
+        return handleGenericError(error, "Callback handling error");
     }
 });
 
 app.post("/store-token", async (c) => {
     try {
         const result = await handler.storeToken(c.req.raw, c.env.OAUTH_PROVIDER);
-        return new Response(JSON.stringify(result), {
-            status: 200,
-            headers: {
-                'Content-Type': 'application/json'
-            }
-        });
+        return createSuccessResponse(result, "Token stored successfully");
     } catch (error) {
-        if (error instanceof Error) {
-            if (error.message.includes('Invalid JSON format')) {
-                return c.text(`Invalid JSON format ${error}`, 400);
-            }
-            if (error.message.includes('Missing token or OAuth request info or instanceUrl')) {
-                return c.text(`Missing token or OAuth request info or instanceUrl ${error}`, 400);
-            }
+        if (error instanceof McpServerError) {
+            return handleMcpServerError(error);
         }
-        return c.text(`Internal server error ${error}`, 500);
+        return handleGenericError(error, "Token storage error");
+    }
+});
+
+app.get("/data/img", async (c) => {
+    try {
+        return await handler.getAnswerImage(c.req.raw, c.env);
+    } catch (error) {
+        if (error instanceof McpServerError) {
+            return handleMcpServerError(error);
+        }
+        return handleGenericError(error, "Image fetching error");
     }
 });
 

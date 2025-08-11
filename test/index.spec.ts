@@ -28,8 +28,12 @@ describe("The ThoughtSpot MCP Worker: Auth handler", () => {
         const result = await typedWorker.fetch(request, env, ctx);
         
         expect(result.status).toBe(200);
-        expect(await result.json()).toMatchObject({
-            message: "Hello, World!",
+        const response = await result.json();
+        expect(response).toMatchObject({
+            success: true,
+            statusCode: 200,
+            data: { message: "Hello, World!" },
+            message: "Hello world response generated successfully"
         });
     });
 });
