@@ -179,6 +179,52 @@ describe("MCP Server", () => {
             expect(liveboardTool?.description).toBe("Create a liveboard from a list of answers");
         });
 
+        it("should return 4 tools when enableSpotterDataSourceDiscovery is false", async () => {
+            // Mock getThoughtSpotClient with enableSpotterDataSourceDiscovery set to false
+            vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
+                getSessionInfo: vi.fn().mockResolvedValue({
+                    clusterId: "test-cluster-123",
+                    clusterName: "test-cluster",
+                    releaseVersion: "10.13.0.cl-110",
+                    userGUID: "test-user-123",
+                    configInfo: {
+                        mixpanelConfig: {
+                            devSdkKey: "test-dev-token",
+                            prodSdkKey: "test-prod-token",
+                            production: false,
+                        },
+                        selfClusterName: "test-cluster",
+                        selfClusterId: "test-cluster-123",
+                    },
+                    userName: "test-user",
+                    currentOrgId: "test-org",
+                    privileges: [],
+                    enableSpotterDataSourceDiscovery: false,
+                }),
+                searchMetadata: vi.fn().mockResolvedValue([]),
+                instanceUrl: "https://test.thoughtspot.cloud",
+            } as any);
+
+            // Create a new server instance to pick up the new mock
+            const testServer = new MCPServer({ props: mockProps });
+            await testServer.init();
+            const { listTools } = connect(testServer);
+
+            const result = await listTools();
+
+            expect(result.tools).toHaveLength(4);
+            expect(result.tools?.map(t => t.name)).toEqual([
+                "ping",
+                "getRelevantQuestions",
+                "getAnswer",
+                "createLiveboard"
+            ]);
+            
+            // Verify that getDataSourceSuggestions is not included
+            const dataSourceTool = result.tools?.find(t => t.name === "getDataSourceSuggestions");
+            expect(dataSourceTool).toBeUndefined();
+        });
+
     });
 
     describe("Ping Tool", () => {
