@@ -49,26 +49,9 @@ export class ThoughtSpotService {
             
             span?.setAttribute("suggestions_count", response.dataSources.length);
             
-            // Sort data sources by confidence in descending order
-            const sortedDataSources = [...response.dataSources].sort((a, b) => b.confidence - a.confidence);
-            
-            const highestConfidenceDataSource = sortedDataSources[0];
-            span?.setAttribute("highest_confidence", highestConfidenceDataSource.confidence);
-            span?.setAttribute("selected_datasource_id", highestConfidenceDataSource.header.guid);
-            
-            // If only one data source, return it
-            if (sortedDataSources.length === 1) {
-                return [highestConfidenceDataSource];
-            }
-            
-            // Check confidence difference between top two
-            const secondHighestConfidenceDataSource = sortedDataSources[1];
-            const confidenceDifference = highestConfidenceDataSource.confidence - secondHighestConfidenceDataSource.confidence;
-            
-            span?.setAttribute("second_highest_confidence", secondHighestConfidenceDataSource.confidence);
-            span?.setAttribute("confidence_difference", confidenceDifference);
-            
-            return [highestConfidenceDataSource, secondHighestConfidenceDataSource];
+            // Return top 2 data sources (or just 1 if only 1 available)
+            const topDataSources = response.dataSources.slice(0, 2);
+            return topDataSources;
             
         } catch (error) {
             span?.setStatus({ code: SpanStatusCode.ERROR, message: (error as Error).message });
@@ -409,6 +392,7 @@ export class ThoughtSpotService {
             releaseVersion: info.releaseVersion,
             currentOrgId: info.currentOrgId,
             privileges: info.privileges,
+            enableSpotterDataSourceDiscovery: info.enableSpotterDataSourceDiscovery,
         };
     }
 

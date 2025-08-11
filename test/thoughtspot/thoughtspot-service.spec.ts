@@ -700,15 +700,6 @@ describe('thoughtspot-service', () => {
       const mockResponse = {
         dataSources: [
           {
-            confidence: 0.60,
-            header: {
-              description: 'Lower confidence data source',
-              displayName: 'Data Source B',
-              guid: 'ds-456'
-            },
-            llmReasoning: 'Lower confidence reasoning'
-          },
-          {
             confidence: 0.80,
             header: {
               description: 'Higher confidence data source',
@@ -716,6 +707,15 @@ describe('thoughtspot-service', () => {
               guid: 'ds-123'
             },
             llmReasoning: 'Higher confidence reasoning'
+          },
+          {
+            confidence: 0.60,
+            header: {
+              description: 'Lower confidence data source',
+              displayName: 'Data Source B',
+              guid: 'ds-456'
+            },
+            llmReasoning: 'Lower confidence reasoning'
           }
         ]
       };

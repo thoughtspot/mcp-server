@@ -90,6 +90,39 @@ export class McpServerError extends Error {
     }
 }
 
+/**
+ * Store a value in Cloudflare KV
+ */
+export async function putInKV(key: string, value: any, env?: any): Promise<void> {
+    if (!env?.OAUTH_KV) {
+        return;
+    }
+    try {
+        await env.OAUTH_KV.put(key, JSON.stringify(value), { expirationTtl: 60 * 60 * 3 });
+    } catch (error) {
+        console.error('Error storing in KV:', error);
+    }
+}
+
+/**
+ * Retrieve a value from Cloudflare KV
+ */
+export async function getFromKV(key: string, env?: any): Promise<any> {
+    console.log('[DEBUG] Getting from KV', key);
+    
+    if (!env?.OAUTH_KV) {
+        return undefined;
+    }
+    
+    try {
+        const value = await env.OAUTH_KV.get(key, { type: "json" });
+        return value;
+    } catch (error) {
+        console.error('Error retrieving from KV:', error);
+        return undefined;
+    }
+}
+
 export function instrumentedMCPServer<T extends BaseMCPServer>(MCPServer: new (ctx: Context) => T, config: ResolveConfigFn) {
     const Agent = class extends McpAgent<Env, any, Props> {
         server = new MCPServer(this);

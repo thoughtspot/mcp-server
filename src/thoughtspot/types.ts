@@ -27,4 +27,5 @@ export interface SessionInfo {
     releaseVersion: string;
     currentOrgId: string;
     privileges: any;
+    enableSpotterDataSourceDiscovery?: boolean;
 } 

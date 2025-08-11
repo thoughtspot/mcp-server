@@ -41,6 +41,7 @@ describe("MCP Server", () => {
                 userName: "test-user",
                 currentOrgId: "test-org",
                 privileges: [],
+                enableSpotterDataSourceDiscovery: true,
             }),
             searchMetadata: vi.fn().mockResolvedValue([
                 {
@@ -131,6 +132,7 @@ describe("MCP Server", () => {
                     userName: "test-user",
                     currentOrgId: "test-org",
                     privileges: [],
+                enableSpotterDataSourceDiscovery: true,
                 },
                 {
                     clientId: "test-client-id",
@@ -177,121 +179,6 @@ describe("MCP Server", () => {
             expect(liveboardTool?.description).toBe("Create a liveboard from a list of answers");
         });
 
-        it("should not include getDataSourceSuggestions tool for version 10.12", async () => {
-            // Mock version to be less than 10.13
-            vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
-                getSessionInfo: vi.fn().mockResolvedValue({
-                    clusterId: "test-cluster-123",
-                    clusterName: "test-cluster",
-                    releaseVersion: "10.12.0.cl-144",
-                    userGUID: "test-user-123",
-                    configInfo: {
-                        mixpanelConfig: {
-                            devSdkKey: "test-dev-token",
-                            prodSdkKey: "test-prod-token",
-                            production: false,
-                        },
-                        selfClusterName: "test-cluster",
-                        selfClusterId: "test-cluster-123",
-                    },
-                    userName: "test-user",
-                    currentOrgId: "test-org",
-                    privileges: [],
-                }),
-                getDataSources: vi.fn().mockResolvedValue([
-                    { id: "ds1", name: "DataSource 1" },
-                    { id: "ds2", name: "DataSource 2" }
-                ])
-            } as any);
-
-            const versionSpecificServer = new MCPServer({
-                props: {
-                    instanceUrl: "https://test.thoughtspot.cloud",
-                    accessToken: "test-access-token",
-                    clientName: {
-                        clientId: "test-client-id",
-                        clientName: "test-client",
-                        registrationDate: Date.now(),
-                    },
-                },
-            });
-
-            await versionSpecificServer.init();
-            const { listTools } = connect(versionSpecificServer);
-
-            const result = await listTools();
-
-            expect(result.tools).toHaveLength(4);
-            expect(result.tools?.map(t => t.name)).toEqual([
-                "ping",
-                "getRelevantQuestions",
-                "getAnswer",
-                "createLiveboard"
-            ]);
-
-            // Ensure getDataSourceSuggestions is NOT included
-            const getDataSourceSuggestionsTool = result.tools?.find(t => t.name === "getDataSourceSuggestions");
-            expect(getDataSourceSuggestionsTool).toBeUndefined();
-        });
-
-        it("should include getDataSourceSuggestions tool for version 10.14", async () => {
-            // Mock version to be greater than 10.13
-            vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
-                getSessionInfo: vi.fn().mockResolvedValue({
-                    clusterId: "test-cluster-123",
-                    clusterName: "test-cluster",
-                    releaseVersion: "10.14.0.cl-155",
-                    userGUID: "test-user-123",
-                    configInfo: {
-                        mixpanelConfig: {
-                            devSdkKey: "test-dev-token",
-                            prodSdkKey: "test-prod-token",
-                            production: false,
-                        },
-                        selfClusterName: "test-cluster",
-                        selfClusterId: "test-cluster-123",
-                    },
-                    userName: "test-user",
-                    currentOrgId: "test-org",
-                    privileges: [],
-                }),
-                getDataSources: vi.fn().mockResolvedValue([
-                    { id: "ds1", name: "DataSource 1" },
-                    { id: "ds2", name: "DataSource 2" }
-                ])
-            } as any);
-
-            const versionSpecificServer = new MCPServer({
-                props: {
-                    instanceUrl: "https://test.thoughtspot.cloud",
-                    accessToken: "test-access-token",
-                    clientName: {
-                        clientId: "test-client-id",
-                        clientName: "test-client",
-                        registrationDate: Date.now(),
-                    },
-                },
-            });
-
-            await versionSpecificServer.init();
-            const { listTools } = connect(versionSpecificServer);
-
-            const result = await listTools();
-
-            expect(result.tools).toHaveLength(5);
-            expect(result.tools?.map(t => t.name)).toEqual([
-                "ping",
-                "getRelevantQuestions",
-                "getAnswer",
-                "createLiveboard",
-                "getDataSourceSuggestions"
-            ]);
-
-            // Ensure getDataSourceSuggestions IS included
-            const getDataSourceSuggestionsTool = result.tools?.find(t => t.name === "getDataSourceSuggestions");
-            expect(getDataSourceSuggestionsTool).toBeDefined();
-            expect(getDataSourceSuggestionsTool?.description).toBe("Get data source suggestions for a query. Use this tool only if there is not datasource id provided in the context or the users query. If mulitple data sources are returned, and the confidence difference between the top two data sources is less than 0.3, ask the user to select the most relevant data source. Otherwise use the data source with the highest confidence to get the relevant questions and answers for the query.");
-        });
     });
 
     describe("Ping Tool", () => {
@@ -365,6 +252,7 @@ describe("MCP Server", () => {
                     userName: "test-user",
                     currentOrgId: "test-org",
                     privileges: [],
+                enableSpotterDataSourceDiscovery: true,
                 }),
                 queryGetDecomposedQuery: vi.fn().mockRejectedValue(new Error("Service unavailable")),
                 instanceUrl: "https://test.thoughtspot.cloud",
@@ -402,6 +290,7 @@ describe("MCP Server", () => {
                     userName: "test-user",
                     currentOrgId: "test-org",
                     privileges: [],
+                enableSpotterDataSourceDiscovery: true,
                 }),
                 queryGetDecomposedQuery: vi.fn().mockResolvedValue({
                     decomposedQueryResponse: {
@@ -480,6 +369,7 @@ describe("MCP Server", () => {
                     userName: "test-user",
                     currentOrgId: "test-org",
                     privileges: [],
+                enableSpotterDataSourceDiscovery: true,
                 }),
                 singleAnswer: vi.fn().mockRejectedValue(new Error("Question not found")),
                 instanceUrl: "https://test.thoughtspot.cloud",
@@ -550,6 +440,7 @@ describe("MCP Server", () => {
                     userName: "test-user",
                     currentOrgId: "test-org",
                     privileges: [],
+                enableSpotterDataSourceDiscovery: true,
                 }),
                 exportUnsavedAnswerTML: vi.fn().mockResolvedValue({
                     answer: {
@@ -737,6 +628,7 @@ describe("MCP Server", () => {
                     userName: "test-user",
                     currentOrgId: "test-org",
                     privileges: [],
+                enableSpotterDataSourceDiscovery: true,
                 }),
                 queryGetDataSourceSuggestions: vi.fn().mockResolvedValue({
                     dataSources: [
@@ -814,6 +706,7 @@ describe("MCP Server", () => {
                     userName: "test-user",
                     currentOrgId: "test-org",
                     privileges: [],
+                enableSpotterDataSourceDiscovery: true,
                 }),
                 queryGetDataSourceSuggestions: vi.fn().mockResolvedValue({
                     dataSources: []
@@ -852,6 +745,7 @@ describe("MCP Server", () => {
                     userName: "test-user",
                     currentOrgId: "test-org",
                     privileges: [],
+                enableSpotterDataSourceDiscovery: true,
                 }),
                 queryGetDataSourceSuggestions: vi.fn().mockResolvedValue({
                     dataSources: [

@@ -127,7 +127,7 @@ export class MCPServer extends BaseMCPServer {
                         destructiveHint: false,
                     },
                 },
-                ...(this.isVersionGreaterThan1013() ? [{
+                ...(this.isDatasourceDiscoveryAvailable() ? [{
                     name: ToolName.GetDataSourceSuggestions,
                     description: "Get data source suggestions for a query. Use this tool only if there is not datasource id provided in the context or the users query. If mulitple data sources are returned, and the confidence difference between the top two data sources is less than 0.3, ask the user to select the most relevant data source. Otherwise use the data source with the highest confidence to get the relevant questions and answers for the query.",
                     inputSchema: zodToJsonSchema(GetDataSourceSuggestionsSchema) as ToolInput,
