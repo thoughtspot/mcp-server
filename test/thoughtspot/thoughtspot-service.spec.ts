@@ -7,6 +7,7 @@ import {
   createLiveboard,
   getDataSources,
   getSessionInfo,
+  getDataSourceSuggestions,
   ThoughtSpotService,
 } from '../../src/thoughtspot/thoughtspot-service';
 
@@ -591,6 +592,231 @@ describe('thoughtspot-service', () => {
       (mockClient as any).getSessionInfo = vi.fn().mockRejectedValue(error);
 
       await expect(getSessionInfo(mockClient)).rejects.toThrow('API Error');
+    });
+  });
+
+  describe('getDataSourceSuggestions', () => {
+    it('should return single data source when only one suggestion is available', async () => {
+      const mockResponse = {
+        dataSources: [
+          {
+            confidence: 0.85,
+            header: {
+              description: 'Sales data for the current year',
+              displayName: 'Sales Data',
+              guid: 'ds-123'
+            },
+            llmReasoning: 'This data source contains sales information relevant to your query'
+          }
+        ]
+      };
+
+      (mockClient as any).queryGetDataSourceSuggestions = vi.fn().mockResolvedValue(mockResponse);
+
+      const result = await getDataSourceSuggestions('show me sales data', mockClient);
+
+      expect((mockClient as any).queryGetDataSourceSuggestions).toHaveBeenCalledWith('show me sales data');
+      expect(result).toEqual([{
+        confidence: 0.85,
+        header: {
+          description: 'Sales data for the current year',
+          displayName: 'Sales Data',
+          guid: 'ds-123'
+        },
+        llmReasoning: 'This data source contains sales information relevant to your query'
+      }]);
+    });
+
+    it('should return both data sources when multiple suggestions are available', async () => {
+      const mockResponse = {
+        dataSources: [
+          {
+            confidence: 0.70,
+            header: {
+              description: 'Sales data for the current year',
+              displayName: 'Sales Data',
+              guid: 'ds-123'
+            },
+            llmReasoning: 'This data source contains sales information'
+          },
+          {
+            confidence: 0.65,
+            header: {
+              description: 'Revenue analysis data',
+              displayName: 'Revenue Data',
+              guid: 'ds-456'
+            },
+            llmReasoning: 'This data source contains revenue information'
+          }
+        ]
+      };
+
+      (mockClient as any).queryGetDataSourceSuggestions = vi.fn().mockResolvedValue(mockResponse);
+
+      const result = await getDataSourceSuggestions('revenue analysis', mockClient);
+
+      expect(result).toHaveLength(2);
+      expect(result![0].confidence).toBe(0.70);
+      expect(result![1].confidence).toBe(0.65);
+    });
+
+    it('should return both data sources regardless of confidence difference', async () => {
+      const mockResponse = {
+        dataSources: [
+          {
+            confidence: 0.90,
+            header: {
+              description: 'Sales data for the current year',
+              displayName: 'Sales Data',
+              guid: 'ds-123'
+            },
+            llmReasoning: 'High confidence match for sales data'
+          },
+          {
+            confidence: 0.55,
+            header: {
+              description: 'Customer data',
+              displayName: 'Customer Data',
+              guid: 'ds-456'
+            },
+            llmReasoning: 'Lower confidence match'
+          }
+        ]
+      };
+
+      (mockClient as any).queryGetDataSourceSuggestions = vi.fn().mockResolvedValue(mockResponse);
+
+      const result = await getDataSourceSuggestions('sales performance', mockClient);
+
+      // Always return both data sources when there are multiple suggestions
+      expect(result).toHaveLength(2);
+      expect(result![0].confidence).toBe(0.90);
+      expect(result![0].header.guid).toBe('ds-123');
+      expect(result![1].confidence).toBe(0.55);
+      expect(result![1].header.guid).toBe('ds-456');
+    });
+
+    it('should sort data sources by confidence in descending order', async () => {
+      const mockResponse = {
+        dataSources: [
+          {
+            confidence: 0.80,
+            header: {
+              description: 'Higher confidence data source',
+              displayName: 'Data Source A',
+              guid: 'ds-123'
+            },
+            llmReasoning: 'Higher confidence reasoning'
+          },
+          {
+            confidence: 0.60,
+            header: {
+              description: 'Lower confidence data source',
+              displayName: 'Data Source B',
+              guid: 'ds-456'
+            },
+            llmReasoning: 'Lower confidence reasoning'
+          }
+        ]
+      };
+
+      (mockClient as any).queryGetDataSourceSuggestions = vi.fn().mockResolvedValue(mockResponse);
+
+      const result = await getDataSourceSuggestions('test query', mockClient);
+
+      expect(result![0].confidence).toBe(0.80);
+      expect(result![0].header.guid).toBe('ds-123');
+      expect(result![1].confidence).toBe(0.60);
+      expect(result![1].header.guid).toBe('ds-456');
+    });
+
+    it('should return null when no data sources are available', async () => {
+      const mockResponse = {
+        dataSources: []
+      };
+
+      (mockClient as any).queryGetDataSourceSuggestions = vi.fn().mockResolvedValue(mockResponse);
+
+      const result = await getDataSourceSuggestions('unknown query', mockClient);
+
+      expect(result).toBeNull();
+    });
+
+    it('should return null when response.dataSources is null or undefined', async () => {
+      const mockResponse = {
+        dataSources: null
+      };
+
+      (mockClient as any).queryGetDataSourceSuggestions = vi.fn().mockResolvedValue(mockResponse);
+
+      const result = await getDataSourceSuggestions('test query', mockClient);
+
+      expect(result).toBeNull();
+    });
+
+    it('should handle API errors by throwing the error', async () => {
+      const error = new Error('GraphQL API Error');
+      (mockClient as any).queryGetDataSourceSuggestions = vi.fn().mockRejectedValue(error);
+
+      await expect(getDataSourceSuggestions('test query', mockClient))
+        .rejects.toThrow('GraphQL API Error');
+    });
+
+    it('should handle multiple data sources with same confidence', async () => {
+      const mockResponse = {
+        dataSources: [
+          {
+            confidence: 0.75,
+            header: {
+              description: 'First data source',
+              displayName: 'Data Source 1',
+              guid: 'ds-123'
+            },
+            llmReasoning: 'First reasoning'
+          },
+          {
+            confidence: 0.75,
+            header: {
+              description: 'Second data source',
+              displayName: 'Data Source 2',
+              guid: 'ds-456'
+            },
+            llmReasoning: 'Second reasoning'
+          }
+        ]
+      };
+
+      (mockClient as any).queryGetDataSourceSuggestions = vi.fn().mockResolvedValue(mockResponse);
+
+      const result = await getDataSourceSuggestions('test query', mockClient);
+
+      expect(result).toHaveLength(2);
+      expect(result![0].confidence).toBe(0.75);
+      expect(result![1].confidence).toBe(0.75);
+    });
+
+    it('should use ThoughtSpotService class method correctly', async () => {
+      const mockResponse = {
+        dataSources: [
+          {
+            confidence: 0.85,
+            header: {
+              description: 'Test data source',
+              displayName: 'Test Data',
+              guid: 'ds-123'
+            },
+            llmReasoning: 'Test reasoning'
+          }
+        ]
+      };
+
+      (mockClient as any).queryGetDataSourceSuggestions = vi.fn().mockResolvedValue(mockResponse);
+
+      const service = new ThoughtSpotService(mockClient);
+      const result = await service.getDataSourceSuggestions('test query');
+
+      expect((mockClient as any).queryGetDataSourceSuggestions).toHaveBeenCalledWith('test query');
+      expect(result).toEqual(mockResponse.dataSources);
     });
   });
 

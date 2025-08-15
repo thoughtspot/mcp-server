@@ -4,6 +4,20 @@ export interface DataSource {
     description: string;
 }
 
+export interface DataSourceSuggestion {
+    confidence: number;
+    header: {
+        description: string;
+        displayName: string;
+        guid: string;
+    };
+    llmReasoning: string;
+}
+
+export interface DataSourceSuggestionResponse {
+    dataSources: DataSourceSuggestion[];
+}
+
 export interface SessionInfo {
     mixpanelToken: string;
     userGUID: string;
@@ -13,4 +27,5 @@ export interface SessionInfo {
     releaseVersion: string;
     currentOrgId: string;
     privileges: any;
+    enableSpotterDataSourceDiscovery?: boolean;
 } 

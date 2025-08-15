@@ -1,7 +1,7 @@
 import type { ThoughtSpotRestApi } from "@thoughtspot/rest-api-sdk";
 import { SpanStatusCode, trace, context } from "@opentelemetry/api";
 import { getActiveSpan, WithSpan } from "../metrics/tracing/tracing-utils";
-import type { DataSource, SessionInfo } from "./types";
+import type { DataSource, SessionInfo, DataSourceSuggestion } from "./types";
 
 
 /**
@@ -9,6 +9,56 @@ import type { DataSource, SessionInfo } from "./types";
  */
 export class ThoughtSpotService {
     constructor(private client: ThoughtSpotRestApi) { }
+
+    @WithSpan('discover-data-sources')
+    async discoverDataSources(query?: string): Promise<DataSource[] | DataSourceSuggestion[] | null> {
+        const span = getActiveSpan();
+        span?.addEvent("discover-data-sources");
+        
+        // If a query is provided, use intelligent data source suggestions
+        if (query) {
+            span?.addEvent("get-data-source-suggestions");
+            return await this.getDataSourceSuggestions(query);
+        }
+        
+        // Otherwise, fallback to getting all data sources
+        const dataSources = await this.getDataSources();
+        return dataSources;
+    }
+
+    /**
+     * Get intelligent data source suggestions based on a query using GraphQL
+     */
+    @WithSpan('get-data-source-suggestions')
+    async getDataSourceSuggestions(query: string): Promise<DataSourceSuggestion[] | null> {
+        const span = getActiveSpan();
+        
+        try {
+            span?.setAttribute("query", query);
+            span?.addEvent("query-get-data-source-suggestions");
+                        
+            const response = await (this.client as any).queryGetDataSourceSuggestions(query);
+            
+            span?.setStatus({ code: SpanStatusCode.OK, message: "Data source suggestions retrieved" });
+            
+            // Check if we have any data sources
+            if (!response.dataSources || response.dataSources.length === 0) {
+                span?.setAttribute("suggestions_count", 0);
+                return null;
+            }
+            
+            span?.setAttribute("suggestions_count", response.dataSources.length);
+            
+            // Return top 2 data sources (or just 1 if only 1 available)
+            const topDataSources = response.dataSources.slice(0, 2);
+            return topDataSources;
+            
+        } catch (error) {
+            span?.setStatus({ code: SpanStatusCode.ERROR, message: (error as Error).message });
+            console.error("Error getting data source suggestions: ", error);
+            throw error;
+        }
+    }
 
     /**
      * Get relevant questions for a given query and data sources
@@ -342,6 +392,7 @@ export class ThoughtSpotService {
             releaseVersion: info.releaseVersion,
             currentOrgId: info.currentOrgId,
             privileges: info.privileges,
+            enableSpotterDataSourceDiscovery: info.enableSpotterDataSourceDiscovery,
         };
     }
 
@@ -439,10 +490,18 @@ export async function getDataSources(
     return service.getDataSources();
 }
 
+export async function getDataSourceSuggestions(
+    query: string,
+    client: ThoughtSpotRestApi,
+): Promise<DataSourceSuggestion[] | null> {
+    const service = new ThoughtSpotService(client);
+    return service.getDataSourceSuggestions(query);
+}
+
 export async function getSessionInfo(client: ThoughtSpotRestApi): Promise<SessionInfo> {
     const service = new ThoughtSpotService(client);
     return service.getSessionInfo();
 }
 
 // Export types
-export type { DataSource, SessionInfo } from "./types";
+export type { DataSource, SessionInfo, DataSourceSuggestion, DataSourceSuggestionResponse } from "./types";

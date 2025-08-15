@@ -120,10 +120,25 @@ export class OpenAIDeepResearchMCPServer extends BaseMCPServer {
 
             return this.createStructuredContentSuccessResponse({ results }, "Relevant questions found");
         }
-
         // Search for datasources in case the query is not of the form "datasource:<id> <query-with-spaces>"
-        // TODO: Implement this
-        return this.createStructuredContentSuccessResponse({ results: [] }, "No relevant questions found");
+        if (!this.isDatasourceDiscoveryAvailable()) {
+            return this.createStructuredContentSuccessResponse({ results: [] }, "No relevant questions found");
+        }
+        const dataSources = await this.getThoughtSpotService().getDataSourceSuggestions(queryWithoutDatasourceId);
+        if (!dataSources || dataSources.length === 0) {
+            return this.createSuccessResponse("No relevant data sources found, please provide a datasource id in the query");
+        }
+        const results = dataSources.map(d => ({
+            id: `datasource:///${d.header.guid}`,
+            title: d.header.displayName,
+            text: `Datasource Description: ${d.header.description}. Confidence that this datasource is relevant to the query: ${d.confidence}. Reasoning for the confidence: ${d.llmReasoning}. 
+            Use this datasource to search for relevant questions and to get answers for the questions. 
+            Use the search tool to search for relevant questions with the format "datasource:<id> <query-with-spaces>" and the fetch tool to get answers for the questions.`,
+        }));
+
+        return this.createStructuredContentSuccessResponse({ results }, "Relevant questions found");
+
+
     }
 
     @WithSpan('call-fetch')

@@ -3,7 +3,7 @@ import type { RequestContext, ResponseContext } from "@thoughtspot/rest-api-sdk"
 import YAML from "yaml";
 import type { Observable } from "rxjs";
 import { of } from "rxjs";
-import type { SessionInfo } from "./types";
+import type { SessionInfo, DataSourceSuggestionResponse } from "./types";
 
 export const getThoughtSpotClient = (instanceUrl: string, bearerToken: string) => {
     const config = createBearerAuthenticationConfig(
@@ -27,6 +27,7 @@ export const getThoughtSpotClient = (instanceUrl: string, bearerToken: string) =
     (client as any).instanceUrl = instanceUrl;
     addExportUnsavedAnswerTML(client, instanceUrl, bearerToken);
     addGetSessionInfo(client, instanceUrl, bearerToken);
+    addQueryGetDataSourceSuggestions(client, instanceUrl, bearerToken);
     return client;
 }
 
@@ -104,5 +105,51 @@ async function addGetSessionInfo(client: any, instanceUrl: string, token: string
         const data: any = await response.json();
         const info = data.info;
         return info;
+    };
+}
+
+const getDataSourceSuggestionsQuery = `
+query QueryGetDataSourceSuggestions($request: Input_eureka_DataSourceSuggestionRequest) {
+  queryGetDataSourceSuggestions(request: $request) {
+    dataSources {
+      confidence
+      header {
+        description
+        displayName
+        guid
+      }
+      llmReasoning
+    }
+  }
+}`;
+
+// This is a workaround until we get the public API for this
+function addQueryGetDataSourceSuggestions(client: any, instanceUrl: string, token: string) {
+    (client as any).queryGetDataSourceSuggestions = async (query: string): Promise<DataSourceSuggestionResponse> => {
+        const endpoint = "/prism/";
+        const fetchOptions = {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "user-agent": "ThoughtSpot-ts-client",
+                "Authorization": `Bearer ${token}`,
+            },
+            body: JSON.stringify({
+                query: getDataSourceSuggestionsQuery,
+                variables: {
+                    request: {
+                        query: query
+                    }
+                },
+                operationName: "QueryGetDataSourceSuggestions"
+            })
+        };
+        console.log("fetchOptions", fetchOptions);
+        const response = await fetch(`${instanceUrl}${endpoint}`, fetchOptions);
+        console.log("response", response);
+        const data = await response.json() as any;
+        console.log("data", data);
+        return data.data.queryGetDataSourceSuggestions;
     };
 }

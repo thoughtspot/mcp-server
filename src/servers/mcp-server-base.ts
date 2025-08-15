@@ -64,6 +64,14 @@ export abstract class BaseMCPServer extends Server {
     }
 
     /**
+     * Check if data source discovery is available
+     */
+    protected isDatasourceDiscoveryAvailable(): boolean {
+        const enableSpotterDataSourceDiscovery = this.sessionInfo?.enableSpotterDataSourceDiscovery;
+        return !!enableSpotterDataSourceDiscovery;
+    };
+
+    /**
      * Initialize span with common attributes (user_guid and instance_url)
      */
     protected initSpanWithCommonAttributes(): Span | undefined {

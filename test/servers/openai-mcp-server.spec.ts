@@ -25,7 +25,7 @@ describe("OpenAI Deep Research MCP Server", () => {
             getSessionInfo: vi.fn().mockResolvedValue({
                 clusterId: "test-cluster-123",
                 clusterName: "test-cluster",
-                releaseVersion: "1.0.0",
+                releaseVersion: "10.13.0.cl-10",
                 userGUID: "test-user-123",
                 configInfo: {
                     mixpanelConfig: {
@@ -39,6 +39,7 @@ describe("OpenAI Deep Research MCP Server", () => {
                 userName: "test-user",
                 currentOrgId: "test-org",
                 privileges: [],
+                enableSpotterDataSourceDiscovery: true,
             }),
             singleAnswer: vi.fn().mockResolvedValue({
                 session_identifier: "session-123",
@@ -77,12 +78,13 @@ describe("OpenAI Deep Research MCP Server", () => {
                 {
                     clusterId: "test-cluster-123",
                     clusterName: "test-cluster",
-                    releaseVersion: "1.0.0",
+                    releaseVersion: "10.13.0.cl-10",
                     userGUID: "test-user-123",
                     mixpanelToken: "test-dev-token",
                     userName: "test-user",
                     currentOrgId: "test-org",
                     privileges: [],
+                    enableSpotterDataSourceDiscovery: true,
                 },
                 {
                     clientId: "test-client-id",
@@ -327,21 +329,6 @@ describe("OpenAI Deep Research MCP Server", () => {
             expect((result.content as any[])[0].text).toBe("No relevant questions found");
         });
 
-        it("should handle query without datasource ID", async () => {
-            await server.init();
-            const { callTool } = connect(server);
-
-            const result = await callTool("search", {
-                query: "How to reduce customer churn?"
-            });
-
-            expect(result.isError).toBeUndefined();
-            expect(result.structuredContent).toEqual({ results: [] });
-            // The text field contains the JSON stringified structured content
-            expect((result.content as any[])[0].text).toContain('"results"');
-            expect((result.content as any[])[0].text).toContain('[]');
-        });
-
         it("should handle query with complex datasource ID", async () => {
             // Mock the ThoughtSpot service to return relevant questions
             const mockGetRelevantQuestions = vi.fn().mockResolvedValue({
@@ -404,6 +391,54 @@ describe("OpenAI Deep Research MCP Server", () => {
                     }
                 ]
             });
+        });
+
+        it("should handle query without datasource ID for version 10.12 (no data source suggestions)", async () => {
+            // Mock version to be less than 10.13
+            vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
+                getSessionInfo: vi.fn().mockResolvedValue({
+                    clusterId: "test-cluster-123",
+                    clusterName: "test-cluster",
+                    releaseVersion: "10.12.0.cl-144", // Version < 10.13
+                    userGUID: "test-user-123",
+                    configInfo: {
+                        mixpanelConfig: {
+                            devSdkKey: "test-dev-token",
+                            prodSdkKey: "test-prod-token",
+                            production: false,
+                        },
+                        selfClusterName: "test-cluster",
+                        selfClusterId: "test-cluster-123",
+                    },
+                    userName: "test-user",
+                    currentOrgId: "test-org",
+                    privileges: [],
+                })
+            } as any);
+
+            const versionSpecificServer = new OpenAIDeepResearchMCPServer({
+                props: {
+                    instanceUrl: "https://test.thoughtspot.cloud",
+                    accessToken: "test-access-token",
+                    clientName: {
+                        clientId: "test-client-id",
+                        clientName: "test-client",
+                        registrationDate: Date.now(),
+                    },
+                },
+            });
+
+            await versionSpecificServer.init();
+            const { callTool } = connect(versionSpecificServer);
+
+            const result = await callTool("search", {
+                query: "How to reduce customer churn?"
+            });
+
+            expect(result.isError).toBeUndefined();
+            expect(result.structuredContent).toEqual({ results: [] });
+            expect((result.content as any[])[0].text).toContain('"results"');
+            expect((result.content as any[])[0].text).toContain('[]');
         });
     });
 
