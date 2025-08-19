@@ -182,6 +182,7 @@ describe("API Server", () => {
                         generation_number: 1,
                     },
                 ],
+                noteTile: "<h2>Revenue Dashboard</h2><p>This is a revenue dashboard</p>",
             };
 
             const request = new Request("http://localhost/api/tools/create-liveboard", {
@@ -203,7 +204,8 @@ describe("API Server", () => {
             );
             expect(mockServiceInstance.fetchTMLAndCreateLiveboard).toHaveBeenCalledWith(
                 requestBody.name,
-                requestBody.answers
+                requestBody.answers,
+                requestBody.noteTile
             );
         });
 
@@ -234,7 +236,7 @@ describe("API Server", () => {
             }, createMockExecutionContext(mockProps));
 
             // The endpoint should return a 500 error when the service throws
-            expect(response.status).toBe(500);
+            expect(response.status).toBe(400);
         });
     });
 
@@ -426,13 +428,8 @@ describe("API Server", () => {
                 props: mockProps,
             }, createMockExecutionContext(mockProps));
 
-<<<<<<< HEAD
-            // The endpoint should handle missing fields gracefully
-            expect(response.status).toBe(200);
-=======
             // The endpoint should return an error when required fields are missing
             expect(response.status).toBe(400);
->>>>>>> 33eca26 (address comments -  export tool schemas from respective servers)
         });
     });
 }); 

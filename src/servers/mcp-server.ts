@@ -65,7 +65,7 @@ export const CreateLiveboardSchema = z.object({
         ` ),
 });
 
-const GetDataSourceSuggestionsSchema = z.object({
+export const GetDataSourceSuggestionsSchema = z.object({
     query: z.string().describe(`The query to get data source suggestions for, this could be a high level task or question the user is asking or hoping to get answered.
          There can be multiple data sources. Each data source can be used to get the data for the user's query using the other tools getRelevantQuestions and getAnswer.`),
 });
@@ -78,6 +78,49 @@ export enum ToolName {
     CreateLiveboard = "createLiveboard",
     GetDataSourceSuggestions = "getDataSourceSuggestions",
 }
+
+export const toolDefinitionsMCPServer = [
+    {
+        name: ToolName.Ping,
+        description: "Simple ping tool to test connectivity and Auth",
+        inputSchema: zodToJsonSchema(PingSchema) as ToolInput,
+        annotations: {
+            title: "Test Connection",
+            readOnlyHint: true,
+            destructiveHint: false,
+        },
+    },
+    {
+        name: ToolName.GetRelevantQuestions,
+        description: "Get relevant data questions from ThoughtSpot database",
+        inputSchema: zodToJsonSchema(GetRelevantQuestionsSchema) as ToolInput,
+        annotations: {
+            title: "Get Relevant Questions for a Query",
+            readOnlyHint: true,
+            destructiveHint: false,
+        },
+    },
+    {
+        name: ToolName.GetAnswer,
+        description: "Get the answer to a question from ThoughtSpot database",
+        inputSchema: zodToJsonSchema(GetAnswerSchema) as ToolInput,
+        annotations: {
+            title: "Get Answer for a Question",
+            readOnlyHint: true,
+            destructiveHint: false,
+        },
+    },
+    {
+        name: ToolName.CreateLiveboard,
+        description: "Create a liveboard from a list of answers",
+        inputSchema: zodToJsonSchema(CreateLiveboardSchema) as ToolInput,
+        annotations: {
+            title: "Create Liveboard from Answers",
+            readOnlyHint: true,
+            destructiveHint: false,
+        },
+    },
+]
 export class MCPServer extends BaseMCPServer {
     constructor(ctx: Context) {
         super(ctx, "ThoughtSpot", "1.0.0");
@@ -86,55 +129,13 @@ export class MCPServer extends BaseMCPServer {
     protected async listTools() {
         return {
             tools: [
-                {
-                    name: ToolName.Ping,
-                    description: "Simple ping tool to test connectivity and Auth",
-                    inputSchema: zodToJsonSchema(PingSchema) as ToolInput,
-                    annotations: {
-                        title: "Test Connection",
-                        readOnlyHint: true,
-                        destructiveHint: false,
-                    },
-                },
-                {
-                    name: ToolName.GetRelevantQuestions,
-                    description: "Get relevant data questions from ThoughtSpot database",
-                    inputSchema: zodToJsonSchema(GetRelevantQuestionsSchema) as ToolInput,
-                    annotations: {
-                        title: "Get Relevant Questions for a Query",
-                        readOnlyHint: true,
-                        destructiveHint: false,
-                    },
-                },
-                {
-                    name: ToolName.GetAnswer,
-                    description: "Get the answer to a question from ThoughtSpot database",
-                    inputSchema: zodToJsonSchema(GetAnswerSchema) as ToolInput,
-                    annotations: {
-                        title: "Get Answer for a Question",
-                        readOnlyHint: true,
-                        destructiveHint: false,
-                    },
-                },
-                {
-                    name: ToolName.CreateLiveboard,
-                    description: "Create a liveboard from a list of answers",
-                    inputSchema: zodToJsonSchema(CreateLiveboardSchema) as ToolInput,
-                    annotations: {
-                        title: "Create Liveboard from Answers",
-                        readOnlyHint: true,
-                        destructiveHint: false,
-                    },
-                },
+                ...toolDefinitionsMCPServer,
+                // Add data source discovery tool if available. 
+                // TODO(shikhar): Add data source discovery tool to the default tool definitions once GA. 
                 ...(this.isDatasourceDiscoveryAvailable() ? [{
                     name: ToolName.GetDataSourceSuggestions,
                     description: "Get data source suggestions for a query. Use this tool only if there is not datasource id provided in the context or the users query. If mulitple data sources are returned, and the confidence difference between the top two data sources is less than 0.3, ask the user to select the most relevant data source. Otherwise use the data source with the highest confidence to get the relevant questions and answers for the query.",
                     inputSchema: zodToJsonSchema(GetDataSourceSuggestionsSchema) as ToolInput,
-                    annotations: {
-                        title: "Get Data Source Suggestions for a Query",
-                        readOnlyHint: true,
-                        destructiveHint: false,
-                    },
                 }] : []),
             ]
         };

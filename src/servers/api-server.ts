@@ -1,16 +1,10 @@
 import { Hono } from 'hono'
 import { zValidator } from '@hono/zod-validator'
 import type { Props } from '../utils';
-import { McpServerError } from '../utils';
-import { getDataSources, ThoughtSpotService } from '../thoughtspot/thoughtspot-service';
+import { ThoughtSpotService } from '../thoughtspot/thoughtspot-service';
 import { getThoughtSpotClient } from '../thoughtspot/thoughtspot-client';
 import { getActiveSpan, WithSpan } from '../metrics/tracing/tracing-utils';
-<<<<<<< HEAD
-import { context, type Span, SpanStatusCode, trace } from "@opentelemetry/api";
-import { CreateLiveboardSchema, GetAnswerSchema, GetRelevantQuestionsSchema } from '../api-schemas/schemas';
-=======
 import { CreateLiveboardSchema, GetAnswerSchema, GetRelevantQuestionsSchema } from './mcp-server';
->>>>>>> 33eca26 (address comments -  export tool schemas from respective servers)
 
 const apiServer = new Hono<{ Bindings: Env & { props: Props } }>()
 

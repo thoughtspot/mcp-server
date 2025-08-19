@@ -6,9 +6,6 @@ import type {
 import { BaseMCPServer, type Context } from "./mcp-server-base";
 import { z } from "zod";
 import { WithSpan } from "../metrics/tracing/tracing-utils";
-<<<<<<< HEAD
-import { SearchInputSchema, fetchInputSchema, toolDefinitionsOpenAIMCPServer } from "../api-schemas/schemas";
-=======
 import zodToJsonSchema from "zod-to-json-schema";
 import { ToolSchema } from "@modelcontextprotocol/sdk/types.js";
 
@@ -17,7 +14,6 @@ export type ToolInput = z.infer<typeof ToolInputSchema>;
 
 const ToolOutputSchema = ToolSchema.shape.outputSchema;
 export type ToolOutput = z.infer<typeof ToolOutputSchema>;
-
 
 export const SearchInputSchema = z.object({
     query: z.string().describe(`The question/task to search for relevant data queries to answer. Use the fetch tool to retrieve the data for individual queries. The datasource id should be passed as part of the query. With the syntax 
@@ -64,7 +60,6 @@ export const toolDefinitionsOpenAIMCPServer = [
         outputSchema: zodToJsonSchema(FetchOutputSchema) as ToolOutput,
     },
 ];
->>>>>>> 33eca26 (address comments -  export tool schemas from respective servers)
 
 export class OpenAIDeepResearchMCPServer extends BaseMCPServer {
     constructor(ctx: Context) {
@@ -75,6 +70,7 @@ export class OpenAIDeepResearchMCPServer extends BaseMCPServer {
         return {
             tools: toolDefinitionsOpenAIMCPServer.map((tool) => ({
                 name: tool.name,
+                description: tool.description,
                 inputSchema: tool.inputSchema,
                 outputSchema: tool.outputSchema,
             })),
@@ -154,7 +150,7 @@ export class OpenAIDeepResearchMCPServer extends BaseMCPServer {
 
     @WithSpan('call-fetch')
     protected async callFetch(request: z.infer<typeof CallToolRequestSchema>) {
-        const { id } = fetchInputSchema.parse(request.params.arguments);
+        const { id } = FetchInputSchema.parse(request.params.arguments);
         // id is of the form "<datasource-id>:<question>"
         const [datasourceId, question = ""] = id.split(":");
         const answer = await this.getThoughtSpotService().getAnswerForQuestion(question, datasourceId, false);
