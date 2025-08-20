@@ -68,12 +68,9 @@ export class OpenAIDeepResearchMCPServer extends BaseMCPServer {
 
     protected async listTools() {
         return {
-            tools: toolDefinitionsOpenAIMCPServer.map((tool) => ({
-                name: tool.name,
-                description: tool.description,
-                inputSchema: tool.inputSchema,
-                outputSchema: tool.outputSchema,
-            })),
+            tools: [
+                ...toolDefinitionsOpenAIMCPServer,
+            ]
         };
     }
 
