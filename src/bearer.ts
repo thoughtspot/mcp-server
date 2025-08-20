@@ -3,6 +3,7 @@ import type honoApp from './handlers';
 import { validateAndSanitizeUrl } from './oauth-manager/oauth-utils';
 
 export function withBearerHandler(app: typeof honoApp, MCPServer: typeof ThoughtSpotMCP) {
+
     app.mount("/bearer", (req, env, ctx) => {
         const authHeader = req.headers.get("authorization");
         if (!authHeader) {
