@@ -11,6 +11,7 @@ export const thoughtSpotAgentCard: AgentCard = {
     organization: "ThoughtSpot",
     url: "https://www.thoughtspot.com",
   },
+  protocolVersion: "1.0.0",
   version: "0.0.2",
   capabilities: {
     streaming: true,
