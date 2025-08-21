@@ -1,10 +1,10 @@
 import { Hono } from 'hono'
+import { zValidator } from '@hono/zod-validator'
 import type { Props } from '../utils';
-import { McpServerError } from '../utils';
-import { getDataSources, ThoughtSpotService } from '../thoughtspot/thoughtspot-service';
+import { ThoughtSpotService } from '../thoughtspot/thoughtspot-service';
 import { getThoughtSpotClient } from '../thoughtspot/thoughtspot-client';
 import { getActiveSpan, WithSpan } from '../metrics/tracing/tracing-utils';
-import { context, type Span, SpanStatusCode, trace } from "@opentelemetry/api";
+import { CreateLiveboardSchema, GetAnswerSchema, GetRelevantQuestionsSchema } from './mcp-server';
 
 const apiServer = new Hono<{ Bindings: Env & { props: Props } }>()
 
@@ -35,9 +35,9 @@ class ApiHandler {
     }
 
     @WithSpan('api-create-liveboard')
-    async createLiveboard(props: Props, name: string, answers: any[]) {
+    async createLiveboard(props: Props, name: string, answers: any[], noteTileParsedHtml: string) {
         const service = this.getThoughtSpotService(props);
-        const result = await service.fetchTMLAndCreateLiveboard(name, answers);
+        const result = await service.fetchTMLAndCreateLiveboard(name, answers, noteTileParsedHtml);
         return result.url || '';
     }
 
@@ -88,25 +88,51 @@ class ApiHandler {
 
 const handler = new ApiHandler();
 
-apiServer.post("/api/tools/relevant-questions", async (c) => {
-    const { props } = c.executionCtx;
-    const { query, datasourceIds, additionalContext } = await c.req.json();
-    const questions = await handler.getRelevantQuestions(props, query, datasourceIds, additionalContext);
-    return c.json(questions);
-});
+apiServer.post(
+    "/api/tools/relevant-questions",
+    zValidator('json', GetRelevantQuestionsSchema),
+    async (c) => {
+        const { props } = c.executionCtx;
+        const { query, datasourceIds, additionalContext } = c.req.valid('json');
+        const questions = await handler.getRelevantQuestions(props, query, datasourceIds, additionalContext);
+        return c.json(questions);
+    }
+);
 
-apiServer.post("/api/tools/get-answer", async (c) => {
-    const { props } = c.executionCtx;
-    const { question, datasourceId } = await c.req.json();
-    const answer = await handler.getAnswer(props, question, datasourceId);
-    return c.json(answer);
-});
+apiServer.post(
+    "/api/tools/get-answer",
+    zValidator('json', GetAnswerSchema),
+    async (c) => {
+        const { props } = c.executionCtx;
+        const { question, datasourceId } = c.req.valid('json');
+        const answer = await handler.getAnswer(props, question, datasourceId);
+        return c.json(answer);
+    }
+);
 
-apiServer.post("/api/tools/create-liveboard", async (c) => {
+apiServer.post(
+    "/api/tools/create-liveboard",
+    zValidator('json', CreateLiveboardSchema),
+    async (c) => {
+        const { props } = c.executionCtx;
+        const { name, answers, noteTile } = c.req.valid('json');
+        const liveboardUrl = await handler.createLiveboard(props, name, answers, noteTile);
+        return c.text(liveboardUrl);
+    }
+);
+
+apiServer.get("/api/tools/ping", async (c) => {
     const { props } = c.executionCtx;
-    const { name, answers } = await c.req.json();
-    const liveboardUrl = await handler.createLiveboard(props, name, answers);
-    return c.text(liveboardUrl);
+    console.log("Received Ping request");
+    if (props.accessToken && props.instanceUrl) {
+        return c.json({
+            content: [{ type: "text", text: "Pong" }],
+        });
+    }
+    return c.json({
+        isError: true,
+        content: [{ type: "text", text: "ERROR: Not authenticated" }],
+    });
 });
 
 apiServer.get("/api/resources/datasources", async (c) => {

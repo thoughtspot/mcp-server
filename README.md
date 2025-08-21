@@ -157,6 +157,7 @@ For API usage, you would the token endpoints with a `secret_key` to generate the
   - `getRelevantQuestions`: Get relevant data questions from ThoughtSpot analytics based on a user query.
   - `getAnswer`: Get the answer to a specific question from ThoughtSpot analytics.
   - `createLiveboard`: Create a liveboard from a list of answers.
+  - `getDataSourceSuggestions`: Get datasource suggestions for a given query.
 - **MCP Resources**:
    - `datasources`: List of ThoughtSpot Data models the user has access to.
 

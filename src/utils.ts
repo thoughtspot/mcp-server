@@ -142,3 +142,8 @@ export function instrumentedMCPServer<T extends BaseMCPServer>(MCPServer: new (c
 
     return instrumentDO(Agent, config);
 }
+
+export const capitalize = (s: string): string => {
+    if (!s) return '';
+    return s.charAt(0).toUpperCase() + s.slice(1);
+};

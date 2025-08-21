@@ -43,6 +43,7 @@
   },
   "dependencies": {
     "@cloudflare/workers-oauth-provider": "^0.0.5",
+    "@hono/zod-validator": "^0.7.2",
     "@microlabs/otel-cf-workers": "^1.0.0-rc.52",
     "@modelcontextprotocol/sdk": "^1.15.1",
     "@thoughtspot/rest-api-sdk": "^2.13.1",
