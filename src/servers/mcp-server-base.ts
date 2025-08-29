@@ -56,7 +56,6 @@ export abstract class BaseMCPServer extends Server {
         }, {
             capabilities: {
                 tools: {},
-                logging: {},
                 completion: {},
                 resources: {},
             }
