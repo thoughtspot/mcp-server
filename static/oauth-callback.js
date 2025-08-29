@@ -18,7 +18,7 @@
         if (!base.pathname.endsWith('/')) {
             base.pathname += '/';
         }
-        const tokenUrl = new URL('callosum/v1/v2/auth/token/fetch?validity_time_in_sec=2592000', base.toString());
+        const tokenUrl = new URL('callosum/v1/v2/auth/token/fetch?validity_time_in_sec=86400', base.toString());
         console.log('Fetching token from:', tokenUrl.toString());
         
         document.getElementById('status').textContent = 'Retrieving authentication token...';

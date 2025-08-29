@@ -13,6 +13,7 @@ export type Props = {
         clientName: string;
         registrationDate: number;
     };
+    //refreshToken: string;
 };
 
 export class McpServerError extends Error {

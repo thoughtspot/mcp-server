@@ -147,6 +147,19 @@ class Handler {
         } catch (error) {
             throw new McpServerError({ message: "Invalid JSON format", details: error }, 400);
         }
+
+        // const url = `${instanceUrl}/callosum/v1/v2/auth/token/fetch?validity_time_in_sec=120000`; // 120 days
+
+        // const response = await fetch(url, {
+        // method: "GET",
+        // headers: {
+        //     Authorization: `Bearer ${token.data.token}`, // old token (may still be valid)
+        //     Accept: "application/json",
+        //     "User-Agent": "ThoughtSpot-mcp-agent",
+        // },
+        // });
+        // const data = await response.json();
+        // const refreshToken = data.data?.token;
         span?.setAttributes({
             instance_url: instanceUrl || "unknown",
             has_token: !!token,
@@ -175,6 +188,7 @@ class Handler {
                 accessToken: token.data.token,
                 instanceUrl: instanceUrl,
                 clientName: clientName,
+                //refreshToken: refreshToken,
             } as Props,
         });
 

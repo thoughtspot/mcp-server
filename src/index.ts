@@ -42,6 +42,82 @@ const oauthProvider = new OAuthProvider({
     authorizeEndpoint: "/authorize",
     tokenEndpoint: "/token",
     clientRegistrationEndpoint: "/register",
+    accessTokenTTL: 60, // 1 day
+    // tokenExchangeCallback: async (options) => {
+    //     if (options.grantType === "refresh_token") {
+    //         const { accessToken, instanceUrl, refreshToken } = options.props;
+            
+    //         if (!refreshToken) {
+    //             // skip the refresh token grant if the refresh token is not available
+    //             // fallback to default behavior for other grant types
+    //             return;
+    //         }
+
+    //         // fetch a new TS token using the refresh token
+    //         console.log("Refresh token grant called");
+
+    //         const url = `${instanceUrl}/callosum/v1/v2/auth/token/fetch?validity_time_in_sec=86400`; // 1 day
+
+    //         const response = await fetch(url, {
+    //         method: "GET",
+    //         headers: {
+    //             Authorization: `Bearer ${refreshToken}`, // old token (may still be valid)
+    //             Accept: "application/json",
+    //             "User-Agent": "ThoughtSpot-mcp-agent",
+    //         },
+    //         });
+
+    //         if (!response.ok) {
+
+    //             console.error("Failed to fetch new TS token:", await response.text());
+
+    //             // Don't issue new Cloudflare token — force user to reauth
+                
+    //             throw new Error(JSON.stringify({
+    //                 error: "unauthorized",
+    //                 error_description: "TS access token expired. Please reauthenticate."
+    //             }));
+    //         }
+
+    //         const data = await response.json();
+    //         const newAccessToken = data.data?.token;
+
+    //         // revoke the old refresh token
+    //         const revokeUrl = `${instanceUrl}/callosum/v1/v2/auth/token/revoke`;
+    //         await fetch(revokeUrl, {
+    //             method: "POST",
+    //             headers: {
+    //                 Authorization: `Bearer ${refreshToken}`,
+            
+    //         });
+
+    //         // fetch a new refresh token
+    //         const refreshUrl = `${instanceUrl}/callosum/v1/v2/auth/token/fetch?validity_time_in_sec=120000`; // 120 days
+    //         const refreshResponse = await fetch(refreshUrl, {
+    //             method: "GET",
+    //             headers: {
+    //                 Authorization: `Bearer ${newAccessToken}`,
+    //                 Accept: "application/json",
+    //                 "User-Agent": "ThoughtSpot-mcp-agent",
+    //             },
+    //         });
+            
+    //         const refreshData = await refreshResponse.json();
+    //         const newRefreshToken = refreshData.data?.token;
+
+
+    //         return {
+    //             newProps: {
+    //                 ...options.props,
+    //                 accessToken: newAccessToken,
+    //                 refreshToken: newRefreshToken,
+    //             },
+    //             accessTokenTTL: 60, // 5 hours
+    //         };
+    //     };
+    //     // fallback to default behavior for other grant types
+    //     return;
+    // },
 });
 
 // Wrap the OAuth provider with a handler that includes tracing
