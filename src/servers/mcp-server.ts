@@ -248,12 +248,7 @@ export class MCPServer extends BaseMCPServer {
             return this.createSuccessResponse("No relevant questions found");
         }
 
-        const questions = relevantQuestions.questions.map(q => ({
-            question: q.question,
-            datasourceId: q.datasourceId,
-        }));
-
-        return this.createStructuredContentSuccessResponse({ questions }, "Relevant questions found");
+        return this.createStructuredContentSuccessResponse({ questions: relevantQuestions.questions }, "Relevant questions found");
     }
 
     @WithSpan('call-get-answer')
