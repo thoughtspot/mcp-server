@@ -132,7 +132,7 @@ describe("MCP Server", () => {
                     userName: "test-user",
                     currentOrgId: "test-org",
                     privileges: [],
-                enableSpotterDataSourceDiscovery: true,
+                    enableSpotterDataSourceDiscovery: true,
                 },
                 {
                     clientId: "test-client-id",
@@ -219,7 +219,7 @@ describe("MCP Server", () => {
                 "getAnswer",
                 "createLiveboard"
             ]);
-            
+
             // Verify that getDataSourceSuggestions is not included
             const dataSourceTool = result.tools?.find(t => t.name === "getDataSourceSuggestions");
             expect(dataSourceTool).toBeUndefined();
@@ -273,9 +273,9 @@ describe("MCP Server", () => {
             });
 
             expect(result.isError).toBeUndefined();
-            expect((result.content as any[])).toHaveLength(2);
-            expect((result.content as any[])[0].text).toContain("What is the total revenue?");
-            expect((result.content as any[])[1].text).toContain("How many customers do we have?");
+            expect((result.structuredContent as any).questions).toHaveLength(2);
+            expect((result.structuredContent as any).questions[0].question).toBe("What is the total revenue?");
+            expect((result.structuredContent as any).questions[1].question).toBe("How many customers do we have?");
         });
 
         it("should handle error from service", async () => {
@@ -298,7 +298,7 @@ describe("MCP Server", () => {
                     userName: "test-user",
                     currentOrgId: "test-org",
                     privileges: [],
-                enableSpotterDataSourceDiscovery: true,
+                    enableSpotterDataSourceDiscovery: true,
                 }),
                 queryGetDecomposedQuery: vi.fn().mockRejectedValue(new Error("Service unavailable")),
                 instanceUrl: "https://test.thoughtspot.cloud",
@@ -336,7 +336,7 @@ describe("MCP Server", () => {
                     userName: "test-user",
                     currentOrgId: "test-org",
                     privileges: [],
-                enableSpotterDataSourceDiscovery: true,
+                    enableSpotterDataSourceDiscovery: true,
                 }),
                 queryGetDecomposedQuery: vi.fn().mockResolvedValue({
                     decomposedQueryResponse: {
@@ -369,9 +369,9 @@ describe("MCP Server", () => {
             });
 
             expect(result.isError).toBeUndefined();
-            expect((result.content as any[])).toHaveLength(2);
-            expect((result.content as any[])[0].text).toContain("What is the total revenue?");
-            expect((result.content as any[])[1].text).toContain("How many customers do we have?");
+            expect((result.structuredContent as any).questions).toHaveLength(2);
+            expect((result.structuredContent as any).questions[0].question).toBe("What is the total revenue?");
+            expect((result.structuredContent as any).questions[1].question).toBe("How many customers do we have?");
         });
     });
 
@@ -415,7 +415,7 @@ describe("MCP Server", () => {
                     userName: "test-user",
                     currentOrgId: "test-org",
                     privileges: [],
-                enableSpotterDataSourceDiscovery: true,
+                    enableSpotterDataSourceDiscovery: true,
                 }),
                 singleAnswer: vi.fn().mockRejectedValue(new Error("Question not found")),
                 instanceUrl: "https://test.thoughtspot.cloud",
@@ -486,7 +486,7 @@ describe("MCP Server", () => {
                     userName: "test-user",
                     currentOrgId: "test-org",
                     privileges: [],
-                enableSpotterDataSourceDiscovery: true,
+                    enableSpotterDataSourceDiscovery: true,
                 }),
                 exportUnsavedAnswerTML: vi.fn().mockResolvedValue({
                     answer: {
@@ -546,112 +546,112 @@ describe("MCP Server", () => {
                 name: "Customer Data",
                 description: "Customer information and demographics",
                 mimeType: "text/plain",
-                    });
+            });
+        });
+
+        describe("Read Resource", () => {
+            it("should return resource content for valid datasource URI", async () => {
+                await server.init();
+
+                const result = await server.readResource({
+                    method: "resources/read",
+                    params: { uri: "datasource:///ds-123" }
+                });
+
+                expect(result.contents).toHaveLength(1);
+                expect(result.contents[0]).toEqual({
+                    uri: "datasource:///ds-123",
+                    mimeType: "text/plain",
+                    text: expect.stringContaining("Sales data for the current year"),
+                });
+                expect(result.contents[0].text).toContain("The id of the datasource is ds-123");
+                expect(result.contents[0].text).toContain("Use ThoughtSpot's getRelevantQuestions tool");
+            });
+
+            it("should return resource content for second datasource", async () => {
+                await server.init();
+
+                const result = await server.readResource({
+                    method: "resources/read",
+                    params: { uri: "datasource:///ds-456" }
+                });
+
+                expect(result.contents).toHaveLength(1);
+                expect(result.contents[0]).toEqual({
+                    uri: "datasource:///ds-456",
+                    mimeType: "text/plain",
+                    text: expect.stringContaining("Customer information and demographics"),
+                });
+                expect(result.contents[0].text).toContain("The id of the datasource is ds-456");
+                expect(result.contents[0].text).toContain("Use ThoughtSpot's getRelevantQuestions tool");
+            });
+
+            it("should throw 404 error for invalid datasource URI format", async () => {
+                await server.init();
+
+                await expect(server.readResource({
+                    method: "resources/read",
+                    params: { uri: "invalid-uri" }
+                })).rejects.toThrow("Datasource not found");
+            });
+
+            it("should throw 400 error for URI without datasource ID", async () => {
+                await server.init();
+
+                await expect(server.readResource({
+                    method: "resources/read",
+                    params: { uri: "datasource:///" }
+                })).rejects.toThrow("Invalid datasource uri");
+            });
+
+            it("should throw 404 error for non-existent datasource", async () => {
+                await server.init();
+
+                await expect(server.readResource({
+                    method: "resources/read",
+                    params: { uri: "datasource:///non-existent-id" }
+                })).rejects.toThrow("Datasource not found");
+            });
+
+            it("should throw 404 error for malformed URI", async () => {
+                await server.init();
+
+                await expect(server.readResource({
+                    method: "resources/read",
+                    params: { uri: "datasource://" }
+                })).rejects.toThrow("Datasource not found");
+            });
+
+            it("should throw 400 error for empty URI", async () => {
+                await server.init();
+
+                await expect(server.readResource({
+                    method: "resources/read",
+                    params: { uri: "" }
+                })).rejects.toThrow("Invalid datasource uri");
+            });
+
+            it("should use cached datasources for resource lookup", async () => {
+                await server.init();
+
+                // First call should fetch from service
+                await server.readResource({
+                    method: "resources/read",
+                    params: { uri: "datasource:///ds-123" }
+                });
+                const mockGetClient = vi.mocked(thoughtspotClient.getThoughtSpotClient);
+                const mockClientInstance = mockGetClient.mock.results[0].value;
+                expect(mockClientInstance.searchMetadata).toHaveBeenCalledTimes(1);
+
+                // Second call should use cached data
+                await server.readResource({
+                    method: "resources/read",
+                    params: { uri: "datasource:///ds-456" }
+                });
+                expect(mockClientInstance.searchMetadata).toHaveBeenCalledTimes(1);
+            });
+        });
     });
-
-    describe("Read Resource", () => {
-        it("should return resource content for valid datasource URI", async () => {
-            await server.init();
-
-            const result = await server.readResource({ 
-                method: "resources/read",
-                params: { uri: "datasource:///ds-123" } 
-            });
-
-            expect(result.contents).toHaveLength(1);
-            expect(result.contents[0]).toEqual({
-                uri: "datasource:///ds-123",
-                mimeType: "text/plain",
-                text: expect.stringContaining("Sales data for the current year"),
-            });
-            expect(result.contents[0].text).toContain("The id of the datasource is ds-123");
-            expect(result.contents[0].text).toContain("Use ThoughtSpot's getRelevantQuestions tool");
-        });
-
-        it("should return resource content for second datasource", async () => {
-            await server.init();
-
-            const result = await server.readResource({ 
-                method: "resources/read",
-                params: { uri: "datasource:///ds-456" } 
-            });
-
-            expect(result.contents).toHaveLength(1);
-            expect(result.contents[0]).toEqual({
-                uri: "datasource:///ds-456",
-                mimeType: "text/plain",
-                text: expect.stringContaining("Customer information and demographics"),
-            });
-            expect(result.contents[0].text).toContain("The id of the datasource is ds-456");
-            expect(result.contents[0].text).toContain("Use ThoughtSpot's getRelevantQuestions tool");
-        });
-
-        it("should throw 404 error for invalid datasource URI format", async () => {
-            await server.init();
-
-            await expect(server.readResource({ 
-                method: "resources/read",
-                params: { uri: "invalid-uri" } 
-            })).rejects.toThrow("Datasource not found");
-        });
-
-        it("should throw 400 error for URI without datasource ID", async () => {
-            await server.init();
-
-            await expect(server.readResource({ 
-                method: "resources/read",
-                params: { uri: "datasource:///" } 
-            })).rejects.toThrow("Invalid datasource uri");
-        });
-
-        it("should throw 404 error for non-existent datasource", async () => {
-            await server.init();
-
-            await expect(server.readResource({ 
-                method: "resources/read",
-                params: { uri: "datasource:///non-existent-id" } 
-            })).rejects.toThrow("Datasource not found");
-        });
-
-        it("should throw 404 error for malformed URI", async () => {
-            await server.init();
-
-            await expect(server.readResource({ 
-                method: "resources/read",
-                params: { uri: "datasource://" } 
-            })).rejects.toThrow("Datasource not found");
-        });
-
-        it("should throw 400 error for empty URI", async () => {
-            await server.init();
-
-            await expect(server.readResource({ 
-                method: "resources/read",
-                params: { uri: "" } 
-            })).rejects.toThrow("Invalid datasource uri");
-        });
-
-        it("should use cached datasources for resource lookup", async () => {
-            await server.init();
-
-            // First call should fetch from service
-            await server.readResource({ 
-                method: "resources/read",
-                params: { uri: "datasource:///ds-123" } 
-            });
-            const mockGetClient = vi.mocked(thoughtspotClient.getThoughtSpotClient);
-            const mockClientInstance = mockGetClient.mock.results[0].value;
-            expect(mockClientInstance.searchMetadata).toHaveBeenCalledTimes(1);
-
-            // Second call should use cached data
-            await server.readResource({ 
-                method: "resources/read",
-                params: { uri: "datasource:///ds-456" } 
-            });
-            expect(mockClientInstance.searchMetadata).toHaveBeenCalledTimes(1);
-        });
-    });
-}); 
 
     describe("getDataSourceSuggestions Tool", () => {
         it("should return data source suggestions successfully", async () => {
@@ -674,7 +674,7 @@ describe("MCP Server", () => {
                     userName: "test-user",
                     currentOrgId: "test-org",
                     privileges: [],
-                enableSpotterDataSourceDiscovery: true,
+                    enableSpotterDataSourceDiscovery: true,
                 }),
                 queryGetDataSourceSuggestions: vi.fn().mockResolvedValue({
                     dataSources: [
@@ -709,7 +709,7 @@ describe("MCP Server", () => {
             });
 
             expect(result.isError).toBeUndefined();
-            
+
             const suggestionsData = JSON.parse((result.content as any[])[0].text);
             expect(suggestionsData).toHaveLength(2);
             expect(suggestionsData[0]).toEqual({
@@ -752,7 +752,7 @@ describe("MCP Server", () => {
                     userName: "test-user",
                     currentOrgId: "test-org",
                     privileges: [],
-                enableSpotterDataSourceDiscovery: true,
+                    enableSpotterDataSourceDiscovery: true,
                 }),
                 queryGetDataSourceSuggestions: vi.fn().mockResolvedValue({
                     dataSources: []
@@ -791,7 +791,7 @@ describe("MCP Server", () => {
                     userName: "test-user",
                     currentOrgId: "test-org",
                     privileges: [],
-                enableSpotterDataSourceDiscovery: true,
+                    enableSpotterDataSourceDiscovery: true,
                 }),
                 queryGetDataSourceSuggestions: vi.fn().mockResolvedValue({
                     dataSources: [
@@ -817,7 +817,7 @@ describe("MCP Server", () => {
             });
 
             expect(result.isError).toBeUndefined();
-            
+
             const suggestionsData = JSON.parse((result.content as any[])[0].text);
             expect(suggestionsData).toHaveLength(1);
             expect(suggestionsData[0].header.guid).toBe("ds-789");

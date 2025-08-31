@@ -16,7 +16,10 @@ import { BaseMCPServer, type Context, type ToolResponse } from "./mcp-server-bas
 
 
 const ToolInputSchema = ToolSchema.shape.inputSchema;
-export type ToolInput = z.infer<typeof ToolInputSchema>;
+type ToolInput = z.infer<typeof ToolInputSchema>;
+
+export const ToolOutputSchema = ToolSchema.shape.outputSchema;
+type ToolOutput = z.infer<typeof ToolOutputSchema>;
 
 export const PingSchema = z.object({});
 
@@ -27,6 +30,13 @@ export const GetRelevantQuestionsSchema = z.object({
         .optional(),
     datasourceIds: z.array(z.string())
         .describe("The datasources to get questions for, this is the ids of the datasources to get data from. Each id is a GUID string.")
+});
+
+export const GetRelevantQuestionsOutputSchema = z.object({
+    questions: z.array(z.object({
+        question: z.string(),
+        datasourceId: z.string(),
+    })),
 });
 
 export const GetAnswerSchema = z.object({
@@ -94,6 +104,7 @@ export const toolDefinitionsMCPServer = [
         name: ToolName.GetRelevantQuestions,
         description: "Get relevant data questions from ThoughtSpot database",
         inputSchema: zodToJsonSchema(GetRelevantQuestionsSchema) as ToolInput,
+        outputSchema: zodToJsonSchema(GetRelevantQuestionsOutputSchema) as ToolOutput,
         annotations: {
             title: "Get Relevant Questions for a Query",
             readOnlyHint: true,
@@ -237,11 +248,7 @@ export class MCPServer extends BaseMCPServer {
             return this.createSuccessResponse("No relevant questions found");
         }
 
-        const questionTexts = relevantQuestions.questions.map(q =>
-            `Question: ${q.question}\nDatasourceId: ${q.datasourceId}`
-        );
-
-        return this.createArraySuccessResponse(questionTexts, "Relevant questions found");
+        return this.createStructuredContentSuccessResponse({ questions: relevantQuestions.questions }, "Relevant questions found");
     }
 
     @WithSpan('call-get-answer')
@@ -268,7 +275,7 @@ export class MCPServer extends BaseMCPServer {
     async callCreateLiveboard(request: z.infer<typeof CallToolRequestSchema>) {
         const { name, answers, noteTile } = CreateLiveboardSchema.parse(request.params.arguments);
         const liveboard = await this.getThoughtSpotService().fetchTMLAndCreateLiveboard(name, answers, noteTile);
-        
+
         if (liveboard.error) {
             return this.createErrorResponse(liveboard.error.message, `Error creating liveboard ${liveboard.error.message}`);
         }
