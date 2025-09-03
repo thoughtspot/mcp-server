@@ -5,9 +5,10 @@ import type {
 } from "@modelcontextprotocol/sdk/types.js";
 import { BaseMCPServer, type Context } from "./mcp-server-base";
 import { z } from "zod";
-import { WithSpan } from "../metrics/tracing/tracing-utils";
+import { getActiveSpan, WithSpan } from "../metrics/tracing/tracing-utils";
 import zodToJsonSchema from "zod-to-json-schema";
 import { ToolSchema } from "@modelcontextprotocol/sdk/types.js";
+import { context, type Span, SpanStatusCode, trace } from "@opentelemetry/api";
 
 const ToolInputSchema = ToolSchema.shape.inputSchema;
 export type ToolInput = z.infer<typeof ToolInputSchema>;
@@ -16,12 +17,13 @@ const ToolOutputSchema = ToolSchema.shape.outputSchema;
 export type ToolOutput = z.infer<typeof ToolOutputSchema>;
 
 export const SearchInputSchema = z.object({
-    query: z.string().describe(`The question/task to search for relevant data queries to answer. Use the fetch tool to retrieve the data for individual queries. The datasource id should be passed as part of the query. With the syntax 
-    datasource:<id> <search-query>. The search-query can be any textual question.
+    query: z.string().describe(`The question/task to search for relevant data queries to answer. Use the fetch tool to retrieve the data for individual queries. The datasource id should be passed as part of the query.
+    Also send if the query being asked is for deep research or not. The handling of the query is different if the query is for deep research. The syntax should be:
+    is_deep_research:<boolean> datasource:<id> <search-query>. The search-query can be any textual question.
         
         For example:
-                    datasource:asdhshd-123123-12dd How to reduce customer churn?
-                    datasource:abc-123123-12dd How to increase sales?
+                    is_deep_research:true datasource:asdhshd-123123-12dd How to reduce customer churn?
+                    is_deep_research:false datasource:abc-123123-12dd How to increase sales?
                 
                 If the datasource id is not available, ask the user to supply one explicitly.`),
 });
@@ -101,26 +103,60 @@ export class OpenAIDeepResearchMCPServer extends BaseMCPServer {
         const { query } = SearchInputSchema.parse(request.params.arguments);
         // query could be of the form "datasource:<id> <query-with-spaces>" or just "<query-with-spaces>"
         // First check if the query is of the form "datasource:<id> <query-with-spaces>. The id is a string of numbers, letters, and hyphens."
-        const re = /^(?:datasource:(?<id>[A-Za-z0-9-]+)\s+)?(.+)$/;
-        const match = re.exec(query);
+        const dsregex = /^(?:datasource:(?<id>[A-Za-z0-9-]+)\s+)?(.+)$/;
+        const deepResearchRegex = /^(?:is_deep_research:(?<isDeepResearch>true)\s+)?(.+)$/;
+        const span = getActiveSpan();
+        const match = dsregex.exec(query);
         const datasourceId = match?.groups?.id;
         const queryWithoutDatasourceId = match![2];
+        const isDeepResearch = deepResearchRegex.exec(query)?.groups?.isDeepResearch;
+        console.log("[DEBUG] callSearch: isDeepResearch: ", isDeepResearch, "datasourceId: ", datasourceId, "queryWithoutDatasourceId: ", queryWithoutDatasourceId);
+        span?.setAttributes({
+            is_deep_research: isDeepResearch,
+            datasource_id: datasourceId,
+            query_without_datasource_id: queryWithoutDatasourceId,
+        });
+
+        // if (!isDeepResearch) {
+        //     // If the query is not for deep research, get the answer for the question
+        //     if (!datasourceId) {
+        //         return this.createErrorResponse("No datasource id provided", "No datasource id provided");
+        //     }
+        //     const answer = await this.getThoughtSpotService().getAnswerForQuestion(queryWithoutDatasourceId, datasourceId!, false);
+        //     if (answer.error) {
+        //         return this.createErrorResponse(answer.error.message, `Error getting answer ${answer.error.message}`);
+        //     }
+        //     console.log("[DEBUG] returning from non deep research callSearch: answer: ", answer);
+        //     const result = {
+        //         id: `${datasourceId}: ${queryWithoutDatasourceId}`,
+        //         title: queryWithoutDatasourceId,
+        //         //text: answer.data,
+        //         url: `${this.ctx.props.instanceUrl}/#/insights/conv-assist?query=${queryWithoutDatasourceId.trim()}&worksheet=${datasourceId}&executeSearch=true`,
+        //     }
+    
+        //     return this.createStructuredContentSuccessResponse(result, "Answer found");
+        // }
+
         if (datasourceId) {
+            span?.addEvent("get-relevant-questions-for-datasource-openai");
             const relevantQuestions = await this.getThoughtSpotService().getRelevantQuestions(queryWithoutDatasourceId, [datasourceId], "");
             if (relevantQuestions.error) {
+                span?.setStatus({ code: SpanStatusCode.ERROR, message: relevantQuestions.error.message });
                 return this.createErrorResponse(relevantQuestions.error.message, `Error getting relevant questions ${relevantQuestions.error.message}`);
             }
 
             if (relevantQuestions.questions.length === 0) {
+                span?.setStatus({ code: SpanStatusCode.OK, message: "No relevant questions found" });
                 return this.createSuccessResponse("No relevant questions found");
             }
 
             const results = relevantQuestions.questions.map(q => ({
                 id: `${datasourceId}: ${q.question}`,
                 title: q.question,
-                text: q.question,
                 url: "",
             }));
+
+            span?.setStatus({ code: SpanStatusCode.OK, message: "Relevant questions found" });
 
             return this.createStructuredContentSuccessResponse({ results }, "Relevant questions found");
         }
@@ -150,8 +186,10 @@ export class OpenAIDeepResearchMCPServer extends BaseMCPServer {
         const { id } = FetchInputSchema.parse(request.params.arguments);
         // id is of the form "<datasource-id>:<question>"
         const [datasourceId, question = ""] = id.split(":");
+        const span = getActiveSpan();
         const answer = await this.getThoughtSpotService().getAnswerForQuestion(question, datasourceId, false);
         if (answer.error) {
+            span?.setStatus({ code: SpanStatusCode.ERROR, message: answer.error.message });
             return this.createErrorResponse(answer.error.message, `Error getting answer ${answer.error.message}`);
         }
 
@@ -161,6 +199,7 @@ export class OpenAIDeepResearchMCPServer extends BaseMCPServer {
             text: answer.data,
             url: `${this.ctx.props.instanceUrl}/#/insights/conv-assist?query=${question.trim()}&worksheet=${datasourceId}&executeSearch=true`,
         }
+        span?.setStatus({ code: SpanStatusCode.OK, message: "Answer found" });
 
         return this.createStructuredContentSuccessResponse(result, "Answer found");
     }
