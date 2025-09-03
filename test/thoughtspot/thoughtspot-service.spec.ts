@@ -20,8 +20,9 @@ const mockClient = {
   importMetadataTML: vi.fn(),
   searchMetadata: vi.fn(),
   getSessionInfo: vi.fn(),
+  getAnswerSession: vi.fn(),
   instanceUrl: 'https://test.thoughtspot.com'
-} as unknown as ThoughtSpotRestApi;
+} as any;
 
 describe('thoughtspot-service', () => {
   beforeEach(() => {
@@ -180,8 +181,18 @@ describe('thoughtspot-service', () => {
         text: vi.fn().mockResolvedValue('col1,col2\nval1,val2\nval3,val4')
       };
 
+      const mockSessionResponse = {
+        sessionId: 'session123',
+        genNo: 1,
+        acSession: {
+          sessionId: 'acSession123',
+          genNo: 1
+        }
+      };
+
       mockClient.singleAnswer = vi.fn().mockResolvedValue(mockAnswerResponse);
       mockClient.exportAnswerReport = vi.fn().mockResolvedValue(mockDataResponse);
+      mockClient.getAnswerSession = vi.fn().mockResolvedValue(mockSessionResponse);
 
       const result = await getAnswerForQuestion(
         'What is the revenue?',
@@ -201,11 +212,17 @@ describe('thoughtspot-service', () => {
         file_format: 'CSV',
       });
 
+      expect(mockClient.getAnswerSession).toHaveBeenCalledWith({
+        session_identifier: 'session123',
+        generation_number: 1,
+      });
+
       expect(result).toEqual({
         question: 'What is the revenue?',
         ...mockAnswerResponse,
         data: 'col1,col2\nval1,val2\nval3,val4',
         tml: null,
+        frame_url: 'https://test.thoughtspot.com/#/embed/conv-assist-answer?sessionId=session123&genNo=1&acSessionId=acSession123&acGenNo=1',
         error: null,
       });
     });
@@ -222,9 +239,19 @@ describe('thoughtspot-service', () => {
 
       const mockTMLResponse = { answer: { name: 'Test Answer' } };
 
+      const mockSessionResponse = {
+        sessionId: 'session123',
+        genNo: 1,
+        acSession: {
+          sessionId: 'acSession123',
+          genNo: 1
+        }
+      };
+
       mockClient.singleAnswer = vi.fn().mockResolvedValue(mockAnswerResponse);
       mockClient.exportAnswerReport = vi.fn().mockResolvedValue(mockDataResponse);
-      (mockClient as any).exportUnsavedAnswerTML = vi.fn().mockResolvedValue(mockTMLResponse);
+      mockClient.exportUnsavedAnswerTML = vi.fn().mockResolvedValue(mockTMLResponse);
+      mockClient.getAnswerSession = vi.fn().mockResolvedValue(mockSessionResponse);
 
       const result = await getAnswerForQuestion(
         'What is the revenue?',
@@ -233,7 +260,7 @@ describe('thoughtspot-service', () => {
         mockClient
       );
 
-      expect((mockClient as any).exportUnsavedAnswerTML).toHaveBeenCalledWith({
+      expect(mockClient.exportUnsavedAnswerTML).toHaveBeenCalledWith({
         session_identifier: 'session123',
         generation_number: 1,
       });
@@ -243,6 +270,7 @@ describe('thoughtspot-service', () => {
         ...mockAnswerResponse,
         data: 'col1,col2\nval1,val2',
         tml: mockTMLResponse,
+        frame_url: 'https://test.thoughtspot.com/#/embed/conv-assist-answer?sessionId=session123&genNo=1&acSessionId=acSession123&acGenNo=1',
         error: null,
       });
     });
@@ -259,8 +287,18 @@ describe('thoughtspot-service', () => {
         text: vi.fn().mockResolvedValue(longCSV)
       };
 
+      const mockSessionResponse = {
+        sessionId: 'session123',
+        genNo: 1,
+        acSession: {
+          sessionId: 'acSession123',
+          genNo: 1
+        }
+      };
+
       mockClient.singleAnswer = vi.fn().mockResolvedValue(mockAnswerResponse);
       mockClient.exportAnswerReport = vi.fn().mockResolvedValue(mockDataResponse);
+      mockClient.getAnswerSession = vi.fn().mockResolvedValue(mockSessionResponse);
 
       const result = await getAnswerForQuestion(
         'What is the revenue?',
@@ -288,9 +326,19 @@ describe('thoughtspot-service', () => {
         text: vi.fn().mockResolvedValue('col1,col2\nval1,val2')
       };
 
+      const mockSessionResponse = {
+        sessionId: 'session123',
+        genNo: 1,
+        acSession: {
+          sessionId: 'acSession123',
+          genNo: 1
+        }
+      };
+
       mockClient.singleAnswer = vi.fn().mockResolvedValue(mockAnswerResponse);
       mockClient.exportAnswerReport = vi.fn().mockResolvedValue(mockDataResponse);
-      (mockClient as any).exportUnsavedAnswerTML = vi.fn().mockRejectedValue(new Error('TML Error'));
+      mockClient.exportUnsavedAnswerTML = vi.fn().mockRejectedValue(new Error('TML Error'));
+      mockClient.getAnswerSession = vi.fn().mockResolvedValue(mockSessionResponse);
 
       const result = await getAnswerForQuestion(
         'What is the revenue?',
@@ -304,6 +352,7 @@ describe('thoughtspot-service', () => {
         ...mockAnswerResponse,
         data: 'col1,col2\nval1,val2',
         tml: null,
+        frame_url: 'https://test.thoughtspot.com/#/embed/conv-assist-answer?sessionId=session123&genNo=1&acSessionId=acSession123&acGenNo=1',
         error: null,
       });
     });
@@ -433,7 +482,7 @@ describe('thoughtspot-service', () => {
 
       const tmlCall = (mockClient.importMetadataTML as any).mock.calls[0][0];
       const tmlData = JSON.parse(tmlCall.metadata_tmls[0]);
-      
+
       expect(tmlData.liveboard.visualizations).toHaveLength(2);
       expect(tmlData.liveboard.layout.tiles).toHaveLength(2);
     });

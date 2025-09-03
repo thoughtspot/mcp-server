@@ -28,6 +28,7 @@ export const getThoughtSpotClient = (instanceUrl: string, bearerToken: string) =
     addExportUnsavedAnswerTML(client, instanceUrl, bearerToken);
     addGetSessionInfo(client, instanceUrl, bearerToken);
     addQueryGetDataSourceSuggestions(client, instanceUrl, bearerToken);
+    addGetAnswerSession(client, instanceUrl, bearerToken);
     return client;
 }
 
@@ -145,11 +146,70 @@ function addQueryGetDataSourceSuggestions(client: any, instanceUrl: string, toke
                 operationName: "QueryGetDataSourceSuggestions"
             })
         };
-        console.log("fetchOptions", fetchOptions);
         const response = await fetch(`${instanceUrl}${endpoint}`, fetchOptions);
-        console.log("response", response);
         const data = await response.json() as any;
-        console.log("data", data);
         return data.data.queryGetDataSourceSuggestions;
+    };
+}
+
+const getAnswerSessionQuery = `
+mutation Answer__updateTokens($session: BachSessionIdInput!) {
+  Answer__updateTokens(session: $session) {
+    id {
+      sessionId
+      genNo
+      acSession {
+        genNo
+        sessionId
+      }
+    }
+  }
+}`;
+
+export interface AnswerSession {
+    sessionId: string;
+    genNo: number;
+    acSession: {
+        genNo: number;
+        sessionId: string;
+    };
+}
+
+
+function addGetAnswerSession(client: any, instanceUrl: string, token: string) {
+    (client as any).getAnswerSession = async ({ session_identifier, generation_number }: { session_identifier: string, generation_number: number }): Promise<AnswerSession> => {
+        const endpoint = "/prism/";
+        const operationName = "Answer__updateTokens";
+        const fetchOptions = {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "user-agent": "ThoughtSpot-ts-client",
+                "Authorization": `Bearer ${token}`,
+            },
+            body: JSON.stringify({
+                operationName,
+                query: getAnswerSessionQuery,
+                variables: {
+                    session: {
+                        sessionId: session_identifier,
+                        genNo: generation_number,
+                    }
+                },
+            }),
+        };
+        const response = await fetch(`${instanceUrl}${endpoint}`, fetchOptions);
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`getAnswerSession failed with status ${response.status}: ${errorText}`);
+        }
+        const data = await response.json() as any;
+        const session = data?.data?.Answer__updateTokens?.id;
+        if (!session) {
+            throw new Error('Could not extract answer session from response.');
+        }
+        return session;
     };
 }

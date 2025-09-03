@@ -87,6 +87,14 @@ describe("MCP Server", () => {
                     name: "Test Answer",
                 },
             }),
+            getAnswerSession: vi.fn().mockResolvedValue({
+                sessionId: "session-123",
+                genNo: 1,
+                acSession: {
+                    sessionId: "acSession-123",
+                    genNo: 1,
+                },
+            }),
             importMetadataTML: vi.fn().mockResolvedValue([
                 {
                     response: {
@@ -388,11 +396,12 @@ describe("MCP Server", () => {
             });
 
             expect(result.isError).toBeUndefined();
-            expect((result.content as any[])).toHaveLength(2);
-            expect((result.content as any[])[0].text).toBe("The total revenue is $1,000,000");
-            expect((result.content as any[])[1].text).toContain("Question: What is the total revenue?");
-            expect((result.content as any[])[1].text).toContain("Session Identifier: session-123");
-            expect((result.content as any[])[1].text).toContain("Generation Number: 1");
+            expect((result.content as any[])).toHaveLength(1);
+            expect((result.structuredContent as any).question).toBe("What is the total revenue?");
+            expect((result.structuredContent as any).session_identifier).toBe("session-123");
+            expect((result.structuredContent as any).generation_number).toBe(1);
+            expect((result.structuredContent as any).frame_url).toBe("https://test.thoughtspot.cloud/#/embed/conv-assist-answer?sessionId=session-123&genNo=1&acSessionId=acSession-123&acGenNo=1");
+            expect((result.structuredContent as any).data).toBe("The total revenue is $1,000,000");
         });
 
         it("should handle error from service", async () => {
