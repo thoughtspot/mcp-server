@@ -119,6 +119,7 @@ export class OpenAIDeepResearchMCPServer extends BaseMCPServer {
             if (answer.error) {
                 return this.createErrorResponse(answer.error.message, `Error getting answer ${answer.error.message}`);
             }
+            console.log("[DEBUG] returning from non deep research callSearch: answer: ", answer);
             const result = {
                 id: `${datasourceId}: ${queryWithoutDatasourceId}`,
                 title: queryWithoutDatasourceId,
