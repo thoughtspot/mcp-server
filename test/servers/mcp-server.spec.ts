@@ -402,8 +402,6 @@ describe("MCP Server", () => {
             expect((result.structuredContent as any).generation_number).toBe(1);
             expect((result.structuredContent as any).frame_url).toBe("https://test.thoughtspot.cloud/#/embed/conv-assist-answer?sessionId=session-123&genNo=1&acSessionId=acSession-123&acGenNo=1");
             expect((result.structuredContent as any).data).toBe("The total revenue is $1,000,000");
-            console.log(result.structuredContent);
-
         });
 
         it("should handle error from service", async () => {

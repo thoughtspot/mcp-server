@@ -275,7 +275,7 @@ export class MCPServer extends BaseMCPServer {
             session_identifier: answer.session_identifier,
             generation_number: answer.generation_number,
             frame_url: answer.frame_url,
-            fields_info: `data: The csv data as an answer to the question\n session_identifier: The session identifier for the answer, use for liveboard creation\n generation_number: The generation number for the answer, use for liveboard creation\n frame_url: A url which can be used to view the answer in an iframe in the browser\n`,
+            fields_info: "data: The csv data as an answer to the question\n session_identifier: The session identifier for the answer, use for liveboard creation\n generation_number: The generation number for the answer, use for liveboard creation\n frame_url: A url which can be used to view the answer in an iframe in the browser\n",
         }, "Answer created successfully");
     }
 

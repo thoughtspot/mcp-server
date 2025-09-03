@@ -200,7 +200,16 @@ function addGetAnswerSession(client: any, instanceUrl: string, token: string) {
             }),
         };
         const response = await fetch(`${instanceUrl}${endpoint}`, fetchOptions);
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`getAnswerSession failed with status ${response.status}: ${errorText}`);
+        }
         const data = await response.json() as any;
-        return data.data.Answer__updateTokens.id;
+        const session = data?.data?.Answer__updateTokens?.id;
+        if (!session) {
+            throw new Error('Could not extract answer session from response.');
+        }
+        return session;
     };
 }
