@@ -110,25 +110,25 @@ export class OpenAIDeepResearchMCPServer extends BaseMCPServer {
         const isDeepResearch = deepResearchRegex.exec(query)?.groups?.isDeepResearch;
         console.log("[DEBUG] callSearch: isDeepResearch: ", isDeepResearch, "datasourceId: ", datasourceId, "queryWithoutDatasourceId: ", queryWithoutDatasourceId);
 
-        if (!isDeepResearch) {
-            // If the query is not for deep research, get the answer for the question
-            if (!datasourceId) {
-                return this.createErrorResponse("No datasource id provided", "No datasource id provided");
-            }
-            const answer = await this.getThoughtSpotService().getAnswerForQuestion(queryWithoutDatasourceId, datasourceId!, false);
-            if (answer.error) {
-                return this.createErrorResponse(answer.error.message, `Error getting answer ${answer.error.message}`);
-            }
-            console.log("[DEBUG] returning from non deep research callSearch: answer: ", answer);
-            const result = {
-                id: `${datasourceId}: ${queryWithoutDatasourceId}`,
-                title: queryWithoutDatasourceId,
-                text: answer.data,
-                url: `${this.ctx.props.instanceUrl}/#/insights/conv-assist?query=${queryWithoutDatasourceId.trim()}&worksheet=${datasourceId}&executeSearch=true`,
-            }
+        // if (!isDeepResearch) {
+        //     // If the query is not for deep research, get the answer for the question
+        //     if (!datasourceId) {
+        //         return this.createErrorResponse("No datasource id provided", "No datasource id provided");
+        //     }
+        //     const answer = await this.getThoughtSpotService().getAnswerForQuestion(queryWithoutDatasourceId, datasourceId!, false);
+        //     if (answer.error) {
+        //         return this.createErrorResponse(answer.error.message, `Error getting answer ${answer.error.message}`);
+        //     }
+        //     console.log("[DEBUG] returning from non deep research callSearch: answer: ", answer);
+        //     const result = {
+        //         id: `${datasourceId}: ${queryWithoutDatasourceId}`,
+        //         title: queryWithoutDatasourceId,
+        //         //text: answer.data,
+        //         url: `${this.ctx.props.instanceUrl}/#/insights/conv-assist?query=${queryWithoutDatasourceId.trim()}&worksheet=${datasourceId}&executeSearch=true`,
+        //     }
     
-            return this.createStructuredContentSuccessResponse(result, "Answer found");
-        }
+        //     return this.createStructuredContentSuccessResponse(result, "Answer found");
+        // }
 
         if (datasourceId) {
             const relevantQuestions = await this.getThoughtSpotService().getRelevantQuestions(queryWithoutDatasourceId, [datasourceId], "");
@@ -143,7 +143,7 @@ export class OpenAIDeepResearchMCPServer extends BaseMCPServer {
             const results = relevantQuestions.questions.map(q => ({
                 id: `${datasourceId}: ${q.question}`,
                 title: q.question,
-                text: q.question,
+                //text: q.question,
                 url: "",
             }));
 
