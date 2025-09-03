@@ -143,7 +143,6 @@ export class OpenAIDeepResearchMCPServer extends BaseMCPServer {
             const results = relevantQuestions.questions.map(q => ({
                 id: `${datasourceId}: ${q.question}`,
                 title: q.question,
-                //text: q.question,
                 url: "",
             }));
 
