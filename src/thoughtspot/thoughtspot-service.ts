@@ -14,13 +14,13 @@ export class ThoughtSpotService {
     async discoverDataSources(query?: string): Promise<DataSource[] | DataSourceSuggestion[] | null> {
         const span = getActiveSpan();
         span?.addEvent("discover-data-sources");
-        
+
         // If a query is provided, use intelligent data source suggestions
         if (query) {
             span?.addEvent("get-data-source-suggestions");
             return await this.getDataSourceSuggestions(query);
         }
-        
+
         // Otherwise, fallback to getting all data sources
         const dataSources = await this.getDataSources();
         return dataSources;
@@ -32,27 +32,27 @@ export class ThoughtSpotService {
     @WithSpan('get-data-source-suggestions')
     async getDataSourceSuggestions(query: string): Promise<DataSourceSuggestion[] | null> {
         const span = getActiveSpan();
-        
+
         try {
             span?.setAttribute("query", query);
             span?.addEvent("query-get-data-source-suggestions");
-                        
+
             const response = await (this.client as any).queryGetDataSourceSuggestions(query);
-            
+
             span?.setStatus({ code: SpanStatusCode.OK, message: "Data source suggestions retrieved" });
-            
+
             // Check if we have any data sources
             if (!response.dataSources || response.dataSources.length === 0) {
                 span?.setAttribute("suggestions_count", 0);
                 return null;
             }
-            
+
             span?.setAttribute("suggestions_count", response.dataSources.length);
-            
+
             // Return top 2 data sources (or just 1 if only 1 available)
             const topDataSources = response.dataSources.slice(0, 2);
             return topDataSources;
-            
+
         } catch (error) {
             span?.setStatus({ code: SpanStatusCode.ERROR, message: (error as Error).message });
             console.error("Error getting data source suggestions: ", error);
@@ -205,16 +205,20 @@ export class ThoughtSpotService {
                 generation_number,
             });
 
-            const [data, tml] = await Promise.all([
+            const [data, session, tml] = await Promise.all([
                 this.getAnswerData(question, session_identifier, generation_number),
+                (this.client as any).getAnswerSession({ session_identifier, generation_number }),
                 shouldGetTML
                     ? this.getAnswerTML(question, session_identifier, generation_number)
                     : Promise.resolve(null)
             ])
 
+            const frameUrl = `${(this.client as any).instanceUrl}/#/embed/conv-assist-answer?sessionId=${session.sessionId}&genNo=${session.genNo}&acSessionId=${session.acSession.sessionId}&acGenNo=${session.acSession.genNo}`;
+
             return {
                 question,
                 ...answer,
+                frame_url: frameUrl,
                 data,
                 tml,
                 error: null,
@@ -354,7 +358,7 @@ export class ThoughtSpotService {
         });
 
         const results = resp
-            .filter(d => d.metadata_header.type === "WORKSHEET" ||  d.metadata_header.subType === "WORKSHEET")
+            .filter(d => d.metadata_header.type === "WORKSHEET" || d.metadata_header.subType === "WORKSHEET")
             .map(d => ({
                 name: d.metadata_header.name,
                 id: d.metadata_header.id,

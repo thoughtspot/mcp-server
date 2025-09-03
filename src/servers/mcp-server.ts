@@ -45,6 +45,14 @@ export const GetAnswerSchema = z.object({
         .describe("The datasource to get the answer for, this is the id of the datasource to get data from")
 });
 
+export const GetAnswerOutputSchema = z.object({
+    data: z.string().describe("The csv data as an answer to the question"),
+    session_identifier: z.string().describe("The session identifier for the answer, use for liveboard creation"),
+    generation_number: z.number().describe("The generation number for the answer, use for liveboard creation"),
+    frame_url: z.string().describe("A url which can be used to view the answer in an iframe in the browser"),
+    fields_info: z.string().describe("Information about the fields in the answer"),
+});
+
 export const CreateLiveboardSchema = z.object({
     name: z.string().describe("The name of the liveboard to create"),
     answers: z.array(z.object({
@@ -261,14 +269,14 @@ export class MCPServer extends BaseMCPServer {
             return this.createErrorResponse(answer.error.message, `Error getting answer ${answer.error.message}`);
         }
 
-        const content = [
-            { type: "text" as const, text: answer.data },
-            {
-                type: "text" as const,
-                text: `Question: ${question}\nSession Identifier: ${answer.session_identifier}\nGeneration Number: ${answer.generation_number}\n\nUse this information to create a liveboard with the createLiveboard tool, if the user asks.`,
-            },
-        ];
-        return this.createMultiContentSuccessResponse(content, "Answer found");
+        return this.createStructuredContentSuccessResponse({
+            data: answer.data,
+            question: answer.question,
+            session_identifier: answer.session_identifier,
+            generation_number: answer.generation_number,
+            frame_url: answer.frame_url,
+            fields_info: `data: The csv data as an answer to the question\n session_identifier: The session identifier for the answer, use for liveboard creation\n generation_number: The generation number for the answer, use for liveboard creation\n frame_url: A url which can be used to view the answer in an iframe in the browser\n`,
+        }, "Answer created successfully");
     }
 
     @WithSpan('call-create-liveboard')
