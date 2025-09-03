@@ -8,6 +8,7 @@ import { z } from "zod";
 import { getActiveSpan, WithSpan } from "../metrics/tracing/tracing-utils";
 import zodToJsonSchema from "zod-to-json-schema";
 import { ToolSchema } from "@modelcontextprotocol/sdk/types.js";
+import { context, type Span, SpanStatusCode, trace } from "@opentelemetry/api";
 
 const ToolInputSchema = ToolSchema.shape.inputSchema;
 export type ToolInput = z.infer<typeof ToolInputSchema>;
@@ -104,11 +105,17 @@ export class OpenAIDeepResearchMCPServer extends BaseMCPServer {
         // First check if the query is of the form "datasource:<id> <query-with-spaces>. The id is a string of numbers, letters, and hyphens."
         const dsregex = /^(?:datasource:(?<id>[A-Za-z0-9-]+)\s+)?(.+)$/;
         const deepResearchRegex = /^(?:is_deep_research:(?<isDeepResearch>true)\s+)?(.+)$/;
+        const span = getActiveSpan();
         const match = dsregex.exec(query);
         const datasourceId = match?.groups?.id;
         const queryWithoutDatasourceId = match![2];
         const isDeepResearch = deepResearchRegex.exec(query)?.groups?.isDeepResearch;
         console.log("[DEBUG] callSearch: isDeepResearch: ", isDeepResearch, "datasourceId: ", datasourceId, "queryWithoutDatasourceId: ", queryWithoutDatasourceId);
+        span?.setAttributes({
+            is_deep_research: isDeepResearch,
+            datasource_id: datasourceId,
+            query_without_datasource_id: queryWithoutDatasourceId,
+        });
 
         // if (!isDeepResearch) {
         //     // If the query is not for deep research, get the answer for the question
@@ -131,12 +138,15 @@ export class OpenAIDeepResearchMCPServer extends BaseMCPServer {
         // }
 
         if (datasourceId) {
+            span?.addEvent("get-relevant-questions-for-datasource-openai");
             const relevantQuestions = await this.getThoughtSpotService().getRelevantQuestions(queryWithoutDatasourceId, [datasourceId], "");
             if (relevantQuestions.error) {
+                span?.setStatus({ code: SpanStatusCode.ERROR, message: relevantQuestions.error.message });
                 return this.createErrorResponse(relevantQuestions.error.message, `Error getting relevant questions ${relevantQuestions.error.message}`);
             }
 
             if (relevantQuestions.questions.length === 0) {
+                span?.setStatus({ code: SpanStatusCode.OK, message: "No relevant questions found" });
                 return this.createSuccessResponse("No relevant questions found");
             }
 
@@ -145,6 +155,8 @@ export class OpenAIDeepResearchMCPServer extends BaseMCPServer {
                 title: q.question,
                 url: "",
             }));
+
+            span?.setStatus({ code: SpanStatusCode.OK, message: "Relevant questions found" });
 
             return this.createStructuredContentSuccessResponse({ results }, "Relevant questions found");
         }
@@ -174,8 +186,10 @@ export class OpenAIDeepResearchMCPServer extends BaseMCPServer {
         const { id } = FetchInputSchema.parse(request.params.arguments);
         // id is of the form "<datasource-id>:<question>"
         const [datasourceId, question = ""] = id.split(":");
+        const span = getActiveSpan();
         const answer = await this.getThoughtSpotService().getAnswerForQuestion(question, datasourceId, false);
         if (answer.error) {
+            span?.setStatus({ code: SpanStatusCode.ERROR, message: answer.error.message });
             return this.createErrorResponse(answer.error.message, `Error getting answer ${answer.error.message}`);
         }
 
@@ -185,6 +199,7 @@ export class OpenAIDeepResearchMCPServer extends BaseMCPServer {
             text: answer.data,
             url: `${this.ctx.props.instanceUrl}/#/insights/conv-assist?query=${question.trim()}&worksheet=${datasourceId}&executeSearch=true`,
         }
+        span?.setStatus({ code: SpanStatusCode.OK, message: "Answer found" });
 
         return this.createStructuredContentSuccessResponse(result, "Answer found");
     }
