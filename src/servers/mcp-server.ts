@@ -193,11 +193,12 @@ export class MCPServer extends BaseMCPServer {
                 uri: uri,
                 mimeType: "text/plain",
                 text: `
+                Name: ${source.name}
                 ${source.description}
 
                 The id of the datasource is ${sourceId}.
 
-                Use ThoughtSpot's getRelevantQuestions tool to get relevant questions for a query. And then use the getAnswer tool to get the answer for a question.
+                Use ThoughtSpot's getRelevantQuestions tool to get relevant questions for a query, using the above id. And then use the getAnswer tool to get the answer for a question.
                 `,
             }],
         };
