@@ -152,6 +152,8 @@ For API usage, you would the token endpoints with a `secret_key` to generate the
 ## Features
 
 - **OAuth Authentication**: Access your data, as yourself.
+  - Dynamic Client Registration (DCR) support.
+  - Any MCP host is allowed. Let's make the world fact driven.
 - **Tools**:
   - `ping`: Test connectivity and authentication.
   - `getRelevantQuestions`: Get relevant data questions from ThoughtSpot analytics based on a user query.

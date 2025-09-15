@@ -24,23 +24,23 @@ vi.mock('yaml', () => ({
 describe('ThoughtSpot Client', () => {
   const mockInstanceUrl = 'https://test.thoughtspot.com';
   const mockBearerToken = 'test-token-123';
-  
+
   let mockConfig: any;
   let mockClient: any;
 
   beforeEach(() => {
     vi.clearAllMocks();
-    
+
     // Setup mock config
     mockConfig = {
       middleware: [],
     };
-    
+
     // Setup mock client
     mockClient = {
       instanceUrl: mockInstanceUrl,
     };
-    
+
     (createBearerAuthenticationConfig as any).mockReturnValue(mockConfig);
     (ThoughtSpotRestApi as any).mockImplementation(() => mockClient);
   });
@@ -52,7 +52,7 @@ describe('ThoughtSpot Client', () => {
   describe('getThoughtSpotClient', () => {
     it('should create a ThoughtSpot client with bearer authentication', () => {
       const client = getThoughtSpotClient(mockInstanceUrl, mockBearerToken) as any;
-      
+
       expect(createBearerAuthenticationConfig).toHaveBeenCalledWith(
         mockInstanceUrl,
         expect.any(Function)
@@ -64,21 +64,21 @@ describe('ThoughtSpot Client', () => {
 
     it('should add middleware with Accept-Language header', async () => {
       const client = getThoughtSpotClient(mockInstanceUrl, mockBearerToken);
-      
+
       expect(mockConfig.middleware).toHaveLength(1);
-      
+
       const middleware = mockConfig.middleware[0];
       expect(middleware).toHaveProperty('pre');
       expect(middleware).toHaveProperty('post');
-      
+
       // Test pre middleware
       const mockContext = {
         getHeaders: vi.fn().mockReturnValue({}),
         setHeaderParam: vi.fn(),
       };
-      
+
       const preResult = await middleware.pre(mockContext).toPromise();
-      
+
       expect(mockContext.getHeaders).toHaveBeenCalled();
       expect(mockContext.setHeaderParam).toHaveBeenCalledWith('Accept-Language', 'en-US');
       expect(preResult).toBe(mockContext);
@@ -86,32 +86,32 @@ describe('ThoughtSpot Client', () => {
 
     it('should not override existing Accept-Language header', async () => {
       const client = getThoughtSpotClient(mockInstanceUrl, mockBearerToken);
-      
+
       const middleware = mockConfig.middleware[0];
       const mockContext = {
         getHeaders: vi.fn().mockReturnValue({ 'Accept-Language': 'fr-FR' }),
         setHeaderParam: vi.fn(),
       };
-      
+
       await middleware.pre(mockContext).toPromise();
-      
+
       expect(mockContext.setHeaderParam).not.toHaveBeenCalled();
     });
 
     it('should handle post middleware correctly', async () => {
       const client = getThoughtSpotClient(mockInstanceUrl, mockBearerToken);
-      
+
       const middleware = mockConfig.middleware[0];
       const mockContext = {} as ResponseContext;
-      
+
       const postResult = await middleware.post(mockContext).toPromise();
-      
+
       expect(postResult).toBe(mockContext);
     });
 
     it('should add custom methods to the client', () => {
       const client = getThoughtSpotClient(mockInstanceUrl, mockBearerToken) as any;
-      
+
       expect(client).toHaveProperty('exportUnsavedAnswerTML');
       expect(client).toHaveProperty('getSessionInfo');
       expect(client).toHaveProperty('queryGetDataSourceSuggestions');
@@ -138,39 +138,38 @@ describe('ThoughtSpot Client', () => {
           }
         }
       };
-      
+
       const mockYamlParsed = { test: 'data' };
-      
+
       (fetch as any).mockResolvedValue({
         json: vi.fn().mockResolvedValue(mockResponse)
       });
-      
+
       (YAML.parse as any).mockReturnValue(mockYamlParsed);
-      
+
       const result = await client.exportUnsavedAnswerTML({
         session_identifier: 'session-123',
         generation_number: 1
       });
-      
-      expect(fetch).toHaveBeenCalledWith('https://plugin-party-vercel.vercel.app/api/proxy', {
+
+      expect(fetch).toHaveBeenCalledWith(`${mockInstanceUrl}/prism/?op=GetUnsavedAnswerTML`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
+          'user-agent': 'ThoughtSpot-ts-client',
+          'Authorization': 'Bearer test-token-123',
         },
         body: expect.any(String)
       });
-      
+
       // Verify the body contains expected data
       const fetchCall = (fetch as any).mock.calls[0];
       const body = JSON.parse(fetchCall[1].body);
-      expect(body.token).toBe(mockBearerToken);
-      expect(body.clusterUrl).toBe(mockInstanceUrl);
-      expect(body.endpoint).toBe('/prism/?op=GetUnsavedAnswerTML');
-      expect(body.payload.operationName).toBe('GetUnsavedAnswerTML');
-      expect(body.payload.variables.session.sessionId).toBe('session-123');
-      expect(body.payload.variables.session.genNo).toBe(1);
-      
+      expect(body.operationName).toBe('GetUnsavedAnswerTML');
+      expect(body.variables.session.sessionId).toBe('session-123');
+      expect(body.variables.session.genNo).toBe(1);
+
       expect(YAML.parse).toHaveBeenCalledWith('test-yaml-content');
       expect(result).toEqual(mockYamlParsed);
     });
@@ -178,7 +177,7 @@ describe('ThoughtSpot Client', () => {
     it('should handle fetch errors', async () => {
       const mockError = new Error('Network error');
       (fetch as any).mockRejectedValue(mockError);
-      
+
       await expect(client.exportUnsavedAnswerTML({
         session_identifier: 'session-123',
         generation_number: 1
@@ -193,11 +192,11 @@ describe('ThoughtSpot Client', () => {
           }
         }
       };
-      
+
       (fetch as any).mockResolvedValue({
         json: vi.fn().mockResolvedValue(mockResponse)
       });
-      
+
       await expect(client.exportUnsavedAnswerTML({
         session_identifier: 'session-123',
         generation_number: 1
@@ -224,13 +223,13 @@ describe('ThoughtSpot Client', () => {
           timezone: 'UTC'
         }
       };
-      
+
       (fetch as any).mockResolvedValue({
         json: vi.fn().mockResolvedValue(mockResponse)
       });
-      
+
       const result = await client.getSessionInfo();
-      
+
       expect(fetch).toHaveBeenCalledWith(`${mockInstanceUrl}/prism/preauth/info`, {
         method: 'GET',
         headers: {
@@ -240,14 +239,14 @@ describe('ThoughtSpot Client', () => {
           'Authorization': `Bearer ${mockBearerToken}`,
         }
       });
-      
+
       expect(result).toEqual(mockResponse.info);
     });
 
     it('should handle fetch errors', async () => {
       const mockError = new Error('Network error');
       (fetch as any).mockRejectedValue(mockError);
-      
+
       await expect(client.getSessionInfo()).rejects.toThrow('Network error');
     });
 
@@ -258,9 +257,9 @@ describe('ThoughtSpot Client', () => {
         statusText: 'Unauthorized',
         json: vi.fn().mockResolvedValue({ error: 'Invalid token' })
       };
-      
+
       (fetch as any).mockResolvedValue(mockResponse);
-      
+
       // The actual implementation doesn't check response.ok, so it will try to parse the response
       const result = await client.getSessionInfo();
       expect(result).toBeUndefined(); // data.info will be undefined
@@ -271,33 +270,33 @@ describe('ThoughtSpot Client', () => {
         // Missing info property
         someOtherProperty: 'value'
       };
-      
+
       (fetch as any).mockResolvedValue({
         json: vi.fn().mockResolvedValue(mockResponse)
       });
-      
+
       const result = await client.getSessionInfo();
       expect(result).toBeUndefined();
     });
 
     it('should handle empty response', async () => {
       const mockResponse = {};
-      
+
       (fetch as any).mockResolvedValue({
         json: vi.fn().mockResolvedValue(mockResponse)
       });
-      
+
       const result = await client.getSessionInfo();
       expect(result).toBeUndefined();
     });
 
     it('should handle null response', async () => {
       const mockResponse = null;
-      
+
       (fetch as any).mockResolvedValue({
         json: vi.fn().mockResolvedValue(mockResponse)
       });
-      
+
       // The actual implementation will throw when trying to access data.info on null
       await expect(client.getSessionInfo()).rejects.toThrow();
     });
@@ -310,13 +309,13 @@ describe('ThoughtSpot Client', () => {
           // Missing other properties
         }
       };
-      
+
       (fetch as any).mockResolvedValue({
         json: vi.fn().mockResolvedValue(mockResponse)
       });
-      
+
       const result = await client.getSessionInfo();
-      
+
       expect(result).toEqual(mockResponse.info);
       expect(result.userId).toBe('user-123');
       expect(result.userName).toBe('test-user');
@@ -330,16 +329,16 @@ describe('ThoughtSpot Client', () => {
           userName: 'test-user'
         }
       };
-      
+
       (fetch as any).mockResolvedValue({
         json: vi.fn().mockResolvedValue(mockResponse)
       });
-      
+
       await client.getSessionInfo();
-      
+
       const fetchCall = (fetch as any).mock.calls[0];
       const headers = fetchCall[1].headers;
-      
+
       expect(headers['Content-Type']).toBe('application/json');
       expect(headers.Accept).toBe('application/json');
       expect(headers['user-agent']).toBe('ThoughtSpot-ts-client');
@@ -350,7 +349,7 @@ describe('ThoughtSpot Client', () => {
       (fetch as any).mockResolvedValue({
         json: vi.fn().mockRejectedValue(new Error('Invalid JSON'))
       });
-      
+
       await expect(client.getSessionInfo()).rejects.toThrow('Invalid JSON');
     });
   });
@@ -380,7 +379,7 @@ describe('ThoughtSpot Client', () => {
                 confidence: 0.78,
                 header: {
                   description: 'Customer relationship management data',
-                  displayName: 'CRM Database', 
+                  displayName: 'CRM Database',
                   guid: 'crm-db-guid-456'
                 },
                 llmReasoning: 'This datasource has customer data that could be relevant to your analysis'
@@ -389,13 +388,13 @@ describe('ThoughtSpot Client', () => {
           }
         }
       };
-      
+
       (fetch as any).mockResolvedValue({
         json: vi.fn().mockResolvedValue(mockResponse)
       });
-      
+
       const result = await client.queryGetDataSourceSuggestions('Show me sales revenue by customer');
-      
+
       expect(fetch).toHaveBeenCalledWith(`${mockInstanceUrl}/prism/`, {
         method: 'POST',
         headers: {
@@ -406,7 +405,7 @@ describe('ThoughtSpot Client', () => {
         },
         body: expect.any(String)
       });
-      
+
       // Verify the body contains expected GraphQL query data
       const fetchCall = (fetch as any).mock.calls[0];
       const body = JSON.parse(fetchCall[1].body);
@@ -417,7 +416,7 @@ describe('ThoughtSpot Client', () => {
       expect(body.query).toContain('confidence');
       expect(body.query).toContain('header');
       expect(body.query).toContain('llmReasoning');
-      
+
       expect(result).toEqual(mockResponse.data.queryGetDataSourceSuggestions);
       expect(result.dataSources).toHaveLength(2);
       expect(result.dataSources[0].confidence).toBe(0.95);
@@ -432,13 +431,13 @@ describe('ThoughtSpot Client', () => {
           }
         }
       };
-      
+
       (fetch as any).mockResolvedValue({
         json: vi.fn().mockResolvedValue(mockResponse)
       });
-      
+
       const result = await client.queryGetDataSourceSuggestions('no matching data');
-      
+
       expect(result.dataSources).toEqual([]);
       expect(result.dataSources).toHaveLength(0);
     });
@@ -446,7 +445,7 @@ describe('ThoughtSpot Client', () => {
     it('should handle network errors', async () => {
       const mockError = new Error('Network connection failed');
       (fetch as any).mockRejectedValue(mockError);
-      
+
       await expect(client.queryGetDataSourceSuggestions('test query')).rejects.toThrow('Network connection failed');
     });
 
@@ -457,9 +456,9 @@ describe('ThoughtSpot Client', () => {
         statusText: 'Internal Server Error',
         json: vi.fn().mockResolvedValue({ error: 'Server error' })
       };
-      
+
       (fetch as any).mockResolvedValue(mockResponse);
-      
+
       // The actual implementation doesn't check response.ok, so it will try to parse the response
       // Since the response doesn't have a 'data' property, accessing data.data will throw
       await expect(client.queryGetDataSourceSuggestions('test query')).rejects.toThrow();
@@ -472,11 +471,11 @@ describe('ThoughtSpot Client', () => {
           someOtherProperty: 'value'
         }
       };
-      
+
       (fetch as any).mockResolvedValue({
         json: vi.fn().mockResolvedValue(mockResponse)
       });
-      
+
       const result = await client.queryGetDataSourceSuggestions('test query');
       expect(result).toBeUndefined();
     });
@@ -491,22 +490,22 @@ describe('ThoughtSpot Client', () => {
           }
         ]
       };
-      
+
       (fetch as any).mockResolvedValue({
         json: vi.fn().mockResolvedValue(mockResponse)
       });
-      
+
       // The actual implementation will throw when trying to access data.data on undefined (no data property when there are errors)
       await expect(client.queryGetDataSourceSuggestions('test query')).rejects.toThrow();
     });
 
     it('should handle null response data', async () => {
       const mockResponse = null;
-      
+
       (fetch as any).mockResolvedValue({
         json: vi.fn().mockResolvedValue(mockResponse)
       });
-      
+
       // The actual implementation will throw when trying to access data.queryGetDataSourceSuggestions on null
       await expect(client.queryGetDataSourceSuggestions('test query')).rejects.toThrow();
     });
@@ -515,7 +514,7 @@ describe('ThoughtSpot Client', () => {
       (fetch as any).mockResolvedValue({
         json: vi.fn().mockRejectedValue(new Error('Invalid JSON response'))
       });
-      
+
       await expect(client.queryGetDataSourceSuggestions('test query')).rejects.toThrow('Invalid JSON response');
     });
 
@@ -527,24 +526,24 @@ describe('ThoughtSpot Client', () => {
           }
         }
       };
-      
+
       (fetch as any).mockResolvedValue({
         json: vi.fn().mockResolvedValue(mockResponse)
       });
-      
+
       await client.queryGetDataSourceSuggestions('sales data analysis');
-      
+
       const fetchCall = (fetch as any).mock.calls[0];
       const url = fetchCall[0];
       const options = fetchCall[1];
-      
+
       expect(url).toBe(`${mockInstanceUrl}/prism/`);
       expect(options.method).toBe('POST');
       expect(options.headers['Content-Type']).toBe('application/json');
       expect(options.headers.Accept).toBe('application/json');
       expect(options.headers['user-agent']).toBe('ThoughtSpot-ts-client');
       expect(options.headers.Authorization).toBe(`Bearer ${mockBearerToken}`);
-      
+
       const body = JSON.parse(options.body);
       expect(body.operationName).toBe('QueryGetDataSourceSuggestions');
       expect(body.variables.request.query).toBe('sales data analysis');
@@ -568,13 +567,13 @@ describe('ThoughtSpot Client', () => {
           }
         }
       };
-      
+
       (fetch as any).mockResolvedValue({
         json: vi.fn().mockResolvedValue(mockResponse)
       });
-      
+
       const result = await client.queryGetDataSourceSuggestions('financial metrics');
-      
+
       expect(result.dataSources).toHaveLength(1);
       expect(result.dataSources[0].confidence).toBe(0.88);
       expect(result.dataSources[0].header.displayName).toBe('Finance DW');
@@ -600,13 +599,13 @@ describe('ThoughtSpot Client', () => {
           }
         }
       };
-      
+
       (fetch as any).mockResolvedValue({
         json: vi.fn().mockResolvedValue(mockResponse)
       });
-      
+
       const result = await client.queryGetDataSourceSuggestions('test query');
-      
+
       expect(result.dataSources).toHaveLength(1);
       expect(result.dataSources[0].confidence).toBe(0.75);
       expect(result.dataSources[0].header.displayName).toBe('Incomplete Data Source');
@@ -621,19 +620,19 @@ describe('ThoughtSpot Client', () => {
           }
         }
       };
-      
+
       (fetch as any).mockResolvedValue({
         json: vi.fn().mockResolvedValue(mockResponse)
       });
-      
+
       // Test with empty string
       await client.queryGetDataSourceSuggestions('');
       expect((fetch as any).mock.calls[0][1].body).toContain('"query":""');
-      
+
       // Test with special characters
       await client.queryGetDataSourceSuggestions('query with "quotes" and %symbols%');
       expect((fetch as any).mock.calls[1][1].body).toContain('query with \\"quotes\\" and %symbols%');
-      
+
       // Test with very long query
       const longQuery = 'a'.repeat(1000);
       await client.queryGetDataSourceSuggestions(longQuery);
@@ -663,7 +662,7 @@ mutation GetUnsavedAnswerTML($session: BachSessionIdInput!, $exportDependencies:
     __typename
   }
 }`;
-      
+
       expect(query).toContain('mutation GetUnsavedAnswerTML');
       expect(query).toContain('BachSessionIdInput');
       expect(query).toContain('UnsavedAnswer_getTML');
@@ -686,7 +685,7 @@ query QueryGetDataSourceSuggestions($request: Input_eureka_DataSourceSuggestionR
     }
   }
 }`;
-      
+
       expect(query).toContain('query QueryGetDataSourceSuggestions');
       expect(query).toContain('Input_eureka_DataSourceSuggestionRequest');
       expect(query).toContain('queryGetDataSourceSuggestions');
