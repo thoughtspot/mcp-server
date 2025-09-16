@@ -35,7 +35,7 @@
                 // TODO: Remove this once we have a proper way to handle this
                 // This is a temporary fix to handle the case where the instance URL is a free trial instance URL
                 // Since, free trial does not support IAMv2, the user needs to login to the free trial instance in a separate tab manually.
-                if (base.toString().match(/^https:\/\/(?:team|my)\d+\.thoughtspot\.cloud$/)) {
+                if (base.toString().match(/^https:\/\/(?:team|my)\d+\.thoughtspot\.cloud\/?$/)) {
                     freeTrialErrorSection.style.display = 'flex';
                     const errorTextEl = document.getElementById('free-trial-error-text');
                     errorTextEl.textContent = 'Click ';
@@ -45,7 +45,6 @@
                     link.textContent = 'here';
                     errorTextEl.appendChild(link);
                     errorTextEl.append(' to login to your ThoughtSpot free trial instance in a separate tab and then refresh this page.');
-                    return;
                 }
 
                 // 401 likely due to 3rd party cookies being blocked

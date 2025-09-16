@@ -538,7 +538,7 @@ describe("Handlers", () => {
 
             it("should verify the exact regex pattern behavior", () => {
                 // Test the actual regex pattern used in the code
-                const regex = /^https:\/\/(?:team|my)\d+\.thoughtspot\.cloud$/;
+                const regex = /^https:\/\/(?:team|my)\d+\.thoughtspot\.cloud\/?$/;
                 
                 // URLs that should match
                 const matchingUrls = [
