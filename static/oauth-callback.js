@@ -45,6 +45,7 @@
                     link.textContent = 'here';
                     errorTextEl.appendChild(link);
                     errorTextEl.append(' to login to your ThoughtSpot free trial instance in a separate tab and then refresh this page.');
+                    return;
                 }
 
                 // 401 likely due to 3rd party cookies being blocked
