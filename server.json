@@ -1,0 +1,85 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-07-09/server.schema.json",
+  "name": "app.thoughtspot/mcp-server",
+  "description": "MCP Server for ThoughtSpot - provides OAuth authentication and tools for querying data",
+  "status": "active",
+  "repository": {
+    "url": "https://github.com/thoughtspot/mcp-server",
+    "source": "github"
+  },
+  "version": "1.0.1",
+  "remotes": [{
+    "type": "streamable-http",
+    "url": "https://agent.thoughtspot.app/mcp"
+  }, {
+    "type": "sse",
+    "url": "https://agent.thoughtspot.app/sse"
+  }, {
+    "type": "streamable-http",
+    "url": "https://agent.thoughtspot.app/bearer/mcp",
+    "headers": [
+        {
+          "name": "Authorization", 
+          "description": "Bearer token for authentication, have the ts-host as 'token@ts-host' or as a separate 'x-ts-host' header",
+          "is_required": true,
+          "is_secret": true
+        },
+        {
+          "name": "X-TS-Host", 
+          "description": "ThoughtSpot instance URL, if not provided in the authorization header",
+          "is_required": false,  
+          "is_secret": false
+        }
+    ]
+  }, {
+    "type": "sse",
+    "url": "https://agent.thoughtspot.app/bearer/sse",
+    "headers": [
+        {
+          "name": "Authorization", 
+          "description": "Bearer token for authentication, have the ts-host as 'token@ts-host' or as a separate 'x-ts-host' header",
+          "is_required": true,
+          "is_secret": true
+        },
+        {
+          "name": "X-TS-Host", 
+          "description": "ThoughtSpot instance URL, if not provided in the authorization header",
+          "is_required": false,  
+          "is_secret": false
+        }
+    ]
+  }],
+  "capabilities": {
+    "tools": [
+      {
+        "name": "ping",
+        "description": "Test connectivity and authentication"
+      },
+      {
+        "name": "getRelevantQuestions",
+        "description": "Get relevant data questions from ThoughtSpot analytics based on a user query"
+      },
+      {
+        "name": "getAnswer",
+        "description": "Get the answer to a specific question from ThoughtSpot analytics"
+      },
+      {
+        "name": "createLiveboard",
+        "description": "Create a liveboard from a list of answers"
+      },
+      {
+        "name": "getDataSourceSuggestions",
+        "description": "Get datasource suggestions for a given query"
+      }
+    ],
+    "resources": [
+      {
+        "name": "datasources",
+        "description": "List of ThoughtSpot Data models the user has access to"
+      }
+    ]
+  },
+  "documentation": {
+    "url": "https://github.com/thoughtspot/mcp-server#readme"
+  }
+}
