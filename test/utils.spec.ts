@@ -12,7 +12,7 @@ describe("utils", () => {
     beforeEach(() => {
         vi.clearAllMocks();
         // Clear console.error mock
-        vi.spyOn(console, 'error').mockImplementation(() => {});
+        vi.spyOn(console, 'error').mockImplementation(() => { });
     });
 
     afterEach(() => {
@@ -134,8 +134,8 @@ describe("utils", () => {
                 };
                 vi.mocked(getActiveSpan).mockReturnValue(mockSpan as any);
 
-                const errorObj = { 
-                    message: "Test error", 
+                const errorObj = {
+                    message: "Test error",
                     code: "ERR_001",
                     type: "ValidationError",
                     details: { field: "email", reason: "invalid format" }
@@ -216,9 +216,9 @@ describe("utils", () => {
 
         describe("getUserMessage method", () => {
             it("should return userMessage from error object when present", () => {
-                const errorObj = { 
-                    message: "Technical error message", 
-                    userMessage: "User-friendly error message" 
+                const errorObj = {
+                    message: "Technical error message",
+                    userMessage: "User-friendly error message"
                 };
                 const error = new McpServerError(errorObj, 400);
 
@@ -245,10 +245,10 @@ describe("utils", () => {
             });
 
             it("should return regular message when errorJson is object but has no userMessage", () => {
-                const errorObj = { 
-                    code: "ERR_001", 
-                    details: "Some details", 
-                    message: "Technical message" 
+                const errorObj = {
+                    code: "ERR_001",
+                    details: "Some details",
+                    message: "Technical message"
                 };
                 const error = new McpServerError(errorObj, 400);
 
@@ -333,7 +333,7 @@ describe("utils", () => {
 
             it("should handle different status codes", () => {
                 const testCases = [200, 400, 401, 403, 404, 500, 502, 503];
-                
+
                 for (const statusCode of testCases) {
                     const error = new McpServerError("Test error", statusCode);
                     expect(error.statusCode).toBe(statusCode);
@@ -346,8 +346,8 @@ describe("utils", () => {
     describe("instrumentedMCPServer", () => {
         it("should create an instrumented MCP server class", () => {
             class MockMCPServer {
-                constructor(public ctx: any) {}
-                async init() {}
+                constructor(public ctx: any) { }
+                async init() { }
             }
 
             const mockConfig = vi.fn();
@@ -360,7 +360,7 @@ describe("utils", () => {
         it("should create agent with lazy server initialization", () => {
             class MockMCPServer {
                 public initCalled = false;
-                constructor(public ctx: any) {}
+                constructor(public ctx: any) { }
                 async init() {
                     this.initCalled = true;
                 }
@@ -368,7 +368,7 @@ describe("utils", () => {
 
             const mockConfig = vi.fn();
             const InstrumentedClass = instrumentedMCPServer(MockMCPServer as any, mockConfig);
-            
+
             const mockState = {} as any;
             const mockEnv = { OAUTH_KV: {} } as any;
             const agent = new InstrumentedClass(mockState, mockEnv);
@@ -380,7 +380,7 @@ describe("utils", () => {
         it("should initialize server when server property is accessed", () => {
             class MockMCPServer {
                 public initCalled = false;
-                constructor(public ctx: any) {}
+                constructor(public ctx: any) { }
                 async init() {
                     this.initCalled = true;
                 }
@@ -388,7 +388,7 @@ describe("utils", () => {
 
             const mockConfig = vi.fn();
             const InstrumentedClass = instrumentedMCPServer(MockMCPServer as any, mockConfig);
-            
+
             const mockState = {} as any;
             const mockEnv = { OAUTH_KV: {} } as any;
             const agent = new InstrumentedClass(mockState, mockEnv);
@@ -417,13 +417,13 @@ describe("utils", () => {
 
         it("should reuse server instance on subsequent access", () => {
             class MockMCPServer {
-                constructor(public ctx: any) {}
-                async init() {}
+                constructor(public ctx: any) { }
+                async init() { }
             }
 
             const mockConfig = vi.fn();
             const InstrumentedClass = instrumentedMCPServer(MockMCPServer as any, mockConfig);
-            
+
             const mockState = {} as any;
             const mockEnv = { OAUTH_KV: {} } as any;
             const agent = new InstrumentedClass(mockState, mockEnv);
@@ -449,7 +449,7 @@ describe("utils", () => {
         it("should call server init when agent init is called", async () => {
             class MockMCPServer {
                 public initSpy = vi.fn();
-                constructor(public ctx: any) {}
+                constructor(public ctx: any) { }
                 async init() {
                     this.initSpy();
                 }
@@ -457,7 +457,7 @@ describe("utils", () => {
 
             const mockConfig = vi.fn();
             const InstrumentedClass = instrumentedMCPServer(MockMCPServer as any, mockConfig);
-            
+
             const mockState = {} as any;
             const mockEnv = { OAUTH_KV: {} } as any;
             const agent = new InstrumentedClass(mockState, mockEnv);
@@ -519,7 +519,7 @@ describe("utils", () => {
         let consoleLogSpy: any;
 
         beforeEach(() => {
-            consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+            consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => { });
         });
 
         it("should retrieve value from KV when OAUTH_KV is available and value exists", async () => {

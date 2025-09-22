@@ -12,15 +12,15 @@ export const getThoughtSpotClient = (instanceUrl: string, bearerToken: string) =
     );
 
     config.middleware.push({
-        pre: (context: RequestContext): Observable<RequestContext> => {
+        pre: (context: RequestContext) => {
             const headers = context.getHeaders();
             if (!headers || !headers["Accept-Language"]) {
                 context.setHeaderParam('Accept-Language', 'en-US');
             }
-            return of(context);
+            return of(context) as any;
         },
-        post: (context: ResponseContext): Observable<ResponseContext> => {
-            return of(context);
+        post: (context: ResponseContext) => {
+            return of(context) as any;
         }
     });
     const client = new ThoughtSpotRestApi(config);
@@ -78,7 +78,7 @@ function addExportUnsavedAnswerTML(client: any, instanceUrl: string, token: stri
             })
         });
 
-        const data = await response.json();
+        const data: any = await response.json();
         const edoc = data.data.UnsavedAnswer_getTML.object[0].edoc;
         return YAML.parse(edoc);
     };

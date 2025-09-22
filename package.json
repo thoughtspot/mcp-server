@@ -19,7 +19,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "bin": "node --import tsx ./src/stdio.ts"
+    "bin": "node --import tsx ./src/stdio.ts",
+    "run:deploy": "tsx deploy/index.ts"
   },
   "keywords": [],
   "author": "",
