@@ -129,14 +129,14 @@ app.all('/mcp', async (req: Request, res: Response) => {
 
         // Handle the request with the transport
         await transport.handleRequest(req, res, req.body);
-    } catch (error) {
+    } catch (error: any) {
         console.error('Error handling MCP request:', error);
         if (!res.headersSent) {
             res.status(500).json({
                 jsonrpc: '2.0',
                 error: {
                     code: -32603,
-                    message: error.message,
+                    message: error?.message || 'Internal server error',
                 },
                 id: null,
             });
@@ -144,13 +144,13 @@ app.all('/mcp', async (req: Request, res: Response) => {
     }
 });
 
-app.use((err, req, res, next) => {
+app.use((err: any, req: Request, res: Response, next: Function) => {
     console.error(err.stack)
     res.status(500).json({
         jsonrpc: '2.0',
         error: {
             code: -32603,
-            message: err.message,
+            message: err?.message || 'Internal server error',
         },
         id: null,
     });

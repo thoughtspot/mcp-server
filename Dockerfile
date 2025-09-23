@@ -9,10 +9,7 @@ COPY package*.json ./
 COPY tsconfig.json ./
 
 # Install dependencies
-RUN npm i
-
-# Install express
-RUN npm i express
+RUN npm ci
 
 COPY . .
 

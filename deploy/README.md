@@ -74,7 +74,6 @@ Look for `(healthy)` status in the container list.
 ```bash
 git clone https://github.com/thoughtspot/mcp-server
 npm i
-npm i express
 ```
 Then run the application.
 

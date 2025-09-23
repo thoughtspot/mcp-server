@@ -1,5 +1,6 @@
 import { JSONRPCMessage } from '@modelcontextprotocol/sdk/types.js';
 import { EventStore } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import { randomUUID } from 'node:crypto';
 
 /**
  * Simple in-memory implementation of the EventStore interface for resumability
@@ -13,7 +14,7 @@ export class InMemoryEventStore implements EventStore {
      * Generates a unique event ID for a given stream ID
      */
     private generateEventId(streamId: string): string {
-        return `${streamId}_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
+        return `${streamId}_${randomUUID()}`;
     }
 
     /**
