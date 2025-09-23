@@ -3,7 +3,7 @@ import { instrument, type ResolveConfigFn, instrumentDO, type TraceConfig } from
 import OAuthProvider from "@cloudflare/workers-oauth-provider";
 
 import handler from "./handlers";
-import { type Props } from "./utils";
+import type { Props } from "./utils";
 import { instrumentedMCPServer } from "./cloudflare-utils";
 import { MCPServer } from "./servers/mcp-server";
 import { apiServer } from "./servers/api-server";

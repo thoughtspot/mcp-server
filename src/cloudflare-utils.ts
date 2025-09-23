@@ -1,7 +1,7 @@
 import { McpAgent } from "agents/mcp";
 import { instrumentDO, type ResolveConfigFn } from '@microlabs/otel-cf-workers';
-import { BaseMCPServer, Context } from "./servers/mcp-server-base";
-import { Props } from "./utils";
+import type { BaseMCPServer, Context } from "./servers/mcp-server-base";
+import type { Props } from "./utils";
 
 export function instrumentedMCPServer<T extends BaseMCPServer>(MCPServer: new (ctx: Context) => T, config: ResolveConfigFn) {
     const Agent = class extends McpAgent<Env, any, Props> {
