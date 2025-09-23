@@ -1,9 +1,5 @@
 import { type Span, SpanStatusCode } from '@opentelemetry/api';
 import { getActiveSpan } from './metrics/tracing/tracing-utils';
-import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { McpAgent } from 'agents/mcp';
-import type { BaseMCPServer, Context } from './servers/mcp-server-base';
-import { instrumentDO, type ResolveConfigFn } from '@microlabs/otel-cf-workers';
 
 export type Props = {
     accessToken: string;
@@ -109,11 +105,11 @@ export async function putInKV(key: string, value: any, env?: any): Promise<void>
  */
 export async function getFromKV(key: string, env?: any): Promise<any> {
     console.log('[DEBUG] Getting from KV', key);
-    
+
     if (!env?.OAUTH_KV) {
         return undefined;
     }
-    
+
     try {
         const value = await env.OAUTH_KV.get(key, { type: "json" });
         return value;
@@ -121,26 +117,6 @@ export async function getFromKV(key: string, env?: any): Promise<any> {
         console.error('Error retrieving from KV:', error);
         return undefined;
     }
-}
-
-export function instrumentedMCPServer<T extends BaseMCPServer>(MCPServer: new (ctx: Context) => T, config: ResolveConfigFn) {
-    const Agent = class extends McpAgent<Env, any, Props> {
-        server = new MCPServer(this);
-
-        // Argument of type 'typeof ThoughtSpotMCPWrapper' is not assignable to parameter of type 'DOClass'.
-        // Cannot assign a 'protected' constructor type to a 'public' constructor type.
-        // Created to satisfy the DOClass type.
-        // biome-ignore lint/complexity/noUselessConstructor: required for DOClass
-        public constructor(state: DurableObjectState, env: Env) {
-            super(state, env);
-        }
-
-        async init() {
-            await this.server.init();
-        }
-    }
-
-    return instrumentDO(Agent, config);
 }
 
 export const capitalize = (s: string): string => {

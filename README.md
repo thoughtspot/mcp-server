@@ -168,6 +168,13 @@ For API usage, you would the token endpoints with a `secret_key` to generate the
 - SSE [https://agent.thoughtspot.app/sse]()
 - Streamed HTTP [https://agent.thoughtspot.app/mcp]()
 
+
+## Self hosted
+
+Use the published docker image to deploy the MCP server in your own environment.
+
+See [this](deploy/README.md) for details.
+
 ## Stdio support (fallback)
 
 If you are unable to use the remote MCP server due to connectivity restrictions on your Thoughtspot instance. You could use the `stdio` local transport using the `npm` package.

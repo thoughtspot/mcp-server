@@ -17,6 +17,11 @@ async function main() {
     const props: Props = {
         instanceUrl: validateAndSanitizeUrl(instanceUrl),
         accessToken,
+        clientName: {
+            clientId: "stdio-client",
+            clientName: "StdIO Client",
+            registrationDate: Date.now()
+        },
     };
 
     const server = new MCPServer({ props });

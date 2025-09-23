@@ -19,15 +19,21 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "bin": "node --import tsx ./src/stdio.ts"
+    "bin": "node --import tsx ./src/stdio.ts",
+    "run:deploy": "tsx deploy/index.ts"
   },
   "keywords": [],
   "author": "",
   "license": "ThoughtSpot End user license agreement",
+  "optionalDependencies": {
+    "express": "^5.1.0"
+  },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
     "@cloudflare/vitest-pool-workers": "^0.8.38",
     "@cloudflare/workers-types": "^4.20250612.0",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.3",
     "@types/mixpanel-browser": "^2.60.0",
     "@types/node": "^22.15.3",
     "@types/node-fetch": "^2.6.0",

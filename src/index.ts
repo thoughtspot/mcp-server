@@ -1,9 +1,10 @@
 import { trace } from '@opentelemetry/api';
-import { instrument, type ResolveConfigFn, instrumentDO } from '@microlabs/otel-cf-workers';
+import { instrument, type ResolveConfigFn, instrumentDO, type TraceConfig } from '@microlabs/otel-cf-workers';
 import OAuthProvider from "@cloudflare/workers-oauth-provider";
-import { McpAgent } from "agents/mcp";
+
 import handler from "./handlers";
-import { type Props, instrumentedMCPServer } from "./utils";
+import type { Props } from "./utils";
+import { instrumentedMCPServer } from "./cloudflare-utils";
 import { MCPServer } from "./servers/mcp-server";
 import { apiServer } from "./servers/api-server";
 import { withBearerHandler } from "./bearer";
@@ -17,7 +18,7 @@ const config: ResolveConfigFn = (env: Env, _trigger) => {
             headers: { 'x-honeycomb-team': process.env.HONEYCOMB_API_KEY },
         },
         service: { name: process.env.HONEYCOMB_DATASET }
-    };
+    } as TraceConfig;
 };
 
 // Create the instrumented ThoughtSpotMCP for the main export
