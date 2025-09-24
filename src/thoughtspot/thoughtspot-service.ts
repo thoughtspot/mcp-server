@@ -358,7 +358,9 @@ export class ThoughtSpotService {
         });
 
         const results = resp
-            .filter(d => d.metadata_header.type === "WORKSHEET" || d.metadata_header.subType === "WORKSHEET")
+            // Tables can also be used for spotter now
+            //.filter(d => d.metadata_header.type === "WORKSHEET" || d.metadata_header.subType === "WORKSHEET")
+            .filter(d => d.metadata_header.aiAnswerGenerationDisabled === false)
             .map(d => ({
                 name: d.metadata_header.name,
                 id: d.metadata_header.id,

@@ -50,6 +50,7 @@ describe("MCP Server", () => {
                         name: "Sales Data",
                         description: "Sales data for the current year",
                         type: "WORKSHEET",
+                        aiAnswerGenerationDisabled: false,
                     },
                 },
                 {
@@ -58,6 +59,7 @@ describe("MCP Server", () => {
                         name: "Customer Data",
                         description: "Customer information and demographics",
                         type: "WORKSHEET",
+                        aiAnswerGenerationDisabled: false,
                     },
                 },
             ]),
