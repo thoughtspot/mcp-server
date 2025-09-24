@@ -510,7 +510,8 @@ describe('thoughtspot-service', () => {
             type: 'WORKSHEET',
             name: 'Sales Data',
             id: 'ws1',
-            description: 'Sales information'
+            description: 'Sales information',
+            aiAnswerGenerationDisabled: false
           }
         },
         {
@@ -518,15 +519,35 @@ describe('thoughtspot-service', () => {
             type: 'WORKSHEET',
             name: 'Revenue Data',
             id: 'ws2',
-            description: 'Revenue information'
+            description: 'Revenue information',
+            aiAnswerGenerationDisabled: false
           }
         },
         {
           metadata_header: {
-            type: 'LOGICAL_TABLE', // This should be filtered out
+            type: 'WORKSHEET',
+            name: 'Revenue Data aiAnswerGenerationDisabled',
+            id: 'ws3',
+            description: 'Revenue information',
+            aiAnswerGenerationDisabled: true
+          }
+        },
+        {
+          metadata_header: {
+            type: 'LOGICAL_TABLE', // This should be filtered out due to aiAnswerGenerationDisabled: true
             name: 'Other Data',
             id: 'lt1',
-            description: 'Other information'
+            description: 'Other information',
+            aiAnswerGenerationDisabled: true
+          }
+        },
+        {
+          metadata_header: {
+            type: 'LOGICAL_TABLE', // This should be filtered out due to aiAnswerGenerationDisabled: true
+            name: 'Other Data 2',
+            id: 'lt2',
+            description: 'Other information',
+            aiAnswerGenerationDisabled: false
           }
         }
       ];
@@ -554,6 +575,11 @@ describe('thoughtspot-service', () => {
           name: 'Revenue Data',
           id: 'ws2',
           description: 'Revenue information'
+        },
+        {
+          name: 'Other Data 2',
+          id: 'lt2',
+          description: 'Other information'
         }
       ]);
     });
