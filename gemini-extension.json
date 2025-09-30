@@ -1,0 +1,14 @@
+{
+  "name": "ThoughtSpot",
+  "version": "1.0.0",
+  "mcpServers": {
+    "ThoughtSpot": {
+      "command": "npx",
+      "args": [
+         "mcp-remote",
+         "https://agent.thoughtspot.app/mcp"
+      ]
+    }
+  },
+  "contextFileName": "gemini-extension/GEMINI.md"
+}
