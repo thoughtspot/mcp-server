@@ -144,6 +144,72 @@ Note: In the `authorization_token` field we have suffixed the ThoughtSpot instan
 
 More details on Claude MCP connector [here](https://docs.anthropic.com/en/docs/agents-and-tools/mcp-connector).
 
+
+### Gemini API
+
+MCP tools can be used with the Gemini Python/Typescript SDK. Here is an example using typescript:
+
+```typescript
+import { GoogleGenAI, FunctionCallingConfigMode , mcpToTool} from '@google/genai';
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+
+// Create server parameters for stdio connection
+const serverParams = new StreamableHTTPClientTransport(new URL("https://agent.thoughtspot.app/bearer/mcp"), {
+    requestInit: {
+        headers: {
+            "Authorization": "Bearer $TS_AUTH_TOKEN",
+            "x-ts-host": "my-thoughtspot-instance.thoughtspot.cloud"
+        },
+    }
+});
+
+const client = new Client(
+  {
+    name: "example-client",
+    version: "1.0.0"
+  }
+);
+
+// Configure the client
+const ai = new GoogleGenAI({});
+
+// Initialize the connection between client and server
+await client.connect(serverParams);
+
+// Send request to the model with MCP tools
+const response = await ai.models.generateContent({
+  model: "gemini-2.5-flash",
+  contents: `What is the weather in London in ${new Date().toLocaleDateString()}?`,
+  config: {
+    tools: [mcpToTool(client)],  // uses the session, will automatically call the tool
+    // Uncomment if you **don't** want the sdk to automatically call the tool
+    // automaticFunctionCalling: {
+    //   disable: true,
+    // },
+  },
+});
+console.log(response.text)
+
+// Close the connection
+await client.close();
+```
+
+Read [this](https://ai.google.dev/gemini-api/docs/function-calling?example=meeting#mcp), for more details on Gemini API MCP tool calling.
+
+An example using Google ADK + Python can be found [here](https://github.com/thoughtspot/developer-examples/tree/main/mcp/python-google-adk-trusted-auth).
+
+#### Gemini CLI extenstions
+
+ThoughtSpot MCP server can also be installed as a Gemini CLI extension.
+
+```bash
+gemini extensions install https://github.com/gemini-cli-extensions/security
+```
+
+Read more about Gemini CLI [here](https://github.com/google-gemini/gemini-cli).
+
+
 ### How to get TS_AUTH_TOKEN for APIs ?
 
 For API usage, you would the token endpoints with a `secret_key` to generate the `API_TOKEN` for a specific user/role, more details [here](https://developers.thoughtspot.com/docs/api-authv2#trusted-auth-v2). 
