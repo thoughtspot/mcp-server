@@ -158,7 +158,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 const serverParams = new StreamableHTTPClientTransport(new URL("https://agent.thoughtspot.app/bearer/mcp"), {
     requestInit: {
         headers: {
-            "Authorization": "Bearer $TS_AUTH_TOKEN",
+            "Authorization": "Bearer $TS_AUTH_TOKEN", // Read below how to get the $TS_AUTH_TOKEN
             "x-ts-host": "my-thoughtspot-instance.thoughtspot.cloud"
         },
     }
