@@ -204,7 +204,7 @@ An example using Google ADK + Python can be found [here](https://github.com/thou
 ThoughtSpot MCP server can also be installed as a Gemini CLI extension.
 
 ```bash
-gemini extensions install https://github.com/gemini-cli-extensions/security
+gemini extensions install https://github.com/thoughtspot/mcp-server
 ```
 
 Read more about Gemini CLI [here](https://github.com/google-gemini/gemini-cli).
