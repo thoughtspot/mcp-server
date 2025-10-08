@@ -23,6 +23,7 @@ Join our [Discord](https://developers.thoughtspot.com/join-discord) to get suppo
 - [Usage in APIs](#usage-in-apis)
   - [OpenAI / ChatGPT](#openai-responses-api)
   - [Claude](#claude-mcp-connector)
+  - [Gemini](#gemini-api)
 - [Features](#features)
   - [Supported transports](#supported-transports)
 - [Stdio support (fallback)](#stdio-support-fallback)
