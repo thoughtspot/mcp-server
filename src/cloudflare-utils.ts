@@ -18,6 +18,24 @@ export function instrumentedMCPServer<T extends BaseMCPServer>(MCPServer: new (c
         async init() {
             await this.server.init();
         }
+
+        public static serve(path: string) {
+            const server = super.serve(path, {
+                corsOptions: {
+                    headers: "Content-Type, Accept, mcp-session-id, mcp-protocol-version, Authorization, x-ts-host"
+                }
+            });
+            const serverFetch = server.fetch;
+            server.fetch = async (request: Request, env: any, ctx: ExecutionContext) => {
+                // Due to https://community.openai.com/t/the-responses-api-terminates-a-session-too-early/1312539/16
+                // We need to ignore DELETE requests from OpenAI MCP clients. As the DELETE makes the session terminate too early.
+                if (request.method === "DELETE" && request.headers.get("user-agent")?.includes("openai-mcp")) {
+                    return new Response(null, { status: 403 });
+                }
+                return serverFetch(request, env, ctx);
+            }
+            return server;
+        }
     }
 
     return instrumentDO(Agent, config) as unknown as typeof Agent;
