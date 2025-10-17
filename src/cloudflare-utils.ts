@@ -20,7 +20,7 @@ export function instrumentedMCPServer<T extends BaseMCPServer>(MCPServer: new (c
         }
 
         public static serve(path: string) {
-            const server = super.serve(path, {
+            const server = McpAgent.serve(path, {
                 corsOptions: {
                     headers: "Content-Type, Accept, mcp-session-id, mcp-protocol-version, Authorization, x-ts-host"
                 }
