@@ -67,7 +67,7 @@ export function renderApprovalDialog(request: Request, options: ApprovalDialogOp
     const mcpLogoUrl = 'https://raw.githubusercontent.com/thoughtspot/mcp-server/refs/heads/main/static/MCP%20Server%20Logo.svg';
     const thoughtspotLogoUrl = 'https://avatars.githubusercontent.com/u/8906680?s=200&v=4';
     const clientUrl = client?.clientUri;
-    const tsInstanceUrlMatch = clientUrl?.match(/x-ts-url:(.*)/);
+    const tsInstanceUrlMatch = clientUrl?.match(/x-ts-host:(.*)/);
     const tsInstanceUrl = tsInstanceUrlMatch ? tsInstanceUrlMatch[1].trim() : '';
 
     const htmlContent = `
