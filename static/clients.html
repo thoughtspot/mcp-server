@@ -1,0 +1,1100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ThoughtSpot MCP OAuth Client Registration</title>
+    <link rel="stylesheet" href="https://unpkg.com/antd@5.12.8/dist/reset.css" />
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica Neue', Arial, sans-serif;
+            background: #f0f2f5;
+            min-height: 100vh;
+            padding: 24px;
+            color: rgba(0, 0, 0, 0.88);
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 24px;
+            padding: 24px 16px;
+            background: #fff;
+            border-radius: 8px;
+            box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.03), 0 1px 6px -1px rgba(0, 0, 0, 0.02), 0 2px 4px 0 rgba(0, 0, 0, 0.02);
+        }
+
+        .header-logo {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            margin-bottom: 8px;
+        }
+
+        .header-logo img {
+            width: 24px;
+            height: 24px;
+        }
+
+        .header h1 {
+            font-size: 18px;
+            margin: 0;
+            font-weight: 600;
+            color: rgba(0, 0, 0, 0.88);
+            line-height: 1.4;
+        }
+
+        .header p {
+            font-size: 14px;
+            color: rgba(0, 0, 0, 0.65);
+            margin: 0;
+            line-height: 1.5715;
+        }
+
+        .oauth-badge {
+            display: inline-block;
+            background: #e6f4ff;
+            border: 1px solid #91caff;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            color: #1677ff;
+            margin-top: 8px;
+            font-weight: 400;
+            line-height: 20px;
+        }
+
+        .card {
+            background: #fff;
+            border-radius: 8px;
+            padding: 24px;
+            margin-bottom: 16px;
+            box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.03), 0 1px 6px -1px rgba(0, 0, 0, 0.02), 0 2px 4px 0 rgba(0, 0, 0, 0.02);
+            border: 1px solid #f0f0f0;
+        }
+
+        .card h2 {
+            color: rgba(0, 0, 0, 0.88);
+            margin-bottom: 16px;
+            font-size: 16px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            line-height: 1.5715;
+        }
+
+        .main-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+        }
+
+        .full-width {
+            grid-column: 1 / -1;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 16px;
+            color: #1677ff;
+            font-size: 14px;
+        }
+
+        .error {
+            background: #fff2e8;
+            border: 1px solid #ffbb96;
+            color: rgba(0, 0, 0, 0.88);
+            padding: 12px 16px;
+            border-radius: 8px;
+            margin-bottom: 16px;
+            font-size: 14px;
+            line-height: 1.5715;
+        }
+
+        .error strong {
+            color: #d4380d;
+        }
+
+        .success {
+            background: #f6ffed;
+            border: 1px solid #b7eb8f;
+            color: rgba(0, 0, 0, 0.88);
+            padding: 12px 16px;
+            border-radius: 8px;
+            margin-bottom: 16px;
+            font-size: 14px;
+            line-height: 1.5715;
+        }
+
+        .success strong {
+            color: #389e0d;
+        }
+
+        .config-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 12px;
+        }
+
+        .config-item {
+            border-left: 3px solid #1677ff;
+            padding: 12px;
+            background: #fafafa;
+            border-radius: 6px;
+            border: 1px solid #f0f0f0;
+        }
+
+        .config-item label {
+            display: block;
+            font-weight: 600;
+            color: rgba(0, 0, 0, 0.65);
+            margin-bottom: 4px;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            line-height: 1.5715;
+        }
+
+        .config-item .value {
+            color: rgba(0, 0, 0, 0.88);
+            font-family: 'Courier New', monospace;
+            word-break: break-all;
+            font-size: 14px;
+            line-height: 1.5715;
+        }
+
+        .config-item .array-value {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .tag {
+            background: #e6f4ff;
+            color: #1677ff;
+            padding: 0 7px;
+            border-radius: 4px;
+            font-size: 12px;
+            display: inline-block;
+            line-height: 20px;
+            border: 1px solid #91caff;
+        }
+
+        .form-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 16px;
+        }
+
+        .form-group {
+            margin-bottom: 16px;
+        }
+
+        .form-group label {
+            display: block;
+            font-weight: 400;
+            color: rgba(0, 0, 0, 0.88);
+            margin-bottom: 8px;
+            font-size: 14px;
+            line-height: 1.5715;
+        }
+
+        .form-group .description {
+            font-size: 12px;
+            color: rgba(0, 0, 0, 0.45);
+            margin-bottom: 8px;
+            line-height: 1.5715;
+        }
+
+        .form-group input,
+        .form-group select,
+        .form-group textarea {
+            width: 100%;
+            padding: 4px 11px;
+            border: 1px solid #d9d9d9;
+            border-radius: 6px;
+            font-size: 14px;
+            transition: all 0.2s;
+            background: #fff;
+            color: rgba(0, 0, 0, 0.88);
+            line-height: 1.5715;
+            min-height: 32px;
+        }
+
+        .form-group input:hover,
+        .form-group select:hover,
+        .form-group textarea:hover {
+            border-color: #4096ff;
+        }
+
+        .form-group input:focus,
+        .form-group select:focus,
+        .form-group textarea:focus {
+            outline: none;
+            border-color: #4096ff;
+            box-shadow: 0 0 0 2px rgba(5, 145, 255, 0.1);
+        }
+
+        .form-group textarea {
+            resize: vertical;
+            min-height: 80px;
+            font-family: 'Courier New', monospace;
+        }
+
+        .array-input {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+
+        .array-input input {
+            flex: 1;
+        }
+
+        .btn {
+            padding: 4px 15px;
+            border: 1px solid #d9d9d9;
+            border-radius: 6px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-weight: 400;
+            line-height: 1.5715;
+            min-height: 32px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
+        }
+
+        .btn-primary {
+            background: #1677ff;
+            color: white;
+            border-color: #1677ff;
+        }
+
+        .btn-primary:hover:not(:disabled) {
+            background: #4096ff;
+            border-color: #4096ff;
+        }
+
+        .btn-primary:disabled {
+            background: #f5f5f5;
+            border-color: #d9d9d9;
+            color: rgba(0, 0, 0, 0.25);
+            cursor: not-allowed;
+        }
+
+        .btn-secondary {
+            background: #fff;
+            color: rgba(0, 0, 0, 0.88);
+            border-color: #d9d9d9;
+        }
+
+        .btn-secondary:hover {
+            color: #4096ff;
+            border-color: #4096ff;
+        }
+
+        .btn-small {
+            padding: 0 7px;
+            font-size: 12px;
+            min-height: 24px;
+        }
+
+        .btn-danger {
+            background: #fff;
+            color: #ff4d4f;
+            border-color: #ff4d4f;
+        }
+
+        .btn-danger:hover {
+            color: #ff7875;
+            border-color: #ff7875;
+        }
+
+        .btn-add {
+            background: #fff;
+            color: #52c41a;
+            border-color: #52c41a;
+        }
+
+        .btn-add:hover {
+            color: #73d13d;
+            border-color: #73d13d;
+        }
+
+        .form-actions {
+            display: flex;
+            gap: 8px;
+            margin-top: 24px;
+        }
+
+        .checkbox-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .checkbox-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 4px 0;
+        }
+
+        .checkbox-item label {
+            color: rgba(0, 0, 0, 0.88);
+            font-weight: 400;
+            cursor: pointer;
+            font-size: 14px;
+            line-height: 1.5715;
+        }
+
+        .checkbox-item input[type="checkbox"] {
+            width: 16px;
+            height: 16px;
+            cursor: pointer;
+            accent-color: #1677ff;
+        }
+
+        .form-error {
+            color: #ff4d4f;
+            font-size: 12px;
+            margin-top: 4px;
+            line-height: 1.5715;
+        }
+
+        .form-group input.invalid,
+        .form-group select.invalid,
+        .form-group textarea.invalid {
+            border-color: #ff4d4f;
+        }
+
+        .form-group input.invalid:focus,
+        .form-group select.invalid:focus,
+        .form-group textarea.invalid:focus {
+            border-color: #ff4d4f;
+            box-shadow: 0 0 0 2px rgba(255, 77, 79, 0.1);
+        }
+
+        .response-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 12px;
+        }
+
+        .response-item {
+            border: 1px solid #f0f0f0;
+            padding: 12px;
+            border-radius: 6px;
+            background: #fafafa;
+        }
+
+        .response-item.full-width {
+            grid-column: 1 / -1;
+        }
+
+        .response-item label {
+            display: block;
+            font-weight: 600;
+            color: rgba(0, 0, 0, 0.65);
+            margin-bottom: 8px;
+            font-size: 12px;
+            line-height: 1.5715;
+        }
+
+        .response-item .value {
+            color: rgba(0, 0, 0, 0.88);
+            font-family: 'Courier New', monospace;
+            word-break: break-all;
+            background: #fff;
+            padding: 8px;
+            border-radius: 4px;
+            font-size: 13px;
+            border: 1px solid #f0f0f0;
+            line-height: 1.5715;
+        }
+
+        .secret-highlight {
+            background: #fffbe6;
+            border: 1px solid #ffe58f;
+            border-left: 3px solid #faad14;
+            padding: 12px 16px;
+            border-radius: 6px;
+            grid-column: 1 / -1;
+        }
+
+        .secret-highlight strong {
+            color: #d46b08;
+            display: block;
+            margin-bottom: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            line-height: 1.5715;
+        }
+
+        .secret-highlight p {
+            color: rgba(0, 0, 0, 0.65);
+            font-size: 14px;
+            line-height: 1.5715;
+        }
+
+        .url-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+
+        .url-list li {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 8px;
+            font-size: 14px;
+            line-height: 1.5715;
+        }
+
+        .icon {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+        }
+
+        @media (max-width: 968px) {
+            .main-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .config-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .form-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .response-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .header h1 {
+                font-size: 20px;
+            }
+        }
+
+        @media (max-width: 768px) {
+            body {
+                padding: 16px;
+            }
+
+            .header {
+                padding: 16px;
+            }
+
+            .header-logo {
+                flex-direction: column;
+                gap: 8px;
+            }
+
+            .header-logo img {
+                width: 32px;
+                height: 32px;
+            }
+
+            .header h1 {
+                font-size: 18px;
+            }
+
+            .header p {
+                font-size: 12px;
+            }
+
+            .card {
+                padding: 16px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        function App() {
+            const [config, setConfig] = useState(null);
+            const [loading, setLoading] = useState(true);
+            const [error, setError] = useState(null);
+            const [formData, setFormData] = useState({
+                redirect_uris: [''],
+                token_endpoint_auth_method: 'none',
+                grant_types: [],
+                response_types: [],
+                client_name: '',
+                client_uri: '',
+                scope: ''
+            });
+            const [registering, setRegistering] = useState(false);
+            const [registrationResponse, setRegistrationResponse] = useState(null);
+            const [registrationError, setRegistrationError] = useState(null);
+            const [validationErrors, setValidationErrors] = useState({
+                client_uri: null,
+                redirect_uris: []
+            });
+
+            useEffect(() => {
+                fetchConfig();
+            }, []);
+
+            const fetchConfig = async () => {
+                try {
+                    setLoading(true);
+                    setError(null);
+                    const response = await fetch('https://agent.thoughtspot.app/.well-known/oauth-authorization-server');
+                    if (!response.ok) throw new Error('Failed to fetch OAuth configuration');
+                    const data = await response.json();
+                    setConfig(data);
+                    
+                    // Pre-populate form with defaults from config
+                    setFormData(prev => ({
+                        ...prev,
+                        token_endpoint_auth_method: data.token_endpoint_auth_methods_supported?.[0] || 'none'
+                    }));
+                } catch (err) {
+                    setError(err.message);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            const validateUrl = (url, allowEmpty = false) => {
+                if (!url || url.trim() === '') {
+                    return allowEmpty ? null : 'URL is required';
+                }
+                
+                try {
+                    const urlObj = new URL(url);
+                    
+                    // Check for valid protocol
+                    if (!['http:', 'https:'].includes(urlObj.protocol)) {
+                        return 'URL must use http:// or https:// protocol';
+                    }
+                    
+                    // Check for valid hostname
+                    if (!urlObj.hostname || urlObj.hostname.length === 0) {
+                        return 'URL must have a valid hostname';
+                    }
+                    
+                    return null;
+                } catch (e) {
+                    return 'Please enter a valid URL (e.g., https://example.com)';
+                }
+            };
+
+            const handleInputChange = (field, value) => {
+                setFormData(prev => ({ ...prev, [field]: value }));
+                
+                // Validate client_uri if it's the field being changed
+                if (field === 'client_uri') {
+                    const error = validateUrl(value, true);
+                    setValidationErrors(prev => ({ ...prev, client_uri: error }));
+                }
+            };
+
+            const handleRedirectUriChange = (index, value) => {
+                const newUris = [...formData.redirect_uris];
+                newUris[index] = value;
+                setFormData(prev => ({ ...prev, redirect_uris: newUris }));
+                
+                // Validate the redirect URI
+                const error = validateUrl(value, false);
+                const newErrors = [...validationErrors.redirect_uris];
+                newErrors[index] = error;
+                setValidationErrors(prev => ({ ...prev, redirect_uris: newErrors }));
+            };
+
+            const addRedirectUri = () => {
+                setFormData(prev => ({
+                    ...prev,
+                    redirect_uris: [...prev.redirect_uris, '']
+                }));
+                setValidationErrors(prev => ({
+                    ...prev,
+                    redirect_uris: [...prev.redirect_uris, null]
+                }));
+            };
+
+            const removeRedirectUri = (index) => {
+                if (formData.redirect_uris.length > 1) {
+                    const newUris = formData.redirect_uris.filter((_, i) => i !== index);
+                    setFormData(prev => ({ ...prev, redirect_uris: newUris }));
+                    
+                    const newErrors = validationErrors.redirect_uris.filter((_, i) => i !== index);
+                    setValidationErrors(prev => ({ ...prev, redirect_uris: newErrors }));
+                }
+            };
+
+            const handleCheckboxChange = (field, value, checked) => {
+                const current = formData[field];
+                const updated = checked
+                    ? [...current, value]
+                    : current.filter(v => v !== value);
+                setFormData(prev => ({ ...prev, [field]: updated }));
+            };
+
+            const handleRegister = async (e) => {
+                e.preventDefault();
+                
+                // Validate all URLs before submission
+                const clientUriError = formData.client_uri?.trim() ? validateUrl(formData.client_uri, true) : null;
+                const redirectUriErrors = formData.redirect_uris.map(uri => validateUrl(uri, false));
+                
+                setValidationErrors({
+                    client_uri: clientUriError,
+                    redirect_uris: redirectUriErrors
+                });
+                
+                // Check if there are any validation errors
+                const hasErrors = clientUriError || redirectUriErrors.some(error => error !== null);
+                if (hasErrors) {
+                    setRegistrationError('Please fix validation errors before submitting');
+                    return;
+                }
+                
+                setRegistering(true);
+                setRegistrationError(null);
+                setRegistrationResponse(null);
+
+                try {
+                    // Clean up the payload
+                    const payload = {
+                        redirect_uris: formData.redirect_uris.filter(uri => uri.trim() !== ''),
+                        token_endpoint_auth_method: formData.token_endpoint_auth_method,
+                        grant_types: formData.grant_types,
+                        response_types: formData.response_types,
+                        client_name: formData.client_name,
+                    };
+
+                    if (formData.client_uri?.trim()) {
+                        payload.client_uri = `x-ts-host:${formData.client_uri}`
+                    }
+
+                    // Add scope only if it's not empty
+                    if (formData.scope.trim()) {
+                        payload.scope = formData.scope;
+                    }
+
+                    const response = await fetch('https://agent.thoughtspot.app/register', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(payload)
+                    });
+
+                    if (!response.ok) {
+                        const errorData = await response.json().catch(() => ({}));
+                        throw new Error(errorData.error || `Registration failed: ${response.statusText}`);
+                    }
+
+                    const data = await response.json();
+                    setRegistrationResponse(data);
+                    
+                    // Scroll to response
+                    setTimeout(() => {
+                        document.getElementById('response-section')?.scrollIntoView({ behavior: 'smooth' });
+                    }, 100);
+                } catch (err) {
+                    setRegistrationError(err.message);
+                } finally {
+                    setRegistering(false);
+                }
+            };
+
+            return (
+                <div className="container">
+                    <div className="header">
+                        <div className="header-logo">
+                            <img src="/ThoughtSpot Logo 40px.svg" alt="ThoughtSpot Logo" />
+                            <h1>ThoughtSpot MCP OAuth Client Registration</h1>
+                        </div>
+                        <p>Configure and register your OAuth client</p>
+                        <div className="oauth-badge">OAuth 2.0 Dynamic Client Registration</div>
+                    </div>
+
+                    <div className="main-grid">
+                        {/* OAuth Server Configuration */}
+                        <div className="card">
+                        <h2>
+                            <span className="icon">🔒</span>
+                            OAuth Server Configuration
+                        </h2>
+                        {loading && <div className="loading">Loading configuration...</div>}
+                        {error && (
+                            <div className="error">
+                                <strong>Error:</strong> {error}
+                                <button className="btn btn-secondary btn-small" onClick={fetchConfig} style={{ marginLeft: '1rem' }}>
+                                    Retry
+                                </button>
+                            </div>
+                        )}
+                        {config && (
+                            <div className="config-grid">
+                                <div className="config-item">
+                                    <label>Issuer</label>
+                                    <div className="value">{config.issuer}</div>
+                                </div>
+                                <div className="config-item">
+                                    <label>Authorization Endpoint</label>
+                                    <div className="value">{config.authorization_endpoint}</div>
+                                </div>
+                                <div className="config-item">
+                                    <label>Token Endpoint</label>
+                                    <div className="value">{config.token_endpoint}</div>
+                                </div>
+                                <div className="config-item">
+                                    <label>Registration Endpoint</label>
+                                    <div className="value">{config.registration_endpoint}</div>
+                                </div>
+                                <div className="config-item">
+                                    <label>Response Types Supported</label>
+                                    <div className="array-value">
+                                        {config.response_types_supported?.map((type, i) => (
+                                            <span key={i} className="tag">{type}</span>
+                                        ))}
+                                    </div>
+                                </div>
+                                <div className="config-item">
+                                    <label>Response Modes Supported</label>
+                                    <div className="array-value">
+                                        {config.response_modes_supported?.map((mode, i) => (
+                                            <span key={i} className="tag">{mode}</span>
+                                        ))}
+                                    </div>
+                                </div>
+                                <div className="config-item">
+                                    <label>Grant Types Supported</label>
+                                    <div className="array-value">
+                                        {config.grant_types_supported?.map((type, i) => (
+                                            <span key={i} className="tag">{type}</span>
+                                        ))}
+                                    </div>
+                                </div>
+                                <div className="config-item">
+                                    <label>Token Endpoint Auth Methods</label>
+                                    <div className="array-value">
+                                        {config.token_endpoint_auth_methods_supported?.map((method, i) => (
+                                            <span key={i} className="tag">{method}</span>
+                                        ))}
+                                    </div>
+                                </div>
+                                <div className="config-item">
+                                    <label>Code Challenge Methods</label>
+                                    <div className="array-value">
+                                        {config.code_challenge_methods_supported?.map((method, i) => (
+                                            <span key={i} className="tag">{method}</span>
+                                        ))}
+                                    </div>
+                                </div>
+                                {config.revocation_endpoint && (
+                                    <div className="config-item">
+                                        <label>Revocation Endpoint</label>
+                                        <div className="value">{config.revocation_endpoint}</div>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Registration Form */}
+                    {config && (
+                        <div className="card">
+                            <h2>
+                                <span className="icon">📝</span>
+                                Register New Client
+                            </h2>
+                            {registrationError && (
+                                <div className="error">
+                                    <strong>Registration Error:</strong> {registrationError}
+                                </div>
+                            )}
+                            <form onSubmit={handleRegister}>
+                                <div className="form-grid">
+                                    <div className="form-group">
+                                        <label>Client Name *</label>
+                                        <div className="description">A human-readable name for your client</div>
+                                        <input
+                                            type="text"
+                                            value={formData.client_name}
+                                            onChange={(e) => handleInputChange('client_name', e.target.value)}
+                                            placeholder="Acme Data connector"
+                                            required
+                                        />
+                                    </div>
+
+                                    <div className="form-group">
+                                        <label>ThoughtSpot Instance URL (Optional)</label>
+                                        <div className="description">Associate this client with a ThoughtSpot instance.</div>
+                                        <input
+                                            type="url"
+                                            value={formData.client_uri}
+                                            onChange={(e) => handleInputChange('client_uri', e.target.value)}
+                                            placeholder="https://your-instance.thoughtspot.cloud"
+                                            className={validationErrors.client_uri ? 'invalid' : ''}
+                                        />
+                                        {validationErrors.client_uri && (
+                                            <div className="form-error">{validationErrors.client_uri}</div>
+                                        )}
+                                    </div>
+                                </div>
+
+                                <div className="form-group">
+                                    <label>Redirect URIs *</label>
+                                    <div className="description">OAuth callback URLs for your application</div>
+                                    {formData.redirect_uris.map((uri, index) => (
+                                        <div key={index}>
+                                            <div className="array-input">
+                                                <input
+                                                    type="url"
+                                                    value={uri}
+                                                    onChange={(e) => handleRedirectUriChange(index, e.target.value)}
+                                                    placeholder="https://example.com/oauth/callback"
+                                                    required
+                                                    className={validationErrors.redirect_uris[index] ? 'invalid' : ''}
+                                                />
+                                                {formData.redirect_uris.length > 1 && (
+                                                    <button
+                                                        type="button"
+                                                        className="btn btn-danger btn-small"
+                                                        onClick={() => removeRedirectUri(index)}
+                                                    >
+                                                        Remove
+                                                    </button>
+                                                )}
+                                            </div>
+                                            {validationErrors.redirect_uris[index] && (
+                                                <div className="form-error">{validationErrors.redirect_uris[index]}</div>
+                                            )}
+                                        </div>
+                                    ))}
+                                    <button
+                                        type="button"
+                                        className="btn btn-add btn-small"
+                                        onClick={addRedirectUri}
+                                    >
+                                        + Add Redirect URI
+                                    </button>
+                                </div>
+
+                                <div className="form-grid">
+                                    <div className="form-group">
+                                        <label>Token Endpoint Auth Method *</label>
+                                        <div className="description">How your client will authenticate at the token endpoint</div>
+                                        <select
+                                            value={formData.token_endpoint_auth_method}
+                                            onChange={(e) => handleInputChange('token_endpoint_auth_method', e.target.value)}
+                                            required
+                                        >
+                                            {config.token_endpoint_auth_methods_supported?.map((method) => (
+                                                <option key={method} value={method}>{method}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+
+                                    <div className="form-group">
+                                        <label>Scope (Optional)</label>
+                                        <div className="description">Space-separated list of OAuth scopes</div>
+                                        <input
+                                            type="text"
+                                            value={formData.scope}
+                                            onChange={(e) => handleInputChange('scope', e.target.value)}
+                                            placeholder="e.g., read write"
+                                        />
+                                    </div>
+                                </div>
+
+                                <div className="form-grid">
+                                    <div className="form-group">
+                                        <label>Grant Types *</label>
+                                        <div className="description">OAuth grant types your client will use</div>
+                                        <div className="checkbox-group">
+                                            {config.grant_types_supported?.map((type) => (
+                                                <div key={type} className="checkbox-item">
+                                                    <input
+                                                        type="checkbox"
+                                                        id={`grant-${type}`}
+                                                        checked={formData.grant_types.includes(type)}
+                                                        onChange={(e) => handleCheckboxChange('grant_types', type, e.target.checked)}
+                                                    />
+                                                    <label htmlFor={`grant-${type}`}>{type}</label>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+
+                                    <div className="form-group">
+                                        <label>Response Types *</label>
+                                        <div className="description">OAuth response types your client expects</div>
+                                        <div className="checkbox-group">
+                                            {config.response_types_supported?.map((type) => (
+                                                <div key={type} className="checkbox-item">
+                                                    <input
+                                                        type="checkbox"
+                                                        id={`response-${type}`}
+                                                        checked={formData.response_types.includes(type)}
+                                                        onChange={(e) => handleCheckboxChange('response_types', type, e.target.checked)}
+                                                    />
+                                                    <label htmlFor={`response-${type}`}>{type}</label>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="form-actions">
+                                    <button
+                                        type="submit"
+                                        className="btn btn-primary"
+                                        disabled={registering || !formData.client_name || formData.grant_types.length === 0 || formData.response_types.length === 0}
+                                    >
+                                        {registering ? 'Registering...' : '🚀 Register Client'}
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className="btn btn-secondary"
+                                        onClick={() => {
+                                            setFormData({
+                                                redirect_uris: [''],
+                                                token_endpoint_auth_method: config.token_endpoint_auth_methods_supported?.[0] || 'none',
+                                                grant_types: [],
+                                                response_types: [],
+                                                client_name: '',
+                                                client_uri: '',
+                                                scope: ''
+                                            });
+                                            setValidationErrors({
+                                                client_uri: null,
+                                                redirect_uris: []
+                                            });
+                                            setRegistrationResponse(null);
+                                            setRegistrationError(null);
+                                        }}
+                                    >
+                                        Reset Form
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    )}
+                    </div>
+
+                    {/* Registration Response */}
+                    {registrationResponse && (
+                        <div className="card full-width" id="response-section">
+                            <h2>
+                                <span className="icon">✅</span>
+                                Registration Successful
+                            </h2>
+                            <div className="success">
+                                Your OAuth client has been successfully registered!
+                            </div>
+                            <div className="response-grid">
+                                <div className="response-item">
+                                    <label>Client ID</label>
+                                    <div className="value">{registrationResponse.client_id}</div>
+                                </div>
+                                {registrationResponse.client_secret && (
+                                    <div className="secret-highlight">
+                                        <strong>⚠️ Important: Save your client secret!</strong>
+                                        <div className="response-item" style={{ margin: '0.5rem 0 0 0' }}>
+                                            <label>Client Secret</label>
+                                            <div className="value">{registrationResponse.client_secret}</div>
+                                        </div>
+                                        <p style={{ marginTop: '0.5rem', fontSize: '0.9rem', color: '#fcd34d' }}>
+                                            This secret will not be shown again. Store it securely.
+                                        </p>
+                                    </div>
+                                )}
+                                <div className="response-item">
+                                    <label>Client Name</label>
+                                    <div className="value">{registrationResponse.client_name}</div>
+                                </div>
+                                <div className="response-item">
+                                    <label>Client URI</label>
+                                    <div className="value">{registrationResponse.client_uri}</div>
+                                </div>
+                                <div className="response-item">
+                                    <label>Token Endpoint Auth Method</label>
+                                    <div className="value">{registrationResponse.token_endpoint_auth_method}</div>
+                                </div>
+                                <div className="response-item">
+                                    <label>Grant Types</label>
+                                    <div className="array-value">
+                                        {registrationResponse.grant_types?.map((type, i) => (
+                                            <span key={i} className="tag">{type}</span>
+                                        ))}
+                                    </div>
+                                </div>
+                                <div className="response-item">
+                                    <label>Response Types</label>
+                                    <div className="array-value">
+                                        {registrationResponse.response_types?.map((type, i) => (
+                                            <span key={i} className="tag">{type}</span>
+                                        ))}
+                                    </div>
+                                </div>
+                                <div className="response-item full-width">
+                                    <label>Redirect URIs</label>
+                                    <ul className="url-list">
+                                        {registrationResponse.redirect_uris?.map((uri, i) => (
+                                            <li key={i}>
+                                                <span>🔗</span>
+                                                <span className="value" style={{ padding: 0, background: 'transparent' }}>{uri}</span>
+                                            </li>
+                                        ))}
+                                    </ul>
+                                </div>
+                                {registrationResponse.registration_client_uri && (
+                                    <div className="response-item">
+                                        <label>Registration Client URI</label>
+                                        <div className="value">{registrationResponse.registration_client_uri}</div>
+                                    </div>
+                                )}
+                                {registrationResponse.client_id_issued_at && (
+                                    <div className="response-item">
+                                        <label>Client ID Issued At</label>
+                                        <div className="value">
+                                            {new Date(registrationResponse.client_id_issued_at * 1000).toLocaleString()}
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
+

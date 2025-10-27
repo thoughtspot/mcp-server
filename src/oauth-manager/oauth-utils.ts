@@ -61,11 +61,14 @@ export interface ApprovalDialogOptions {
  * @returns A Response containing the HTML approval dialog
  */
 export function renderApprovalDialog(request: Request, options: ApprovalDialogOptions): Response {
-    const { server, state } = options;
+    const { server, state, client } = options;
     const encodedState = btoa(JSON.stringify(state));
     const serverName = sanitizeHtml(server.name);
     const mcpLogoUrl = 'https://raw.githubusercontent.com/thoughtspot/mcp-server/refs/heads/main/static/MCP%20Server%20Logo.svg';
     const thoughtspotLogoUrl = 'https://avatars.githubusercontent.com/u/8906680?s=200&v=4';
+    const clientUrl = client?.clientUri;
+    const tsInstanceUrlMatch = clientUrl?.match(/x-ts-url:(.*)/);
+    const tsInstanceUrl = tsInstanceUrlMatch ? tsInstanceUrlMatch[1].trim() : '';
 
     const htmlContent = `
       <!DOCTYPE html>
@@ -296,7 +299,7 @@ export function renderApprovalDialog(request: Request, options: ApprovalDialogOp
             <form class="approval-form" method="post" action="${new URL(request.url).pathname}" id="approvalForm" autocomplete="off" novalidate>
               <div class="form-group">
                 <label for="instanceUrl" id="instanceUrlLabel">ThoughtSpot Instance URL</label>
-                <input type="text" id="instanceUrl" name="instanceUrl" placeholder="https://your-instance.thoughtspot.cloud" autocomplete="off">
+                <input type="text" id="instanceUrl" name="instanceUrl" value="${tsInstanceUrl}" placeholder="https://your-instance.thoughtspot.cloud" autocomplete="off">
                 <input type="hidden" name="state" value="${encodedState}">
               </div>
               <div class="approval-subtitle">ThoughtSpot MCP Server will be able to:</div>
