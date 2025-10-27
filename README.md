@@ -26,7 +26,7 @@ Join our [Discord](https://developers.thoughtspot.com/join-discord) to get suppo
   - [Gemini](#gemini-api)
 - [Features](#features)
   - [Supported transports](#supported-transports)
-- [Manual client registration](#dynamic-client-registration-not-supported)
+- [Manual client registration](#manual-client-registration)
   - [Associating with a ThoughtSpot instance](#associate-with-a-thoughtspot-instance)
 - [Self hosted](#self-hosted)
 - [Stdio support (fallback)](#stdio-support-fallback)
