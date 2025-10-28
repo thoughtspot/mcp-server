@@ -26,6 +26,9 @@ Join our [Discord](https://developers.thoughtspot.com/join-discord) to get suppo
   - [Gemini](#gemini-api)
 - [Features](#features)
   - [Supported transports](#supported-transports)
+- [Manual client registration](#manual-client-registration)
+  - [Associating with a ThoughtSpot instance](#associate-with-a-thoughtspot-instance)
+- [Self hosted](#self-hosted)
 - [Stdio support (fallback)](#stdio-support-fallback)
   - [How to obtain a TS_AUTH_TOKEN](#how-to-obtain-a-ts_auth_token)
 - [Troubleshooting](#troubleshooting)
@@ -43,6 +46,7 @@ MCP Server URL:
 ```
 https://agent.thoughtspot.app/mcp
 ```
+Preferred Auth method: Oauth
 
 - For OpenAI ChatGPT Deep Research, add the URL as:
 ```js
@@ -235,6 +239,14 @@ For API usage, you would the token endpoints with a `secret_key` to generate the
 - SSE [https://agent.thoughtspot.app/sse]()
 - Streamed HTTP [https://agent.thoughtspot.app/mcp]()
 
+
+## Manual client registration
+
+For MCP hosts which do not(yet) support Dynamic client registration, or they require statically adding Oauth Client Id etc. Go to [this](https://agent.thoughtspot.app/clients) page, to register a new client and copy the details over.
+
+### Associate with a ThoughtSpot instance
+
+Manual client registration also allows to associate with a specific ThoughtSpot instance, so that your users do not have to enter the Thoughtspot instance URL when doing the authorization flow.
 
 ## Self hosted
 
