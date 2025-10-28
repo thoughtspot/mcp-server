@@ -242,11 +242,11 @@ For API usage, you would the token endpoints with a `secret_key` to generate the
 
 ## Manual client registration
 
-For MCP hosts which do not(yet) support Dynamic client registration, or they require statically adding Oauth Client Id etc. Go to [this](https://agent.thoughtspot.app/clients) page, to register a new client and copy the details over.
+For MCP hosts which do not(yet) support Dynamic client registration, or they require statically adding Oauth Client Id etc. Go to [this](https://agent.thoughtspot.app/clients) page, to register a new client and copy the details over. The most relevant values are `Oauth Client Id` and `Oauth Client Secret` which should be added when adding ThoughtSpot as an MCP connector in the MCP client (ChatGPT/Claude etc). The generated client details are only available when they are generated and are NOT available later for reference.
 
 ### Associate with a ThoughtSpot instance
 
-Manual client registration also allows to associate with a specific ThoughtSpot instance, so that your users do not have to enter the Thoughtspot instance URL when doing the authorization flow.
+Manual client registration also allows to associate with a specific ThoughtSpot instance, so that your users do not have to enter the Thoughtspot instance URL when doing the authorization flow. While registering the Oauth client add `ThoughtSpot URL` to the appropriate value.
 
 ## Self hosted
 
