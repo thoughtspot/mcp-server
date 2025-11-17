@@ -330,6 +330,92 @@ describe("MCP Server", () => {
             expect(resultText.questions[0].datasourceId).toBe("ds-123");
         });
 
+        it("should handle error from service with multiple datasource IDs", async () => {
+            // Mock client to return error
+            vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
+                getSessionInfo: vi.fn().mockResolvedValue({
+                    clusterId: "test-cluster-123",
+                    clusterName: "test-cluster",
+                    releaseVersion: "1.0.0",
+                    userGUID: "test-user-123",
+                    configInfo: {
+                        mixpanelConfig: {
+                            devSdkKey: "test-dev-token",
+                            prodSdkKey: "test-prod-token",
+                            production: false,
+                        },
+                        selfClusterName: "test-cluster",
+                        selfClusterId: "test-cluster-123",
+                    },
+                    userName: "test-user",
+                    currentOrgId: "test-org",
+                    privileges: [],
+                    enableSpotterDataSourceDiscovery: true,
+                }),
+                queryGetDecomposedQuery: vi.fn().mockRejectedValue(new Error("Service unavailable")),
+                instanceUrl: "https://test.thoughtspot.cloud",
+            } as any);
+
+            await server.init();
+            const { callTool } = connect(server);
+
+            const result = await callTool("getRelevantQuestions", {
+                query: "What are the sales?",
+                datasourceIds: ["ds-123", "ds-456", "ds-789"],
+            });
+
+            // Should use the first datasourceId for the fallback
+            expect(result.isError).toBeUndefined();
+            const resultText = JSON.parse((result.content as any[])[0].text);
+            expect(resultText.questions).toBeInstanceOf(Array);
+            expect(resultText.questions[0].question).toBe("What are the sales?");
+            expect(resultText.questions[0].datasourceId).toBe("ds-123");
+            // Verify structuredContent is also set
+            expect((result.structuredContent as any).questions).toEqual(resultText.questions);
+        });
+
+        it("should handle error from service with empty datasourceIds array", async () => {
+            // Mock client to return error
+            vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
+                getSessionInfo: vi.fn().mockResolvedValue({
+                    clusterId: "test-cluster-123",
+                    clusterName: "test-cluster",
+                    releaseVersion: "1.0.0",
+                    userGUID: "test-user-123",
+                    configInfo: {
+                        mixpanelConfig: {
+                            devSdkKey: "test-dev-token",
+                            prodSdkKey: "test-prod-token",
+                            production: false,
+                        },
+                        selfClusterName: "test-cluster",
+                        selfClusterId: "test-cluster-123",
+                    },
+                    userName: "test-user",
+                    currentOrgId: "test-org",
+                    privileges: [],
+                    enableSpotterDataSourceDiscovery: true,
+                }),
+                queryGetDecomposedQuery: vi.fn().mockRejectedValue(new Error("Network error")),
+                instanceUrl: "https://test.thoughtspot.cloud",
+            } as any);
+
+            await server.init();
+            const { callTool } = connect(server);
+
+            const result = await callTool("getRelevantQuestions", {
+                query: "Show me data",
+                datasourceIds: [],
+            });
+
+            // Should handle empty array gracefully (fallback to empty string for datasourceId)
+            expect(result.isError).toBeUndefined();
+            const resultText = JSON.parse((result.content as any[])[0].text);
+            expect(resultText.questions).toBeInstanceOf(Array);
+            expect(resultText.questions[0].question).toBe("Show me data");
+            expect(resultText.questions[0].datasourceId).toBe("");
+        });
+
         it("should handle empty questions response", async () => {
             // Mock client to return empty questions
             vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
@@ -646,7 +732,7 @@ describe("MCP Server", () => {
                 })).rejects.toThrow("Invalid datasource uri");
             });
 
-            it("should use cached datasources for resource lookup", async () => {
+        it("should use cached datasources for resource lookup", async () => {
                 await server.init();
 
                 // First call should fetch from service
