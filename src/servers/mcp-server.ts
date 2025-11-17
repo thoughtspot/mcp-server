@@ -253,11 +253,10 @@ export class MCPServer extends BaseMCPServer {
         if (relevantQuestions.error) {
             console.error("Error getting relevant questions: ", relevantQuestions.error);
             
-            const structuredContent = { questions: query };
-            const span = getActiveSpan();
+            const structuredContent = { questions: [{ question: query, datasourceId: sourceIds?.[0] ?? '' }] };
+            const span = this.initSpanWithCommonAttributes();
             span?.setStatus({ code: SpanStatusCode.ERROR, message: "Relevant questions failed, sending back the query as it is" });
-            span?.setAttribute("source_ids", sourceIds?.join(",") ?? "");
-            span?.setAttribute("instance_url", this.ctx.props.instanceUrl ?? "");
+            span?.setAttribute("datasource_ids", sourceIds?.join(",") ?? "");
             span?.setAttribute("error", relevantQuestions.error.message);
             return {
                 content: [{
@@ -265,8 +264,7 @@ export class MCPServer extends BaseMCPServer {
                     text: JSON.stringify(structuredContent),
                 }],
                 structuredContent,
-            }
-            
+            };
         }
 
         if (relevantQuestions.questions.length === 0) {

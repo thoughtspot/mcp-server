@@ -325,7 +325,9 @@ describe("MCP Server", () => {
             // When error occurs, the code returns the query as fallback (graceful degradation)
             expect(result.isError).toBeUndefined();
             const resultText = JSON.parse((result.content as any[])[0].text);
-            expect(resultText.questions).toBe("Show me revenue data");
+            expect(resultText.questions).toBeInstanceOf(Array);
+            expect(resultText.questions[0].question).toBe("Show me revenue data");
+            expect(resultText.questions[0].datasourceId).toBe("ds-123");
         });
 
         it("should handle empty questions response", async () => {
