@@ -88,7 +88,7 @@ export abstract class BaseMCPServer extends Server {
      * Create a standardized error response
      */
     protected createErrorResponse(message: string, statusMessage?: string): ErrorResponse {
-        const span = getActiveSpan();
+        const span = this.initSpanWithCommonAttributes();
         span?.setStatus({ code: SpanStatusCode.ERROR, message: statusMessage || message });
         return {
             isError: true,
@@ -100,7 +100,7 @@ export abstract class BaseMCPServer extends Server {
      * Create a standardized success response with a single message
      */
     protected createSuccessResponse(message: string, statusMessage?: string): SuccessResponse {
-        const span = getActiveSpan();
+        const span = this.initSpanWithCommonAttributes();
         span?.setStatus({ code: SpanStatusCode.OK, message: statusMessage || message });
         return {
             content: [{ type: "text", text: message }],
@@ -111,7 +111,7 @@ export abstract class BaseMCPServer extends Server {
      * Create a standardized success response with multiple content items
      */
     protected createMultiContentSuccessResponse(content: ContentItem[], statusMessage: string): SuccessResponse {
-        const span = getActiveSpan();
+        const span = this.initSpanWithCommonAttributes();
         span?.setStatus({ code: SpanStatusCode.OK, message: statusMessage });
         return {
             content,
@@ -122,7 +122,7 @@ export abstract class BaseMCPServer extends Server {
      * Create a standardized success response with an array of text items
      */
     protected createArraySuccessResponse(texts: string[], statusMessage: string): SuccessResponse {
-        const span = getActiveSpan();
+        const span = this.initSpanWithCommonAttributes();
         span?.setStatus({ code: SpanStatusCode.OK, message: statusMessage });
         return {
             content: texts.map(text => ({ type: "text", text })),
@@ -130,7 +130,7 @@ export abstract class BaseMCPServer extends Server {
     }
 
     protected createStructuredContentSuccessResponse<T>(structuredContent: T, statusMessage: string): SuccessResponse<T> {
-        const span = getActiveSpan();
+        const span = this.initSpanWithCommonAttributes();
         span?.setStatus({ code: SpanStatusCode.OK, message: statusMessage });
         return {
             content: [{
