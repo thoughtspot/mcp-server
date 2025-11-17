@@ -11,7 +11,8 @@ import type {
     DataSource
 } from "../thoughtspot/thoughtspot-service";
 import { TrackEvent } from "../metrics";
-import { WithSpan } from "../metrics/tracing/tracing-utils";
+import { getActiveSpan, WithSpan } from "../metrics/tracing/tracing-utils";
+import { SpanStatusCode } from "@opentelemetry/api";
 import { BaseMCPServer, type Context, type ToolResponse } from "./mcp-server-base";
 
 
@@ -250,7 +251,20 @@ export class MCPServer extends BaseMCPServer {
         );
 
         if (relevantQuestions.error) {
-            return this.createErrorResponse(relevantQuestions.error.message, `Error getting relevant questions ${relevantQuestions.error.message}`);
+            console.error("Error getting relevant questions: ", relevantQuestions.error);
+            
+            const structuredContent = { questions: [{ question: query, datasourceId: sourceIds?.[0] ?? '' }] };
+            const span = this.initSpanWithCommonAttributes();
+            span?.setStatus({ code: SpanStatusCode.ERROR, message: "Relevant questions failed, sending back the query as it is" });
+            span?.setAttribute("datasource_ids", sourceIds?.join(",") ?? "");
+            span?.setAttribute("error", relevantQuestions.error.message);
+            return {
+                content: [{
+                    type: "text",
+                    text: JSON.stringify(structuredContent),
+                }],
+                structuredContent,
+            };
         }
 
         if (relevantQuestions.questions.length === 0) {
