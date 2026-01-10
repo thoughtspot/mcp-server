@@ -398,7 +398,7 @@ export class ThoughtSpotService {
             releaseVersion: info.releaseVersion,
             currentOrgId: info.currentOrgId,
             privileges: info.privileges,
-            enableSpotterDataSourceDiscovery: info.enableSpotterDataSourceDiscovery,
+            enableSpotterDataSourceDiscovery: info.configInfo?.enableSpotterDataSourceDiscovery,
         };
     }
 
