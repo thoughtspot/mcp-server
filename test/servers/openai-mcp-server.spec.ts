@@ -35,11 +35,11 @@ describe("OpenAI Deep Research MCP Server", () => {
                     },
                     selfClusterName: "test-cluster",
                     selfClusterId: "test-cluster-123",
+                    enableSpotterDataSourceDiscovery: true,
                 },
                 userName: "test-user",
                 currentOrgId: "test-org",
                 privileges: [],
-                enableSpotterDataSourceDiscovery: true,
             }),
             singleAnswer: vi.fn().mockResolvedValue({
                 session_identifier: "session-123",

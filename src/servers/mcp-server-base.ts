@@ -66,8 +66,11 @@ export abstract class BaseMCPServer extends Server {
      * Check if data source discovery is available
      */
     protected isDatasourceDiscoveryAvailable(): boolean {
-        const enableSpotterDataSourceDiscovery = this.sessionInfo?.enableSpotterDataSourceDiscovery;
-        return !!enableSpotterDataSourceDiscovery;
+        if (!this.sessionInfo) {
+            console.warn("[DEBUG] sessionInfo is not initialized when checking datasource discovery availability");
+            return false;
+        }
+        return String(this.sessionInfo.enableSpotterDataSourceDiscovery) === "true";
     };
 
     /**
