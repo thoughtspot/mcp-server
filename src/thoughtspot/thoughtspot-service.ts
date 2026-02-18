@@ -213,7 +213,7 @@ export class ThoughtSpotService {
                     : Promise.resolve(null)
             ])
 
-            const frameUrl = `${(this.client as any).instanceUrl}/#/embed/conv-assist-answer?sessionId=${session.sessionId}&genNo=${session.genNo}&acSessionId=${session.acSession.sessionId}&acGenNo=${session.acSession.genNo}`;
+            const frameUrl = `${(this.client as any).instanceUrl}/?tsmcp=true#/embed/conv-assist-answer?sessionId=${session.sessionId}&genNo=${session.genNo}&acSessionId=${session.acSession.sessionId}&acGenNo=${session.acSession.genNo}`;
 
             return {
                 question,
