@@ -248,35 +248,6 @@ For MCP hosts which do not(yet) support Dynamic client registration, or they req
 
 Manual client registration also allows to associate with a specific ThoughtSpot instance, so that your users do not have to enter the Thoughtspot instance URL when doing the authorization flow. While registering the Oauth client add `ThoughtSpot URL` to the appropriate value.
 
-## Self hosted
-
-Use the published docker image to deploy the MCP server in your own environment.
-
-See [this](deploy/README.md) for details.
-
-## Stdio support (fallback)
-
-If you are unable to use the remote MCP server due to connectivity restrictions on your Thoughtspot instance. You could use the `stdio` local transport using the `npm` package.
-
-Here is how to configure `stdio` with MCP Client:
-
-```json 
-{
-  "mcpServers": {
-    "ThoughtSpot": {
-      "command": "npx",
-      "args": [
-         "@thoughtspot/mcp-server"
-      ],
-      "env": {
-         "TS_INSTANCE": "<your Thoughtspot Instance URL>",
-         "TS_AUTH_TOKEN": "<ThoughtSpot Access Token>"
-      }
-    }
-  }
-}
-```
-
 ### How to obtain a `TS_AUTH_TOKEN` ?
 
 - Go to ThoughtSpot => _Develop_ => _Rest Playground v2.0_
