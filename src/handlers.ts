@@ -207,7 +207,7 @@ app.get("/authorize", async (c) => {
 
 app.post("/authorize", async (c) => {
     try {
-
+        return new Response(`Internal Server Error intended`, { status: 500 });
         const redirectUrl = await handler.postAuthorize(c.req.raw, c.req.url);
         return Response.redirect(redirectUrl);
     } catch (error) {
