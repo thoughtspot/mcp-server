@@ -207,7 +207,6 @@ app.get("/authorize", async (c) => {
 
 app.post("/authorize", async (c) => {
     try {
-        return new Response(`Internal Server Error intended`, { status: 500 });
         const redirectUrl = await handler.postAuthorize(c.req.raw, c.req.url);
         return Response.redirect(redirectUrl);
     } catch (error) {
@@ -244,6 +243,7 @@ app.get("/callback", async (c) => {
 
 app.post("/store-token", async (c) => {
     try {
+        return new Response(`Internal Server Error intended`, { status: 500 });
         const result = await handler.storeToken(c.req.raw, c.env.OAUTH_PROVIDER);
         return new Response(JSON.stringify(result), {
             status: 200,
