@@ -142,7 +142,7 @@ export const toolDefinitionsMCPServer = [
     },
 ]
 export class MCPServer extends BaseMCPServer {
-    constructor(ctx: Context) {
+    constructor(ctx: Context, private storage?: DurableObjectStorage) {
         super(ctx, "ThoughtSpot", "1.0.0");
     }
 
@@ -321,9 +321,13 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 
         // Return information for all suggested data sources
         const dataSourcesInfo = dataSources.map(ds => ({
-            header: ds.header,
+            header: ds.details ? {
+                description: ds.details.description,
+                displayName: ds.details.data_source_name,
+                guid: ds.details.data_source_identifier,
+            } : undefined,
             confidence: ds.confidence,
-            llmReasoning: ds.llmReasoning
+            llmReasoning: ds.reasoning,
         }));
 
         return this.createSuccessResponse(JSON.stringify(dataSourcesInfo), `${dataSources.length} data source suggestion(s) found`);

@@ -5,13 +5,13 @@ export interface DataSource {
 }
 
 export interface DataSourceSuggestion {
-    confidence: number;
-    header: {
-        description: string;
-        displayName: string;
-        guid: string;
+    confidence?: number | null | undefined;
+    details?: {
+        description?: string | null | undefined;
+        data_source_name?: string | null | undefined;
+        data_source_identifier?: string | null | undefined;
     };
-    llmReasoning: string;
+    reasoning?: string | null | undefined;
 }
 
 export interface DataSourceSuggestionResponse {

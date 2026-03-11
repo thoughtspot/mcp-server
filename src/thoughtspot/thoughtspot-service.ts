@@ -37,20 +37,20 @@ export class ThoughtSpotService {
             span?.setAttribute("query", query);
             span?.addEvent("query-get-data-source-suggestions");
 
-            const response = await (this.client as any).queryGetDataSourceSuggestions(query);
+            const response = await this.client.getDataSourceSuggestions({ query });
 
             span?.setStatus({ code: SpanStatusCode.OK, message: "Data source suggestions retrieved" });
 
             // Check if we have any data sources
-            if (!response.dataSources || response.dataSources.length === 0) {
+            if (!response.data_sources || response.data_sources.length === 0) {
                 span?.setAttribute("suggestions_count", 0);
                 return null;
             }
 
-            span?.setAttribute("suggestions_count", response.dataSources.length);
+            span?.setAttribute("suggestions_count", response.data_sources.length);
 
             // Return top 2 data sources (or just 1 if only 1 available)
-            const topDataSources = response.dataSources.slice(0, 2);
+            const topDataSources = response.data_sources.slice(0, 2);
             return topDataSources;
 
         } catch (error) {

@@ -3,9 +3,9 @@ import { instrumentDO, type ResolveConfigFn } from '@microlabs/otel-cf-workers';
 import type { BaseMCPServer, Context } from "./servers/mcp-server-base";
 import type { Props } from "./utils";
 
-export function instrumentedMCPServer<T extends BaseMCPServer>(MCPServer: new (ctx: Context) => T, config: ResolveConfigFn) {
+export function instrumentedMCPServer<T extends BaseMCPServer>(MCPServer: new (ctx: Context, storage?: DurableObjectStorage) => T, config: ResolveConfigFn) {
     const Agent = class extends McpAgent<Env, any, Props> {
-        server = new MCPServer(this as Context);
+        server = new MCPServer(this as Context, this.ctx.storage);
 
         // Argument of type 'typeof ThoughtSpotMCPWrapper' is not assignable to parameter of type 'DOClass'.
         // Cannot assign a 'protected' constructor type to a 'public' constructor type.
@@ -17,6 +17,7 @@ export function instrumentedMCPServer<T extends BaseMCPServer>(MCPServer: new (c
 
         async init() {
             await this.server.init();
+            this.ctx.storage
         }
 
         public static serve(path: string) {
