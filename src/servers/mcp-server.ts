@@ -89,6 +89,62 @@ export const GetDataSourceSuggestionsSchema = z.object({
          There can be multiple data sources. Each data source can be used to get the data for the user's query using the other tools getRelevantQuestions and getAnswer.`),
 });
 
+/** Data source context for agent conversation */
+const DataSourceContextSchema = z.object({
+    guid: z.string().describe("Unique identifier of the data source (e.g. worksheet/datasource GUID)"),
+});
+
+/** Answer context for agent conversation */
+const AnswerContextSchema = z.object({
+    session_identifier: z.string().describe("Unique identifier of the answer session"),
+    generation_number: z.number().describe("Generation number of the answer"),
+});
+
+/** Liveboard context for agent conversation */
+const LiveboardContextSchema = z.object({
+    liveboard_identifier: z.string().describe("Unique identifier of the liveboard"),
+    visualization_identifier: z.string().describe("Unique identifier of the visualization"),
+});
+
+/** Metadata context for creating an agent conversation */
+const AgentConversationMetadataContextSchema = z.object({
+    type: z.enum(["answer", "liveboard", "data_source"]).describe("Type of context for the conversation"),
+    data_source_context: DataSourceContextSchema.optional().describe("Required when type is data_source"),
+    answer_context: AnswerContextSchema.optional().describe("Required when type is answer"),
+    liveboard_context: LiveboardContextSchema.optional().describe("Required when type is liveboard"),
+});
+
+/** Conversation settings for agent conversation */
+const AgentConversationSettingsSchema = z.object({
+    enable_contextual_change_analysis: z.boolean().optional(),
+    enable_natural_language_answer_generation: z.boolean().optional(),
+    enable_reasoning: z.boolean().optional(),
+}).optional();
+
+export const CreateAgentConversationSchema = z.object({
+    metadata_context: AgentConversationMetadataContextSchema.describe("Context for the conversation (data source, answer, or liveboard)"),
+    conversation_settings: AgentConversationSettingsSchema.optional().describe("Optional conversation settings"),
+});
+
+export const CreateAgentConversationOutputSchema = z.object({
+    conversation_id: z.string().describe("Unique identifier of the created conversation"),
+});
+
+export const SendAgentMessageSchema = z.object({
+    conversationId: z.string().describe("Unique identifier of the conversation (from createAgentConversation)"),
+    messages: z.array(z.string()).describe("Messages to send to the agent"),
+});
+
+export const SendAgentMessageOutputSchema = z.object({
+    success: z.boolean().describe("Whether the message was sent successfully"),
+    messages: z.array(z.object({
+        type: z.string(),
+        text: z.string().optional(),
+        answerTitle: z.string().optional(),
+        answerQuery: z.string().optional(),
+    })).optional().describe("Response messages from the agent"),
+});
+
 
 export enum ToolName {
     Ping = "ping",
@@ -96,6 +152,8 @@ export enum ToolName {
     GetAnswer = "getAnswer",
     CreateLiveboard = "createLiveboard",
     GetDataSourceSuggestions = "getDataSourceSuggestions",
+    CreateAgentConversation = "createAgentConversation",
+    SendAgentMessage = "sendAgentMessage",
 }
 
 export const toolDefinitionsMCPServer = [
@@ -136,6 +194,28 @@ export const toolDefinitionsMCPServer = [
         inputSchema: zodToJsonSchema(CreateLiveboardSchema) as ToolInput,
         annotations: {
             title: "Create Liveboard from Answers",
+            readOnlyHint: true,
+            destructiveHint: false,
+        },
+    },
+    {
+        name: ToolName.CreateAgentConversation,
+        description: "Create an agent (Spotter) conversation with a specific metadata context (data source, answer, or liveboard). Returns a conversation_id to use with sendAgentMessage for follow-up messages.",
+        inputSchema: zodToJsonSchema(CreateAgentConversationSchema) as ToolInput,
+        outputSchema: zodToJsonSchema(CreateAgentConversationOutputSchema) as ToolOutput,
+        annotations: {
+            title: "Create Agent Conversation",
+            readOnlyHint: true,
+            destructiveHint: false,
+        },
+    },
+    {
+        name: ToolName.SendAgentMessage,
+        description: "Send one or more messages to an existing agent conversation. Use the conversation_id returned from createAgentConversation.",
+        inputSchema: zodToJsonSchema(SendAgentMessageSchema) as ToolInput,
+        outputSchema: zodToJsonSchema(SendAgentMessageOutputSchema) as ToolOutput,
+        annotations: {
+            title: "Send Agent Message",
             readOnlyHint: true,
             destructiveHint: false,
         },
@@ -214,29 +294,48 @@ export class MCPServer extends BaseMCPServer {
             case ToolName.Ping: {
                 console.log("Received Ping request");
                 if (this.ctx.props.accessToken && this.ctx.props.instanceUrl) {
-                    return this.createSuccessResponse("Pong", "Ping successful");
+                    response = this.createSuccessResponse("Pong", "Ping successful");
+                    break;
                 }
-                return this.createErrorResponse("Not authenticated", "Ping failed");
+                response = this.createErrorResponse("Not authenticated", "Ping failed");
+                break;
             }
             case ToolName.GetRelevantQuestions: {
-                return this.callGetRelevantQuestions(request);
+                response = await this.callGetRelevantQuestions(request) as ToolResponse;
+                break;
             }
 
             case ToolName.GetAnswer: {
-                return this.callGetAnswer(request);
+                response = await this.callGetAnswer(request) as ToolResponse;
+                break;
             }
 
             case ToolName.CreateLiveboard: {
-                return this.callCreateLiveboard(request);
+                response = await this.callCreateLiveboard(request) as ToolResponse;
+                break;
             }
 
             case ToolName.GetDataSourceSuggestions: {
-                return this.callGetDataSourceSuggestions(request);
+                response = await this.callGetDataSourceSuggestions(request) as ToolResponse;
+                break;
+            }
+
+            case ToolName.CreateAgentConversation: {
+                response = await this.callCreateAgentConversation(request) as ToolResponse;
+                break;
+            }
+
+            case ToolName.SendAgentMessage: {
+                response = await this.callSendAgentMessage(request) as ToolResponse;
+                break;
             }
 
             default:
                 throw new Error(`Unknown tool: ${name}`);
         }
+
+        console.log('>>> response', response);
+        return response;
     }
 
     @WithSpan('call-get-relevant-questions')
@@ -331,6 +430,32 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
         }));
 
         return this.createSuccessResponse(JSON.stringify(dataSourcesInfo), `${dataSources.length} data source suggestion(s) found`);
+    }
+
+    @WithSpan('call-create-agent-conversation')
+    async callCreateAgentConversation(request: z.infer<typeof CallToolRequestSchema>) {
+        const { metadata_context, conversation_settings } = CreateAgentConversationSchema.parse(request.params.arguments);
+        const conversation = await this.getThoughtSpotService().createAgentConversation({
+            metadata_context,
+            conversation_settings,
+        });
+
+        return this.createStructuredContentSuccessResponse(
+            { conversation_id: conversation.conversation_id },
+            "Agent conversation created successfully"
+        );
+    }
+
+    @WithSpan('call-send-agent-message')
+    async callSendAgentMessage(request: z.infer<typeof CallToolRequestSchema>) {
+        const { conversationId, messages } = SendAgentMessageSchema.parse(request.params.arguments);
+        const response = await this.getThoughtSpotService().sendAgentMessage(conversationId, { messages });
+
+        return this.createStructuredContentSuccessResponse(
+            { success: true, messages: response.messages },
+            "Agent message sent successfully"
+        );
+        // return this.createSuccessResponse(JSON.stringify({ success: true, message: response.messages }), "Agent message sent successfully");
     }
 
     private _sources: {
