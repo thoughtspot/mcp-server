@@ -79,7 +79,7 @@ export interface SendAgentMessageOptions {
 }
 
 export interface AgentMessage {
-    type: 'text' | 'answer';
+    type: 'text' | 'text-chunk' |'answer';
     text?: string | null | undefined;
     answerTitle?: string | null | undefined;
     answerQuery?: string | null | undefined;

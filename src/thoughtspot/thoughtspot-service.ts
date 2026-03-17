@@ -11,7 +11,6 @@ import type {
     SendAgentMessageResponse,
 } from "./types";
 
-
 /**
  * Main ThoughtSpot service class using decorator pattern for tracing
  */
@@ -534,6 +533,49 @@ export class ThoughtSpotService {
     }
 
     /**
+     * Send a message to an existing agent conversation and record the streaming response async
+     */
+    @WithSpan('send-agent-message-streaming')
+    async sendAgentMessageStreaming(
+        conversationId: string,
+        options: SendAgentMessageOptions
+    ) {
+        const span = getActiveSpan();
+
+        try {
+            span?.setAttribute("conversation_id", conversationId);
+            span?.setAttribute(
+                "messages_count",
+                options.messages.length
+            );
+            span?.addEvent("send-agent-message-streaming");
+
+            console.log('>>> send agent message streaming started');
+            const response = await sendAgentMessageStreaming({
+                instanceUrl: (this.client as any).instanceUrl,
+                authToken: await (this.client as any).api?.configuration?.authMethods.bearerAuth?.tokenProvider?.getToken(),
+                conversation_identifier: conversationId,
+                messages: options.messages,
+            });
+            console.log('>>> send agent message streaming resolved');
+
+            span?.setStatus({
+                code: SpanStatusCode.OK,
+                message: "Agent message streaming sent",
+            });
+
+            return response;
+        } catch (error) {
+            span?.setStatus({
+                code: SpanStatusCode.ERROR,
+                message: (error as Error).message,
+            });
+            console.error("Error sending agent message streaming: ", error);
+            throw error;
+        }
+    }
+
+    /**
      * Validate connection to ThoughtSpot
      */
     @WithSpan('validate-connection')
@@ -546,6 +588,36 @@ export class ThoughtSpotService {
             return false;
         }
     }
+}
+
+// Need to do it ourself because the REST API SDK does not support streaming yet
+async function sendAgentMessageStreaming(params: {
+    instanceUrl: string;
+    authToken: string;
+    conversation_identifier: string;
+    messages: string[];
+}): Promise<Response> {
+    const endpoint = "/api/rest/2.0/ai/agent/converse/sse";
+    const response = await fetch(`${params.instanceUrl}${endpoint}`, {
+        method: "POST",
+        headers: {
+            "Accept": "*/*",
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${params.authToken}`,
+            "User-Agent": "ThoughtSpot-ts-client",
+        },
+        body: JSON.stringify({
+            conversation_identifier: params.conversation_identifier,
+            messages: params.messages,
+        }),
+    });
+
+    if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`sendAgentMessageStreaming failed with status ${response.status}: ${errorText}`);
+    }
+
+    return response;
 }
 
 // Backward compatibility - export functions that use the service class

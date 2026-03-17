@@ -11,9 +11,18 @@ import type {
     DataSource
 } from "../thoughtspot/thoughtspot-service";
 import { TrackEvent } from "../metrics";
-import { getActiveSpan, WithSpan } from "../metrics/tracing/tracing-utils";
+import { WithSpan } from "../metrics/tracing/tracing-utils";
 import { SpanStatusCode } from "@opentelemetry/api";
 import { BaseMCPServer, type Context, type ToolResponse } from "./mcp-server-base";
+import { AgentMessage } from "../thoughtspot/types";
+
+type StreamingConversationState = {
+    latestMessages: AgentMessage[];
+    isDone: boolean;
+    // ttlTimeoutId: number | null;
+}
+
+const latestMessagesByConversationId = new Map<string, StreamingConversationState>();
 
 
 const ToolInputSchema = ToolSchema.shape.inputSchema;
@@ -145,6 +154,29 @@ export const SendAgentMessageOutputSchema = z.object({
     })).optional().describe("Response messages from the agent"),
 });
 
+export const SendAgentMessageAsyncSchema = z.object({
+    conversationId: z.string().describe("Unique identifier of the conversation (from createAgentConversation)"),
+    messages: z.array(z.string()).describe("Messages to send to the agent"),
+});
+
+export const SendAgentMessageAsyncOutputSchema = z.object({
+    success: z.boolean().describe("Whether the message was sent successfully"),
+});
+
+export const GetAgentMessageUpdatesSchema = z.object({
+    conversationId: z.string().describe("Unique identifier of the conversation (from createAgentConversation)"),
+});
+
+export const GetAgentMessageUpdatesOutputSchema = z.object({
+    messages: z.array(z.object({
+        type: z.string(),
+        text: z.string().optional(),
+        answerTitle: z.string().optional(),
+        answerQuery: z.string().optional(),
+    })).optional().describe("Response messages from the agent"),
+    done: z.boolean().describe("Whether the conversation is done (if not, call getAgentMessageUpdates again to get the latest messages)"),
+});
+
 
 export enum ToolName {
     Ping = "ping",
@@ -154,6 +186,8 @@ export enum ToolName {
     GetDataSourceSuggestions = "getDataSourceSuggestions",
     CreateAgentConversation = "createAgentConversation",
     SendAgentMessage = "sendAgentMessage",
+    SendAgentMessageAsync = "sendAgentMessageAsync",
+    GetAgentMessageUpdates = "getAgentMessageUpdates",
 }
 
 export const toolDefinitionsMCPServer = [
@@ -216,6 +250,28 @@ export const toolDefinitionsMCPServer = [
         outputSchema: zodToJsonSchema(SendAgentMessageOutputSchema) as ToolOutput,
         annotations: {
             title: "Send Agent Message",
+            readOnlyHint: true,
+            destructiveHint: false,
+        },
+    },
+    {
+        name: ToolName.SendAgentMessageAsync,
+        description: "Send a message to an existing agent conversation, and allow the response to be generated asynchronously. Use the conversation_id returned from createAgentConversation. Call getAgentMessageUpdates to get the latest messages until the conversation is done.",
+        inputSchema: zodToJsonSchema(SendAgentMessageAsyncSchema) as ToolInput,
+        outputSchema: zodToJsonSchema(SendAgentMessageAsyncOutputSchema) as ToolOutput,
+        annotations: {
+            title: "Send Agent Message Async",
+            readOnlyHint: true,
+            destructiveHint: false,
+        },
+    },
+    {
+        name: ToolName.GetAgentMessageUpdates,
+        description: "Retrieve the latest messages from an asynchronous conversation after sending a message with sendAgentMessageAsync. Use the conversation_id returned from createAgentConversation.",
+        inputSchema: zodToJsonSchema(GetAgentMessageUpdatesSchema) as ToolInput,
+        outputSchema: zodToJsonSchema(GetAgentMessageUpdatesOutputSchema) as ToolOutput,
+        annotations: {
+            title: "Get Agent Message Updates",
             readOnlyHint: true,
             destructiveHint: false,
         },
@@ -304,32 +360,34 @@ export class MCPServer extends BaseMCPServer {
                 response = await this.callGetRelevantQuestions(request) as ToolResponse;
                 break;
             }
-
             case ToolName.GetAnswer: {
                 response = await this.callGetAnswer(request) as ToolResponse;
                 break;
             }
-
             case ToolName.CreateLiveboard: {
                 response = await this.callCreateLiveboard(request) as ToolResponse;
                 break;
             }
-
             case ToolName.GetDataSourceSuggestions: {
                 response = await this.callGetDataSourceSuggestions(request) as ToolResponse;
                 break;
             }
-
             case ToolName.CreateAgentConversation: {
                 response = await this.callCreateAgentConversation(request) as ToolResponse;
                 break;
             }
-
             case ToolName.SendAgentMessage: {
                 response = await this.callSendAgentMessage(request) as ToolResponse;
                 break;
             }
-
+            case ToolName.SendAgentMessageAsync: {
+                response = await this.callSendAgentMessageAsync(request) as ToolResponse;
+                break;
+            }
+            case ToolName.GetAgentMessageUpdates: {
+                response = await this.callGetAgentMessageUpdates(request) as ToolResponse;
+                break;
+            }
             default:
                 throw new Error(`Unknown tool: ${name}`);
         }
@@ -455,7 +513,85 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
             { success: true, messages: response.messages },
             "Agent message sent successfully"
         );
-        // return this.createSuccessResponse(JSON.stringify({ success: true, message: response.messages }), "Agent message sent successfully");
+    }
+
+    @WithSpan('call-send-agent-message-async')
+    async callSendAgentMessageAsync(request: z.infer<typeof CallToolRequestSchema>) {
+        const { conversationId, messages } = SendAgentMessageSchema.parse(request.params.arguments);
+        const response = await this.getThoughtSpotService().sendAgentMessageStreaming(conversationId, { messages });
+
+        const reader = response.body?.getReader();
+        if (!reader) {
+            throw new Error("Failed to get reader from response body");
+        }
+
+        setTimeout(async () => {
+            const decoder = new TextDecoder();
+            let buffer = "";
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) {
+                    const latestMessages = latestMessagesByConversationId.get(conversationId)?.latestMessages ?? [];
+                    latestMessagesByConversationId.set(conversationId, {isDone: true, latestMessages});
+                    break;
+                }
+
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split("\n");
+                buffer = lines.pop() || "";
+
+                for (const line of lines) {
+                    if (!line.startsWith("data: ")) continue;
+
+                    try {
+                        const data = JSON.parse(line.slice(6));
+                        data.forEach((item: any) => {
+                            if (item.type === 'text-chunk') {
+                                const latestMessages = latestMessagesByConversationId.get(conversationId)?.latestMessages ?? [];
+                                latestMessages.push({
+                                    type: 'text-chunk',
+                                    text: item.content,
+                                });
+                                latestMessagesByConversationId.set(conversationId, {isDone: false, latestMessages});
+                            } else if (item.type === 'answer') {
+                                const latestMessages = latestMessagesByConversationId.get(conversationId)?.latestMessages ?? [];
+                                latestMessages.push({
+                                    type: 'answer',
+                                    answerTitle: item.metadata.title,
+                                    answerQuery: item.metadata.sage_query,
+                                });
+                                latestMessagesByConversationId.set(conversationId, {isDone: false, latestMessages});
+                            } else {
+                                console.log('>>> unknown item in event stream', item);
+                            }
+                        });
+                    } catch {
+                        console.log('>>> error parsing line', line);
+                    }
+                }
+            }
+        });
+
+        return this.createStructuredContentSuccessResponse(
+            { success: true },
+            "Agent message sent successfully"
+        );
+    }
+
+    @WithSpan('call-get-agent-message-updates')
+    async callGetAgentMessageUpdates(request: z.infer<typeof CallToolRequestSchema>) {
+        const conversationId = request.params?.arguments?.conversationId as string;
+        const latestStatus = latestMessagesByConversationId.get(conversationId);
+        if (!latestStatus) {
+            console.log('>>> no latest status for conversationId', conversationId);
+        }
+        latestMessagesByConversationId.delete(conversationId);
+
+        return this.createStructuredContentSuccessResponse(
+            { messages: latestStatus?.latestMessages ?? [], done: latestStatus?.isDone ?? false },
+            "Agent message updates retrieved successfully"
+        );
     }
 
     private _sources: {
