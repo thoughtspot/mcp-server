@@ -242,7 +242,7 @@ export class MCPServer extends BaseMCPServer {
     @WithSpan('call-get-relevant-questions')
     async callGetRelevantQuestions(request: z.infer<typeof CallToolRequestSchema>) {
         const { query, datasourceIds: sourceIds, additionalContext } = GetRelevantQuestionsSchema.parse(request.params.arguments);
-        throw new McpServerError({ message: "Invalid call get relevant questions" }, 400);
+        return this.createErrorResponse("Error call get relevant question", `Errror with callGetRelevantQuestions`);
         // console.log("[DEBUG] Getting relevant questions for datasource: ", sourceIds);
 
         // const relevantQuestions = await this.getThoughtSpotService().getRelevantQuestions(
