@@ -16,14 +16,11 @@ import { SpanStatusCode } from "@opentelemetry/api";
 import { BaseMCPServer, type Context, type ToolResponse } from "./mcp-server-base";
 import { AgentMessage } from "../thoughtspot/types";
 
-type StreamingConversationState = {
+export type StreamingConversationState = {
     latestMessages: AgentMessage[];
     isDone: boolean;
-    // ttlTimeoutId: number | null;
+    ttlTimeoutId?: string | undefined;
 }
-
-const latestMessagesByConversationId = new Map<string, StreamingConversationState>();
-
 
 const ToolInputSchema = ToolSchema.shape.inputSchema;
 type ToolInput = z.infer<typeof ToolInputSchema>;
@@ -278,7 +275,16 @@ export const toolDefinitionsMCPServer = [
     },
 ]
 export class MCPServer extends BaseMCPServer {
-    constructor(ctx: Context, private storage?: DurableObjectStorage) {
+    constructor(
+        ctx: Context,
+        private getConversationState: (
+            conversationId: string,
+        ) => Promise<StreamingConversationState | undefined>,
+        private updateConversationStateAndResetTtlTimeout: (
+            conversationId: string,
+            newState: StreamingConversationState,
+        ) => Promise<void>,
+    ) {
         super(ctx, "ThoughtSpot", "1.0.0");
     }
 
@@ -525,6 +531,22 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
             throw new Error("Failed to get reader from response body");
         }
 
+        const updateConversationState = async (isDone: boolean, latestMessages?: AgentMessage[]) => {
+            let conversationState = await this.getConversationState(conversationId);
+            if (!conversationState) {
+                conversationState = {
+                    latestMessages: [],
+                    isDone: false,
+                }
+            }
+
+            await this.updateConversationStateAndResetTtlTimeout(conversationId, {
+                ...conversationState,
+                isDone,
+                ...(latestMessages ? { latestMessages: [...conversationState.latestMessages, ...latestMessages as AgentMessage[]] } : {}),
+            });
+        }
+
         setTimeout(async () => {
             const decoder = new TextDecoder();
             let buffer = "";
@@ -532,42 +554,39 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
             while (true) {
                 const { done, value } = await reader.read();
                 if (done) {
-                    const latestMessages = latestMessagesByConversationId.get(conversationId)?.latestMessages ?? [];
-                    latestMessagesByConversationId.set(conversationId, {isDone: true, latestMessages});
+                    console.log('>>> streaming response done');
+                    await updateConversationState(true);
                     break;
                 }
 
                 buffer += decoder.decode(value, { stream: true });
                 const lines = buffer.split("\n");
                 buffer = lines.pop() || "";
+                console.log('>>> streaming response update with # lines', lines.length);
 
                 for (const line of lines) {
                     if (!line.startsWith("data: ")) continue;
 
                     try {
                         const data = JSON.parse(line.slice(6));
-                        data.forEach((item: any) => {
+                        for (const item of data) {
                             if (item.type === 'text-chunk') {
-                                const latestMessages = latestMessagesByConversationId.get(conversationId)?.latestMessages ?? [];
-                                latestMessages.push({
+                                await updateConversationState(false, [{
                                     type: 'text-chunk',
                                     text: item.content,
-                                });
-                                latestMessagesByConversationId.set(conversationId, {isDone: false, latestMessages});
+                                }]);
                             } else if (item.type === 'answer') {
-                                const latestMessages = latestMessagesByConversationId.get(conversationId)?.latestMessages ?? [];
-                                latestMessages.push({
+                                await updateConversationState(false, [{
                                     type: 'answer',
                                     answerTitle: item.metadata.title,
                                     answerQuery: item.metadata.sage_query,
-                                });
-                                latestMessagesByConversationId.set(conversationId, {isDone: false, latestMessages});
+                                }]);
                             } else {
                                 console.log('>>> unknown item in event stream', item);
                             }
-                        });
-                    } catch {
-                        console.log('>>> error parsing line', line);
+                        };
+                    } catch(error) {
+                        console.log('>>> error parsing line', line, error);
                     }
                 }
             }
@@ -582,14 +601,26 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
     @WithSpan('call-get-agent-message-updates')
     async callGetAgentMessageUpdates(request: z.infer<typeof CallToolRequestSchema>) {
         const conversationId = request.params?.arguments?.conversationId as string;
-        const latestStatus = latestMessagesByConversationId.get(conversationId);
-        if (!latestStatus) {
-            console.log('>>> no latest status for conversationId', conversationId);
+
+        // Wait up to 5 seconds for the conversation state to be available
+        let conversationState: StreamingConversationState | undefined;
+        for (let i = 0; i < 5; i++) {
+            conversationState = await this.getConversationState(conversationId);
+            if (conversationState?.latestMessages?.length ?? 0 > 0) break;
+            await new Promise(resolve => setTimeout(resolve, 1000));
         }
-        latestMessagesByConversationId.delete(conversationId);
+
+        if (!conversationState) {
+            console.log('>>> no latest status for conversationId, assuming done and evicted', conversationId);
+        }
+
+        await this.updateConversationStateAndResetTtlTimeout(conversationId, {
+            ...conversationState,
+            latestMessages: [],
+        } as StreamingConversationState);
 
         return this.createStructuredContentSuccessResponse(
-            { messages: latestStatus?.latestMessages ?? [], done: latestStatus?.isDone ?? false },
+            { messages: conversationState?.latestMessages ?? [], done: conversationState?.isDone ?? true },
             "Agent message updates retrieved successfully"
         );
     }

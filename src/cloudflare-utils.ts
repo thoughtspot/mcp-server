@@ -2,10 +2,24 @@ import { McpAgent } from "agents/mcp";
 import { instrumentDO, type ResolveConfigFn } from '@microlabs/otel-cf-workers';
 import type { BaseMCPServer, Context } from "./servers/mcp-server-base";
 import type { Props } from "./utils";
+import { StreamingConversationState } from "./servers/mcp-server";
 
-export function instrumentedMCPServer<T extends BaseMCPServer>(MCPServer: new (ctx: Context, storage?: DurableObjectStorage) => T, config: ResolveConfigFn) {
+export function instrumentedMCPServer<T extends BaseMCPServer>(MCPServer: new (
+    ctx: Context,
+    getConversationState: (
+        conversationId: string,
+    ) => Promise<StreamingConversationState | undefined>,
+    updateConversationStateAndResetTtlTimeout: (
+        conversationId: string,
+        newState: StreamingConversationState,
+    ) => Promise<void>,
+) => T, config: ResolveConfigFn) {
     const Agent = class extends McpAgent<Env, any, Props> {
-        server = new MCPServer(this as Context, this.ctx.storage);
+        server = new MCPServer(
+            this as Context,
+            this.getConversationState.bind(this),
+            this.updateConversationStateAndResetTtlTimeout.bind(this),
+        );
 
         // Argument of type 'typeof ThoughtSpotMCPWrapper' is not assignable to parameter of type 'DOClass'.
         // Cannot assign a 'protected' constructor type to a 'public' constructor type.
@@ -36,6 +50,34 @@ export function instrumentedMCPServer<T extends BaseMCPServer>(MCPServer: new (c
                 return serverFetch(request, env, ctx);
             }
             return server;
+        }
+
+        private async getConversationState(conversationId: string) {
+            return await this.ctx.storage?.get<StreamingConversationState>(conversationId);
+        }
+
+        private async updateConversationStateAndResetTtlTimeout(
+            conversationId: string,
+            newState: StreamingConversationState,
+        ) {
+            const oldState = await this.getConversationState(conversationId);
+            if (oldState?.ttlTimeoutId) {
+                await this.cancelSchedule(oldState.ttlTimeoutId);
+            }
+
+            const schedule = await this.schedule(30, 'clearConversationState' as any, {
+                conversationId,
+            });
+
+            await this.ctx.storage?.put(conversationId, {
+                ...newState,
+                ttlTimeoutId: schedule.id,
+            });
+        }
+
+        private async clearConversationState(payload: { conversationId: string }) {
+            console.log('>>> clearing conversation state', payload.conversationId);
+            await this.ctx.storage?.delete(payload.conversationId);
         }
     }
 
