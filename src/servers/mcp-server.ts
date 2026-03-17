@@ -242,56 +242,59 @@ export class MCPServer extends BaseMCPServer {
     @WithSpan('call-get-relevant-questions')
     async callGetRelevantQuestions(request: z.infer<typeof CallToolRequestSchema>) {
         const { query, datasourceIds: sourceIds, additionalContext } = GetRelevantQuestionsSchema.parse(request.params.arguments);
-        console.log("[DEBUG] Getting relevant questions for datasource: ", sourceIds);
+        throw new McpServerError({ message: "Invalid call get relevant questions" }, 400);
+        // console.log("[DEBUG] Getting relevant questions for datasource: ", sourceIds);
 
-        const relevantQuestions = await this.getThoughtSpotService().getRelevantQuestions(
-            query,
-            sourceIds!,
-            additionalContext ?? ""
-        );
+        // const relevantQuestions = await this.getThoughtSpotService().getRelevantQuestions(
+        //     query,
+        //     sourceIds!,
+        //     additionalContext ?? ""
+        // );
 
-        if (relevantQuestions.error) {
-            console.error("Error getting relevant questions: ", relevantQuestions.error);
+        // if (relevantQuestions.error) {
+        //     console.error("Error getting relevant questions: ", relevantQuestions.error);
             
-            const structuredContent = { questions: [{ question: query, datasourceId: sourceIds?.[0] ?? '' }] };
-            const span = this.initSpanWithCommonAttributes();
-            span?.setStatus({ code: SpanStatusCode.ERROR, message: "Relevant questions failed, sending back the query as it is" });
-            span?.setAttribute("datasource_ids", sourceIds?.join(",") ?? "");
-            span?.setAttribute("error", relevantQuestions.error.message);
-            return {
-                content: [{
-                    type: "text",
-                    text: JSON.stringify(structuredContent),
-                }],
-                structuredContent,
-            };
-        }
+        //     const structuredContent = { questions: [{ question: query, datasourceId: sourceIds?.[0] ?? '' }] };
+        //     const span = this.initSpanWithCommonAttributes();
+        //     span?.setStatus({ code: SpanStatusCode.ERROR, message: "Relevant questions failed, sending back the query as it is" });
+        //     span?.setAttribute("datasource_ids", sourceIds?.join(",") ?? "");
+        //     span?.setAttribute("error", relevantQuestions.error.message);
+        //     return {
+        //         content: [{
+        //             type: "text",
+        //             text: JSON.stringify(structuredContent),
+        //         }],
+        //         structuredContent,
+        //     };
+        // }
 
-        if (relevantQuestions.questions.length === 0) {
-            return this.createSuccessResponse("No relevant questions found");
-        }
+        // if (relevantQuestions.questions.length === 0) {
+        //     return this.createSuccessResponse("No relevant questions found");
+        // }
 
-        return this.createStructuredContentSuccessResponse({ questions: relevantQuestions.questions }, "Relevant questions found");
+        // return this.createStructuredContentSuccessResponse({ questions: relevantQuestions.questions }, "Relevant questions found");
     }
 
     @WithSpan('call-get-answer')
     async callGetAnswer(request: z.infer<typeof CallToolRequestSchema>) {
         const { question, datasourceId: sourceId } = GetAnswerSchema.parse(request.params.arguments);
+        throw new McpServerError({ message: "invalid call get answer" }, 500);
 
-        const answer = await this.getThoughtSpotService().getAnswerForQuestion(question, sourceId, false);
 
-        if (answer.error) {
-            return this.createErrorResponse(answer.error.message, `Error getting answer ${answer.error.message}`);
-        }
+        // const answer = await this.getThoughtSpotService().getAnswerForQuestion(question, sourceId, false);
 
-        return this.createStructuredContentSuccessResponse({
-            data: answer.data,
-            question: answer.question,
-            session_identifier: answer.session_identifier,
-            generation_number: answer.generation_number,
-            frame_url: answer.frame_url,
-            fields_info: "data: The csv data as an answer to the question\n session_identifier: The session identifier for the answer, use for liveboard creation\n generation_number: The generation number for the answer, use for liveboard creation\n frame_url: A url which can be used to view the answer in an iframe in the browser\n",
-        }, "Answer created successfully");
+        // if (answer.error) {
+        //     return this.createErrorResponse(answer.error.message, `Error getting answer ${answer.error.message}`);
+        // }
+
+        // return this.createStructuredContentSuccessResponse({
+        //     data: answer.data,
+        //     question: answer.question,
+        //     session_identifier: answer.session_identifier,
+        //     generation_number: answer.generation_number,
+        //     frame_url: answer.frame_url,
+        //     fields_info: "data: The csv data as an answer to the question\n session_identifier: The session identifier for the answer, use for liveboard creation\n generation_number: The generation number for the answer, use for liveboard creation\n frame_url: A url which can be used to view the answer in an iframe in the browser\n",
+        // }, "Answer created successfully");
     }
 
     @WithSpan('call-create-liveboard')
