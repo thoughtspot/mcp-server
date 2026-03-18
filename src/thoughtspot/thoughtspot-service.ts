@@ -3,511 +3,612 @@ import { SpanStatusCode, trace, context } from "@opentelemetry/api";
 import { getActiveSpan, WithSpan } from "../metrics/tracing/tracing-utils";
 import type { DataSource, SessionInfo, DataSourceSuggestion } from "./types";
 
-
 /**
  * Main ThoughtSpot service class using decorator pattern for tracing
  */
 export class ThoughtSpotService {
-    constructor(private client: ThoughtSpotRestApi) { }
+	constructor(private client: ThoughtSpotRestApi) {}
 
-    @WithSpan('discover-data-sources')
-    async discoverDataSources(query?: string): Promise<DataSource[] | DataSourceSuggestion[] | null> {
-        const span = getActiveSpan();
-        span?.addEvent("discover-data-sources");
+	@WithSpan("discover-data-sources")
+	async discoverDataSources(
+		query?: string,
+	): Promise<DataSource[] | DataSourceSuggestion[] | null> {
+		const span = getActiveSpan();
+		span?.addEvent("discover-data-sources");
 
-        // If a query is provided, use intelligent data source suggestions
-        if (query) {
-            span?.addEvent("get-data-source-suggestions");
-            return await this.getDataSourceSuggestions(query);
-        }
+		// If a query is provided, use intelligent data source suggestions
+		if (query) {
+			span?.addEvent("get-data-source-suggestions");
+			return await this.getDataSourceSuggestions(query);
+		}
 
-        // Otherwise, fallback to getting all data sources
-        const dataSources = await this.getDataSources();
-        return dataSources;
-    }
+		// Otherwise, fallback to getting all data sources
+		const dataSources = await this.getDataSources();
+		return dataSources;
+	}
 
-    /**
-     * Get intelligent data source suggestions based on a query using GraphQL
-     */
-    @WithSpan('get-data-source-suggestions')
-    async getDataSourceSuggestions(query: string): Promise<DataSourceSuggestion[] | null> {
-        const span = getActiveSpan();
+	/**
+	 * Get intelligent data source suggestions based on a query using GraphQL
+	 */
+	@WithSpan("get-data-source-suggestions")
+	async getDataSourceSuggestions(
+		query: string,
+	): Promise<DataSourceSuggestion[] | null> {
+		const span = getActiveSpan();
 
-        try {
-            span?.setAttribute("query", query);
-            span?.addEvent("query-get-data-source-suggestions");
+		try {
+			span?.setAttribute("query", query);
+			span?.addEvent("query-get-data-source-suggestions");
 
-            const response = await (this.client as any).queryGetDataSourceSuggestions(query);
+			const response = await (this.client as any).queryGetDataSourceSuggestions(
+				query,
+			);
 
-            span?.setStatus({ code: SpanStatusCode.OK, message: "Data source suggestions retrieved" });
+			span?.setStatus({
+				code: SpanStatusCode.OK,
+				message: "Data source suggestions retrieved",
+			});
 
-            // Check if we have any data sources
-            if (!response.dataSources || response.dataSources.length === 0) {
-                span?.setAttribute("suggestions_count", 0);
-                return null;
-            }
+			// Check if we have any data sources
+			if (!response.dataSources || response.dataSources.length === 0) {
+				span?.setAttribute("suggestions_count", 0);
+				return null;
+			}
 
-            span?.setAttribute("suggestions_count", response.dataSources.length);
+			span?.setAttribute("suggestions_count", response.dataSources.length);
 
-            // Return top 2 data sources (or just 1 if only 1 available)
-            const topDataSources = response.dataSources.slice(0, 2);
-            return topDataSources;
+			// Return top 2 data sources (or just 1 if only 1 available)
+			const topDataSources = response.dataSources.slice(0, 2);
+			return topDataSources;
+		} catch (error) {
+			span?.setStatus({
+				code: SpanStatusCode.ERROR,
+				message: (error as Error).message,
+			});
+			console.error("Error getting data source suggestions: ", error);
+			throw error;
+		}
+	}
 
-        } catch (error) {
-            span?.setStatus({ code: SpanStatusCode.ERROR, message: (error as Error).message });
-            console.error("Error getting data source suggestions: ", error);
-            throw error;
-        }
-    }
+	/**
+	 * Get relevant questions for a given query and data sources
+	 */
+	@WithSpan("get-relevant-questions")
+	async getRelevantQuestions(
+		query: string,
+		sourceIds: string[],
+		additionalContext: string,
+	): Promise<{
+		questions: { question: string; datasourceId: string }[];
+		error: Error | null;
+	}> {
+		const span = trace.getSpan(context.active());
 
-    /**
-     * Get relevant questions for a given query and data sources
-     */
-    @WithSpan('get-relevant-questions')
-    async getRelevantQuestions(
-        query: string,
-        sourceIds: string[],
-        additionalContext: string
-    ): Promise<{ questions: { question: string, datasourceId: string }[], error: Error | null }> {
-        const span = trace.getSpan(context.active());
+		try {
+			additionalContext = additionalContext || "";
+			span?.setAttribute("datasource_ids", sourceIds.join(","));
+			console.log(
+				"[DEBUG] Getting relevant questions with datasource: ",
+				sourceIds,
+			);
+			span?.addEvent("get-decomposed-query");
 
-        try {
-            additionalContext = additionalContext || '';
-            span?.setAttribute("datasource_ids", sourceIds.join(","));
-            console.log("[DEBUG] Getting relevant questions with datasource: ", sourceIds);
-            span?.addEvent("get-decomposed-query");
+			const resp = await this.client.queryGetDecomposedQuery({
+				nlsRequest: {
+					query: query,
+				},
+				content: [additionalContext],
+				worksheetIds: sourceIds,
+				maxDecomposedQueries: 5,
+			});
 
-            const resp = await this.client.queryGetDecomposedQuery({
-                nlsRequest: {
-                    query: query,
-                },
-                content: [
-                    additionalContext,
-                ],
-                worksheetIds: sourceIds,
-                maxDecomposedQueries: 5,
-            })
+			const questions =
+				resp.decomposedQueryResponse?.decomposedQueries?.map((q) => ({
+					question: q.query!,
+					datasourceId: q.worksheetId!,
+				})) || [];
 
-            const questions = resp.decomposedQueryResponse?.decomposedQueries?.map((q) => ({
-                question: q.query!,
-                datasourceId: q.worksheetId!,
-            })) || [];
+			span?.setStatus({
+				code: SpanStatusCode.OK,
+				message: "Relevant questions found",
+			});
+			span?.setAttribute("questions_count", questions.length);
 
-            span?.setStatus({ code: SpanStatusCode.OK, message: "Relevant questions found" });
-            span?.setAttribute("questions_count", questions.length);
+			return {
+				questions,
+				error: null,
+			};
+		} catch (error) {
+			span?.setStatus({
+				code: SpanStatusCode.ERROR,
+				message: (error as Error).message,
+			});
+			console.error(
+				"Error getting relevant questions: ",
+				"sourceIds: ",
+				sourceIds,
+				"instanceUrl: ",
+				(this.client as any).instanceUrl,
+				"error: ",
+				error,
+			);
+			return {
+				questions: [],
+				error: error as Error,
+			};
+		}
+	}
 
-            return {
-                questions,
-                error: null,
-            }
-        } catch (error) {
-            span?.setStatus({ code: SpanStatusCode.ERROR, message: (error as Error).message });
-            console.error("Error getting relevant questions: ", "sourceIds: ", sourceIds, "instanceUrl: ", (this.client as any).instanceUrl, "error: ", error);
-            return {
-                questions: [],
-                error: error as Error,
-            }
-        }
-    }
+	/**
+	 * Get answer data for a specific question
+	 */
+	@WithSpan("get-answer-data")
+	private async getAnswerData(
+		question: string,
+		session_identifier: string,
+		generation_number: number,
+	): Promise<string> {
+		const span = getActiveSpan();
 
-    /**
-     * Get answer data for a specific question
-     */
-    @WithSpan('get-answer-data')
-    private async getAnswerData(
-        question: string,
-        session_identifier: string,
-        generation_number: number
-    ): Promise<string> {
-        const span = getActiveSpan();
+		try {
+			span?.setAttributes({
+				session_identifier,
+				generation_number,
+			});
 
-        try {
-            span?.setAttributes({
-                session_identifier,
-                generation_number,
-            })
+			console.log(
+				"[DEBUG] Getting Data for session_identifier: ",
+				session_identifier,
+				"generation_number: ",
+				generation_number,
+				"instanceUrl: ",
+				(this.client as any).instanceUrl,
+			);
+			span?.addEvent("get-answer-data");
+			const data = await this.client.exportAnswerReport({
+				session_identifier,
+				generation_number,
+				file_format: "CSV",
+			});
 
-            console.log("[DEBUG] Getting Data for session_identifier: ", session_identifier, "generation_number: ", generation_number, "instanceUrl: ", (this.client as any).instanceUrl);
-            span?.addEvent("get-answer-data");
-            const data = await this.client.exportAnswerReport({
-                session_identifier,
-                generation_number,
-                file_format: "CSV",
-            })
+			let csvData = await data.text();
+			// get only the first 100 lines of the csv data
+			csvData = csvData.split("\n").slice(0, 100).join("\n");
 
-            let csvData = await data.text();
-            // get only the first 100 lines of the csv data
-            csvData = csvData.split('\n').slice(0, 100).join('\n');
+			return csvData;
+		} catch (error) {
+			span?.setStatus({
+				code: SpanStatusCode.ERROR,
+				message: `Error getting answer Data ${error}`,
+			});
+			console.error(
+				"Error getting answer Data: ",
+				error,
+				"instanceUrl: ",
+				(this.client as any).instanceUrl,
+			);
+			throw error;
+		}
+	}
 
-            return csvData;
-        } catch (error) {
-            span?.setStatus({ code: SpanStatusCode.ERROR, message: `Error getting answer Data ${error}` });
-            console.error("Error getting answer Data: ", error, "instanceUrl: ", (this.client as any).instanceUrl);
-            throw error;
-        }
-    }
+	/**
+	 * Get TML for a specific answer
+	 */
+	@WithSpan("get-answer-tml")
+	private async getAnswerTML(
+		question: string,
+		session_identifier: string,
+		generation_number: number,
+	): Promise<any> {
+		const span = getActiveSpan();
 
-    /**
-     * Get TML for a specific answer
-     */
-    @WithSpan('get-answer-tml')
-    private async getAnswerTML(
-        question: string,
-        session_identifier: string,
-        generation_number: number
-    ): Promise<any> {
-        const span = getActiveSpan();
+		try {
+			span?.setAttribute("session_identifier", session_identifier);
+			span?.addEvent("get-answer-tml");
+			console.log("[DEBUG] Getting TML for question: ", question);
+			const tml = await (this.client as any).exportUnsavedAnswerTML({
+				session_identifier,
+				generation_number,
+			});
+			return tml;
+		} catch (error) {
+			span?.setStatus({
+				code: SpanStatusCode.ERROR,
+				message: `Error getting answer TML ${error}`,
+			});
+			console.error("Error getting answer TML: ", error);
+			return null;
+		}
+	}
 
-        try {
-            span?.setAttribute("session_identifier", session_identifier);
-            span?.addEvent("get-answer-tml");
-            console.log("[DEBUG] Getting TML for question: ", question);
-            const tml = await (this.client as any).exportUnsavedAnswerTML({
-                session_identifier,
-                generation_number,
-            })
-            return tml;
-        } catch (error) {
-            span?.setStatus({ code: SpanStatusCode.ERROR, message: `Error getting answer TML ${error}` });
-            console.error("Error getting answer TML: ", error);
-            return null;
-        }
-    }
+	/**
+	 * Get answer for a specific question
+	 */
+	@WithSpan("get-answer-for-question")
+	async getAnswerForQuestion(
+		question: string,
+		sourceId: string,
+		shouldGetTML: boolean,
+	): Promise<any> {
+		const span = getActiveSpan();
 
-    /**
-     * Get answer for a specific question
-     */
-    @WithSpan('get-answer-for-question')
-    async getAnswerForQuestion(
-        question: string,
-        sourceId: string,
-        shouldGetTML: boolean
-    ): Promise<any> {
-        const span = getActiveSpan();
+		span?.setAttributes({
+			datasource_id: sourceId,
+			should_get_tml: shouldGetTML,
+		});
+		span?.addEvent("get-answer-for-question");
 
-        span?.setAttributes({
-            datasource_id: sourceId,
-            should_get_tml: shouldGetTML,
-        });
-        span?.addEvent("get-answer-for-question");
+		console.log(
+			"[DEBUG] Getting answer for sourceId: ",
+			sourceId,
+			"shouldGetTML: ",
+			shouldGetTML,
+		);
 
-        console.log("[DEBUG] Getting answer for sourceId: ", sourceId, "shouldGetTML: ", shouldGetTML);
+		try {
+			const answer = await this.client.singleAnswer({
+				query: question,
+				metadata_identifier: sourceId,
+			});
 
-        try {
-            const answer = await this.client.singleAnswer({
-                query: question,
-                metadata_identifier: sourceId,
-            })
+			const { session_identifier, generation_number } = answer as any;
+			span?.setAttributes({
+				session_identifier,
+				generation_number,
+			});
 
-            const { session_identifier, generation_number } = answer as any;
-            span?.setAttributes({
-                session_identifier,
-                generation_number,
-            });
+			const [data, session, tml] = await Promise.all([
+				this.getAnswerData(question, session_identifier, generation_number),
+				(this.client as any).getAnswerSession({
+					session_identifier,
+					generation_number,
+				}),
+				shouldGetTML
+					? this.getAnswerTML(question, session_identifier, generation_number)
+					: Promise.resolve(null),
+			]);
 
-            const [data, session, tml] = await Promise.all([
-                this.getAnswerData(question, session_identifier, generation_number),
-                (this.client as any).getAnswerSession({ session_identifier, generation_number }),
-                shouldGetTML
-                    ? this.getAnswerTML(question, session_identifier, generation_number)
-                    : Promise.resolve(null)
-            ])
+			const frameUrl = `${(this.client as any).instanceUrl}/?tsmcp=true#/embed/conv-assist-answer?sessionId=${session.sessionId}&genNo=${session.genNo}&acSessionId=${session.acSession.sessionId}&acGenNo=${session.acSession.genNo}`;
 
-            const frameUrl = `${(this.client as any).instanceUrl}/?tsmcp=true#/embed/conv-assist-answer?sessionId=${session.sessionId}&genNo=${session.genNo}&acSessionId=${session.acSession.sessionId}&acGenNo=${session.acSession.genNo}`;
+			return {
+				question,
+				...answer,
+				frame_url: frameUrl,
+				data,
+				tml,
+				error: null,
+			};
+		} catch (error) {
+			span?.setStatus({
+				code: SpanStatusCode.ERROR,
+				message: `Error getting answer for question ${error}`,
+			});
+			console.error(
+				"Error getting answer for question: ",
+				question,
+				" and sourceId: ",
+				sourceId,
+				" and shouldGetTML: ",
+				shouldGetTML,
+				" and error: ",
+				error,
+				"instanceUrl: ",
+				(this.client as any).instanceUrl,
+			);
+			return {
+				error: error as Error,
+			};
+		}
+	}
 
-            return {
-                question,
-                ...answer,
-                frame_url: frameUrl,
-                data,
-                tml,
-                error: null,
-            };
-        } catch (error) {
-            span?.setStatus({ code: SpanStatusCode.ERROR, message: `Error getting answer for question ${error}` });
-            console.error("Error getting answer for question: ", question, " and sourceId: ", sourceId, " and shouldGetTML: ", shouldGetTML, " and error: ", error, "instanceUrl: ", (this.client as any).instanceUrl);
-            return {
-                error: error as Error,
-            };
-        }
-    }
+	/**
+	 * Fetch TML and create liveboard
+	 */
+	@WithSpan("fetch-tml-and-create-liveboard")
+	async fetchTMLAndCreateLiveboard(
+		name: string,
+		answers: any[],
+		noteTileParsedHtml: string,
+	): Promise<{ url?: string; error: Error | null }> {
+		const span = getActiveSpan();
 
-    /**
-     * Fetch TML and create liveboard
-     */
-    @WithSpan('fetch-tml-and-create-liveboard')
-    async fetchTMLAndCreateLiveboard(name: string, answers: any[], noteTileParsedHtml: string): Promise<{ url?: string; error: Error | null }> {
-        const span = getActiveSpan();
+		try {
+			span?.setAttributes({
+				liveboard_name: name,
+				answers_count: answers.length,
+			});
+			span?.addEvent("create-answer-tmls");
 
-        try {
-            span?.setAttributes({
-                liveboard_name: name,
-                answers_count: answers.length,
-            });
-            span?.addEvent("create-answer-tmls");
+			const tmls = await Promise.all(
+				answers.map((answer) =>
+					this.getAnswerTML(
+						answer.question,
+						answer.session_identifier,
+						answer.generation_number,
+					),
+				),
+			);
 
-            const tmls = await Promise.all(answers.map((answer) =>
-                this.getAnswerTML(answer.question, answer.session_identifier, answer.generation_number)
-            ));
+			// Add note tile first
+			const noteTitle = {
+				id: "Viz_0",
+				note_tile: {
+					html_parsed_string: noteTileParsedHtml,
+				},
+			};
 
-            // Add note tile first
-            const noteTitle = {
-                id: "Viz_0",
-                note_tile: {
-                    html_parsed_string: noteTileParsedHtml
-                }
-            };
+			// Update answers with TML data to match TML visualization format
+			const visualizationAnswers = answers
+				.map((answer, idx) => {
+					const tml = tmls[idx];
+					if (!tml) return null;
+					return {
+						id: `Viz_${idx + 1}`,
+						answer: {
+							...tml.answer,
+							name: answer.question,
+						},
+					};
+				})
+				.filter((viz) => viz !== null);
 
-            // Update answers with TML data to match TML visualization format
-            const visualizationAnswers = answers
-                .map((answer, idx) => {
-                    const tml = tmls[idx];
-                    if (!tml) return null;
-                    return {
-                        id: `Viz_${idx + 1}`,
-                        answer: {
-                            ...tml.answer,
-                            name: answer.question,
-                        },
-                    };
-                })
-                .filter((viz) => viz !== null);
+			// Combine note tile first, then visualization answers
+			answers = [noteTitle, ...visualizationAnswers];
 
-            // Combine note tile first, then visualization answers
-            answers = [noteTitle, ...visualizationAnswers];
+			span?.addEvent("create-liveboard");
 
-            span?.addEvent("create-liveboard");
+			const liveboardUrl = await this.createLiveboard(name, answers);
+			return {
+				url: liveboardUrl,
+				error: null,
+			};
+		} catch (error) {
+			span?.setStatus({
+				code: SpanStatusCode.ERROR,
+				message: `Error fetching TML and creating liveboard ${error}`,
+			});
+			console.error("Error fetching TML and creating liveboard: ", error);
+			return {
+				error: error as Error,
+			};
+		}
+	}
 
+	/**
+	 * Create liveboard from answers
+	 */
+	@WithSpan("create-liveboard")
+	async createLiveboard(name: string, answers: any[]): Promise<string> {
+		const span = getActiveSpan();
 
-            const liveboardUrl = await this.createLiveboard(name, answers);
-            return {
-                url: liveboardUrl,
-                error: null,
-            }
-        } catch (error) {
-            span?.setStatus({ code: SpanStatusCode.ERROR, message: `Error fetching TML and creating liveboard ${error}` });
-            console.error("Error fetching TML and creating liveboard: ", error);
-            return {
-                error: error as Error,
-            }
-        }
-    }
+		span?.addEvent("createLiveboard");
+		span?.setAttributes({
+			liveboard_name: name,
+			total_answers: answers.length,
+		});
 
-    /**
-     * Create liveboard from answers
-     */
-    @WithSpan('create-liveboard')
-    async createLiveboard(name: string, answers: any[]): Promise<string> {
-        const span = getActiveSpan();
+		const tml = {
+			liveboard: {
+				name,
+				visualizations: answers,
+				layout: {
+					tiles: answers.map((answer, idx) => {
+						if (answer.note_tile) {
+							return {
+								visualization_id: `Viz_${idx}`,
+								size: "LARGE",
+							};
+						}
+						return {
+							visualization_id: `Viz_${idx}`,
+							size: "MEDIUM_SMALL",
+						};
+					}),
+				},
+			},
+		};
 
-        span?.addEvent("createLiveboard");
-        span?.setAttributes({
-            liveboard_name: name,
-            total_answers: answers.length,
-        });
+		const resp = await this.client.importMetadataTML({
+			metadata_tmls: [JSON.stringify(tml)],
+			import_policy: "ALL_OR_NONE",
+		});
 
-        const tml = {
-            liveboard: {
-                name,
-                visualizations: answers,
-                layout: {
-                    tiles: answers.map((answer, idx) => {
-                        if (answer.note_tile) {
-                            return {
-                                visualization_id: `Viz_${idx}`,
-                                size: 'LARGE'
-                            }
-                        }
-                        return {
-                            visualization_id: `Viz_${idx}`,
-                            size: 'MEDIUM_SMALL'
-                        }
-                    })
-                },
-            }
-        };
+		const liveboardUrl = `${(this.client as any).instanceUrl}/#/pinboard/${resp[0].response.header.id_guid}`;
+		span?.setStatus({
+			code: SpanStatusCode.OK,
+			message: "Liveboard created successfully",
+		});
+		return liveboardUrl;
+	}
 
-        const resp = await this.client.importMetadataTML({
-            metadata_tmls: [JSON.stringify(tml)],
-            import_policy: "ALL_OR_NONE",
-        })
+	/**
+	 * Get data sources
+	 */
+	@WithSpan("get-data-sources")
+	async getDataSources(): Promise<DataSource[]> {
+		const span = getActiveSpan();
 
-        const liveboardUrl = `${(this.client as any).instanceUrl}/#/pinboard/${resp[0].response.header.id_guid}`;
-        span?.setStatus({ code: SpanStatusCode.OK, message: "Liveboard created successfully" });
-        return liveboardUrl;
-    }
+		span?.addEvent("get-data-sources");
 
-    /**
-     * Get data sources
-     */
-    @WithSpan('get-data-sources')
-    async getDataSources(): Promise<DataSource[]> {
-        const span = getActiveSpan();
+		const resp = await this.client.searchMetadata({
+			metadata: [
+				{
+					type: "LOGICAL_TABLE",
+				},
+			],
+			record_size: 2000,
+			sort_options: {
+				field_name: "LAST_ACCESSED",
+				order: "DESC",
+			},
+		});
 
-        span?.addEvent("get-data-sources");
+		const results = resp
+			// Tables can also be used for spotter now
+			//.filter(d => d.metadata_header.type === "WORKSHEET" || d.metadata_header.subType === "WORKSHEET")
+			.filter((d) => d.metadata_header.aiAnswerGenerationDisabled === false)
+			.map((d) => ({
+				name: d.metadata_header.name,
+				id: d.metadata_header.id,
+				description: d.metadata_header.description,
+			}));
 
-        const resp = await this.client.searchMetadata({
-            metadata: [{
-                type: "LOGICAL_TABLE",
-            }],
-            record_size: 2000,
-            sort_options: {
-                field_name: "LAST_ACCESSED",
-                order: "DESC",
-            }
-        });
+		return results;
+	}
 
-        const results = resp
-            // Tables can also be used for spotter now
-            //.filter(d => d.metadata_header.type === "WORKSHEET" || d.metadata_header.subType === "WORKSHEET")
-            .filter(d => d.metadata_header.aiAnswerGenerationDisabled === false)
-            .map(d => ({
-                name: d.metadata_header.name,
-                id: d.metadata_header.id,
-                description: d.metadata_header.description,
-            }));
+	/**
+	 * Get session information
+	 */
+	@WithSpan("get-session-info")
+	async getSessionInfo(): Promise<SessionInfo> {
+		const span = getActiveSpan();
 
-        return results;
-    }
+		const info = await (this.client as any).getSessionInfo();
+		const devMixpanelToken = info.configInfo.mixpanelConfig.devSdkKey;
+		const prodMixpanelToken = info.configInfo.mixpanelConfig.prodSdkKey;
+		const mixpanelToken = info.configInfo.mixpanelConfig.production
+			? prodMixpanelToken
+			: devMixpanelToken;
 
-    /**
-     * Get session information
-     */
-    @WithSpan('get-session-info')
-    async getSessionInfo(): Promise<SessionInfo> {
-        const span = getActiveSpan();
+		span?.setAttribute("user_guid", info.userGUID);
+		span?.setAttribute("user_name", info.userName);
+		span?.setAttribute("cluster_name", info.configInfo.selfClusterName);
+		span?.setAttribute("release_version", info.releaseVersion);
 
-        const info = await (this.client as any).getSessionInfo();
-        const devMixpanelToken = info.configInfo.mixpanelConfig.devSdkKey;
-        const prodMixpanelToken = info.configInfo.mixpanelConfig.prodSdkKey;
-        const mixpanelToken = info.configInfo.mixpanelConfig.production
-            ? prodMixpanelToken
-            : devMixpanelToken;
+		return {
+			mixpanelToken,
+			userGUID: info.userGUID,
+			userName: info.userName,
+			clusterName: info.configInfo.selfClusterName,
+			clusterId: info.configInfo.selfClusterId,
+			releaseVersion: info.releaseVersion,
+			currentOrgId: info.currentOrgId,
+			privileges: info.privileges,
+			enableSpotterDataSourceDiscovery:
+				info.configInfo?.enableSpotterDataSourceDiscovery,
+		};
+	}
 
-        span?.setAttribute("user_guid", info.userGUID);
-        span?.setAttribute("user_name", info.userName);
-        span?.setAttribute("cluster_name", info.configInfo.selfClusterName);
-        span?.setAttribute("release_version", info.releaseVersion);
+	/**
+	 * Search worksheets by term
+	 */
+	@WithSpan("search-worksheets")
+	async searchWorksheets(searchTerm: string): Promise<DataSource[]> {
+		const span = getActiveSpan();
 
-        return {
-            mixpanelToken,
-            userGUID: info.userGUID,
-            userName: info.userName,
-            clusterName: info.configInfo.selfClusterName,
-            clusterId: info.configInfo.selfClusterId,
-            releaseVersion: info.releaseVersion,
-            currentOrgId: info.currentOrgId,
-            privileges: info.privileges,
-            enableSpotterDataSourceDiscovery: info.configInfo?.enableSpotterDataSourceDiscovery,
-        };
-    }
+		const resp = await this.client.searchMetadata({
+			metadata: [
+				{
+					type: "LOGICAL_TABLE",
+				},
+			],
+			record_size: 100,
+			sort_options: {
+				field_name: "NAME",
+				order: "ASC",
+			},
+		});
 
-    /**
-     * Search worksheets by term
-     */
-    @WithSpan('search-worksheets')
-    async searchWorksheets(searchTerm: string): Promise<DataSource[]> {
-        const span = getActiveSpan();
+		const results = resp
+			.filter((d) => d.metadata_header.type === "WORKSHEET")
+			.filter((d) =>
+				d.metadata_header.name.toLowerCase().includes(searchTerm.toLowerCase()),
+			)
+			.map((d) => ({
+				name: d.metadata_header.name,
+				id: d.metadata_header.id,
+				description: d.metadata_header.description,
+			}));
 
-        const resp = await this.client.searchMetadata({
-            metadata: [{
-                type: "LOGICAL_TABLE",
-            }],
-            record_size: 100,
-            sort_options: {
-                field_name: "NAME",
-                order: "ASC",
-            }
-        });
+		span?.setAttribute("results_count", results.length);
 
-        const results = resp
-            .filter(d => d.metadata_header.type === "WORKSHEET")
-            .filter(d => d.metadata_header.name.toLowerCase().includes(searchTerm.toLowerCase()))
-            .map(d => ({
-                name: d.metadata_header.name,
-                id: d.metadata_header.id,
-                description: d.metadata_header.description,
-            }));
+		return results;
+	}
 
-        span?.setAttribute('results_count', results.length);
-
-        return results;
-    }
-
-    /**
-     * Validate connection to ThoughtSpot
-     */
-    @WithSpan('validate-connection')
-    async validateConnection(): Promise<boolean> {
-        try {
-            await (this.client as any).getSessionInfo();
-            return true;
-        } catch (error) {
-            // The decorator will automatically record the exception
-            return false;
-        }
-    }
+	/**
+	 * Validate connection to ThoughtSpot
+	 */
+	@WithSpan("validate-connection")
+	async validateConnection(): Promise<boolean> {
+		try {
+			await (this.client as any).getSessionInfo();
+			return true;
+		} catch (error) {
+			// The decorator will automatically record the exception
+			return false;
+		}
+	}
 }
 
 // Backward compatibility - export functions that use the service class
 export async function getRelevantQuestions(
-    query: string,
-    sourceIds: string[],
-    additionalContext: string,
-    client: ThoughtSpotRestApi,
-): Promise<{ questions: { question: string, datasourceId: string }[], error: Error | null }> {
-    const service = new ThoughtSpotService(client);
-    return service.getRelevantQuestions(query, sourceIds, additionalContext);
+	query: string,
+	sourceIds: string[],
+	additionalContext: string,
+	client: ThoughtSpotRestApi,
+): Promise<{
+	questions: { question: string; datasourceId: string }[];
+	error: Error | null;
+}> {
+	const service = new ThoughtSpotService(client);
+	return service.getRelevantQuestions(query, sourceIds, additionalContext);
 }
 
 export async function getAnswerForQuestion(
-    question: string,
-    sourceId: string,
-    shouldGetTML: boolean,
-    client: ThoughtSpotRestApi,
+	question: string,
+	sourceId: string,
+	shouldGetTML: boolean,
+	client: ThoughtSpotRestApi,
 ) {
-    const service = new ThoughtSpotService(client);
-    return service.getAnswerForQuestion(question, sourceId, shouldGetTML);
+	const service = new ThoughtSpotService(client);
+	return service.getAnswerForQuestion(question, sourceId, shouldGetTML);
 }
 
 export async function fetchTMLAndCreateLiveboard(
-    name: string,
-    answers: any[],
-    summary: string,
-    client: ThoughtSpotRestApi,
+	name: string,
+	answers: any[],
+	summary: string,
+	client: ThoughtSpotRestApi,
 ) {
-    const service = new ThoughtSpotService(client);
-    return service.fetchTMLAndCreateLiveboard(name, answers, summary);
+	const service = new ThoughtSpotService(client);
+	return service.fetchTMLAndCreateLiveboard(name, answers, summary);
 }
 
 export async function createLiveboard(
-    name: string,
-    answers: any[],
-    client: ThoughtSpotRestApi,
+	name: string,
+	answers: any[],
+	client: ThoughtSpotRestApi,
 ) {
-    const service = new ThoughtSpotService(client);
-    return service.createLiveboard(name, answers);
+	const service = new ThoughtSpotService(client);
+	return service.createLiveboard(name, answers);
 }
 
 export async function getDataSources(
-    client: ThoughtSpotRestApi,
+	client: ThoughtSpotRestApi,
 ): Promise<DataSource[]> {
-    const service = new ThoughtSpotService(client);
-    return service.getDataSources();
+	const service = new ThoughtSpotService(client);
+	return service.getDataSources();
 }
 
 export async function getDataSourceSuggestions(
-    query: string,
-    client: ThoughtSpotRestApi,
+	query: string,
+	client: ThoughtSpotRestApi,
 ): Promise<DataSourceSuggestion[] | null> {
-    const service = new ThoughtSpotService(client);
-    return service.getDataSourceSuggestions(query);
+	const service = new ThoughtSpotService(client);
+	return service.getDataSourceSuggestions(query);
 }
 
-export async function getSessionInfo(client: ThoughtSpotRestApi): Promise<SessionInfo> {
-    const service = new ThoughtSpotService(client);
-    return service.getSessionInfo();
+export async function getSessionInfo(
+	client: ThoughtSpotRestApi,
+): Promise<SessionInfo> {
+	const service = new ThoughtSpotService(client);
+	return service.getSessionInfo();
 }
 
 // Export types
-export type { DataSource, SessionInfo, DataSourceSuggestion, DataSourceSuggestionResponse } from "./types";
+export type {
+	DataSource,
+	SessionInfo,
+	DataSourceSuggestion,
+	DataSourceSuggestionResponse,
+} from "./types";
