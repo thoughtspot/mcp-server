@@ -133,9 +133,9 @@ export class OpenAIDeepResearchMCPServer extends BaseMCPServer {
             return this.createSuccessResponse("No relevant data sources found, please provide a datasource id in the query");
         }
         const results = dataSources.map(d => ({
-            id: `datasource:///${d.header.guid}`,
-            title: d.header.displayName,
-            text: `Datasource Description: ${d.header.description}. Confidence that this datasource is relevant to the query: ${d.confidence}. Reasoning for the confidence: ${d.llmReasoning}. 
+            id: `datasource:///${d.details?.data_source_identifier ?? ""}`,
+            title: d.details?.data_source_name ?? "",
+            text: `Datasource Description: ${d.details?.description ?? ""}. Confidence that this datasource is relevant to the query: ${d.confidence}. Reasoning for the confidence: ${d.reasoning ?? ""}. 
             Use this datasource to search for relevant questions and to get answers for the questions. 
             Use the search tool to search for relevant questions with the format "datasource:<id> <query-with-spaces>" and the fetch tool to get answers for the questions.`,
         }));

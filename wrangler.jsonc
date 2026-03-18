@@ -49,4 +49,9 @@
         { "binding": "ANALYTICS", "dataset": "mcp_events" }
     ],
 	"assets": { "directory": "./static/", "binding": "ASSETS" },
+	"dev": {
+        "host": "myserver.com:8787",
+        "ip": "127.0.0.1",
+        "port": 8787,
+	},
 }

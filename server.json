@@ -70,6 +70,22 @@
       {
         "name": "getDataSourceSuggestions",
         "description": "Get datasource suggestions for a given query"
+      },
+      {
+        "name": "createAgentConversation",
+        "description": "Create a conversation with a given data source"
+      },
+      {
+        "name": "sendAgentMessage",
+        "description": "Send a message in a conversation"
+      },
+      {
+        "name": "sendAgentMessageAsync",
+        "description": "Send a message in a conversation, and allow the response to be generated asynchronously"
+      },
+      {
+        "name": "getAgentMessageUpdates",
+        "description": "Retrieve the latest messages from an asynchronous conversation"
       }
     ],
     "resources": [

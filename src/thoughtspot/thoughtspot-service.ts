@@ -1,8 +1,15 @@
 import type { ThoughtSpotRestApi } from "@thoughtspot/rest-api-sdk";
 import { SpanStatusCode, trace, context } from "@opentelemetry/api";
 import { getActiveSpan, WithSpan } from "../metrics/tracing/tracing-utils";
-import type { DataSource, SessionInfo, DataSourceSuggestion } from "./types";
-
+import type {
+    DataSource,
+    SessionInfo,
+    DataSourceSuggestion,
+    CreateAgentConversationOptions,
+    AgentConversation,
+    SendAgentMessageOptions,
+    SendAgentMessageResponse,
+} from "./types";
 
 /**
  * Main ThoughtSpot service class using decorator pattern for tracing
@@ -37,20 +44,20 @@ export class ThoughtSpotService {
             span?.setAttribute("query", query);
             span?.addEvent("query-get-data-source-suggestions");
 
-            const response = await (this.client as any).queryGetDataSourceSuggestions(query);
+            const response = await this.client.getDataSourceSuggestions({ query });
 
             span?.setStatus({ code: SpanStatusCode.OK, message: "Data source suggestions retrieved" });
 
             // Check if we have any data sources
-            if (!response.dataSources || response.dataSources.length === 0) {
+            if (!response.data_sources || response.data_sources.length === 0) {
                 span?.setAttribute("suggestions_count", 0);
                 return null;
             }
 
-            span?.setAttribute("suggestions_count", response.dataSources.length);
+            span?.setAttribute("suggestions_count", response.data_sources.length);
 
             // Return top 2 data sources (or just 1 if only 1 available)
-            const topDataSources = response.dataSources.slice(0, 2);
+            const topDataSources = response.data_sources.slice(0, 2);
             return topDataSources;
 
         } catch (error) {
@@ -435,6 +442,140 @@ export class ThoughtSpotService {
     }
 
     /**
+     * Create an agent conversation with the specified metadata context
+     */
+    @WithSpan('create-agent-conversation')
+    async createAgentConversation(
+        options: CreateAgentConversationOptions
+    ): Promise<AgentConversation> {
+        const span = getActiveSpan();
+
+        try {
+            span?.setAttribute(
+                "metadata_context_type",
+                options.metadata_context.type
+            );
+            span?.addEvent("create-agent-conversation");
+
+            const conversation = await this.client.createAgentConversation({
+                metadata_context: options.metadata_context,
+                conversation_settings: options.conversation_settings ?? {},
+            });
+
+            span?.setStatus({
+                code: SpanStatusCode.OK,
+                message: "Agent conversation created",
+            });
+            span?.setAttribute(
+                "conversation_id",
+                conversation.conversation_id
+            );
+
+            return {
+                conversation_id: conversation.conversation_id,
+            };
+        } catch (error) {
+            span?.setStatus({
+                code: SpanStatusCode.ERROR,
+                message: (error as Error).message,
+            });
+            console.error("Error creating agent conversation: ", error);
+            throw error;
+        }
+    }
+
+    /**
+     * Send a message to an existing agent conversation
+     */
+    @WithSpan('send-agent-message')
+    async sendAgentMessage(
+        conversationId: string,
+        options: SendAgentMessageOptions
+    ): Promise<SendAgentMessageResponse> {
+        const span = getActiveSpan();
+
+        try {
+            span?.setAttribute("conversation_id", conversationId);
+            span?.setAttribute(
+                "messages_count",
+                options.messages.length
+            );
+            span?.addEvent("send-agent-message");
+
+            const response = await this.client.sendAgentMessage(
+                conversationId,
+                { messages: options.messages }
+            );
+
+            span?.setStatus({
+                code: SpanStatusCode.OK,
+                message: "Agent message sent",
+            });
+
+            const messages = response?.messages?.map((message: any) => ({
+                type: message.type,
+                text: message.text,
+                answerTitle: message.title,
+                answerQuery: message.sage_query,
+            })) ?? [];
+
+            return {
+                messages,
+            };
+        } catch (error) {
+            span?.setStatus({
+                code: SpanStatusCode.ERROR,
+                message: (error as Error).message,
+            });
+            console.error("Error sending agent message: ", error);
+            throw error;
+        }
+    }
+
+    /**
+     * Send a message to an existing agent conversation and record the streaming response async
+     */
+    @WithSpan('send-agent-message-streaming')
+    async sendAgentMessageStreaming(
+        conversationId: string,
+        options: SendAgentMessageOptions
+    ) {
+        const span = getActiveSpan();
+
+        try {
+            span?.setAttribute("conversation_id", conversationId);
+            span?.setAttribute(
+                "messages_count",
+                options.messages.length
+            );
+            span?.addEvent("send-agent-message-streaming");
+
+            console.log('>>> send agent message streaming started');
+            const response = await sendAgentMessageStreaming({
+                instanceUrl: (this.client as any).instanceUrl,
+                authToken: await (this.client as any).api?.configuration?.authMethods.bearerAuth?.tokenProvider?.getToken(),
+                conversation_identifier: conversationId,
+                messages: options.messages,
+            });
+            console.log('>>> send agent message streaming resolved');
+
+            span?.setStatus({
+                code: SpanStatusCode.OK,
+                message: "Agent message streaming sent",
+            });
+
+            return response;
+        } catch (error) {
+            span?.setStatus({
+                code: SpanStatusCode.ERROR,
+                message: (error as Error).message,
+            });
+            console.error("Error sending agent message streaming: ", error);
+            throw error;
+        }
+    }
+
+    /**
      * Validate connection to ThoughtSpot
      */
     @WithSpan('validate-connection')
@@ -447,6 +588,36 @@ export class ThoughtSpotService {
             return false;
         }
     }
+}
+
+// Need to do it ourself because the REST API SDK does not support streaming yet
+async function sendAgentMessageStreaming(params: {
+    instanceUrl: string;
+    authToken: string;
+    conversation_identifier: string;
+    messages: string[];
+}): Promise<Response> {
+    const endpoint = "/api/rest/2.0/ai/agent/converse/sse";
+    const response = await fetch(`${params.instanceUrl}${endpoint}`, {
+        method: "POST",
+        headers: {
+            "Accept": "*/*",
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${params.authToken}`,
+            "User-Agent": "ThoughtSpot-ts-client",
+        },
+        body: JSON.stringify({
+            conversation_identifier: params.conversation_identifier,
+            messages: params.messages,
+        }),
+    });
+
+    if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`sendAgentMessageStreaming failed with status ${response.status}: ${errorText}`);
+    }
+
+    return response;
 }
 
 // Backward compatibility - export functions that use the service class
@@ -509,5 +680,31 @@ export async function getSessionInfo(client: ThoughtSpotRestApi): Promise<Sessio
     return service.getSessionInfo();
 }
 
+export async function createAgentConversation(
+    options: CreateAgentConversationOptions,
+    client: ThoughtSpotRestApi,
+): Promise<AgentConversation> {
+    const service = new ThoughtSpotService(client);
+    return service.createAgentConversation(options);
+}
+
+export async function sendAgentMessage(
+    conversationId: string,
+    options: SendAgentMessageOptions,
+    client: ThoughtSpotRestApi,
+): Promise<SendAgentMessageResponse> {
+    const service = new ThoughtSpotService(client);
+    return service.sendAgentMessage(conversationId, options);
+}
+
 // Export types
-export type { DataSource, SessionInfo, DataSourceSuggestion, DataSourceSuggestionResponse } from "./types";
+export type {
+    DataSource,
+    SessionInfo,
+    DataSourceSuggestion,
+    DataSourceSuggestionResponse,
+    CreateAgentConversationOptions,
+    AgentConversation,
+    SendAgentMessageOptions,
+    SendAgentMessageResponse,
+} from "./types";
