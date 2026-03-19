@@ -235,7 +235,7 @@ describe("thoughtspot-service", () => {
 				data: "col1,col2\nval1,val2\nval3,val4",
 				tml: null,
 				frame_url:
-					"https://test.thoughtspot.com/#/embed/conv-assist-answer?sessionId=session123&genNo=1&acSessionId=acSession123&acGenNo=1",
+					"https://test.thoughtspot.com/?tsmcp=true#/embed/conv-assist-answer?sessionId=session123&genNo=1&acSessionId=acSession123&acGenNo=1",
 				error: null,
 			});
 		});
@@ -290,7 +290,7 @@ describe("thoughtspot-service", () => {
 				data: "col1,col2\nval1,val2",
 				tml: mockTMLResponse,
 				frame_url:
-					"https://test.thoughtspot.com/#/embed/conv-assist-answer?sessionId=session123&genNo=1&acSessionId=acSession123&acGenNo=1",
+					"https://test.thoughtspot.com/?tsmcp=true#/embed/conv-assist-answer?sessionId=session123&genNo=1&acSessionId=acSession123&acGenNo=1",
 				error: null,
 			});
 		});
@@ -386,7 +386,7 @@ describe("thoughtspot-service", () => {
 				data: "col1,col2\nval1,val2",
 				tml: null,
 				frame_url:
-					"https://test.thoughtspot.com/#/embed/conv-assist-answer?sessionId=session123&genNo=1&acSessionId=acSession123&acGenNo=1",
+					"https://test.thoughtspot.com/?tsmcp=true#/embed/conv-assist-answer?sessionId=session123&genNo=1&acSessionId=acSession123&acGenNo=1",
 				error: null,
 			});
 		});
