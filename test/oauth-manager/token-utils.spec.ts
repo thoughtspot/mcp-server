@@ -2,12 +2,13 @@ import { describe, it, expect, vi } from "vitest";
 import { renderTokenCallback } from "../../src/oauth-manager/token-utils";
 
 describe("Token Utils", () => {
-    describe("renderTokenCallback", () => {
-        // Mock assets that returns the static HTML content
-        const mockAssets = {
-            fetch: vi.fn().mockImplementation((url: string) => {
-                if (url === 'https://example.com/oauth-callback.html') {
-                    return Promise.resolve(new Response(`
+	describe("renderTokenCallback", () => {
+		// Mock assets that returns the static HTML content
+		const mockAssets = {
+			fetch: vi.fn().mockImplementation((url: string) => {
+				if (url === "https://example.com/oauth-callback.html") {
+					return Promise.resolve(
+						new Response(`
                         <!DOCTYPE html>
                         <html>
                         <head>
@@ -58,17 +59,21 @@ describe("Token Utils", () => {
                             <script src="oauth-callback.js"></script>
                         </body>
                         </html>
-                    `));
-                } 
-                if (url === 'https://example.com/oauth-callback.css') {
-                    return Promise.resolve(new Response(`
+                    `),
+					);
+				}
+				if (url === "https://example.com/oauth-callback.css") {
+					return Promise.resolve(
+						new Response(`
                         body { background: #f8f9fa; }
                         .container { background: white; }
                         .spinner { animation: spin 1s linear infinite; }
-                    `));
-                }
-                if (url === 'https://example.com/oauth-callback.js') {
-                    return Promise.resolve(new Response(`
+                    `),
+					);
+				}
+				if (url === "https://example.com/oauth-callback.js") {
+					return Promise.resolve(
+						new Response(`
                         // Immediately invoke the async function
                         (async function() {
                             const oauthReqInfo = JSON.parse(document.getElementById('oauth-req-info').textContent);
@@ -209,195 +214,252 @@ describe("Token Utils", () => {
                                 document.querySelector('.spinner').style.display = 'none';
                             }
                         })();
-                    `));
-                }
-                return Promise.resolve(new Response('Not found', { status: 404 }));
-            })
-        };
+                    `),
+					);
+				}
+				return Promise.resolve(new Response("Not found", { status: 404 }));
+			}),
+		};
 
-        const testOrigin = 'https://example.com';
+		const testOrigin = "https://example.com";
 
-        it("should render token callback page with string oauthReqInfo", async () => {
-            const instanceUrl = "https://test.thoughtspot.cloud";
-            const oauthReqInfo = JSON.stringify({
-                clientId: "test-client",
-                scope: "read",
-                redirectUri: "https://example.com/callback"
-            });
+		it("should render token callback page with string oauthReqInfo", async () => {
+			const instanceUrl = "https://test.thoughtspot.cloud";
+			const oauthReqInfo = JSON.stringify({
+				clientId: "test-client",
+				scope: "read",
+				redirectUri: "https://example.com/callback",
+			});
 
-            const result = await renderTokenCallback(instanceUrl, oauthReqInfo, mockAssets, testOrigin);
+			const result = await renderTokenCallback(
+				instanceUrl,
+				oauthReqInfo,
+				mockAssets,
+				testOrigin,
+			);
 
-            expect(result).toContain("ThoughtSpot Authorization");
-            expect(result).toContain("Authorization in Progress");
-            expect(result).toContain("Establishing secure connection");
-            expect(result).toContain("ThoughtSpot MCP Server");
-            expect(result).toContain(instanceUrl);
-            expect(result).toContain("test-client");
-            expect(result).toContain("read");
-            expect(result).toContain("https://example.com/callback");
-        });
+			expect(result).toContain("ThoughtSpot Authorization");
+			expect(result).toContain("Authorization in Progress");
+			expect(result).toContain("Establishing secure connection");
+			expect(result).toContain("ThoughtSpot MCP Server");
+			expect(result).toContain(instanceUrl);
+			expect(result).toContain("test-client");
+			expect(result).toContain("read");
+			expect(result).toContain("https://example.com/callback");
+		});
 
-        it("should render token callback page with object oauthReqInfo", async () => {
-            const instanceUrl = "https://test.thoughtspot.cloud";
-            const oauthReqInfo = JSON.stringify({
-                clientId: "test-client",
-                scope: "read write",
-                redirectUri: "https://example.com/callback",
-                state: "random-state"
-            });
+		it("should render token callback page with object oauthReqInfo", async () => {
+			const instanceUrl = "https://test.thoughtspot.cloud";
+			const oauthReqInfo = JSON.stringify({
+				clientId: "test-client",
+				scope: "read write",
+				redirectUri: "https://example.com/callback",
+				state: "random-state",
+			});
 
-            const result = await renderTokenCallback(instanceUrl, oauthReqInfo, mockAssets, testOrigin);
+			const result = await renderTokenCallback(
+				instanceUrl,
+				oauthReqInfo,
+				mockAssets,
+				testOrigin,
+			);
 
-            expect(result).toContain("ThoughtSpot Authorization");
-            expect(result).toContain("Authorization in Progress");
-            expect(result).toContain("Establishing secure connection");
-            expect(result).toContain("ThoughtSpot MCP Server");
-            expect(result).toContain(instanceUrl);
-            expect(result).toContain("test-client");
-            expect(result).toContain("read write");
-            expect(result).toContain("https://example.com/callback");
-            expect(result).toContain("random-state");
-        });
+			expect(result).toContain("ThoughtSpot Authorization");
+			expect(result).toContain("Authorization in Progress");
+			expect(result).toContain("Establishing secure connection");
+			expect(result).toContain("ThoughtSpot MCP Server");
+			expect(result).toContain(instanceUrl);
+			expect(result).toContain("test-client");
+			expect(result).toContain("read write");
+			expect(result).toContain("https://example.com/callback");
+			expect(result).toContain("random-state");
+		});
 
-        it("should include instance URL in JavaScript", async () => {
-            const instanceUrl = "https://test.thoughtspot.cloud";
-            const oauthReqInfo = JSON.stringify({ clientId: "test-client" });
+		it("should include instance URL in JavaScript", async () => {
+			const instanceUrl = "https://test.thoughtspot.cloud";
+			const oauthReqInfo = JSON.stringify({ clientId: "test-client" });
 
-            const result = await renderTokenCallback(instanceUrl, oauthReqInfo, mockAssets, testOrigin);
+			const result = await renderTokenCallback(
+				instanceUrl,
+				oauthReqInfo,
+				mockAssets,
+				testOrigin,
+			);
 
-            // Check for instance URL in JavaScript
-            expect(result).toContain("window.INSTANCE_URL");
-            expect(result).toContain(instanceUrl);
-        });
+			// Check for instance URL in JavaScript
+			expect(result).toContain("window.INSTANCE_URL");
+			expect(result).toContain(instanceUrl);
+		});
 
-        it("should include proper CSS styling", async () => {
-            const instanceUrl = "https://test.thoughtspot.cloud";
-            const oauthReqInfo = JSON.stringify({ clientId: "test-client" });
+		it("should include proper CSS styling", async () => {
+			const instanceUrl = "https://test.thoughtspot.cloud";
+			const oauthReqInfo = JSON.stringify({ clientId: "test-client" });
 
-            const result = await renderTokenCallback(instanceUrl, oauthReqInfo, mockAssets, testOrigin);
+			const result = await renderTokenCallback(
+				instanceUrl,
+				oauthReqInfo,
+				mockAssets,
+				testOrigin,
+			);
 
-            // Check for inlined CSS classes and styling
-            expect(result).toContain("<style>");
-            expect(result).toContain("class=\"container\"");
-            expect(result).toContain("class=\"spinner\"");
-            expect(result).toContain("class=\"logo\"");
-            expect(result).toContain("class=\"footer\"");
-        });
+			// Check for inlined CSS classes and styling
+			expect(result).toContain("<style>");
+			expect(result).toContain('class="container"');
+			expect(result).toContain('class="spinner"');
+			expect(result).toContain('class="logo"');
+			expect(result).toContain('class="footer"');
+		});
 
-        it("should include ThoughtSpot logo", async () => {
-            const instanceUrl = "https://test.thoughtspot.cloud";
-            const oauthReqInfo = JSON.stringify({ clientId: "test-client" });
+		it("should include ThoughtSpot logo", async () => {
+			const instanceUrl = "https://test.thoughtspot.cloud";
+			const oauthReqInfo = JSON.stringify({ clientId: "test-client" });
 
-            const result = await renderTokenCallback(instanceUrl, oauthReqInfo, mockAssets, testOrigin);
+			const result = await renderTokenCallback(
+				instanceUrl,
+				oauthReqInfo,
+				mockAssets,
+				testOrigin,
+			);
 
-            expect(result).toContain("https://avatars.githubusercontent.com/u/8906680?s=200&v=4");
-            expect(result).toContain("ThoughtSpot Logo");
-        });
+			expect(result).toContain(
+				"https://avatars.githubusercontent.com/u/8906680?s=200&v=4",
+			);
+			expect(result).toContain("ThoughtSpot Logo");
+		});
 
-        it("should handle complex oauthReqInfo objects", async () => {
-            const instanceUrl = "https://test.thoughtspot.cloud";
-            const oauthReqInfo = JSON.stringify({
-                clientId: "test-client",
-                scope: ["read", "write", "admin"],
-                redirectUri: "https://example.com/callback",
-                state: "random-state",
-                codeChallenge: "challenge",
-                codeChallengeMethod: "S256",
-                responseType: "code"
-            });
+		it("should handle complex oauthReqInfo objects", async () => {
+			const instanceUrl = "https://test.thoughtspot.cloud";
+			const oauthReqInfo = JSON.stringify({
+				clientId: "test-client",
+				scope: ["read", "write", "admin"],
+				redirectUri: "https://example.com/callback",
+				state: "random-state",
+				codeChallenge: "challenge",
+				codeChallengeMethod: "S256",
+				responseType: "code",
+			});
 
-            const result = await renderTokenCallback(instanceUrl, oauthReqInfo, mockAssets, testOrigin);
+			const result = await renderTokenCallback(
+				instanceUrl,
+				oauthReqInfo,
+				mockAssets,
+				testOrigin,
+			);
 
-            expect(result).toContain("test-client");
-            expect(result).toContain("read");
-            expect(result).toContain("write");
-            expect(result).toContain("admin");
-            expect(result).toContain("https://example.com/callback");
-            expect(result).toContain("random-state");
-            expect(result).toContain("challenge");
-            expect(result).toContain("S256");
-            expect(result).toContain("code");
-        });
+			expect(result).toContain("test-client");
+			expect(result).toContain("read");
+			expect(result).toContain("write");
+			expect(result).toContain("admin");
+			expect(result).toContain("https://example.com/callback");
+			expect(result).toContain("random-state");
+			expect(result).toContain("challenge");
+			expect(result).toContain("S256");
+			expect(result).toContain("code");
+		});
 
-        it("should properly escape instance URL in JavaScript", async () => {
-            const instanceUrl = "https://test.thoughtspot.cloud/path?param=value&other=123";
-            const oauthReqInfo = JSON.stringify({ clientId: "test-client" });
+		it("should properly escape instance URL in JavaScript", async () => {
+			const instanceUrl =
+				"https://test.thoughtspot.cloud/path?param=value&other=123";
+			const oauthReqInfo = JSON.stringify({ clientId: "test-client" });
 
-            const result = await renderTokenCallback(instanceUrl, oauthReqInfo, mockAssets, testOrigin);
+			const result = await renderTokenCallback(
+				instanceUrl,
+				oauthReqInfo,
+				mockAssets,
+				testOrigin,
+			);
 
-            // The URL should be properly included in the JavaScript
-            expect(result).toContain(instanceUrl);
-        });
+			// The URL should be properly included in the JavaScript
+			expect(result).toContain(instanceUrl);
+		});
 
-        it("should include proper HTML structure", async () => {
-            const instanceUrl = "https://test.thoughtspot.cloud";
-            const oauthReqInfo = JSON.stringify({ clientId: "test-client" });
+		it("should include proper HTML structure", async () => {
+			const instanceUrl = "https://test.thoughtspot.cloud";
+			const oauthReqInfo = JSON.stringify({ clientId: "test-client" });
 
-            const result = await renderTokenCallback(instanceUrl, oauthReqInfo, mockAssets, testOrigin);
+			const result = await renderTokenCallback(
+				instanceUrl,
+				oauthReqInfo,
+				mockAssets,
+				testOrigin,
+			);
 
-            // Check for proper HTML structure
-            expect(result).toContain("<!DOCTYPE html>");
-            expect(result).toContain("<html>");
-            expect(result).toContain("<head>");
-            expect(result).toContain("<title>");
-            expect(result).toContain("<body>");
-            expect(result).toContain("</html>");
-        });
+			// Check for proper HTML structure
+			expect(result).toContain("<!DOCTYPE html>");
+			expect(result).toContain("<html>");
+			expect(result).toContain("<head>");
+			expect(result).toContain("<title>");
+			expect(result).toContain("<body>");
+			expect(result).toContain("</html>");
+		});
 
-        it("should handle assets fetch errors gracefully", async () => {
-            const instanceUrl = "https://test.thoughtspot.cloud";
-            const oauthReqInfo = JSON.stringify({ clientId: "test-client" });
-            
-            // Mock assets that fails to fetch
-            const failingAssets = {
-                fetch: vi.fn().mockRejectedValue(new Error("Failed to fetch"))
-            };
+		it("should handle assets fetch errors gracefully", async () => {
+			const instanceUrl = "https://test.thoughtspot.cloud";
+			const oauthReqInfo = JSON.stringify({ clientId: "test-client" });
 
-            const result = await renderTokenCallback(instanceUrl, oauthReqInfo, failingAssets, testOrigin);
+			// Mock assets that fails to fetch
+			const failingAssets = {
+				fetch: vi.fn().mockRejectedValue(new Error("Failed to fetch")),
+			};
 
-            // Should return fallback error page
-            expect(result).toContain("Authorization Error");
-            expect(result).toContain("Failed to load authorization page");
-            expect(result).toContain("Failed to fetch");
-        });
+			const result = await renderTokenCallback(
+				instanceUrl,
+				oauthReqInfo,
+				failingAssets,
+				testOrigin,
+			);
 
-        it("should handle HTML file fetch failure (line 10)", async () => {
-            const instanceUrl = "https://test.thoughtspot.cloud";
-            const oauthReqInfo = JSON.stringify({ clientId: "test-client" });
-            
-            // Mock assets that fails to fetch HTML file specifically
-            const htmlFailingAssets = {
-                fetch: vi.fn().mockImplementation((url: string) => {
-                    if (url === 'https://example.com/oauth-callback.html') {
-                        return Promise.resolve(new Response('Not found', { status: 404 }));
-                    } 
-                    if (url === 'https://example.com/oauth-callback.css') {
-                        return Promise.resolve(new Response('body { background: #f8f9fa; }'));
-                    } 
-                    if (url === 'https://example.com/oauth-callback.js') {
-                        return Promise.resolve(new Response('console.log("test");'));
-                    }
-                    return Promise.resolve(new Response('Not found', { status: 404 }));
-                })
-            };
+			// Should return fallback error page
+			expect(result).toContain("Authorization Error");
+			expect(result).toContain("Failed to load authorization page");
+			expect(result).toContain("Failed to fetch");
+		});
 
-            const result = await renderTokenCallback(instanceUrl, oauthReqInfo, htmlFailingAssets, testOrigin);
+		it("should handle HTML file fetch failure (line 10)", async () => {
+			const instanceUrl = "https://test.thoughtspot.cloud";
+			const oauthReqInfo = JSON.stringify({ clientId: "test-client" });
 
-            // Should return fallback error page with specific error message
-            expect(result).toContain("Authorization Error");
-            expect(result).toContain("Failed to load authorization page");
-            expect(result).toContain("Failed to load oauth-callback.html");
-        });
+			// Mock assets that fails to fetch HTML file specifically
+			const htmlFailingAssets = {
+				fetch: vi.fn().mockImplementation((url: string) => {
+					if (url === "https://example.com/oauth-callback.html") {
+						return Promise.resolve(new Response("Not found", { status: 404 }));
+					}
+					if (url === "https://example.com/oauth-callback.css") {
+						return Promise.resolve(
+							new Response("body { background: #f8f9fa; }"),
+						);
+					}
+					if (url === "https://example.com/oauth-callback.js") {
+						return Promise.resolve(new Response('console.log("test");'));
+					}
+					return Promise.resolve(new Response("Not found", { status: 404 }));
+				}),
+			};
 
-        it("should handle CSS file fetch failure (line 17)", async () => {
-            const instanceUrl = "https://test.thoughtspot.cloud";
-            const oauthReqInfo = JSON.stringify({ clientId: "test-client" });
-            
-            // Mock assets that fails to fetch CSS file specifically
-            const cssFailingAssets = {
-                fetch: vi.fn().mockImplementation((url: string) => {
-                    if (url === 'https://example.com/oauth-callback.html') {
-                        return Promise.resolve(new Response(`
+			const result = await renderTokenCallback(
+				instanceUrl,
+				oauthReqInfo,
+				htmlFailingAssets,
+				testOrigin,
+			);
+
+			// Should return fallback error page with specific error message
+			expect(result).toContain("Authorization Error");
+			expect(result).toContain("Failed to load authorization page");
+			expect(result).toContain("Failed to load oauth-callback.html");
+		});
+
+		it("should handle CSS file fetch failure (line 17)", async () => {
+			const instanceUrl = "https://test.thoughtspot.cloud";
+			const oauthReqInfo = JSON.stringify({ clientId: "test-client" });
+
+			// Mock assets that fails to fetch CSS file specifically
+			const cssFailingAssets = {
+				fetch: vi.fn().mockImplementation((url: string) => {
+					if (url === "https://example.com/oauth-callback.html") {
+						return Promise.resolve(
+							new Response(`
                             <!DOCTYPE html>
                             <html>
                             <head>
@@ -411,35 +473,42 @@ describe("Token Utils", () => {
                                 <script src="oauth-callback.js"></script>
                             </body>
                             </html>
-                        `));
-                    } 
-                    if (url === 'https://example.com/oauth-callback.css') {
-                        return Promise.resolve(new Response('Not found', { status: 404 }));
-                    } 
-                    if (url === 'https://example.com/oauth-callback.js') {
-                        return Promise.resolve(new Response('console.log("test");'));
-                    }
-                    return Promise.resolve(new Response('Not found', { status: 404 }));
-                })
-            };
+                        `),
+						);
+					}
+					if (url === "https://example.com/oauth-callback.css") {
+						return Promise.resolve(new Response("Not found", { status: 404 }));
+					}
+					if (url === "https://example.com/oauth-callback.js") {
+						return Promise.resolve(new Response('console.log("test");'));
+					}
+					return Promise.resolve(new Response("Not found", { status: 404 }));
+				}),
+			};
 
-            const result = await renderTokenCallback(instanceUrl, oauthReqInfo, cssFailingAssets, testOrigin);
+			const result = await renderTokenCallback(
+				instanceUrl,
+				oauthReqInfo,
+				cssFailingAssets,
+				testOrigin,
+			);
 
-            // Should return fallback error page with specific error message
-            expect(result).toContain("Authorization Error");
-            expect(result).toContain("Failed to load authorization page");
-            expect(result).toContain("Failed to load oauth-callback.css");
-        });
+			// Should return fallback error page with specific error message
+			expect(result).toContain("Authorization Error");
+			expect(result).toContain("Failed to load authorization page");
+			expect(result).toContain("Failed to load oauth-callback.css");
+		});
 
-        it("should handle JS file fetch failure (line 24)", async () => {
-            const instanceUrl = "https://test.thoughtspot.cloud";
-            const oauthReqInfo = JSON.stringify({ clientId: "test-client" });
-            
-            // Mock assets that fails to fetch JS file specifically
-            const jsFailingAssets = {
-                fetch: vi.fn().mockImplementation((url: string) => {
-                    if (url === 'https://example.com/oauth-callback.html') {
-                        return Promise.resolve(new Response(`
+		it("should handle JS file fetch failure (line 24)", async () => {
+			const instanceUrl = "https://test.thoughtspot.cloud";
+			const oauthReqInfo = JSON.stringify({ clientId: "test-client" });
+
+			// Mock assets that fails to fetch JS file specifically
+			const jsFailingAssets = {
+				fetch: vi.fn().mockImplementation((url: string) => {
+					if (url === "https://example.com/oauth-callback.html") {
+						return Promise.resolve(
+							new Response(`
                             <!DOCTYPE html>
                             <html>
                             <head>
@@ -453,115 +522,151 @@ describe("Token Utils", () => {
                                 <script src="oauth-callback.js"></script>
                             </body>
                             </html>
-                        `));
-                    } 
-                    if (url === 'https://example.com/oauth-callback.css') {
-                        return Promise.resolve(new Response('body { background: #f8f9fa; }'));
-                    } 
-                    if (url === 'https://example.com/oauth-callback.js') {
-                        return Promise.resolve(new Response('Not found', { status: 404 }));
-                    }
-                    return Promise.resolve(new Response('Not found', { status: 404 }));
-                })
-            };
+                        `),
+						);
+					}
+					if (url === "https://example.com/oauth-callback.css") {
+						return Promise.resolve(
+							new Response("body { background: #f8f9fa; }"),
+						);
+					}
+					if (url === "https://example.com/oauth-callback.js") {
+						return Promise.resolve(new Response("Not found", { status: 404 }));
+					}
+					return Promise.resolve(new Response("Not found", { status: 404 }));
+				}),
+			};
 
-            const result = await renderTokenCallback(instanceUrl, oauthReqInfo, jsFailingAssets, testOrigin);
+			const result = await renderTokenCallback(
+				instanceUrl,
+				oauthReqInfo,
+				jsFailingAssets,
+				testOrigin,
+			);
 
-            // Should return fallback error page with specific error message
-            expect(result).toContain("Authorization Error");
-            expect(result).toContain("Failed to load authorization page");
-            expect(result).toContain("Failed to load oauth-callback.js");
-        });
+			// Should return fallback error page with specific error message
+			expect(result).toContain("Authorization Error");
+			expect(result).toContain("Failed to load authorization page");
+			expect(result).toContain("Failed to load oauth-callback.js");
+		});
 
-        it("should handle network errors during file fetch", async () => {
-            const instanceUrl = "https://test.thoughtspot.cloud";
-            const oauthReqInfo = JSON.stringify({ clientId: "test-client" });
-            
-            // Mock assets that throws network error
-            const networkErrorAssets = {
-                fetch: vi.fn().mockImplementation((url: string) => {
-                    if (url === 'https://example.com/oauth-callback.html') {
-                        throw new Error('Network error: ECONNREFUSED');
-                    }
-                    return Promise.resolve(new Response('Not found', { status: 404 }));
-                })
-            };
+		it("should handle network errors during file fetch", async () => {
+			const instanceUrl = "https://test.thoughtspot.cloud";
+			const oauthReqInfo = JSON.stringify({ clientId: "test-client" });
 
-            const result = await renderTokenCallback(instanceUrl, oauthReqInfo, networkErrorAssets, testOrigin);
+			// Mock assets that throws network error
+			const networkErrorAssets = {
+				fetch: vi.fn().mockImplementation((url: string) => {
+					if (url === "https://example.com/oauth-callback.html") {
+						throw new Error("Network error: ECONNREFUSED");
+					}
+					return Promise.resolve(new Response("Not found", { status: 404 }));
+				}),
+			};
 
-            // Should return fallback error page with network error message
-            expect(result).toContain("Authorization Error");
-            expect(result).toContain("Failed to load authorization page");
-            expect(result).toContain("Network error: ECONNREFUSED");
-        });
+			const result = await renderTokenCallback(
+				instanceUrl,
+				oauthReqInfo,
+				networkErrorAssets,
+				testOrigin,
+			);
 
-        it("should handle timeout errors during file fetch", async () => {
-            const instanceUrl = "https://test.thoughtspot.cloud";
-            const oauthReqInfo = JSON.stringify({ clientId: "test-client" });
-            
-            // Mock assets that throws timeout error
-            const timeoutErrorAssets = {
-                fetch: vi.fn().mockImplementation((url: string) => {
-                    if (url === 'https://example.com/oauth-callback.html') {
-                        throw new Error('Request timeout');
-                    }
-                    return Promise.resolve(new Response('Not found', { status: 404 }));
-                })
-            };
+			// Should return fallback error page with network error message
+			expect(result).toContain("Authorization Error");
+			expect(result).toContain("Failed to load authorization page");
+			expect(result).toContain("Network error: ECONNREFUSED");
+		});
 
-            const result = await renderTokenCallback(instanceUrl, oauthReqInfo, timeoutErrorAssets, testOrigin);
+		it("should handle timeout errors during file fetch", async () => {
+			const instanceUrl = "https://test.thoughtspot.cloud";
+			const oauthReqInfo = JSON.stringify({ clientId: "test-client" });
 
-            // Should return fallback error page with timeout error message
-            expect(result).toContain("Authorization Error");
-            expect(result).toContain("Failed to load authorization page");
-            expect(result).toContain("Request timeout");
-        });
+			// Mock assets that throws timeout error
+			const timeoutErrorAssets = {
+				fetch: vi.fn().mockImplementation((url: string) => {
+					if (url === "https://example.com/oauth-callback.html") {
+						throw new Error("Request timeout");
+					}
+					return Promise.resolve(new Response("Not found", { status: 404 }));
+				}),
+			};
 
-        it("should include JavaScript logic for token format handling", async () => {
-            const instanceUrl = "https://test.thoughtspot.cloud";
-            const oauthReqInfo = JSON.stringify({ clientId: "test-client" });
+			const result = await renderTokenCallback(
+				instanceUrl,
+				oauthReqInfo,
+				timeoutErrorAssets,
+				testOrigin,
+			);
 
-            const result = await renderTokenCallback(instanceUrl, oauthReqInfo, mockAssets, testOrigin);
+			// Should return fallback error page with timeout error message
+			expect(result).toContain("Authorization Error");
+			expect(result).toContain("Failed to load authorization page");
+			expect(result).toContain("Request timeout");
+		});
 
-            // Check for token parsing logic
-            expect(result).toContain("JSON.parse(jsonText)");
-            expect(result).toContain("typeof parsed === 'string'");
-            expect(result).toContain("parsed.data && parsed.data.token");
-            expect(result).toContain("parsed.token");
-            
-            // Check for different token format handling
-            expect(result).toContain("tokenData = { data: { token: parsed } }");
-            expect(result).toContain("tokenData = { data: { token: parsed.data.token } }");
-            expect(result).toContain("tokenData = { data: { token: parsed.token } }");
-            
-            // Check for regex token extraction
-            expect(result).toContain('tokenText.match(/"token"\\s*:\\s*"([^"]+)"/)');
-            
-            // Check for raw token string handling
-            expect(result).toContain("tokenData = { data: { token: tokenText.trim() } }");
-            
-            // Check for error handling
-            expect(result).toContain("Invalid token format. Please paste the correct token.");
-        });
+		it("should include JavaScript logic for token format handling", async () => {
+			const instanceUrl = "https://test.thoughtspot.cloud";
+			const oauthReqInfo = JSON.stringify({ clientId: "test-client" });
 
-        it("should handle different instance URL formats correctly", async () => {
-            const testCases = [
-                "https://test.thoughtspot.cloud",
-                "https://mycompany.thoughtspot.cloud",
-                "https://thoughtspot.company.com",
-                "https://ts.company.com/path"
-            ];
+			const result = await renderTokenCallback(
+				instanceUrl,
+				oauthReqInfo,
+				mockAssets,
+				testOrigin,
+			);
 
-            for (const instanceUrl of testCases) {
-                const oauthReqInfo = JSON.stringify({ clientId: "test-client" });
-                const result = await renderTokenCallback(instanceUrl, oauthReqInfo, mockAssets, testOrigin);
+			// Check for token parsing logic
+			expect(result).toContain("JSON.parse(jsonText)");
+			expect(result).toContain("typeof parsed === 'string'");
+			expect(result).toContain("parsed.data && parsed.data.token");
+			expect(result).toContain("parsed.token");
 
-                // Check that the instance URL is properly included in the JavaScript
-                expect(result).toContain(`window.INSTANCE_URL = '${instanceUrl}'`);
-                
-                // Check that the token URL is constructed correctly
-                expect(result).toContain("new URL('callosum/v1/v2/auth/token/fetch?validity_time_in_sec=2592000', window.INSTANCE_URL)");
-            }
-        });
-    });
-}); 
+			// Check for different token format handling
+			expect(result).toContain("tokenData = { data: { token: parsed } }");
+			expect(result).toContain(
+				"tokenData = { data: { token: parsed.data.token } }",
+			);
+			expect(result).toContain("tokenData = { data: { token: parsed.token } }");
+
+			// Check for regex token extraction
+			expect(result).toContain('tokenText.match(/"token"\\s*:\\s*"([^"]+)"/)');
+
+			// Check for raw token string handling
+			expect(result).toContain(
+				"tokenData = { data: { token: tokenText.trim() } }",
+			);
+
+			// Check for error handling
+			expect(result).toContain(
+				"Invalid token format. Please paste the correct token.",
+			);
+		});
+
+		it("should handle different instance URL formats correctly", async () => {
+			const testCases = [
+				"https://test.thoughtspot.cloud",
+				"https://mycompany.thoughtspot.cloud",
+				"https://thoughtspot.company.com",
+				"https://ts.company.com/path",
+			];
+
+			for (const instanceUrl of testCases) {
+				const oauthReqInfo = JSON.stringify({ clientId: "test-client" });
+				const result = await renderTokenCallback(
+					instanceUrl,
+					oauthReqInfo,
+					mockAssets,
+					testOrigin,
+				);
+
+				// Check that the instance URL is properly included in the JavaScript
+				expect(result).toContain(`window.INSTANCE_URL = '${instanceUrl}'`);
+
+				// Check that the token URL is constructed correctly
+				expect(result).toContain(
+					"new URL('callosum/v1/v2/auth/token/fetch?validity_time_in_sec=2592000', window.INSTANCE_URL)",
+				);
+			}
+		});
+	});
+});

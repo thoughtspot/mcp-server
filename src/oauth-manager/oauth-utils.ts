@@ -1,54 +1,56 @@
-import type { ClientInfo, AuthRequest } from '@cloudflare/workers-oauth-provider'
-import { encodeBase64Url } from 'hono/utils/encode'
-
+import type {
+	ClientInfo,
+	AuthRequest,
+} from "@cloudflare/workers-oauth-provider";
+import { encodeBase64Url } from "hono/utils/encode";
 
 /**
  * Configuration for the approval dialog
  */
 export interface ApprovalDialogOptions {
-  /**
-   * Client information to display in the approval dialog
-   */
-  client: ClientInfo | null
-  /**
-   * Server information to display in the approval dialog
-   */
-  server: {
-    name: string
-    logo?: string
-    description?: string
-  }
-  /**
-   * Arbitrary state data to pass through the approval flow
-   * Will be encoded in the form and returned when approval is complete
-   */
-  state: Record<string, any>
-  /**
-   * Name of the cookie to use for storing approvals
-   * @default "mcp_approved_clients"
-   */
-  cookieName?: string
-  /**
-   * Secret used to sign cookies for verification
-   * Can be a string or Uint8Array
-   * @default Built-in Uint8Array key
-   */
-  cookieSecret?: string | Uint8Array
-  /**
-   * Cookie domain
-   * @default current domain
-   */
-  cookieDomain?: string
-  /**
-   * Cookie path
-   * @default "/"
-   */
-  cookiePath?: string
-  /**
-   * Cookie max age in seconds
-   * @default 30 days
-   */
-  cookieMaxAge?: number
+	/**
+	 * Client information to display in the approval dialog
+	 */
+	client: ClientInfo | null;
+	/**
+	 * Server information to display in the approval dialog
+	 */
+	server: {
+		name: string;
+		logo?: string;
+		description?: string;
+	};
+	/**
+	 * Arbitrary state data to pass through the approval flow
+	 * Will be encoded in the form and returned when approval is complete
+	 */
+	state: Record<string, any>;
+	/**
+	 * Name of the cookie to use for storing approvals
+	 * @default "mcp_approved_clients"
+	 */
+	cookieName?: string;
+	/**
+	 * Secret used to sign cookies for verification
+	 * Can be a string or Uint8Array
+	 * @default Built-in Uint8Array key
+	 */
+	cookieSecret?: string | Uint8Array;
+	/**
+	 * Cookie domain
+	 * @default current domain
+	 */
+	cookieDomain?: string;
+	/**
+	 * Cookie path
+	 * @default "/"
+	 */
+	cookiePath?: string;
+	/**
+	 * Cookie max age in seconds
+	 * @default 30 days
+	 */
+	cookieMaxAge?: number;
 }
 
 /**
@@ -60,17 +62,22 @@ export interface ApprovalDialogOptions {
  * @param options - Configuration for the approval dialog
  * @returns A Response containing the HTML approval dialog
  */
-export function renderApprovalDialog(request: Request, options: ApprovalDialogOptions): Response {
-    const { server, state, client } = options;
-    const encodedState = btoa(JSON.stringify(state));
-    const serverName = sanitizeHtml(server.name);
-    const mcpLogoUrl = 'https://raw.githubusercontent.com/thoughtspot/mcp-server/refs/heads/main/static/MCP%20Server%20Logo.svg';
-    const thoughtspotLogoUrl = 'https://avatars.githubusercontent.com/u/8906680?s=200&v=4';
-    const clientUrl = client?.clientUri;
-    const tsInstanceUrlMatch = clientUrl?.match(/x-ts-host:(.*)/);
-    const tsInstanceUrl = tsInstanceUrlMatch ? tsInstanceUrlMatch[1].trim() : '';
+export function renderApprovalDialog(
+	request: Request,
+	options: ApprovalDialogOptions,
+): Response {
+	const { server, state, client } = options;
+	const encodedState = btoa(JSON.stringify(state));
+	const serverName = sanitizeHtml(server.name);
+	const mcpLogoUrl =
+		"https://raw.githubusercontent.com/thoughtspot/mcp-server/refs/heads/main/static/MCP%20Server%20Logo.svg";
+	const thoughtspotLogoUrl =
+		"https://avatars.githubusercontent.com/u/8906680?s=200&v=4";
+	const clientUrl = client?.clientUri;
+	const tsInstanceUrlMatch = clientUrl?.match(/x-ts-host:(.*)/);
+	const tsInstanceUrl = tsInstanceUrlMatch ? tsInstanceUrlMatch[1].trim() : "";
 
-    const htmlContent = `
+	const htmlContent = `
       <!DOCTYPE html>
       <html lang="en">
         <head>
@@ -384,36 +391,35 @@ export function renderApprovalDialog(request: Request, options: ApprovalDialogOp
         </body>
       </html>
     `;
-    return new Response(htmlContent, {
-      headers: {
-        'Content-Type': 'text/html; charset=utf-8',
-      },
-    });
+	return new Response(htmlContent, {
+		headers: {
+			"Content-Type": "text/html; charset=utf-8",
+		},
+	});
 }
 
 /**
  * Decodes a base64-encoded state string back into an object
  */
 function decodeState<T>(encodedState: string): T {
-  try {
-    const decoded = atob(encodedState);
-    return JSON.parse(decoded) as T;
-  } catch (e) {
-    console.error('Error decoding state:', e);
-    throw new Error('Invalid state format');
-  }
+	try {
+		const decoded = atob(encodedState);
+		return JSON.parse(decoded) as T;
+	} catch (e) {
+		console.error("Error decoding state:", e);
+		throw new Error("Invalid state format");
+	}
 }
 
 /**
  * Result of parsing the approval form submission.
  */
 export interface ParsedApprovalResult {
-  /** The original state object passed through the form. */
-  state: any
-  /** The instance URL extracted from the form. */
-  instanceUrl: string
+	/** The original state object passed through the form. */
+	state: any;
+	/** The instance URL extracted from the form. */
+	instanceUrl: string;
 }
-
 
 /**
  * Validates and sanitizes a URL to ensure it's a valid ThoughtSpot instance URL
@@ -422,27 +428,28 @@ export interface ParsedApprovalResult {
  * @throws Error if the URL is invalid
  */
 export function validateAndSanitizeUrl(url: string): string {
-  try {
-    // Remove any whitespace
-    const trimmedUrl = url.trim();
+	try {
+		// Remove any whitespace
+		const trimmedUrl = url.trim();
 
-    // Add https:// if no protocol is specified
-    const urlWithProtocol = trimmedUrl.startsWith('http://') || trimmedUrl.startsWith('https://')
-      ? trimmedUrl
-      : `https://${trimmedUrl}`;
+		// Add https:// if no protocol is specified
+		const urlWithProtocol =
+			trimmedUrl.startsWith("http://") || trimmedUrl.startsWith("https://")
+				? trimmedUrl
+				: `https://${trimmedUrl}`;
 
-    const parsedUrl = new URL(urlWithProtocol);
+		const parsedUrl = new URL(urlWithProtocol);
 
-    // Remove trailing slashes and normalize the URL
-    const sanitizedUrl = parsedUrl.origin;
+		// Remove trailing slashes and normalize the URL
+		const sanitizedUrl = parsedUrl.origin;
 
-    return sanitizedUrl;
-  } catch (e) {
-    if (e instanceof Error) {
-      throw new Error(`Invalid URL: ${e.message}`);
-    }
-    throw new Error('Invalid URL format');
-  }
+		return sanitizedUrl;
+	} catch (e) {
+		if (e instanceof Error) {
+			throw new Error(`Invalid URL: ${e.message}`);
+		}
+		throw new Error("Invalid URL format");
+	}
 }
 
 /**
@@ -453,42 +460,46 @@ export function validateAndSanitizeUrl(url: string): string {
  * @returns A promise resolving to an object containing the parsed state and necessary headers.
  * @throws If the request method is not POST, form data is invalid, or state is missing.
  */
-export async function parseRedirectApproval(request: Request): Promise<ParsedApprovalResult> {
-  if (request.method !== 'POST') {
-    throw new Error('Invalid request method. Expected POST.')
-  }
+export async function parseRedirectApproval(
+	request: Request,
+): Promise<ParsedApprovalResult> {
+	if (request.method !== "POST") {
+		throw new Error("Invalid request method. Expected POST.");
+	}
 
-  let state: any
-  let clientId: string | undefined
-  let instanceUrl: string | undefined
-  try {
-    const formData = await request.formData()
-    const encodedState = formData.get('state')
-    const rawInstanceUrl = formData.get('instanceUrl') as string;
+	let state: any;
+	let clientId: string | undefined;
+	let instanceUrl: string | undefined;
+	try {
+		const formData = await request.formData();
+		const encodedState = formData.get("state");
+		const rawInstanceUrl = formData.get("instanceUrl") as string;
 
-    if (typeof encodedState !== 'string' || !encodedState) {
-      throw new Error("Missing or invalid 'state' in form data.")
-    }
+		if (typeof encodedState !== "string" || !encodedState) {
+			throw new Error("Missing or invalid 'state' in form data.");
+		}
 
-    state = decodeState<{ oauthReqInfo?: AuthRequest }>(encodedState)
-    clientId = state?.oauthReqInfo?.clientId
+		state = decodeState<{ oauthReqInfo?: AuthRequest }>(encodedState);
+		clientId = state?.oauthReqInfo?.clientId;
 
-    if (!clientId) {
-      throw new Error('Could not extract clientId from state object.')
-    }
+		if (!clientId) {
+			throw new Error("Could not extract clientId from state object.");
+		}
 
-    if (!rawInstanceUrl) {
-      throw new Error('Missing instance URL')
-    }
+		if (!rawInstanceUrl) {
+			throw new Error("Missing instance URL");
+		}
 
-    // Validate and sanitize the instance URL
-    instanceUrl = validateAndSanitizeUrl(rawInstanceUrl);
-  } catch (e) {
-    console.error('Error processing form submission:', e)
-    throw new Error(`Failed to parse approval form: ${e instanceof Error ? e.message : String(e)}`)
-  }
+		// Validate and sanitize the instance URL
+		instanceUrl = validateAndSanitizeUrl(rawInstanceUrl);
+	} catch (e) {
+		console.error("Error processing form submission:", e);
+		throw new Error(
+			`Failed to parse approval form: ${e instanceof Error ? e.message : String(e)}`,
+		);
+	}
 
-  return { state, instanceUrl }
+	return { state, instanceUrl };
 }
 
 /**
@@ -497,7 +508,12 @@ export async function parseRedirectApproval(request: Request): Promise<ParsedApp
  * @returns A safe string with HTML special characters escaped
  */
 function sanitizeHtml(unsafe: string): string {
-  return unsafe.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;')
+	return unsafe
+		.replace(/&/g, "&amp;")
+		.replace(/</g, "&lt;")
+		.replace(/>/g, "&gt;")
+		.replace(/"/g, "&quot;")
+		.replace(/'/g, "&#039;");
 }
 
 /**
@@ -507,13 +523,19 @@ function sanitizeHtml(unsafe: string): string {
  * @param callbackOrigin The origin to use for the callback URL (e.g., from the incoming request).
  * @returns The full redirect URL as a string.
  */
-export function buildSamlRedirectUrl(instanceUrl: string, oauthReqInfo: any, callbackOrigin: string): string {
-    // Construct the redirect URL to v1/saml
-    const redirectUrl = new URL('callosum/v1/saml/login', instanceUrl);
-    const targetURLPath = new URL("/callback", callbackOrigin);
-    targetURLPath.searchParams.append('instanceUrl', instanceUrl);
-    const encodedState = encodeBase64Url(new TextEncoder().encode(JSON.stringify(oauthReqInfo)).buffer);
-    targetURLPath.searchParams.append('oauthReqInfo', encodedState);
-    redirectUrl.searchParams.append('targetURLPath', targetURLPath.href);
-    return redirectUrl.toString();
+export function buildSamlRedirectUrl(
+	instanceUrl: string,
+	oauthReqInfo: any,
+	callbackOrigin: string,
+): string {
+	// Construct the redirect URL to v1/saml
+	const redirectUrl = new URL("callosum/v1/saml/login", instanceUrl);
+	const targetURLPath = new URL("/callback", callbackOrigin);
+	targetURLPath.searchParams.append("instanceUrl", instanceUrl);
+	const encodedState = encodeBase64Url(
+		new TextEncoder().encode(JSON.stringify(oauthReqInfo)).buffer,
+	);
+	targetURLPath.searchParams.append("oauthReqInfo", encodedState);
+	redirectUrl.searchParams.append("targetURLPath", targetURLPath.href);
+	return redirectUrl.toString();
 }

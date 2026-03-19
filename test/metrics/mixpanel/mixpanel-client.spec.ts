@@ -5,379 +5,383 @@ import { MixpanelClient } from "../../../src/metrics/mixpanel/mixpanel-client";
 global.fetch = vi.fn();
 
 describe("MixpanelClient", () => {
-    const mockToken = "test-mixpanel-token";
-    let client: MixpanelClient;
+	const mockToken = "test-mixpanel-token";
+	let client: MixpanelClient;
 
-    beforeEach(() => {
-        client = new MixpanelClient(mockToken);
-        vi.clearAllMocks();
-    });
+	beforeEach(() => {
+		client = new MixpanelClient(mockToken);
+		vi.clearAllMocks();
+	});
 
-    afterEach(() => {
-        vi.resetAllMocks();
-    });
+	afterEach(() => {
+		vi.resetAllMocks();
+	});
 
-    describe("constructor", () => {
-        it("should initialize with token", () => {
-            expect(client).toBeInstanceOf(MixpanelClient);
-        });
+	describe("constructor", () => {
+		it("should initialize with token", () => {
+			expect(client).toBeInstanceOf(MixpanelClient);
+		});
 
-        it("should store token internally", () => {
-            const testToken = "test-token-123";
-            const testClient = new MixpanelClient(testToken);
-            // We can't directly access private properties, but we can test behavior
-            expect(testClient).toBeDefined();
-        });
-    });
+		it("should store token internally", () => {
+			const testToken = "test-token-123";
+			const testClient = new MixpanelClient(testToken);
+			// We can't directly access private properties, but we can test behavior
+			expect(testClient).toBeDefined();
+		});
+	});
 
-    describe("identify", () => {
-        it("should set distinct ID", () => {
-            const distinctId = "user-123";
-            client.identify(distinctId);
-            
-            // Test that identify doesn't throw and can be called
-            expect(() => client.identify(distinctId)).not.toThrow();
-        });
+	describe("identify", () => {
+		it("should set distinct ID", () => {
+			const distinctId = "user-123";
+			client.identify(distinctId);
 
-        it("should accept empty string", () => {
-            expect(() => client.identify("")).not.toThrow();
-        });
+			// Test that identify doesn't throw and can be called
+			expect(() => client.identify(distinctId)).not.toThrow();
+		});
 
-        it("should accept special characters", () => {
-            const specialId = "user@example.com#123";
-            expect(() => client.identify(specialId)).not.toThrow();
-        });
-    });
+		it("should accept empty string", () => {
+			expect(() => client.identify("")).not.toThrow();
+		});
 
-    describe("register", () => {
-        it("should register super properties", () => {
-            const props = {
-                clusterId: "cluster-123",
-                clusterName: "test-cluster",
-                releaseVersion: "8.0.0"
-            };
-            
-            expect(() => client.register(props)).not.toThrow();
-        });
+		it("should accept special characters", () => {
+			const specialId = "user@example.com#123";
+			expect(() => client.identify(specialId)).not.toThrow();
+		});
+	});
 
-        it("should accept empty object", () => {
-            expect(() => client.register({})).not.toThrow();
-        });
+	describe("register", () => {
+		it("should register super properties", () => {
+			const props = {
+				clusterId: "cluster-123",
+				clusterName: "test-cluster",
+				releaseVersion: "8.0.0",
+			};
 
-        it("should accept nested objects", () => {
-            const nestedProps = {
-                user: {
-                    id: "123",
-                    name: "test"
-                },
-                metadata: {
-                    version: "1.0.0"
-                }
-            };
-            
-            expect(() => client.register(nestedProps)).not.toThrow();
-        });
+			expect(() => client.register(props)).not.toThrow();
+		});
 
-        it("should accept arrays", () => {
-            const propsWithArray = {
-                tags: ["tag1", "tag2"],
-                numbers: [1, 2, 3]
-            };
-            
-            expect(() => client.register(propsWithArray)).not.toThrow();
-        });
-    });
+		it("should accept empty object", () => {
+			expect(() => client.register({})).not.toThrow();
+		});
 
-    describe("track", () => {
-        const mockDistinctId = "user-123";
-        const mockSuperProps = {
-            clusterId: "cluster-123",
-            clusterName: "test-cluster"
-        };
+		it("should accept nested objects", () => {
+			const nestedProps = {
+				user: {
+					id: "123",
+					name: "test",
+				},
+				metadata: {
+					version: "1.0.0",
+				},
+			};
 
-        beforeEach(() => {
-            client.identify(mockDistinctId);
-            client.register(mockSuperProps);
-        });
+			expect(() => client.register(nestedProps)).not.toThrow();
+		});
 
-        it("should track event successfully", async () => {
-            const eventName = "test-event";
-            const eventProps = { action: "click", page: "home" };
-            
-            const mockResponse = {
-                ok: true,
-                text: vi.fn().mockResolvedValue("1")
-            };
-            (fetch as any).mockResolvedValue(mockResponse);
+		it("should accept arrays", () => {
+			const propsWithArray = {
+				tags: ["tag1", "tag2"],
+				numbers: [1, 2, 3],
+			};
 
-            const result = await client.track(eventName, eventProps);
+			expect(() => client.register(propsWithArray)).not.toThrow();
+		});
+	});
 
-            expect(fetch).toHaveBeenCalledWith(
-                "https://api.mixpanel.com/track",
-                expect.objectContaining({
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json",
-                        "accept": "text/plain"
-                    },
-                    body: expect.any(String)
-                })
-            );
+	describe("track", () => {
+		const mockDistinctId = "user-123";
+		const mockSuperProps = {
+			clusterId: "cluster-123",
+			clusterName: "test-cluster",
+		};
 
-            const fetchCall = (fetch as any).mock.calls[0];
-            const body = JSON.parse(fetchCall[1].body);
-            
-            expect(body).toHaveLength(1);
-            expect(body[0]).toEqual({
-                event: eventName,
-                properties: expect.objectContaining({
-                    ...mockSuperProps,
-                    ...eventProps,
-                    token: mockToken,
-                    distinct_id: mockDistinctId,
-                    time: expect.any(Number)
-                })
-            });
+		beforeEach(() => {
+			client.identify(mockDistinctId);
+			client.register(mockSuperProps);
+		});
 
-            expect(result).toBe("1");
-        });
+		it("should track event successfully", async () => {
+			const eventName = "test-event";
+			const eventProps = { action: "click", page: "home" };
 
-        it("should include timestamp in payload", async () => {
-            const eventName = "test-event";
-            const eventProps = { action: "click" };
-            
-            const mockResponse = {
-                ok: true,
-                text: vi.fn().mockResolvedValue("1")
-            };
-            (fetch as any).mockResolvedValue(mockResponse);
+			const mockResponse = {
+				ok: true,
+				text: vi.fn().mockResolvedValue("1"),
+			};
+			(fetch as any).mockResolvedValue(mockResponse);
 
-            const beforeTime = Date.now();
-            await client.track(eventName, eventProps);
-            const afterTime = Date.now();
+			const result = await client.track(eventName, eventProps);
 
-            const fetchCall = (fetch as any).mock.calls[0];
-            const body = JSON.parse(fetchCall[1].body);
-            const payloadTime = body[0].properties.time;
+			expect(fetch).toHaveBeenCalledWith(
+				"https://api.mixpanel.com/track",
+				expect.objectContaining({
+					method: "POST",
+					headers: {
+						"Content-Type": "application/json",
+						accept: "text/plain",
+					},
+					body: expect.any(String),
+				}),
+			);
 
-            expect(payloadTime).toBeGreaterThanOrEqual(beforeTime);
-            expect(payloadTime).toBeLessThanOrEqual(afterTime);
-        });
+			const fetchCall = (fetch as any).mock.calls[0];
+			const body = JSON.parse(fetchCall[1].body);
 
-        it("should merge super properties with event properties", async () => {
-            const eventName = "test-event";
-            const eventProps = { action: "click" };
-            
-            const mockResponse = {
-                ok: true,
-                text: vi.fn().mockResolvedValue("1")
-            };
-            (fetch as any).mockResolvedValue(mockResponse);
+			expect(body).toHaveLength(1);
+			expect(body[0]).toEqual({
+				event: eventName,
+				properties: expect.objectContaining({
+					...mockSuperProps,
+					...eventProps,
+					token: mockToken,
+					distinct_id: mockDistinctId,
+					time: expect.any(Number),
+				}),
+			});
 
-            await client.track(eventName, eventProps);
+			expect(result).toBe("1");
+		});
 
-            const fetchCall = (fetch as any).mock.calls[0];
-            const body = JSON.parse(fetchCall[1].body);
-            const properties = body[0].properties;
+		it("should include timestamp in payload", async () => {
+			const eventName = "test-event";
+			const eventProps = { action: "click" };
 
-            expect(properties).toMatchObject({
-                ...mockSuperProps,
-                ...eventProps,
-                token: mockToken,
-                distinct_id: mockDistinctId
-            });
-        });
+			const mockResponse = {
+				ok: true,
+				text: vi.fn().mockResolvedValue("1"),
+			};
+			(fetch as any).mockResolvedValue(mockResponse);
 
-        it("should handle event properties overriding super properties", async () => {
-            const eventName = "test-event";
-            const eventProps = { 
-                clusterId: "overridden-cluster", // This should override the super property
-                action: "click" 
-            };
-            
-            const mockResponse = {
-                ok: true,
-                text: vi.fn().mockResolvedValue("1")
-            };
-            (fetch as any).mockResolvedValue(mockResponse);
+			const beforeTime = Date.now();
+			await client.track(eventName, eventProps);
+			const afterTime = Date.now();
 
-            await client.track(eventName, eventProps);
+			const fetchCall = (fetch as any).mock.calls[0];
+			const body = JSON.parse(fetchCall[1].body);
+			const payloadTime = body[0].properties.time;
 
-            const fetchCall = (fetch as any).mock.calls[0];
-            const body = JSON.parse(fetchCall[1].body);
-            const properties = body[0].properties;
+			expect(payloadTime).toBeGreaterThanOrEqual(beforeTime);
+			expect(payloadTime).toBeLessThanOrEqual(afterTime);
+		});
 
-            expect(properties.clusterId).toBe("overridden-cluster");
-            expect(properties.clusterName).toBe("test-cluster"); // Should remain from super properties
-            expect(properties.action).toBe("click");
-        });
+		it("should merge super properties with event properties", async () => {
+			const eventName = "test-event";
+			const eventProps = { action: "click" };
 
-        it("should handle empty event properties", async () => {
-            const eventName = "test-event";
-            
-            const mockResponse = {
-                ok: true,
-                text: vi.fn().mockResolvedValue("1")
-            };
-            (fetch as any).mockResolvedValue(mockResponse);
+			const mockResponse = {
+				ok: true,
+				text: vi.fn().mockResolvedValue("1"),
+			};
+			(fetch as any).mockResolvedValue(mockResponse);
 
-            await client.track(eventName, {});
+			await client.track(eventName, eventProps);
 
-            const fetchCall = (fetch as any).mock.calls[0];
-            const body = JSON.parse(fetchCall[1].body);
-            const properties = body[0].properties;
+			const fetchCall = (fetch as any).mock.calls[0];
+			const body = JSON.parse(fetchCall[1].body);
+			const properties = body[0].properties;
 
-            expect(properties).toMatchObject({
-                ...mockSuperProps,
-                token: mockToken,
-                distinct_id: mockDistinctId
-            });
-        });
+			expect(properties).toMatchObject({
+				...mockSuperProps,
+				...eventProps,
+				token: mockToken,
+				distinct_id: mockDistinctId,
+			});
+		});
 
-        it("should handle HTTP error responses", async () => {
-            const eventName = "test-event";
-            const eventProps = { action: "click" };
-            
-            const mockResponse = {
-                ok: false,
-                status: 400,
-                statusText: "Bad Request"
-            };
-            (fetch as any).mockResolvedValue(mockResponse);
+		it("should handle event properties overriding super properties", async () => {
+			const eventName = "test-event";
+			const eventProps = {
+				clusterId: "overridden-cluster", // This should override the super property
+				action: "click",
+			};
 
-            await expect(client.track(eventName, eventProps)).rejects.toThrow(
-                "Failed to track event: Bad Request"
-            );
-        });
+			const mockResponse = {
+				ok: true,
+				text: vi.fn().mockResolvedValue("1"),
+			};
+			(fetch as any).mockResolvedValue(mockResponse);
 
-        it("should handle network errors", async () => {
-            const eventName = "test-event";
-            const eventProps = { action: "click" };
-            
-            const networkError = new Error("Network error");
-            (fetch as any).mockRejectedValue(networkError);
+			await client.track(eventName, eventProps);
 
-            await expect(client.track(eventName, eventProps)).rejects.toThrow("Network error");
-        });
+			const fetchCall = (fetch as any).mock.calls[0];
+			const body = JSON.parse(fetchCall[1].body);
+			const properties = body[0].properties;
 
-        it("should handle JSON parsing errors in response", async () => {
-            const eventName = "test-event";
-            const eventProps = { action: "click" };
-            
-            const mockResponse = {
-                ok: true,
-                text: vi.fn().mockRejectedValue(new Error("Invalid JSON"))
-            };
-            (fetch as any).mockResolvedValue(mockResponse);
+			expect(properties.clusterId).toBe("overridden-cluster");
+			expect(properties.clusterName).toBe("test-cluster"); // Should remain from super properties
+			expect(properties.action).toBe("click");
+		});
 
-            await expect(client.track(eventName, eventProps)).rejects.toThrow("Invalid JSON");
-        });
+		it("should handle empty event properties", async () => {
+			const eventName = "test-event";
 
-        it("should work without calling identify first", async () => {
-            const newClient = new MixpanelClient(mockToken);
-            newClient.register(mockSuperProps);
-            
-            const eventName = "test-event";
-            const eventProps = { action: "click" };
-            
-            const mockResponse = {
-                ok: true,
-                text: vi.fn().mockResolvedValue("1")
-            };
-            (fetch as any).mockResolvedValue(mockResponse);
+			const mockResponse = {
+				ok: true,
+				text: vi.fn().mockResolvedValue("1"),
+			};
+			(fetch as any).mockResolvedValue(mockResponse);
 
-            await newClient.track(eventName, eventProps);
+			await client.track(eventName, {});
 
-            const fetchCall = (fetch as any).mock.calls[0];
-            const body = JSON.parse(fetchCall[1].body);
-            const properties = body[0].properties;
+			const fetchCall = (fetch as any).mock.calls[0];
+			const body = JSON.parse(fetchCall[1].body);
+			const properties = body[0].properties;
 
-            expect(properties.distinct_id).toBe(""); // Should be empty string
-            expect(properties).toMatchObject({
-                ...mockSuperProps,
-                ...eventProps,
-                token: mockToken
-            });
-        });
+			expect(properties).toMatchObject({
+				...mockSuperProps,
+				token: mockToken,
+				distinct_id: mockDistinctId,
+			});
+		});
 
-        it("should work without calling register first", async () => {
-            const newClient = new MixpanelClient(mockToken);
-            newClient.identify(mockDistinctId);
-            
-            const eventName = "test-event";
-            const eventProps = { action: "click" };
-            
-            const mockResponse = {
-                ok: true,
-                text: vi.fn().mockResolvedValue("1")
-            };
-            (fetch as any).mockResolvedValue(mockResponse);
+		it("should handle HTTP error responses", async () => {
+			const eventName = "test-event";
+			const eventProps = { action: "click" };
 
-            await newClient.track(eventName, eventProps);
+			const mockResponse = {
+				ok: false,
+				status: 400,
+				statusText: "Bad Request",
+			};
+			(fetch as any).mockResolvedValue(mockResponse);
 
-            const fetchCall = (fetch as any).mock.calls[0];
-            const body = JSON.parse(fetchCall[1].body);
-            const properties = body[0].properties;
+			await expect(client.track(eventName, eventProps)).rejects.toThrow(
+				"Failed to track event: Bad Request",
+			);
+		});
 
-            expect(properties).toMatchObject({
-                ...eventProps,
-                token: mockToken,
-                distinct_id: mockDistinctId
-            });
-        });
+		it("should handle network errors", async () => {
+			const eventName = "test-event";
+			const eventProps = { action: "click" };
 
-        it("should handle special characters in event name", async () => {
-            const eventName = "test-event-with-special-chars!@#$%^&*()";
-            const eventProps = { action: "click" };
-            
-            const mockResponse = {
-                ok: true,
-                text: vi.fn().mockResolvedValue("1")
-            };
-            (fetch as any).mockResolvedValue(mockResponse);
+			const networkError = new Error("Network error");
+			(fetch as any).mockRejectedValue(networkError);
 
-            await client.track(eventName, eventProps);
+			await expect(client.track(eventName, eventProps)).rejects.toThrow(
+				"Network error",
+			);
+		});
 
-            const fetchCall = (fetch as any).mock.calls[0];
-            const body = JSON.parse(fetchCall[1].body);
-            
-            expect(body[0].event).toBe(eventName);
-        });
+		it("should handle JSON parsing errors in response", async () => {
+			const eventName = "test-event";
+			const eventProps = { action: "click" };
 
-        it("should handle complex nested properties", async () => {
-            const eventName = "test-event";
-            const eventProps = {
-                user: {
-                    id: "123",
-                    preferences: {
-                        theme: "dark",
-                        language: "en"
-                    }
-                },
-                metadata: {
-                    tags: ["tag1", "tag2"],
-                    timestamp: Date.now()
-                }
-            };
-            
-            const mockResponse = {
-                ok: true,
-                text: vi.fn().mockResolvedValue("1")
-            };
-            (fetch as any).mockResolvedValue(mockResponse);
+			const mockResponse = {
+				ok: true,
+				text: vi.fn().mockRejectedValue(new Error("Invalid JSON")),
+			};
+			(fetch as any).mockResolvedValue(mockResponse);
 
-            await client.track(eventName, eventProps);
+			await expect(client.track(eventName, eventProps)).rejects.toThrow(
+				"Invalid JSON",
+			);
+		});
 
-            const fetchCall = (fetch as any).mock.calls[0];
-            const body = JSON.parse(fetchCall[1].body);
-            const properties = body[0].properties;
+		it("should work without calling identify first", async () => {
+			const newClient = new MixpanelClient(mockToken);
+			newClient.register(mockSuperProps);
 
-            expect(properties).toMatchObject({
-                ...mockSuperProps,
-                ...eventProps,
-                token: mockToken,
-                distinct_id: mockDistinctId
-            });
-        });
-    });
-}); 
+			const eventName = "test-event";
+			const eventProps = { action: "click" };
+
+			const mockResponse = {
+				ok: true,
+				text: vi.fn().mockResolvedValue("1"),
+			};
+			(fetch as any).mockResolvedValue(mockResponse);
+
+			await newClient.track(eventName, eventProps);
+
+			const fetchCall = (fetch as any).mock.calls[0];
+			const body = JSON.parse(fetchCall[1].body);
+			const properties = body[0].properties;
+
+			expect(properties.distinct_id).toBe(""); // Should be empty string
+			expect(properties).toMatchObject({
+				...mockSuperProps,
+				...eventProps,
+				token: mockToken,
+			});
+		});
+
+		it("should work without calling register first", async () => {
+			const newClient = new MixpanelClient(mockToken);
+			newClient.identify(mockDistinctId);
+
+			const eventName = "test-event";
+			const eventProps = { action: "click" };
+
+			const mockResponse = {
+				ok: true,
+				text: vi.fn().mockResolvedValue("1"),
+			};
+			(fetch as any).mockResolvedValue(mockResponse);
+
+			await newClient.track(eventName, eventProps);
+
+			const fetchCall = (fetch as any).mock.calls[0];
+			const body = JSON.parse(fetchCall[1].body);
+			const properties = body[0].properties;
+
+			expect(properties).toMatchObject({
+				...eventProps,
+				token: mockToken,
+				distinct_id: mockDistinctId,
+			});
+		});
+
+		it("should handle special characters in event name", async () => {
+			const eventName = "test-event-with-special-chars!@#$%^&*()";
+			const eventProps = { action: "click" };
+
+			const mockResponse = {
+				ok: true,
+				text: vi.fn().mockResolvedValue("1"),
+			};
+			(fetch as any).mockResolvedValue(mockResponse);
+
+			await client.track(eventName, eventProps);
+
+			const fetchCall = (fetch as any).mock.calls[0];
+			const body = JSON.parse(fetchCall[1].body);
+
+			expect(body[0].event).toBe(eventName);
+		});
+
+		it("should handle complex nested properties", async () => {
+			const eventName = "test-event";
+			const eventProps = {
+				user: {
+					id: "123",
+					preferences: {
+						theme: "dark",
+						language: "en",
+					},
+				},
+				metadata: {
+					tags: ["tag1", "tag2"],
+					timestamp: Date.now(),
+				},
+			};
+
+			const mockResponse = {
+				ok: true,
+				text: vi.fn().mockResolvedValue("1"),
+			};
+			(fetch as any).mockResolvedValue(mockResponse);
+
+			await client.track(eventName, eventProps);
+
+			const fetchCall = (fetch as any).mock.calls[0];
+			const body = JSON.parse(fetchCall[1].body);
+			const properties = body[0].properties;
+
+			expect(properties).toMatchObject({
+				...mockSuperProps,
+				...eventProps,
+				token: mockToken,
+				distinct_id: mockDistinctId,
+			});
+		});
+	});
+});
