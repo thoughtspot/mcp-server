@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import type { ThoughtSpotRestApi } from "@thoughtspot/rest-api-sdk";
 import {
 	getRelevantQuestions,
 	getAnswerForQuestion,
@@ -741,21 +740,21 @@ describe("thoughtspot-service", () => {
 	describe("getDataSourceSuggestions", () => {
 		it("should return single data source when only one suggestion is available", async () => {
 			const mockResponse = {
-				dataSources: [
+				data_sources: [
 					{
 						confidence: 0.85,
-						header: {
+						details: {
 							description: "Sales data for the current year",
-							displayName: "Sales Data",
-							guid: "ds-123",
+							data_source_name: "Sales Data",
+							data_source_identifier: "ds-123",
 						},
-						llmReasoning:
+						reasoning:
 							"This data source contains sales information relevant to your query",
 					},
 				],
 			};
 
-			(mockClient as any).queryGetDataSourceSuggestions = vi
+			mockClient.getDataSourceSuggestions = vi
 				.fn()
 				.mockResolvedValue(mockResponse);
 
@@ -764,9 +763,9 @@ describe("thoughtspot-service", () => {
 				mockClient,
 			);
 
-			expect(
-				(mockClient as any).queryGetDataSourceSuggestions,
-			).toHaveBeenCalledWith("show me sales data");
+			expect(mockClient.getDataSourceSuggestions).toHaveBeenCalledWith({
+				query: "show me sales data",
+			});
 			expect(result).toEqual([
 				{
 					confidence: 0.85,
@@ -783,29 +782,29 @@ describe("thoughtspot-service", () => {
 
 		it("should return both data sources when multiple suggestions are available", async () => {
 			const mockResponse = {
-				dataSources: [
+				data_sources: [
 					{
 						confidence: 0.7,
-						header: {
+						details: {
 							description: "Sales data for the current year",
-							displayName: "Sales Data",
-							guid: "ds-123",
+							data_source_name: "Sales Data",
+							data_source_identifier: "ds-123",
 						},
-						llmReasoning: "This data source contains sales information",
+						reasoning: "This data source contains sales information",
 					},
 					{
 						confidence: 0.65,
-						header: {
+						details: {
 							description: "Revenue analysis data",
-							displayName: "Revenue Data",
-							guid: "ds-456",
+							data_source_name: "Revenue Data",
+							data_source_identifier: "ds-456",
 						},
-						llmReasoning: "This data source contains revenue information",
+						reasoning: "This data source contains revenue information",
 					},
 				],
 			};
 
-			(mockClient as any).queryGetDataSourceSuggestions = vi
+			mockClient.getDataSourceSuggestions = vi
 				.fn()
 				.mockResolvedValue(mockResponse);
 
@@ -821,29 +820,29 @@ describe("thoughtspot-service", () => {
 
 		it("should return both data sources regardless of confidence difference", async () => {
 			const mockResponse = {
-				dataSources: [
+				data_sources: [
 					{
 						confidence: 0.9,
-						header: {
+						details: {
 							description: "Sales data for the current year",
-							displayName: "Sales Data",
-							guid: "ds-123",
+							data_source_name: "Sales Data",
+							data_source_identifier: "ds-123",
 						},
-						llmReasoning: "High confidence match for sales data",
+						reasoning: "High confidence match for sales data",
 					},
 					{
 						confidence: 0.55,
-						header: {
+						details: {
 							description: "Customer data",
-							displayName: "Customer Data",
-							guid: "ds-456",
+							data_source_name: "Customer Data",
+							data_source_identifier: "ds-456",
 						},
-						llmReasoning: "Lower confidence match",
+						reasoning: "Lower confidence match",
 					},
 				],
 			};
 
-			(mockClient as any).queryGetDataSourceSuggestions = vi
+			mockClient.getDataSourceSuggestions = vi
 				.fn()
 				.mockResolvedValue(mockResponse);
 
@@ -862,29 +861,29 @@ describe("thoughtspot-service", () => {
 
 		it("should sort data sources by confidence in descending order", async () => {
 			const mockResponse = {
-				dataSources: [
+				data_sources: [
 					{
 						confidence: 0.8,
-						header: {
+						details: {
 							description: "Higher confidence data source",
-							displayName: "Data Source A",
-							guid: "ds-123",
+							data_source_name: "Data Source A",
+							data_source_identifier: "ds-123",
 						},
-						llmReasoning: "Higher confidence reasoning",
+						reasoning: "Higher confidence reasoning",
 					},
 					{
 						confidence: 0.6,
-						header: {
+						details: {
 							description: "Lower confidence data source",
-							displayName: "Data Source B",
-							guid: "ds-456",
+							data_source_name: "Data Source B",
+							data_source_identifier: "ds-456",
 						},
-						llmReasoning: "Lower confidence reasoning",
+						reasoning: "Lower confidence reasoning",
 					},
 				],
 			};
 
-			(mockClient as any).queryGetDataSourceSuggestions = vi
+			mockClient.getDataSourceSuggestions = vi
 				.fn()
 				.mockResolvedValue(mockResponse);
 
@@ -898,10 +897,10 @@ describe("thoughtspot-service", () => {
 
 		it("should return null when no data sources are available", async () => {
 			const mockResponse = {
-				dataSources: [],
+				data_sources: [],
 			};
 
-			(mockClient as any).queryGetDataSourceSuggestions = vi
+			mockClient.getDataSourceSuggestions = vi
 				.fn()
 				.mockResolvedValue(mockResponse);
 
@@ -915,10 +914,10 @@ describe("thoughtspot-service", () => {
 
 		it("should return null when response.dataSources is null or undefined", async () => {
 			const mockResponse = {
-				dataSources: null,
+				data_sources: null,
 			};
 
-			(mockClient as any).queryGetDataSourceSuggestions = vi
+			mockClient.getDataSourceSuggestions = vi
 				.fn()
 				.mockResolvedValue(mockResponse);
 
@@ -929,7 +928,7 @@ describe("thoughtspot-service", () => {
 
 		it("should handle API errors by throwing the error", async () => {
 			const error = new Error("GraphQL API Error");
-			(mockClient as any).queryGetDataSourceSuggestions = vi
+			(mockClient as any).getDataSourceSuggestions = vi
 				.fn()
 				.mockRejectedValue(error);
 
@@ -940,29 +939,29 @@ describe("thoughtspot-service", () => {
 
 		it("should handle multiple data sources with same confidence", async () => {
 			const mockResponse = {
-				dataSources: [
+				data_sources: [
 					{
 						confidence: 0.75,
-						header: {
+						details: {
 							description: "First data source",
-							displayName: "Data Source 1",
-							guid: "ds-123",
+							data_source_name: "Data Source 1",
+							data_source_identifier: "ds-123",
 						},
-						llmReasoning: "First reasoning",
+						reasoning: "First reasoning",
 					},
 					{
 						confidence: 0.75,
-						header: {
+						details: {
 							description: "Second data source",
-							displayName: "Data Source 2",
-							guid: "ds-456",
+							data_source_name: "Data Source 2",
+							data_source_identifier: "ds-456",
 						},
-						llmReasoning: "Second reasoning",
+						reasoning: "Second reasoning",
 					},
 				],
 			};
 
-			(mockClient as any).queryGetDataSourceSuggestions = vi
+			mockClient.getDataSourceSuggestions = vi
 				.fn()
 				.mockResolvedValue(mockResponse);
 
@@ -975,30 +974,45 @@ describe("thoughtspot-service", () => {
 
 		it("should use ThoughtSpotService class method correctly", async () => {
 			const mockResponse = {
-				dataSources: [
+				data_sources: [
 					{
 						confidence: 0.85,
-						header: {
+						details: {
 							description: "Test data source",
-							displayName: "Test Data",
-							guid: "ds-123",
+							data_source_name: "Test Data",
+							data_source_identifier: "ds-123",
 						},
-						llmReasoning: "Test reasoning",
+						reasoning: "Test reasoning",
 					},
 				],
 			};
 
-			(mockClient as any).queryGetDataSourceSuggestions = vi
+			mockClient.getDataSourceSuggestions = vi
 				.fn()
 				.mockResolvedValue(mockResponse);
 
 			const service = new ThoughtSpotService(mockClient);
 			const result = await service.getDataSourceSuggestions("test query");
 
-			expect(
-				(mockClient as any).queryGetDataSourceSuggestions,
-			).toHaveBeenCalledWith("test query");
-			expect(result).toEqual(mockResponse.dataSources);
+			expect(mockClient.getDataSourceSuggestions).toHaveBeenCalledWith({
+				query: "test query",
+			});
+			expect(result?.length).toEqual(mockResponse.data_sources.length);
+			expect(result?.[0].confidence).toEqual(
+				mockResponse.data_sources[0].confidence,
+			);
+			expect(result?.[0].header.description).toEqual(
+				mockResponse.data_sources[0].details.description,
+			);
+			expect(result?.[0].header.displayName).toEqual(
+				mockResponse.data_sources[0].details.data_source_name,
+			);
+			expect(result?.[0].header.guid).toEqual(
+				mockResponse.data_sources[0].details.data_source_identifier,
+			);
+			expect(result?.[0].llmReasoning).toEqual(
+				mockResponse.data_sources[0].reasoning,
+			);
 		});
 	});
 
