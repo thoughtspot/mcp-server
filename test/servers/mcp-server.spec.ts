@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { connect } from "mcp-testing-kit";
 import { MCPServer } from "../../src/servers/mcp-server";
-import * as thoughtspotService from "../../src/thoughtspot/thoughtspot-service";
 import * as thoughtspotClient from "../../src/thoughtspot/thoughtspot-client";
 import { MixpanelTracker } from "../../src/metrics/mixpanel/mixpanel";
 
@@ -829,7 +828,7 @@ describe("MCP Server", () => {
 
 	describe("getDataSourceSuggestions Tool", () => {
 		it("should return data source suggestions successfully", async () => {
-			// Mock queryGetDataSourceSuggestions method
+			// Mock getDataSourceSuggestions method
 			vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
 				getSessionInfo: vi.fn().mockResolvedValue({
 					clusterId: "test-cluster-123",
@@ -850,26 +849,26 @@ describe("MCP Server", () => {
 					privileges: [],
 					enableSpotterDataSourceDiscovery: true,
 				}),
-				queryGetDataSourceSuggestions: vi.fn().mockResolvedValue({
-					dataSources: [
+				getDataSourceSuggestions: vi.fn().mockResolvedValue({
+					data_sources: [
 						{
 							confidence: 0.85,
-							header: {
+							details: {
 								description: "Sales data for the current year",
-								displayName: "Sales Data",
-								guid: "ds-123",
+								data_source_name: "Sales Data",
+								data_source_identifier: "ds-123",
 							},
-							llmReasoning:
+							reasoning:
 								"This data source contains sales information relevant to your query",
 						},
 						{
 							confidence: 0.75,
-							header: {
+							details: {
 								description: "Revenue analysis data",
-								displayName: "Revenue Data",
-								guid: "ds-456",
+								data_source_name: "Revenue Data",
+								data_source_identifier: "ds-456",
 							},
-							llmReasoning: "This data source contains revenue information",
+							reasoning: "This data source contains revenue information",
 						},
 					],
 				}),
@@ -930,7 +929,7 @@ describe("MCP Server", () => {
 					privileges: [],
 					enableSpotterDataSourceDiscovery: true,
 				}),
-				queryGetDataSourceSuggestions: vi.fn().mockResolvedValue({
+				getDataSourceSuggestions: vi.fn().mockResolvedValue({
 					dataSources: [],
 				}),
 				instanceUrl: "https://test.thoughtspot.cloud",
@@ -971,16 +970,16 @@ describe("MCP Server", () => {
 					privileges: [],
 					enableSpotterDataSourceDiscovery: true,
 				}),
-				queryGetDataSourceSuggestions: vi.fn().mockResolvedValue({
-					dataSources: [
+				getDataSourceSuggestions: vi.fn().mockResolvedValue({
+					data_sources: [
 						{
 							confidence: 0.95,
-							header: {
+							details: {
 								description: "Customer analytics data",
-								displayName: "Customer Data",
-								guid: "ds-789",
+								data_source_name: "Customer Data",
+								data_source_identifier: "ds-789",
 							},
-							llmReasoning: "Perfect match for customer-related queries",
+							reasoning: "Perfect match for customer-related queries",
 						},
 					],
 				}),
