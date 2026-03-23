@@ -83,6 +83,7 @@ export interface AgentMessage {
     text?: string | null | undefined;
     answerTitle?: string | null | undefined;
     answerQuery?: string | null | undefined;
+    answerFrameUrl?: string | null | undefined;
 }
 
 /** Response from sendAgentMessage */

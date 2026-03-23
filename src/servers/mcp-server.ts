@@ -148,6 +148,7 @@ export const SendAgentMessageOutputSchema = z.object({
         text: z.string().optional(),
         answerTitle: z.string().optional(),
         answerQuery: z.string().optional(),
+        answerFrameUrl: z.string().optional().describe("A url which can be used to view the answer in an iframe in the browser"),
     })).optional().describe("Response messages from the agent"),
 });
 
@@ -170,6 +171,7 @@ export const GetAgentMessageUpdatesOutputSchema = z.object({
         text: z.string().optional(),
         answerTitle: z.string().optional(),
         answerQuery: z.string().optional(),
+        answerFrameUrl: z.string().optional().describe("A url which can be used to view the answer in an iframe in the browser"),
     })).optional().describe("Response messages from the agent"),
     done: z.boolean().describe("Whether the conversation is done (if not, call getAgentMessageUpdates again to get the latest messages)"),
 });
@@ -576,10 +578,13 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
                                     text: item.content,
                                 }]);
                             } else if (item.type === 'answer') {
+                                const frameUrl = `${this.ctx.props.instanceUrl}/?tsmcp=true#/embed/conv-assist-answer?sessionId=${item.metadata.session_id}&genNo=${item.metadata.gen_no}&acSessionId=${item.metadata.transaction_id}&acGenNo=${item.metadata.generation_number}`;
+
                                 await updateConversationState(false, [{
                                     type: 'answer',
                                     answerTitle: item.metadata.title,
                                     answerQuery: item.metadata.sage_query,
+                                    answerFrameUrl: frameUrl,
                                 }]);
                             } else {
                                 console.log('>>> unknown item in event stream', item);
@@ -606,7 +611,7 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
         let conversationState: StreamingConversationState | undefined;
         for (let i = 0; i < 5; i++) {
             conversationState = await this.getConversationState(conversationId);
-            if (conversationState?.latestMessages?.length ?? 0 > 0) break;
+            if ((conversationState?.latestMessages?.length ?? 0) > 0) break;
             await new Promise(resolve => setTimeout(resolve, 1000));
         }
 

@@ -517,6 +517,7 @@ export class ThoughtSpotService {
                 text: message.text,
                 answerTitle: message.title,
                 answerQuery: message.sage_query,
+                // AC session details not present so can't generate frame URL
             })) ?? [];
 
             return {
