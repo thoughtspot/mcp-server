@@ -238,17 +238,28 @@ export class ThoughtSpotService {
 	 * Create a conversation with Spotter agent
 	 */
 	@WithSpan("create-agent-conversation")
-	async createAgentConversation(): Promise<AgentConversation> {
+	async createAgentConversation(
+		dataSourceId?: string,
+	): Promise<AgentConversation> {
 		const span = trace.getSpan(context.active());
 
 		try {
 			span?.addEvent("create-agent-conversation");
 
+			// Use auto mode by default, but support passing an explicit data source context
+			const metadataContext = dataSourceId
+				? {
+						data_source_context: {
+							guid: dataSourceId,
+						},
+					}
+				: {
+						type: "AUTO_MODE" as any, // Not yet supported by SDK but works through API
+					};
+
 			const response = await this.client.createAgentConversation({
-				// TODO(Rifdhan): Which of these need to be configurable?
-				metadata_context: {
-					type: "AUTO_MODE" as any, // Not yet supported by SDK but works through API
-				},
+				// TODO(Rifdhan): Which of these flags need to be configurable?
+				metadata_context: metadataContext,
 				conversation_settings: {
 					enable_contextual_change_analysis: true,
 					enable_natural_language_answer_generation: true,
