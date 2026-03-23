@@ -7,7 +7,6 @@ import type {
 	ResponseContext,
 } from "@thoughtspot/rest-api-sdk";
 import YAML from "yaml";
-import type { Observable } from "rxjs";
 import { of } from "rxjs";
 import type { SessionInfo, DataSourceSuggestionResponse } from "./types";
 
@@ -37,6 +36,7 @@ export const getThoughtSpotClient = (
 	addGetSessionInfo(client, instanceUrl, bearerToken);
 	addQueryGetDataSourceSuggestions(client, instanceUrl, bearerToken);
 	addGetAnswerSession(client, instanceUrl, bearerToken);
+	addSendAgentConversationMessageStreaming(client, instanceUrl, bearerToken);
 	return client;
 };
 
@@ -237,5 +237,44 @@ function addGetAnswerSession(client: any, instanceUrl: string, token: string) {
 			throw new Error("Could not extract answer session from response.");
 		}
 		return session;
+	};
+}
+
+function addSendAgentConversationMessageStreaming(
+	client: any,
+	instanceUrl: string,
+	token: string,
+) {
+	(client as any).sendAgentConversationMessageStreaming = async ({
+		conversation_identifier,
+		messages,
+	}: {
+		conversation_identifier: string;
+		messages: string[];
+	}): Promise<Response> => {
+		const endpoint = "/api/rest/2.0/ai/agent/converse/sse";
+		const fetchOptions = {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json",
+				Accept: "text/event-stream",
+				"user-agent": "ThoughtSpot-ts-client",
+				Authorization: `Bearer ${token}`,
+			},
+			body: JSON.stringify({
+				conversation_identifier,
+				messages,
+			}),
+		};
+		const response = await fetch(`${instanceUrl}${endpoint}`, fetchOptions);
+
+		if (!response.ok) {
+			const errorText = await response.text();
+			throw new Error(
+				`sendAgentConversationMessageStreaming failed with status ${response.status}: ${errorText}`,
+			);
+		}
+
+		return response;
 	};
 }
