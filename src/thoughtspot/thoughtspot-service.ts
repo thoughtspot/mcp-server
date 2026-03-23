@@ -1,4 +1,7 @@
-import type { ThoughtSpotRestApi } from "@thoughtspot/rest-api-sdk";
+import type {
+	AgentConversation,
+	ThoughtSpotRestApi,
+} from "@thoughtspot/rest-api-sdk";
 import { SpanStatusCode, trace, context } from "@opentelemetry/api";
 import { getActiveSpan, WithSpan } from "../metrics/tracing/tracing-utils";
 import type { DataSource, SessionInfo, DataSourceSuggestion } from "./types";
@@ -228,6 +231,95 @@ export class ThoughtSpotService {
 			});
 			console.error("Error getting answer TML: ", error);
 			return null;
+		}
+	}
+
+	/**
+	 * Create a conversation with Spotter agent
+	 */
+	@WithSpan("create-agent-conversation")
+	async createAgentConversation(
+		dataSourceId?: string,
+	): Promise<AgentConversation> {
+		const span = trace.getSpan(context.active());
+
+		try {
+			span?.addEvent("create-agent-conversation");
+
+			// Use auto mode by default, but support passing an explicit data source context
+			const metadataContext = dataSourceId
+				? {
+						data_source_context: {
+							guid: dataSourceId,
+						},
+					}
+				: {
+						type: "AUTO_MODE" as any, // Not yet supported by SDK but works through API
+					};
+
+			const response = await this.client.createAgentConversation({
+				// TODO(Rifdhan): Which of these flags need to be configurable?
+				metadata_context: metadataContext,
+				conversation_settings: {
+					enable_contextual_change_analysis: true,
+					enable_natural_language_answer_generation: true,
+					enable_reasoning: true,
+				},
+			});
+
+			span?.setStatus({
+				code: SpanStatusCode.OK,
+				message: "Agent conversation created",
+			});
+			span?.setAttribute("conversation_id", response.conversation_id);
+
+			return response;
+		} catch (error) {
+			console.error("Error creating agent conversation:", error);
+			span?.setStatus({
+				code: SpanStatusCode.ERROR,
+				message: (error as Error).message,
+			});
+			throw error;
+		}
+	}
+
+	/**
+	 * Send a message to an agent conversation, and collect the streaming response asynchronously
+	 */
+	@WithSpan("send-agent-conversation-message-streaming")
+	async sendAgentConversationMessageStreaming(
+		conversationId: string,
+		messages: string[],
+	): Promise<void> {
+		const span = trace.getSpan(context.active());
+
+		try {
+			span?.addEvent("send-agent-conversation-message-streaming");
+
+			const response = await (
+				this.client as any
+			).sendAgentConversationMessageStreaming({
+				conversation_identifier: conversationId,
+				messages,
+			});
+
+			// TODO(Rifdhan): Collect the streaming response asynchronously
+
+			span?.setStatus({
+				code: SpanStatusCode.OK,
+				message: "Agent conversation message streaming sent",
+			});
+		} catch (error) {
+			console.error(
+				"Error sending agent conversation message streaming:",
+				error,
+			);
+			span?.setStatus({
+				code: SpanStatusCode.ERROR,
+				message: (error as Error).message,
+			});
+			throw error;
 		}
 	}
 
