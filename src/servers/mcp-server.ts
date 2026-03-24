@@ -20,6 +20,8 @@ type ToolOutput = z.infer<typeof ToolOutputSchema>;
 
 export const PingSchema = z.object({});
 
+export const PingBetaSchema = z.object({});
+
 export const GetRelevantQuestionsSchema = z.object({
 	query: z
 		.string()
@@ -201,6 +203,7 @@ export const GetDataSourceSuggestionsSchema = z.object({
 
 export enum ToolName {
 	Ping = "ping",
+	PingBeta = "pingBeta",
 	GetRelevantQuestions = "getRelevantQuestions",
 	GetAnswer = "getAnswer",
 	CreateConversation = "createConversation",
@@ -292,6 +295,21 @@ export const toolDefinitionsMCPServer = [
 		},
 	},
 ];
+
+// Beta tools - only available when apiVersion=beta
+export const betaToolDefinitions = [
+	{
+		name: ToolName.PingBeta,
+		description: "Beta ping tool to test connectivity and Auth",
+		inputSchema: zodToJsonSchema(PingBetaSchema) as ToolInput,
+		annotations: {
+			title: "Test Connection (Beta)",
+			readOnlyHint: true,
+			destructiveHint: false,
+		},
+	},
+];
+
 export class MCPServer extends BaseMCPServer {
 	constructor(ctx: Context) {
 		super(ctx, "ThoughtSpot", "2.0.0");
@@ -320,6 +338,8 @@ export class MCPServer extends BaseMCPServer {
 							},
 						]
 					: []),
+				// Add beta tools if apiVersion is beta
+				...(this.ctx.props.apiVersion === "beta" ? betaToolDefinitions : []),
 			],
 		};
 	}
@@ -378,6 +398,13 @@ export class MCPServer extends BaseMCPServer {
 					return this.createSuccessResponse("Pong", "Ping successful");
 				}
 				return this.createErrorResponse("Not authenticated", "Ping failed");
+			}
+			case ToolName.PingBeta: {
+				console.log("Received PingBeta request");
+				if (this.ctx.props.accessToken && this.ctx.props.instanceUrl) {
+					return this.createSuccessResponse("pongBeta", "PingBeta successful");
+				}
+				return this.createErrorResponse("Not authenticated", "PingBeta failed");
 			}
 
 			case ToolName.GetRelevantQuestions: {

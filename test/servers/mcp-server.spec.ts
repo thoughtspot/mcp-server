@@ -290,6 +290,100 @@ describe("MCP Server", () => {
 		});
 	});
 
+	describe("PingBeta Tool", () => {
+		it("should return error when not authenticated", async () => {
+			const unauthenticatedServer = new MCPServer({
+				props: {
+					instanceUrl: "",
+					accessToken: "",
+					clientName: {
+						clientId: "test-client-id",
+						clientName: "test-client",
+						registrationDate: Date.now(),
+					},
+					apiVersion: "beta",
+				},
+			});
+			await unauthenticatedServer.init();
+
+			const { callTool } = connect(unauthenticatedServer);
+			const result = await callTool("pingBeta", {});
+
+			expect(result.isError).toBe(true);
+			expect((result.content as any[])[0].text).toBe(
+				"ERROR: Not authenticated",
+			);
+		});
+
+		it("should return pongBeta when authenticated", async () => {
+			const betaServer = new MCPServer({
+				props: {
+					...mockProps,
+					apiVersion: "beta",
+				},
+			});
+			await betaServer.init();
+			const { callTool } = connect(betaServer);
+
+			const result = await callTool("pingBeta", {});
+
+			expect(result.isError).toBeUndefined();
+			expect((result.content as any[])[0].text).toBe("pongBeta");
+		});
+	});
+
+	describe("Beta Tools in List", () => {
+		it("should not include beta tools when apiVersion is not set", async () => {
+			await server.init();
+			const { listTools } = connect(server);
+
+			const result = await listTools();
+
+			const betaTool = result.tools?.find((t) => t.name === "pingBeta");
+			expect(betaTool).toBeUndefined();
+		});
+
+		it("should include beta tools when apiVersion=beta", async () => {
+			const betaServer = new MCPServer({
+				props: {
+					...mockProps,
+					apiVersion: "beta",
+				},
+			});
+			await betaServer.init();
+			const { listTools } = connect(betaServer);
+
+			const result = await listTools();
+
+			const betaTool = result.tools?.find((t) => t.name === "pingBeta");
+			expect(betaTool).toBeDefined();
+			expect(betaTool?.description).toBe(
+				"Beta ping tool to test connectivity and Auth",
+			);
+		});
+
+		it("should include all standard tools plus beta tools when apiVersion=beta", async () => {
+			const betaServer = new MCPServer({
+				props: {
+					...mockProps,
+					apiVersion: "beta",
+				},
+			});
+			await betaServer.init();
+			const { listTools } = connect(betaServer);
+
+			const result = await listTools();
+
+			// Should have standard tools + beta tool
+			expect(result.tools?.length).toBeGreaterThan(5);
+			expect(result.tools?.map((t) => t.name)).toContain("ping");
+			expect(result.tools?.map((t) => t.name)).toContain("pingBeta");
+			expect(result.tools?.map((t) => t.name)).toContain(
+				"getRelevantQuestions",
+			);
+		});
+	});
+
 	describe("Get Relevant Questions Tool", () => {
 		// Using real service with mocked client, no service method mocks needed
 
