@@ -589,11 +589,11 @@ describe("Bearer Handler", () => {
 			expect(mockCtx.props.apiVersion).toBeUndefined();
 		});
 
-		it("should not inject apiVersion when query param is not beta on /token/mcp", async () => {
+		it("should inject apiVersion with date format on /token/mcp", async () => {
 			const appWithBearer = withBearerHandler(app, ThoughtSpotMCP);
 
 			const request = new Request(
-				"https://example.com/token/mcp?api-version=alpha",
+				"https://example.com/token/mcp?api-version=2025-03-01",
 				{
 					headers: {
 						authorization: "Bearer test-token@test.thoughtspot.cloud",
@@ -603,12 +603,34 @@ describe("Bearer Handler", () => {
 
 			await appWithBearer.fetch(request, mockEnv, mockCtx);
 
-			// Verify that props do not have apiVersion for non-beta values
+			// Verify that props have apiVersion with date
 			expect(mockCtx.props).toMatchObject({
 				accessToken: "test-token",
 				instanceUrl: "https://test.thoughtspot.cloud",
+				apiVersion: "2025-03-01",
 			});
-			expect(mockCtx.props.apiVersion).toBeUndefined();
+		});
+
+		it("should inject apiVersion with any string value on /token/mcp", async () => {
+			const appWithBearer = withBearerHandler(app, ThoughtSpotMCP);
+
+			const request = new Request(
+				"https://example.com/token/mcp?api-version=2024-12-01",
+				{
+					headers: {
+						authorization: "Bearer test-token@test.thoughtspot.cloud",
+					},
+				},
+			);
+
+			await appWithBearer.fetch(request, mockEnv, mockCtx);
+
+			// Verify that props have apiVersion - validation happens in the MCP server
+			expect(mockCtx.props).toMatchObject({
+				accessToken: "test-token",
+				instanceUrl: "https://test.thoughtspot.cloud",
+				apiVersion: "2024-12-01",
+			});
 		});
 
 		it("should handle query params with x-ts-host header on /token/mcp", async () => {

@@ -41,6 +41,8 @@ function handleTokenAuth(
 	const clientName =
 		req.headers.get("x-ts-client-name") || "Bearer Token client";
 
+	const url = new URL(req.url);
+
 	// Build props object
 	const props: any = {
 		accessToken: accessToken,
@@ -48,23 +50,23 @@ function handleTokenAuth(
 		clientName,
 	};
 
-	// Add api-version support only for /token endpoints
+	// Add api-version support only for /token endpoints (supports "beta" or "YYYY-MM-DD" format)
 	if (supportApiVersion) {
-		const url = new URL(req.url);
 		const apiVersion = url.searchParams.get("api-version");
-		if (apiVersion === "beta") {
-			props.apiVersion = "beta" as const;
+		if (apiVersion) {
+			props.apiVersion = apiVersion;
 		}
 	}
 
 	(ctx as any).props = props;
 
 	// Route to appropriate handler
-	if (req.url.endsWith("/mcp") || req.url.includes("/mcp?")) {
+	const pathname = url.pathname;
+	if (pathname.endsWith("/mcp")) {
 		return MCPServer.serve("/mcp").fetch(req, env, ctx);
 	}
 
-	if (req.url.endsWith("/sse") || req.url.includes("/sse?")) {
+	if (pathname.endsWith("/sse")) {
 		return MCPServer.serveSSE("/sse").fetch(req, env, ctx);
 	}
 

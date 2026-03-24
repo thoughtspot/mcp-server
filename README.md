@@ -321,25 +321,66 @@ Make sure to add the following entries in your ThoughtSpot instance:
    npm run dev
    ```
 
+### Adding New Tools
+
+When adding new MCP tools to the server:
+
+1. **Define schemas and tools** in `src/servers/tool-definitions.ts`
+2. **Implement handlers** in `src/servers/mcp-server.ts`
+3. **Update version registry** in `src/servers/version-registry.ts`:
+   - Add new tools to appropriate version(s) in `VERSION_REGISTRY`
+   - For new stable features, update `DEFAULT_VERSION`
+   - For beta features, add to the `beta` version entry
+4. **Add tests** for new tools and version configurations
+5. **Update documentation** in README.md
+
+**Important:** The version registry controls which tools are available in each API version. Make sure to add new tools to the correct version configuration to ensure they're accessible to users.
+
 ### Endpoints
 
 **OAuth-based endpoints:**
-- `/mcp`: MCP HTTP Streaming endpoint (supports `?api-version=beta`)
-- `/sse`: Server-sent events for MCP (supports `?api-version=beta`)
+- `/mcp`: MCP HTTP Streaming endpoint (supports `?api-version`)
+- `/sse`: Server-sent events for MCP (supports `?api-version`)
 - `/api`: MCP tools exposed as HTTP endpoints
 - `/authorize`, `/token`, `/register`: OAuth endpoints
 
 **Token-based endpoints (Recommended for APIs):**
-- `/token/mcp`: MCP HTTP Streaming with bearer auth (supports `?api-version=beta`)
-- `/token/sse`: Server-sent events with bearer auth (supports `?api-version=beta`)
+- `/token/mcp`: MCP HTTP Streaming with bearer auth (supports `?api-version`)
+- `/token/sse`: Server-sent events with bearer auth (supports `?api-version`)
 
 **Deprecated endpoints:**
 - `/bearer/mcp`, `/bearer/sse`: Legacy MCP endpoints with bearer auth (**deprecated**, no `api-version` support). Use `/token/*` endpoints instead.
 
-**Beta Tools Access:**
+**API Versioning:**
 
-To access beta tools, append `?api-version=beta` to any MCP endpoint (except deprecated `/bearer/*` endpoints):
-- Example: `https://agent.thoughtspot.app/token/mcp?api-version=beta`
-- Beta tools include experimental features
+The ThoughtSpot MCP Server supports API versioning to access different tool sets. You can specify the version using the `api-version` query parameter on OAuth and `/token/*` endpoints (not supported on deprecated `/bearer/*` endpoints).
+
+**Version Formats:**
+- **Beta version**: `?api-version=beta` - Access the latest beta features
+- **Date-based version**: `?api-version=YYYY-MM-DD` - Access tools from a specific release date or the latest version on or before that date
+- **Default** (no parameter): Returns the stable default tool set
+
+**Examples:**
+```bash
+# Beta version (latest experimental features)
+https://agent.thoughtspot.app/token/mcp?api-version=beta
+
+# Specific date version (Spotter3 agent tools)
+https://agent.thoughtspot.app/token/mcp?api-version=2025-03-01
+
+# Date range resolution (returns latest version ≤ specified date)
+https://agent.thoughtspot.app/token/mcp?api-version=2025-03-15
+
+# Default version (stable tools)
+https://agent.thoughtspot.app/token/mcp
+```
+
+**Available Versions:**
+- `beta`: Latest beta features with Spotter3 agent conversation tools
+- `2025-03-01`: Spotter3 agent conversation tools (`createConversation`, `sendConversationMessage`, `getConversationUpdates`)
+- `2024-12-01`: Base MCP tools (`getRelevantQuestions`, `getAnswer`, `getDataSourceSuggestions`)
+- `default`: Stable base tools (same as `2024-12-01`)
+
+**Note:** The `/bearer/*` endpoints always return the default stable tool set and ignore the `api-version` parameter for backward compatibility.
 
 MCP Server, © ThoughtSpot, Inc. 2025
