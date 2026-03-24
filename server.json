@@ -7,7 +7,7 @@
     "url": "https://github.com/thoughtspot/mcp-server",
     "source": "github"
   },
-  "version": "1.0.1",
+  "version": "2.0.0",
   "remotes": [{
     "type": "streamable-http",
     "url": "https://agent.thoughtspot.app/mcp"
@@ -62,6 +62,18 @@
       {
         "name": "getAnswer",
         "description": "Get the answer to a specific question from ThoughtSpot analytics"
+      },
+      {
+        "name": "createConversation",
+        "description": "Begin a conversation with Spotter agent"
+      },
+      {
+        "name": "sendConversationMessage",
+        "description": "Send messages to a conversation with Spotter agent"
+      },
+      {
+        "name": "getConversationUpdates",
+        "description": "Get response updates from a conversation with Spotter agent"
       },
       {
         "name": "createLiveboard",
