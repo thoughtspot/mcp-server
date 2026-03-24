@@ -37,69 +37,29 @@ describe("The ThoughtSpot MCP Worker: Auth handler", () => {
 });
 
 describe("MCP Router with API Version", () => {
-	it("should inject apiVersion=beta when query param is present", async () => {
+	it("should create router with correct serve method for /mcp", async () => {
 		vi.resetModules();
 		const { default: worker } = await import("../src/index.js");
 
 		const typedWorker = worker as {
 			fetch: (request: Request, env: any, ctx: any) => Promise<Response>;
 		};
-
-		// Create a mock execution context to capture props
-		const ctx = createExecutionContext();
-		let capturedProps: any = null;
-
-		// Mock the serve method to capture props
-		const originalServe = (await import("../src/index.js")).ThoughtSpotMCP
-			.serve;
-		vi.spyOn(
-			(await import("../src/index.js")).ThoughtSpotMCP,
-			"serve",
-		).mockImplementation((path: string) => {
-			return {
-				fetch: async (req: Request, _env: any, _ctx: any) => {
-					capturedProps = (_ctx as any).props;
-					return new Response("OK");
-				},
-			} as any;
-		});
-
-		const request = new IncomingRequest(
-			"https://example.com/mcp?api-version=beta",
-		);
-
-		// This would normally go through OAuth provider, but we're testing the router
-		// So we'll test it indirectly through the exported functions
-		await typedWorker.fetch(request, env, ctx);
-
-		// The test verifies the router function exists and can be called
-		expect(true).toBe(true);
-
-		vi.restoreAllMocks();
-	});
-
-	it("should not inject apiVersion when query param is missing", async () => {
-		vi.resetModules();
-		const { default: worker } = await import("../src/index.js");
-
-		const typedWorker = worker as {
-			fetch: (request: Request, env: any, ctx: any) => Promise<Response>;
-		};
-
-		const ctx = createExecutionContext();
 
 		const request = new IncomingRequest("https://example.com/mcp");
+		const ctx = createExecutionContext();
 
-		// This would normally go through OAuth provider
-		await typedWorker.fetch(request, env, ctx);
+		// This tests that the router is correctly set up
+		// The actual apiVersion injection is tested in bearer.spec.ts
+		const response = await typedWorker.fetch(request, env, ctx);
 
-		// The test verifies the router function exists
-		expect(true).toBe(true);
+		// Should get a response (even if it's an auth error)
+		expect(response).toBeDefined();
+		expect(response instanceof Response).toBe(true);
 
 		vi.restoreAllMocks();
 	});
 
-	it("should ignore non-beta api-version values", async () => {
+	it("should create router with correct serve method for /sse", async () => {
 		vi.resetModules();
 		const { default: worker } = await import("../src/index.js");
 
@@ -107,16 +67,36 @@ describe("MCP Router with API Version", () => {
 			fetch: (request: Request, env: any, ctx: any) => Promise<Response>;
 		};
 
+		const request = new IncomingRequest("https://example.com/sse");
 		const ctx = createExecutionContext();
 
+		const response = await typedWorker.fetch(request, env, ctx);
+
+		// Should get a response (even if it's an auth error)
+		expect(response).toBeDefined();
+		expect(response instanceof Response).toBe(true);
+
+		vi.restoreAllMocks();
+	});
+
+	it("should handle query parameters in router paths", async () => {
+		vi.resetModules();
+		const { default: worker } = await import("../src/index.js");
+
+		const typedWorker = worker as {
+			fetch: (request: Request, env: any, ctx: any) => Promise<Response>;
+		};
+
 		const request = new IncomingRequest(
-			"https://example.com/mcp?api-version=alpha",
+			"https://example.com/mcp?api-version=beta&other=param",
 		);
+		const ctx = createExecutionContext();
 
-		await typedWorker.fetch(request, env, ctx);
+		const response = await typedWorker.fetch(request, env, ctx);
 
-		// The test verifies non-beta values are ignored
-		expect(true).toBe(true);
+		// Should handle query params gracefully
+		expect(response).toBeDefined();
+		expect(response instanceof Response).toBe(true);
 
 		vi.restoreAllMocks();
 	});

@@ -38,6 +38,7 @@ export const ThoughtSpotOpenAIDeepResearchMCP = instrumentedMCPServer(
 function createMCPRouter(
 	path: string,
 	serverClass: typeof ThoughtSpotMCP,
+	serveMethod: "serve" | "serveSSE",
 	options?: { binding?: string },
 ) {
 	return {
@@ -49,47 +50,17 @@ function createMCPRouter(
 			const url = new URL(request.url);
 			const apiVersion = url.searchParams.get("api-version");
 
-			// Inject apiVersion into props if it's "beta"
-			if (apiVersion === "beta") {
+			// Inject apiVersion into props if provided (supports "beta" or "YYYY-MM-DD" format)
+			if (apiVersion) {
 				const originalProps = (ctx as any).props || {};
 				(ctx as any).props = {
 					...originalProps,
-					apiVersion: "beta" as const,
+					apiVersion,
 				};
 			}
 
 			// Route to the appropriate serve method
-			return serverClass.serve(path, options).fetch(request, env, ctx);
-		},
-	};
-}
-
-// Router function for SSE endpoints
-function createMCPRouterSSE(
-	path: string,
-	serverClass: typeof ThoughtSpotMCP,
-	options?: { binding?: string },
-) {
-	return {
-		async fetch(
-			request: Request,
-			env: Env,
-			ctx: ExecutionContext,
-		): Promise<Response> {
-			const url = new URL(request.url);
-			const apiVersion = url.searchParams.get("api-version");
-
-			// Inject apiVersion into props if it's "beta"
-			if (apiVersion === "beta") {
-				const originalProps = (ctx as any).props || {};
-				(ctx as any).props = {
-					...originalProps,
-					apiVersion: "beta" as const,
-				};
-			}
-
-			// Route to the appropriate serveSSE method
-			return serverClass.serveSSE(path, options).fetch(request, env, ctx);
+			return serverClass[serveMethod](path, options).fetch(request, env, ctx);
 		},
 	};
 }
@@ -97,8 +68,8 @@ function createMCPRouterSSE(
 // Create the OAuth provider instance
 const oauthProvider = new OAuthProvider({
 	apiHandlers: {
-		"/mcp": createMCPRouter("/mcp", ThoughtSpotMCP) as any,
-		"/sse": createMCPRouterSSE("/sse", ThoughtSpotMCP) as any,
+		"/mcp": createMCPRouter("/mcp", ThoughtSpotMCP, "serve") as any,
+		"/sse": createMCPRouter("/sse", ThoughtSpotMCP, "serveSSE") as any,
 		"/openai/mcp": ThoughtSpotOpenAIDeepResearchMCP.serve("/openai/mcp", {
 			binding: "OPENAI_DEEP_RESEARCH_MCP_OBJECT",
 		}) as any, // TODO: Remove 'any'
@@ -106,7 +77,6 @@ const oauthProvider = new OAuthProvider({
 			binding: "OPENAI_DEEP_RESEARCH_MCP_OBJECT",
 		}) as any, // TODO: Remove 'any'
 		"/api": apiServer as any, // TODO: Remove 'any'
-		"/bearer/mcp": withBearerHandler(handler, ThoughtSpotMCP) as any,
 	},
 	defaultHandler: withBearerHandler(handler, ThoughtSpotMCP) as any, // TODO: Remove 'any'
 	authorizeEndpoint: "/authorize",
