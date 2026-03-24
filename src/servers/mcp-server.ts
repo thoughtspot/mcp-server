@@ -5,17 +5,12 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
-
 import { McpServerError } from "../utils";
 import type { DataSource } from "../thoughtspot/thoughtspot-service";
 import { TrackEvent } from "../metrics";
-import { getActiveSpan, WithSpan } from "../metrics/tracing/tracing-utils";
+import { WithSpan } from "../metrics/tracing/tracing-utils";
 import { SpanStatusCode } from "@opentelemetry/api";
-import {
-	BaseMCPServer,
-	type Context,
-	type ToolResponse,
-} from "./mcp-server-base";
+import { BaseMCPServer, type Context } from "./mcp-server-base";
 
 const ToolInputSchema = ToolSchema.shape.inputSchema;
 type ToolInput = z.infer<typeof ToolInputSchema>;
@@ -88,6 +83,79 @@ export const GetAnswerOutputSchema = z.object({
 		.describe("Information about the fields in the answer"),
 });
 
+export const CreateConversationSchema = z.object({
+	dataSourceId: z
+		.string()
+		.optional()
+		.describe(
+			"Sets the data source for the conversation. If not provided, the most relevant data source will be automatically selected based on the conversation.",
+		),
+});
+
+export const CreateConversationOutputSchema = z.object({
+	conversationId: z
+		.string()
+		.describe(
+			"Identifier for the conversation. Use this to send messages or get updates on the conversation.",
+		),
+});
+
+export const SendConversationMessageSchema = z.object({
+	conversationId: z
+		.string()
+		.describe("Identifier of the conversation to send messages to."),
+	messages: z
+		.array(z.string())
+		.describe("The messages to send to the conversation."),
+});
+
+export const SendConversationMessageOutputSchema = z.object({
+	success: z.boolean().describe("Whether the messages were sent successfully."),
+});
+
+export const GetConversationUpdatesSchema = z.object({
+	conversationId: z
+		.string()
+		.describe("Identifier of the conversation to get updates from."),
+});
+
+export const ConversationUpdateSchema = z.object({
+	type: z.enum(["text", "answer"]).describe("The type of the update."),
+	text: z
+		.string()
+		.optional()
+		.describe("For a text message, the text content of the message."),
+	answerTitle: z
+		.string()
+		.optional()
+		.describe(
+			"For an answer message, the title of the answer. This describes the overall content of the answer.",
+		),
+	answerQuery: z
+		.string()
+		.optional()
+		.describe(
+			"For an answer message, the full search query of the answer. This outlines the specific search being performed to generate the answer.",
+		),
+	answerFrameUrl: z
+		.string()
+		.optional()
+		.describe(
+			"For an answer message, the embeddable URL for the answer. If you are capable of displaying webpages in an iframe, you can use this URL to display an interactive answer visualization.",
+		),
+});
+
+export const GetConversationUpdatesOutputSchema = z.object({
+	conversationUpdates: z
+		.array(ConversationUpdateSchema)
+		.describe("The updates from the conversation."),
+	isDone: z
+		.boolean()
+		.describe(
+			"Whether the ThoughtSpot agent is finished responding to the conversation. If not done yet, make another GetConversationUpdates call to get the next set of updates.",
+		),
+});
+
 export const CreateLiveboardSchema = z.object({
 	name: z.string().describe("The name of the liveboard to create"),
 	answers: z
@@ -135,6 +203,9 @@ export enum ToolName {
 	Ping = "ping",
 	GetRelevantQuestions = "getRelevantQuestions",
 	GetAnswer = "getAnswer",
+	CreateConversation = "createConversation",
+	SendConversationMessage = "sendConversationMessage",
+	GetConversationUpdates = "getConversationUpdates",
 	CreateLiveboard = "createLiveboard",
 	GetDataSourceSuggestions = "getDataSourceSuggestions",
 }
@@ -174,6 +245,43 @@ export const toolDefinitionsMCPServer = [
 		},
 	},
 	{
+		name: ToolName.CreateConversation,
+		description: "Begin a conversation with Spotter agent",
+		inputSchema: zodToJsonSchema(CreateConversationSchema) as ToolInput,
+		outputSchema: zodToJsonSchema(CreateConversationOutputSchema) as ToolOutput,
+		annotations: {
+			title: "Begin a conversation with Spotter agent",
+			readOnlyHint: true,
+			destructiveHint: false,
+		},
+	},
+	{
+		name: ToolName.SendConversationMessage,
+		description: "Send messages to a conversation with Spotter agent",
+		inputSchema: zodToJsonSchema(SendConversationMessageSchema) as ToolInput,
+		outputSchema: zodToJsonSchema(
+			SendConversationMessageOutputSchema,
+		) as ToolOutput,
+		annotations: {
+			title: "Send messages to a conversation with Spotter agent",
+			readOnlyHint: true,
+			destructiveHint: false,
+		},
+	},
+	{
+		name: ToolName.GetConversationUpdates,
+		description: "Get response updates from a conversation with Spotter agent",
+		inputSchema: zodToJsonSchema(GetConversationUpdatesSchema) as ToolInput,
+		outputSchema: zodToJsonSchema(
+			GetConversationUpdatesOutputSchema,
+		) as ToolOutput,
+		annotations: {
+			title: "Get response updates from a conversation with Spotter agent",
+			readOnlyHint: true,
+			destructiveHint: false,
+		},
+	},
+	{
 		name: ToolName.CreateLiveboard,
 		description: "Create a liveboard from a list of answers",
 		inputSchema: zodToJsonSchema(CreateLiveboardSchema) as ToolInput,
@@ -186,7 +294,7 @@ export const toolDefinitionsMCPServer = [
 ];
 export class MCPServer extends BaseMCPServer {
 	constructor(ctx: Context) {
-		super(ctx, "ThoughtSpot", "1.0.0");
+		super(ctx, "ThoughtSpot", "2.0.0");
 	}
 
 	protected async listTools() {
@@ -263,7 +371,6 @@ export class MCPServer extends BaseMCPServer {
 		const { name } = request.params;
 		this.trackers.track(TrackEvent.CallTool, { toolName: name });
 
-		let response: ToolResponse | undefined;
 		switch (name) {
 			case ToolName.Ping: {
 				console.log("Received Ping request");
@@ -272,12 +379,37 @@ export class MCPServer extends BaseMCPServer {
 				}
 				return this.createErrorResponse("Not authenticated", "Ping failed");
 			}
+
 			case ToolName.GetRelevantQuestions: {
 				return this.callGetRelevantQuestions(request);
 			}
 
 			case ToolName.GetAnswer: {
 				return this.callGetAnswer(request);
+			}
+
+			case ToolName.CreateConversation: {
+				// TODO(Rifdhan) implement
+				return this.createErrorResponse(
+					"Not implemented",
+					"Tool not implemented yet",
+				);
+			}
+
+			case ToolName.SendConversationMessage: {
+				// TODO(Rifdhan) implement
+				return this.createErrorResponse(
+					"Not implemented",
+					"Tool not implemented yet",
+				);
+			}
+
+			case ToolName.GetConversationUpdates: {
+				// TODO(Rifdhan) implement
+				return this.createErrorResponse(
+					"Not implemented",
+					"Tool not implemented yet",
+				);
 			}
 
 			case ToolName.CreateLiveboard: {
