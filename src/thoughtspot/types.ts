@@ -29,3 +29,8 @@ export interface SessionInfo {
 	privileges: any;
 	enableSpotterDataSourceDiscovery?: boolean;
 }
+
+export interface StreamingMessagesState {
+	messages: string[];
+	isDone: boolean;
+}
