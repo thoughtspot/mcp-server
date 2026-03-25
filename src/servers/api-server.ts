@@ -8,7 +8,7 @@ import {
 	CreateLiveboardSchema,
 	GetAnswerSchema,
 	GetRelevantQuestionsSchema,
-} from "./mcp-server";
+} from "./tool-definitions";
 
 const apiServer = new Hono<{ Bindings: Env & { props: Props } }>();
 

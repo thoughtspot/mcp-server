@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { toolDefinitionsMCPServer } from "../servers/mcp-server";
+import { toolDefinitionsMCPServer } from "../servers/tool-definitions";
 import { capitalize } from "../utils";
 
 export const openApiSpecHandler = new Hono();

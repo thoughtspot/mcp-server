@@ -478,4 +478,246 @@ describe("Bearer Handler", () => {
 			expect(result.status).not.toBe(400);
 		});
 	});
+
+	describe("DEPRECATED: /bearer endpoints - No API Version Support", () => {
+		it("should NOT inject apiVersion even when query param is present on /bearer/mcp", async () => {
+			const appWithBearer = withBearerHandler(app, ThoughtSpotMCP);
+
+			const request = new Request(
+				"https://example.com/bearer/mcp?api-version=beta",
+				{
+					headers: {
+						authorization: "Bearer test-token@test.thoughtspot.cloud",
+					},
+				},
+			);
+
+			await appWithBearer.fetch(request, mockEnv, mockCtx);
+
+			// LEGACY: /bearer endpoints do NOT support api-version for backward compatibility
+			expect(mockCtx.props).toMatchObject({
+				accessToken: "test-token",
+				instanceUrl: "https://test.thoughtspot.cloud",
+			});
+			expect(mockCtx.props.apiVersion).toBeUndefined();
+		});
+
+		it("should NOT inject apiVersion even when query param is present on /bearer/sse", async () => {
+			const appWithBearer = withBearerHandler(app, ThoughtSpotMCP);
+
+			const request = new Request(
+				"https://example.com/bearer/sse?api-version=beta",
+				{
+					headers: {
+						authorization: "Bearer test-token@test.thoughtspot.cloud",
+					},
+				},
+			);
+
+			await appWithBearer.fetch(request, mockEnv, mockCtx);
+
+			// LEGACY: /bearer endpoints do NOT support api-version
+			expect(mockCtx.props).toMatchObject({
+				accessToken: "test-token",
+				instanceUrl: "https://test.thoughtspot.cloud",
+			});
+			expect(mockCtx.props.apiVersion).toBeUndefined();
+		});
+	});
+
+	describe("NEW: /token endpoints - API Version Query Parameter Support", () => {
+		it("should inject apiVersion=beta when query param is present on /token/mcp", async () => {
+			const appWithBearer = withBearerHandler(app, ThoughtSpotMCP);
+
+			const request = new Request(
+				"https://example.com/token/mcp?api-version=beta",
+				{
+					headers: {
+						authorization: "Bearer test-token@test.thoughtspot.cloud",
+					},
+				},
+			);
+
+			await appWithBearer.fetch(request, mockEnv, mockCtx);
+
+			// Verify that props were set with apiVersion
+			expect(mockCtx.props).toMatchObject({
+				accessToken: "test-token",
+				instanceUrl: "https://test.thoughtspot.cloud",
+				apiVersion: "beta",
+			});
+		});
+
+		it("should inject apiVersion=beta when query param is present on /token/sse", async () => {
+			const appWithBearer = withBearerHandler(app, ThoughtSpotMCP);
+
+			const request = new Request(
+				"https://example.com/token/sse?api-version=beta",
+				{
+					headers: {
+						authorization: "Bearer test-token@test.thoughtspot.cloud",
+					},
+				},
+			);
+
+			await appWithBearer.fetch(request, mockEnv, mockCtx);
+
+			// Verify that props were set with apiVersion
+			expect(mockCtx.props).toMatchObject({
+				accessToken: "test-token",
+				instanceUrl: "https://test.thoughtspot.cloud",
+				apiVersion: "beta",
+			});
+		});
+
+		it("should not inject apiVersion when query param is not present on /token/mcp", async () => {
+			const appWithBearer = withBearerHandler(app, ThoughtSpotMCP);
+
+			const request = new Request("https://example.com/token/mcp", {
+				headers: {
+					authorization: "Bearer test-token@test.thoughtspot.cloud",
+				},
+			});
+
+			await appWithBearer.fetch(request, mockEnv, mockCtx);
+
+			// Verify that props do not have apiVersion
+			expect(mockCtx.props).toMatchObject({
+				accessToken: "test-token",
+				instanceUrl: "https://test.thoughtspot.cloud",
+			});
+			expect(mockCtx.props.apiVersion).toBeUndefined();
+		});
+
+		it("should inject apiVersion with date format on /token/mcp", async () => {
+			const appWithBearer = withBearerHandler(app, ThoughtSpotMCP);
+
+			const request = new Request(
+				"https://example.com/token/mcp?api-version=2025-03-01",
+				{
+					headers: {
+						authorization: "Bearer test-token@test.thoughtspot.cloud",
+					},
+				},
+			);
+
+			await appWithBearer.fetch(request, mockEnv, mockCtx);
+
+			// Verify that props have apiVersion with date
+			expect(mockCtx.props).toMatchObject({
+				accessToken: "test-token",
+				instanceUrl: "https://test.thoughtspot.cloud",
+				apiVersion: "2025-03-01",
+			});
+		});
+
+		it("should inject apiVersion with any string value on /token/mcp", async () => {
+			const appWithBearer = withBearerHandler(app, ThoughtSpotMCP);
+
+			const request = new Request(
+				"https://example.com/token/mcp?api-version=2024-12-01",
+				{
+					headers: {
+						authorization: "Bearer test-token@test.thoughtspot.cloud",
+					},
+				},
+			);
+
+			await appWithBearer.fetch(request, mockEnv, mockCtx);
+
+			// Verify that props have apiVersion - validation happens in the MCP server
+			expect(mockCtx.props).toMatchObject({
+				accessToken: "test-token",
+				instanceUrl: "https://test.thoughtspot.cloud",
+				apiVersion: "2024-12-01",
+			});
+		});
+
+		it("should handle query params with x-ts-host header on /token/mcp", async () => {
+			const appWithBearer = withBearerHandler(app, ThoughtSpotMCP);
+
+			const request = new Request(
+				"https://example.com/token/mcp?api-version=beta",
+				{
+					headers: {
+						authorization: "Bearer test-token",
+						"x-ts-host": "test.thoughtspot.cloud",
+					},
+				},
+			);
+
+			await appWithBearer.fetch(request, mockEnv, mockCtx);
+
+			// Verify that props were set correctly with both header and query param
+			expect(mockCtx.props).toMatchObject({
+				accessToken: "test-token",
+				instanceUrl: "https://test.thoughtspot.cloud",
+				apiVersion: "beta",
+			});
+		});
+
+		it("should properly route to serve() with query params on /token/mcp", async () => {
+			const appWithBearer = withBearerHandler(app, ThoughtSpotMCP);
+
+			const request = new Request(
+				"https://example.com/token/mcp?api-version=beta",
+				{
+					headers: {
+						authorization: "Bearer test-token@test.thoughtspot.cloud",
+					},
+				},
+			);
+
+			const result = await appWithBearer.fetch(request, mockEnv, mockCtx);
+
+			// Verify that serve was called
+			expect(mockMcpServer.serve).toHaveBeenCalledWith("/mcp");
+			expect(result.status).toBe(200);
+		});
+
+		it("should properly route to serveSSE() with query params on /token/sse", async () => {
+			const appWithBearer = withBearerHandler(app, ThoughtSpotMCP);
+
+			const request = new Request(
+				"https://example.com/token/sse?api-version=beta",
+				{
+					headers: {
+						authorization: "Bearer test-token@test.thoughtspot.cloud",
+					},
+				},
+			);
+
+			const result = await appWithBearer.fetch(request, mockEnv, mockCtx);
+
+			// Verify that serveSSE was called
+			expect(mockMcpServer.serveSSE).toHaveBeenCalledWith("/sse");
+			expect(result.status).toBe(200);
+		});
+
+		it("should handle /token/mcp without query params", async () => {
+			const appWithBearer = withBearerHandler(app, ThoughtSpotMCP);
+
+			const request = new Request("https://example.com/token/mcp", {
+				headers: {
+					authorization: "Bearer test-token@test.thoughtspot.cloud",
+				},
+			});
+
+			const result = await appWithBearer.fetch(request, mockEnv, mockCtx);
+
+			expect(result.status).toBe(200);
+			expect(mockCtx.props.apiVersion).toBeUndefined();
+		});
+
+		it("should require bearer token on /token/mcp", async () => {
+			const appWithBearer = withBearerHandler(app, ThoughtSpotMCP);
+
+			const request = new Request("https://example.com/token/mcp");
+
+			const result = await appWithBearer.fetch(request, mockEnv, mockCtx);
+
+			expect(result.status).toBe(400);
+			expect(await result.text()).toBe("Bearer token is required");
+		});
+	});
 });
