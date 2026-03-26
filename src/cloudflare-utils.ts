@@ -2,13 +2,23 @@ import { McpAgent } from "agents/mcp";
 import { instrumentDO, type ResolveConfigFn } from "@microlabs/otel-cf-workers";
 import type { BaseMCPServer, Context } from "./servers/mcp-server-base";
 import type { Props } from "./utils";
+import { StreamingMessagesStorageWithTtl } from "./streaming-message-storage-with-ttl/streaming-message-storage-with-ttl";
 
 export function instrumentedMCPServer<T extends BaseMCPServer>(
-	MCPServer: new (ctx: Context) => T,
+	MCPServer: new (
+		ctx: Context,
+		streamingMessageStorage: StreamingMessagesStorageWithTtl,
+	) => T,
 	config: ResolveConfigFn,
 ) {
 	const Agent = class extends McpAgent<Env, any, Props> {
-		server = new MCPServer(this as Context);
+		streamingMessageStorage = new StreamingMessagesStorageWithTtl(
+			// TODO(Rifdhan) optional chaining is needed to fix test failures, need to investigate
+			this.ctx?.storage,
+			this.scheduleTimer,
+			this.cancelTimer,
+		);
+		server = new MCPServer(this as Context, this.streamingMessageStorage);
 
 		// Argument of type 'typeof ThoughtSpotMCPWrapper' is not assignable to parameter of type 'DOClass'.
 		// Cannot assign a 'protected' constructor type to a 'public' constructor type.
@@ -46,6 +56,26 @@ export function instrumentedMCPServer<T extends BaseMCPServer>(
 				return serverFetch(request, env, ctx);
 			};
 			return server;
+		}
+
+		private async scheduleTimer(
+			delaySeconds: number,
+			conversationId: string,
+		): Promise<string> {
+			const schedule = await this.schedule(
+				delaySeconds,
+				"onTimerTriggered" as keyof this,
+				conversationId,
+			);
+			return schedule.id;
+		}
+
+		private async cancelTimer(timerId: string): Promise<void> {
+			await this.cancelSchedule(timerId);
+		}
+
+		private async onTimerTriggered(conversationId: string): Promise<void> {
+			await this.streamingMessageStorage.onTimerTriggered(conversationId);
 		}
 	};
 

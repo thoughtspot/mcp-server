@@ -20,7 +20,7 @@ export class StreamingMessagesStorageWithTtl {
 	public async appendMessagesAndRestartTtl(
 		conversationId: string,
 		newMessages: string[],
-		isDone: boolean,
+		isDone = false,
 	): Promise<void> {
 		const oldState: StreamingMessagesWithTtlState | undefined =
 			await this.storage.get(conversationId);

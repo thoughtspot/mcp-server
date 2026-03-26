@@ -3,6 +3,7 @@ import { connect } from "mcp-testing-kit";
 import { MCPServer } from "../../src/servers/mcp-server";
 import * as thoughtspotClient from "../../src/thoughtspot/thoughtspot-client";
 import { MixpanelTracker } from "../../src/metrics/mixpanel/mixpanel";
+import { StreamingMessagesStorageWithTtl } from "../../src/streaming-message-storage-with-ttl/streaming-message-storage-with-ttl";
 
 // Mock the MixpanelTracker
 vi.mock("../../src/metrics/mixpanel/mixpanel", () => ({
@@ -119,9 +120,12 @@ describe("MCP Server", () => {
 			},
 		};
 
-		server = new MCPServer({
-			props: mockProps,
-		});
+		server = new MCPServer(
+			{
+				props: mockProps,
+			},
+			new StreamingMessagesStorageWithTtl(null as any, vi.fn(), vi.fn()),
+		);
 	});
 
 	describe("Initialization", () => {
@@ -228,7 +232,10 @@ describe("MCP Server", () => {
 			} as any);
 
 			// Create a new server instance to pick up the new mock
-			const testServer = new MCPServer({ props: mockProps });
+			const testServer = new MCPServer(
+				{ props: mockProps },
+				new StreamingMessagesStorageWithTtl(null as any, vi.fn(), vi.fn()),
+			);
 			await testServer.init();
 			const { listTools } = connect(testServer);
 
@@ -253,17 +260,20 @@ describe("MCP Server", () => {
 
 	describe("Ping Tool", () => {
 		it("should return error when not authenticated", async () => {
-			const unauthenticatedServer = new MCPServer({
-				props: {
-					instanceUrl: "",
-					accessToken: "",
-					clientName: {
-						clientId: "test-client-id",
-						clientName: "test-client",
-						registrationDate: Date.now(),
+			const unauthenticatedServer = new MCPServer(
+				{
+					props: {
+						instanceUrl: "",
+						accessToken: "",
+						clientName: {
+							clientId: "test-client-id",
+							clientName: "test-client",
+							registrationDate: Date.now(),
+						},
 					},
 				},
-			});
+				new StreamingMessagesStorageWithTtl(null as any, vi.fn(), vi.fn()),
+			);
 			await unauthenticatedServer.init();
 
 			const { callTool } = connect(unauthenticatedServer);

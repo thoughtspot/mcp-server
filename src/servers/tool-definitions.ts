@@ -95,9 +95,7 @@ export const SendConversationMessageSchema = z.object({
 	conversationId: z
 		.string()
 		.describe("Identifier of the conversation to send messages to."),
-	messages: z
-		.array(z.string())
-		.describe("The messages to send to the conversation."),
+	message: z.string().describe("The message to send to the conversation."),
 });
 
 export const SendConversationMessageOutputSchema = z.object({
