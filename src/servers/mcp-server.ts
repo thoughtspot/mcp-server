@@ -20,7 +20,7 @@ import {
 	SendConversationMessageSchema,
 	GetConversationUpdatesSchema,
 } from "./tool-definitions";
-import { StreamingMessagesStorageWithTtl } from "../streaming-message-storage-with-ttl/streaming-message-storage-with-ttl";
+import type { StreamingMessagesStorageWithTtl } from "../streaming-message-storage-with-ttl/streaming-message-storage-with-ttl";
 
 export class MCPServer extends BaseMCPServer {
 	constructor(
@@ -280,12 +280,11 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		const { conversationId, message } = SendConversationMessageSchema.parse(
 			request.params.arguments,
 		);
-		const response =
-			await this.getThoughtSpotService().sendAgentConversationMessageStreaming(
-				conversationId,
-				message,
-				this.streamingMessageStorage,
-			);
+		await this.getThoughtSpotService().sendAgentConversationMessageStreaming(
+			conversationId,
+			message,
+			this.streamingMessageStorage,
+		);
 
 		return this.createStructuredContentSuccessResponse(
 			{ success: true },
@@ -306,8 +305,11 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			);
 
 		return this.createStructuredContentSuccessResponse(
-			{ messages: messagesState.messages, isDone: messagesState.isDone },
-			"Conversation message sent successfully",
+			{
+				conversationUpdates: messagesState.messages,
+				isDone: messagesState.isDone,
+			},
+			"Conversation updates retrieved successfully",
 		);
 	}
 

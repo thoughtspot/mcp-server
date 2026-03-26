@@ -15,8 +15,8 @@ export function instrumentedMCPServer<T extends BaseMCPServer>(
 		streamingMessageStorage = new StreamingMessagesStorageWithTtl(
 			// TODO(Rifdhan) optional chaining is needed to fix test failures, need to investigate
 			this.ctx?.storage,
-			this.scheduleTimer,
-			this.cancelTimer,
+			this.scheduleTimer.bind(this),
+			this.cancelTimer.bind(this),
 		);
 		server = new MCPServer(this as Context, this.streamingMessageStorage);
 

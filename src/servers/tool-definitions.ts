@@ -109,7 +109,9 @@ export const GetConversationUpdatesSchema = z.object({
 });
 
 export const ConversationUpdateSchema = z.object({
-	type: z.enum(["text", "answer"]).describe("The type of the update."),
+	type: z
+		.enum(["text", "text-chunk", "answer"])
+		.describe("The type of the update."),
 	text: z
 		.string()
 		.optional()
@@ -126,7 +128,7 @@ export const ConversationUpdateSchema = z.object({
 		.describe(
 			"For an answer message, the full search query of the answer. This outlines the specific search being performed to generate the answer.",
 		),
-	answerFrameUrl: z
+	iframeUrl: z
 		.string()
 		.optional()
 		.describe(

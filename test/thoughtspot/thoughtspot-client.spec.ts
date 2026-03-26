@@ -130,9 +130,15 @@ describe("ThoughtSpot Client", () => {
 			expect(client).toHaveProperty("exportUnsavedAnswerTML");
 			expect(client).toHaveProperty("getSessionInfo");
 			expect(client).toHaveProperty("queryGetDataSourceSuggestions");
+			expect(client).toHaveProperty("getAnswerSession");
+			expect(client).toHaveProperty("sendAgentConversationMessageStreaming");
 			expect(typeof client.exportUnsavedAnswerTML).toBe("function");
 			expect(typeof client.getSessionInfo).toBe("function");
 			expect(typeof client.queryGetDataSourceSuggestions).toBe("function");
+			expect(typeof client.getAnswerSession).toBe("function");
+			expect(typeof client.sendAgentConversationMessageStreaming).toBe(
+				"function",
+			);
 		});
 	});
 

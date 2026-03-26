@@ -5,7 +5,7 @@ import type {
 import { SpanStatusCode, trace, context } from "@opentelemetry/api";
 import { getActiveSpan, WithSpan } from "../metrics/tracing/tracing-utils";
 import type { DataSource, SessionInfo, DataSourceSuggestion } from "./types";
-import { StreamingMessagesStorageWithTtl } from "../streaming-message-storage-with-ttl/streaming-message-storage-with-ttl";
+import type { StreamingMessagesStorageWithTtl } from "../streaming-message-storage-with-ttl/streaming-message-storage-with-ttl";
 
 /**
  * Main ThoughtSpot service class using decorator pattern for tracing
@@ -335,32 +335,46 @@ export class ThoughtSpotService {
 						try {
 							const data = JSON.parse(line.slice(6));
 							for (const item of data) {
-								if (item.type === "text-chunk") {
+								if (item.type === "text") {
 									await streamingMessageStorage.appendMessagesAndRestartTtl(
 										conversationId,
-										[item.content],
+										[
+											{
+												type: "text",
+												text: item.content,
+											},
+										],
+									);
+								} else if (item.type === "text-chunk") {
+									await streamingMessageStorage.appendMessagesAndRestartTtl(
+										conversationId,
+										[
+											{
+												type: "text-chunk",
+												text: item.content,
+											},
+										],
 									);
 								} else if (item.type === "answer") {
-									const frameUrl = `${this.ctx.props.instanceUrl}/?tsmcp=true#/embed/conv-assist-answer?sessionId=${item.metadata.session_id}&genNo=${item.metadata.gen_no}&acSessionId=${item.metadata.transaction_id}&acGenNo=${item.metadata.generation_number}`;
+									const iframeUrl = `${(this.client as any).instanceUrl}/?tsmcp=true#/embed/conv-assist-answer?sessionId=${item.metadata.session_id}&genNo=${item.metadata.gen_no}&acSessionId=${item.metadata.transaction_id}&acGenNo=${item.metadata.generation_number}`;
 
 									await streamingMessageStorage.appendMessagesAndRestartTtl(
 										conversationId,
-										[frameUrl],
+										[
+											{
+												type: "answer",
+												answerTitle: item.metadata.title,
+												answerQuery: item.metadata.sage_query,
+												iframeUrl,
+											},
+										],
 									);
-									// await updateConversationState(false, [
-									// 	{
-									// 		type: "answer",
-									// 		answerTitle: item.metadata.title,
-									// 		answerQuery: item.metadata.sage_query,
-									// 		answerFrameUrl: frameUrl,
-									// 	},
-									// ]);
 								} else {
-									console.log(">>> unknown item in event stream", item);
+									console.warn("Unknown event in event stream: ", item);
 								}
 							}
 						} catch (error) {
-							console.log(">>> error parsing line", line, error);
+							console.error("Error while parsing event stream: ", line, error);
 						}
 					}
 				}

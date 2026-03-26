@@ -30,7 +30,21 @@ export interface SessionInfo {
 	enableSpotterDataSourceDiscovery?: boolean;
 }
 
+export interface TextMessage {
+	type: "text" | "text-chunk";
+	text: string;
+}
+
+export interface AnswerMessage {
+	type: "answer";
+	answerTitle: string;
+	answerQuery: string;
+	iframeUrl: string;
+}
+
+export type Message = TextMessage | AnswerMessage;
+
 export interface StreamingMessagesState {
-	messages: string[];
+	messages: Message[];
 	isDone: boolean;
 }
