@@ -37,7 +37,18 @@ class Handler {
 		const { clientId } = oauthReqInfo;
 
 		span?.setAttribute("client_id", clientId || "unknown");
-
+		if (!oauthReqInfo.codeChallenge) {
+			throw new McpServerError(
+				{ message: "PKCE is required: missing code challenge" },
+				400,
+			);
+		}
+		if (oauthReqInfo.codeChallengeMethod !== "S256") {
+			throw new McpServerError(
+				{ message: "PKCE code challenge method must be S256" },
+				400,
+			);
+		}
 		if (!clientId) {
 			throw new McpServerError({ message: "Missing client ID" }, 400);
 		}

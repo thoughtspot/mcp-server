@@ -224,6 +224,7 @@ export const toolDefinitionsV1 = [
 			title: "Test Connection",
 			readOnlyHint: true,
 			destructiveHint: false,
+			openWorldHint: false,
 		},
 	},
 	{
@@ -232,8 +233,9 @@ export const toolDefinitionsV1 = [
 		inputSchema: zodToJsonSchema(CreateLiveboardSchema) as ToolInput,
 		annotations: {
 			title: "Create Liveboard from Answers",
-			readOnlyHint: true,
+			readOnlyHint: false,
 			destructiveHint: false,
+			openWorldHint: false,
 		},
 	},
 	{
@@ -245,6 +247,7 @@ export const toolDefinitionsV1 = [
 			title: "Get Data Source Suggestions for a Query",
 			readOnlyHint: true,
 			destructiveHint: false,
+			openWorldHint: false,
 		},
 	},
 	{
@@ -258,6 +261,7 @@ export const toolDefinitionsV1 = [
 			title: "Get Relevant Questions for a Query",
 			readOnlyHint: true,
 			destructiveHint: false,
+			openWorldHint: false,
 		},
 	},
 	{
@@ -268,6 +272,7 @@ export const toolDefinitionsV1 = [
 			title: "Get Answer for a Question",
 			readOnlyHint: true,
 			destructiveHint: false,
+			openWorldHint: false,
 		},
 	},
 ];
@@ -281,6 +286,7 @@ export const toolDefinitionsV2 = [
 			title: "Check Connectivity",
 			readOnlyHint: true,
 			destructiveHint: false,
+			openWorldHint: false,
 		},
 	},
 	{
@@ -293,6 +299,7 @@ export const toolDefinitionsV2 = [
 			title: "Start Analysis",
 			readOnlyHint: true,
 			destructiveHint: false,
+			openWorldHint: false,
 		},
 	},
 	{
@@ -307,6 +314,7 @@ export const toolDefinitionsV2 = [
 			title: "Send Analysis Request",
 			readOnlyHint: true,
 			destructiveHint: false,
+			openWorldHint: false,
 		},
 	},
 	{
@@ -321,6 +329,7 @@ export const toolDefinitionsV2 = [
 			title: "Check Analysis Updates",
 			readOnlyHint: true,
 			destructiveHint: false,
+			openWorldHint: false,
 		},
 	},
 ];

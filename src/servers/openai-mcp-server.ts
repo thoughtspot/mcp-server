@@ -82,7 +82,8 @@ export class OpenAIDeepResearchMCPServer extends BaseMCPServer {
 			resources: [],
 		};
 	}
-
+	//Set _meta.ui.csp
+	// https://developers.openai.com/apps-sdk/build/mcp-server#content-security-policy-csp
 	protected async readResource(
 		request: z.infer<typeof ReadResourceRequestSchema>,
 	) {

@@ -15,6 +15,8 @@ Learn more about [ThoughtSpot](https://thoughtspot.com).
 
 Join our [Discord](https://developers.thoughtspot.com/join-discord) to get support.
 
+See our privacy statement [here](https://www.thoughtspot.com/privacy-statement).
+
 ## Table of Contents
 
 - [Connect](#connect)
