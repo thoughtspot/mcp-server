@@ -34,11 +34,42 @@ export const ThoughtSpotOpenAIDeepResearchMCP = instrumentedMCPServer(
 	config,
 );
 
+// Router function to handle query params and inject apiVersion into props
+function createMCPRouter(
+	path: string,
+	serverClass: typeof ThoughtSpotMCP,
+	serveMethod: "serve" | "serveSSE",
+	options?: { binding?: string },
+) {
+	return {
+		async fetch(
+			request: Request,
+			env: Env,
+			ctx: ExecutionContext,
+		): Promise<Response> {
+			const url = new URL(request.url);
+			const apiVersion = url.searchParams.get("api-version");
+
+			// Inject apiVersion into props if provided (supports "beta" or "YYYY-MM-DD" format)
+			if (apiVersion) {
+				const originalProps = (ctx as any).props || {};
+				(ctx as any).props = {
+					...originalProps,
+					apiVersion,
+				};
+			}
+
+			// Route to the appropriate serve method
+			return serverClass[serveMethod](path, options).fetch(request, env, ctx);
+		},
+	};
+}
+
 // Create the OAuth provider instance
 const oauthProvider = new OAuthProvider({
 	apiHandlers: {
-		"/mcp": ThoughtSpotMCP.serve("/mcp") as any, // TODO: Remove 'any'
-		"/sse": ThoughtSpotMCP.serveSSE("/sse") as any, // TODO: Remove 'any'
+		"/mcp": createMCPRouter("/mcp", ThoughtSpotMCP, "serve") as any,
+		"/sse": createMCPRouter("/sse", ThoughtSpotMCP, "serveSSE") as any,
 		"/openai/mcp": ThoughtSpotOpenAIDeepResearchMCP.serve("/openai/mcp", {
 			binding: "OPENAI_DEEP_RESEARCH_MCP_OBJECT",
 		}) as any, // TODO: Remove 'any'

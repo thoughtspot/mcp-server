@@ -159,16 +159,14 @@ describe("MCP Server", () => {
 
 			const result = await listTools();
 
-			expect(result.tools).toHaveLength(8);
+			// Common tools (2) + Standard tools (2) + DataSourceDiscovery (1) = 5
+			expect(result.tools).toHaveLength(5);
 			expect(result.tools?.map((t) => t.name)).toEqual([
 				"ping",
-				"getRelevantQuestions",
-				"getAnswer",
-				"createConversation",
-				"sendConversationMessage",
-				"getConversationUpdates",
 				"createLiveboard",
 				"getDataSourceSuggestions",
+				"getRelevantQuestions",
+				"getAnswer",
 			]);
 		});
 
@@ -203,7 +201,7 @@ describe("MCP Server", () => {
 			);
 		});
 
-		it("should return 7 tools when enableSpotterDataSourceDiscovery is false", async () => {
+		it("should return 4 tools when enableSpotterDataSourceDiscovery is false", async () => {
 			// Mock getThoughtSpotClient with enableSpotterDataSourceDiscovery set to false
 			vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
 				getSessionInfo: vi.fn().mockResolvedValue({
@@ -236,15 +234,13 @@ describe("MCP Server", () => {
 
 			const result = await listTools();
 
-			expect(result.tools).toHaveLength(7);
+			// Common tools (2) + Standard tools (2) = 4 (no datasource discovery)
+			expect(result.tools).toHaveLength(4);
 			expect(result.tools?.map((t) => t.name)).toEqual([
 				"ping",
+				"createLiveboard",
 				"getRelevantQuestions",
 				"getAnswer",
-				"createConversation",
-				"sendConversationMessage",
-				"getConversationUpdates",
-				"createLiveboard",
 			]);
 
 			// Verify that getDataSourceSuggestions is not included

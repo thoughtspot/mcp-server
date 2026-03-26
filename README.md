@@ -103,7 +103,7 @@ curl https://api.openai.com/v1/responses \
     {
       "type": "mcp",
       "server_label": "thoughtspot",
-      "server_url": "https://agent.thoughtspot.app/bearer/mcp",
+      "server_url": "https://agent.thoughtspot.app/token/mcp",
       "headers": {
         "Authorization": "Bearer $TS_AUTH_TOKEN",
         "x-ts-host": "my-thoughtspot-instance.thoughtspot.cloud"
@@ -113,6 +113,8 @@ curl https://api.openai.com/v1/responses \
   "input": "How can I increase my sales ?"
 }'
 ```
+
+**Note**: Use `/token/mcp` for new integrations. The older `/bearer/mcp` endpoint is deprecated but still supported for backward compatibility.
 
 More details on how can you use OpenAI API with MCP tool calling can be found [here](https://platform.openai.com/docs/guides/tools-remote-mcp).
 
@@ -129,13 +131,13 @@ curl https://api.anthropic.com/v1/messages \
     "model": "claude-sonnet-4-20250514",
     "max_tokens": 1000,
     "messages": [{
-      "role": "user", 
+      "role": "user",
       "content": "How do I increase my sales ?"
     }],
     "mcp_servers": [
       {
         "type": "url",
-        "url": "https://agent.thoughtspot.app/bearer/mcp",
+        "url": "https://agent.thoughtspot.app/token/mcp",
         "name": "thoughtspot",
         "authorization_token": "$TS_AUTH_TOKEN@my-thoughtspot-instance.thoughtspot.cloud"
       }
@@ -143,7 +145,7 @@ curl https://api.anthropic.com/v1/messages \
   }'
 ```
 
-Note: In the `authorization_token` field we have suffixed the ThoughtSpot instance host as well with the `@` symbol to the `TS_AUTH_TOKEN`.
+**Note**: In the `authorization_token` field we have suffixed the ThoughtSpot instance host as well with the `@` symbol to the `TS_AUTH_TOKEN`. Use `/token/mcp` for new integrations. The older `/bearer/mcp` endpoint is deprecated but still supported for backward compatibility.
 
 More details on Claude MCP connector [here](https://docs.anthropic.com/en/docs/agents-and-tools/mcp-connector).
 
@@ -158,7 +160,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 
 // Create server parameters for stdio connection
-const serverParams = new StreamableHTTPClientTransport(new URL("https://agent.thoughtspot.app/bearer/mcp"), {
+const serverParams = new StreamableHTTPClientTransport(new URL("https://agent.thoughtspot.app/token/mcp"), {
     requestInit: {
         headers: {
             "Authorization": "Bearer $TS_AUTH_TOKEN", // Read below how to get the $TS_AUTH_TOKEN
@@ -197,6 +199,8 @@ console.log(response.text)
 // Close the connection
 await client.close();
 ```
+
+**Note**: Use `/token/mcp` for new integrations. The older `/bearer/mcp` endpoint is deprecated but still supported for backward compatibility.
 
 Read [this](https://ai.google.dev/gemini-api/docs/function-calling?example=meeting#mcp), for more details on Gemini API MCP tool calling.
 
@@ -317,12 +321,66 @@ Make sure to add the following entries in your ThoughtSpot instance:
    npm run dev
    ```
 
+### Adding New Tools
+
+When adding new MCP tools to the server:
+
+1. **Define schemas and tools** in `src/servers/tool-definitions.ts`
+2. **Implement handlers** in `src/servers/mcp-server.ts`
+3. **Update version registry** in `src/servers/version-registry.ts`:
+   - Add new tools to appropriate version(s) in `VERSION_REGISTRY`
+   - For new stable features, update `DEFAULT_VERSION`
+   - For beta features, add to the `beta` version entry
+4. **Add tests** for new tools and version configurations
+5. **Update documentation** in README.md
+
+**Important:** The version registry controls which tools are available in each API version. Make sure to add new tools to the correct version configuration to ensure they're accessible to users.
+
 ### Endpoints
 
-- `/mcp`: MCP HTTP Streaming endpoint
-- `/sse`: Server-sent events for MCP
+**OAuth-based endpoints:**
+- `/mcp`: MCP HTTP Streaming endpoint (supports `?api-version`)
+- `/sse`: Server-sent events for MCP (supports `?api-version`)
 - `/api`: MCP tools exposed as HTTP endpoints
 - `/authorize`, `/token`, `/register`: OAuth endpoints
-- `/bearer/mcp`, `/bearer/sse`: MCP endpoints as bearer auth instead of Oauth, mainly for use in APIs or in cases where Oauth is not working.
+
+**Token-based endpoints (Recommended for APIs):**
+- `/token/mcp`: MCP HTTP Streaming with bearer auth (supports `?api-version`)
+- `/token/sse`: Server-sent events with bearer auth (supports `?api-version`)
+
+**Deprecated endpoints:**
+- `/bearer/mcp`, `/bearer/sse`: Legacy MCP endpoints with bearer auth (**deprecated**, no `api-version` support). Use `/token/*` endpoints instead.
+
+**API Versioning:**
+
+The ThoughtSpot MCP Server supports API versioning to access different tool sets. You can specify the version using the `api-version` query parameter on OAuth and `/token/*` endpoints (not supported on deprecated `/bearer/*` endpoints).
+
+**Version Formats:**
+- **Beta version**: `?api-version=beta` - Access the latest beta features
+- **Date-based version**: `?api-version=YYYY-MM-DD` - Access tools from a specific release date or the latest version on or before that date
+- **Default** (no parameter): Returns the stable default tool set
+
+**Examples:**
+```bash
+# Beta version (latest experimental features)
+https://agent.thoughtspot.app/token/mcp?api-version=beta
+
+# Specific date version (Spotter3 agent tools)
+https://agent.thoughtspot.app/token/mcp?api-version=2025-03-01
+
+# Date range resolution (returns latest version ≤ specified date)
+https://agent.thoughtspot.app/token/mcp?api-version=2025-03-15
+
+# Default version (stable tools)
+https://agent.thoughtspot.app/token/mcp
+```
+
+**Available Versions:**
+- `beta`: Latest beta features with Spotter3 agent conversation tools
+- `2025-03-01`: Spotter3 agent conversation tools (`createConversation`, `sendConversationMessage`, `getConversationUpdates`)
+- `2024-12-01`: Base MCP tools (`getRelevantQuestions`, `getAnswer`, `getDataSourceSuggestions`)
+- `default`: Stable base tools (same as `2024-12-01`)
+
+**Note:** The `/bearer/*` endpoints always return the default stable tool set and ignore the `api-version` parameter for backward compatibility.
 
 MCP Server, © ThoughtSpot, Inc. 2025
