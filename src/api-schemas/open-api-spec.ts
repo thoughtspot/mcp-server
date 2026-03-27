@@ -1,11 +1,11 @@
 import { Hono } from "hono";
-import { toolDefinitionsMCPServer } from "../servers/tool-definitions";
+import { toolDefinitionsV1 } from "../servers/tool-definitions";
 import { capitalize } from "../utils";
 
 export const openApiSpecHandler = new Hono();
 
 // Helper function to generate tool schema
-const generateToolSchema = (tool: (typeof toolDefinitionsMCPServer)[0]) => {
+const generateToolSchema = (tool: (typeof toolDefinitionsV1)[0]) => {
 	const schemaName = `${capitalize(tool.name)}Request`;
 	const generatedSchema = { ...tool.inputSchema } as any;
 	generatedSchema.$schema = undefined;
@@ -21,7 +21,7 @@ const generateResponseSchema = () => {
 };
 
 // Create individual endpoints for each tool
-for (const tool of toolDefinitionsMCPServer) {
+for (const tool of toolDefinitionsV1) {
 	const { schemaName, schema } = generateToolSchema(tool);
 	const responseSchema = generateResponseSchema();
 
@@ -99,7 +99,7 @@ openApiSpecHandler.get("/", async (c) => {
 
 	// any tool added to the toolDefinitionsMCPServer will be added to the openapi spec automatically
 	// the api server path should be /api/tools/<tool-name>
-	for (const tool of toolDefinitionsMCPServer) {
+	for (const tool of toolDefinitionsV1) {
 		const { schemaName, schema } = generateToolSchema(tool);
 		const responseSchema = generateResponseSchema();
 

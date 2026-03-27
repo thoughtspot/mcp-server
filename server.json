@@ -64,18 +64,6 @@
         "description": "Get the answer to a specific question from ThoughtSpot analytics"
       },
       {
-        "name": "createConversation",
-        "description": "Begin a conversation with Spotter agent"
-      },
-      {
-        "name": "sendConversationMessage",
-        "description": "Send messages to a conversation with Spotter agent"
-      },
-      {
-        "name": "getConversationUpdates",
-        "description": "Get response updates from a conversation with Spotter agent"
-      },
-      {
         "name": "createLiveboard",
         "description": "Create a liveboard from a list of answers"
       },

@@ -149,9 +149,9 @@ describe("Version Registry", () => {
 			const betaConfig = resolveApiVersion("beta");
 			expect(betaConfig.version).toContain("beta");
 			const toolNames = betaConfig.tools.map((t: any) => t.name);
-			expect(toolNames).toContain("createConversation");
-			expect(toolNames).toContain("sendConversationMessage");
-			expect(toolNames).toContain("getConversationUpdates");
+			expect(toolNames).toContain("create_analysis_session");
+			expect(toolNames).toContain("send_session_message");
+			expect(toolNames).toContain("get_session_updates");
 		});
 
 		it("2024-12-01 should have base MCP tools without Spotter3", () => {

@@ -75,75 +75,85 @@ export const GetAnswerOutputSchema = z.object({
 });
 
 export const CreateConversationSchema = z.object({
-	dataSourceId: z
+	data_source_id: z
 		.string()
 		.optional()
 		.describe(
-			"Sets the data source for the conversation. If not provided, the most relevant data source will be automatically selected based on the conversation.",
+			"The data source to query. Provide this when the user has specified or confirmed a data source, or when context makes a particular source obvious. Omit it to let ThoughtSpot automatically select the most relevant source based on the question.",
 		),
 });
 
 export const CreateConversationOutputSchema = z.object({
-	conversationId: z
+	session_id: z
 		.string()
 		.describe(
-			"Identifier for the conversation. Use this to send messages or get updates on the conversation.",
+			"Identifier for the session. Use this to send messages or get updates on the session.",
 		),
 });
 
 export const SendConversationMessageSchema = z.object({
-	conversationId: z
+	session_id: z
 		.string()
-		.describe("Identifier of the conversation to send messages to."),
-	message: z.string().describe("The message to send to the conversation."),
+		.describe("Identifier of the session to send the message to."),
+	message: z
+		.string()
+		.describe(
+			"A natural language analytical question or follow-up to send to the ThoughtSpot agent.",
+		),
 });
 
 export const SendConversationMessageOutputSchema = z.object({
-	success: z.boolean().describe("Whether the messages were sent successfully."),
+	success: z.boolean().describe("Whether the message was successfully sent."),
 });
 
 export const GetConversationUpdatesSchema = z.object({
-	conversationId: z
+	session_id: z
 		.string()
-		.describe("Identifier of the conversation to get updates from."),
+		.describe("Identifier of the session to get updates from."),
 });
 
 export const ConversationUpdateSchema = z.object({
 	type: z
-		.enum(["text", "text-chunk", "answer"])
-		.describe("The type of the update."),
+		.enum(["text", "text_chunk", "answer"])
+		.describe(
+			"The type of update: `text` or `text_chunk` for a natural language message from the agent, or `answer` for a data visualization with query results. Determines which other fields are populated.",
+		),
 	text: z
 		.string()
 		.optional()
-		.describe("For a text message, the text content of the message."),
-	answerTitle: z
-		.string()
-		.optional()
 		.describe(
-			"For an answer message, the title of the answer. This describes the overall content of the answer.",
+			"The text content of the message. Only present when `type` is `text` or `text_chunk`. If `type` is `text_chunk`, combine the chunks of text together to form the complete message.",
 		),
-	answerQuery: z
+	answer_title: z
 		.string()
 		.optional()
 		.describe(
-			"For an answer message, the full search query of the answer. This outlines the specific search being performed to generate the answer.",
+			"A human-readable title describing what the answer shows. Only present when `type` is `answer`.",
 		),
-	iframeUrl: z
+	answer_query: z
 		.string()
 		.optional()
 		.describe(
-			"For an answer message, the embeddable URL for the answer. If you are capable of displaying webpages in an iframe, you can use this URL to display an interactive answer visualization.",
+			"The search query ThoughtSpot used to generate the answer. Only present when `type` is `answer`. Useful for explaining to the user what data was queried or diagnosing unexpected results.",
+		),
+	iframe_url: z
+		.string()
+		.optional()
+		.describe(
+			"An embeddable URL for displaying the answer as an interactive visualization. Only present when `type` is `answer`. Use this to render a live chart or table if your environment supports iframes.",
 		),
 });
 
 export const GetConversationUpdatesOutputSchema = z.object({
-	conversationUpdates: z
+	session_updates: z
 		.array(ConversationUpdateSchema)
-		.describe("The updates from the conversation."),
-	isDone: z
+		.describe(
+			"List of updates from the session. This may be an empty list if the agent is still thinking, instead use the `is_done` flag to know whether the agent response is complete.",
+		),
+	is_done: z
 		.boolean()
 		.describe(
-			"Whether the ThoughtSpot agent is finished responding to the conversation. If not done yet, make another GetConversationUpdates call to get the next set of updates.",
+			"Whether the ThoughtSpot agent has finished responding. If not `is_done` is false, make another `get_session_updates` call to get the next set of updates.",
 		),
 });
 
@@ -191,17 +201,21 @@ export const GetDataSourceSuggestionsSchema = z.object({
 });
 
 export enum ToolName {
+	// V1
 	Ping = "ping",
 	GetRelevantQuestions = "getRelevantQuestions",
 	GetAnswer = "getAnswer",
-	CreateConversation = "createConversation",
-	SendConversationMessage = "sendConversationMessage",
-	GetConversationUpdates = "getConversationUpdates",
 	CreateLiveboard = "createLiveboard",
 	GetDataSourceSuggestions = "getDataSourceSuggestions",
+	// V2 (Spotter 3)
+	CheckConnectivity = "check_connectivity",
+	CreateAnalysisSession = "create_analysis_session",
+	SendSessionMessage = "send_session_message",
+	GetSessionUpdates = "get_session_updates",
+	// CreateDashboard = "create_dashboard", // TODO(Rifdhan) need to implement
 }
 
-export const toolDefinitionsMCPServer = [
+export const toolDefinitionsV1 = [
 	{
 		name: ToolName.Ping,
 		description: "Simple ping tool to test connectivity and Auth",
@@ -258,60 +272,53 @@ export const toolDefinitionsMCPServer = [
 	},
 ];
 
-export const toolDefinitionsMCPServerSpotter3 = [
+export const toolDefinitionsV2 = [
 	{
-		name: ToolName.Ping,
-		description: "Simple ping tool to test connectivity and Auth",
+		name: ToolName.CheckConnectivity,
+		description: "Ping tool to test connectivity and authentication",
 		inputSchema: zodToJsonSchema(PingSchema) as ToolInput,
 		annotations: {
-			title: "Test Connection",
+			title: "Check Connectivity",
 			readOnlyHint: true,
 			destructiveHint: false,
 		},
 	},
 	{
-		name: ToolName.CreateLiveboard,
-		description: "Create a liveboard from a list of answers",
-		inputSchema: zodToJsonSchema(CreateLiveboardSchema) as ToolInput,
-		annotations: {
-			title: "Create Liveboard from Answers",
-			readOnlyHint: true,
-			destructiveHint: false,
-		},
-	},
-	{
-		name: ToolName.CreateConversation,
-		description: "Begin a conversation with Spotter agent",
+		name: ToolName.CreateAnalysisSession,
+		description:
+			"Start an analytical session with ThoughtSpot's analytics agent. This is the first step in a three-step workflow: create a session, send a message, then poll for updates. Once created, use the returned `session_id` to send analytical questions via `send_session_message` and retrieve answers via `get_session_updates`. Sessions are conversational, so you can ask follow-up questions in the same session without creating a new one.",
 		inputSchema: zodToJsonSchema(CreateConversationSchema) as ToolInput,
 		outputSchema: zodToJsonSchema(CreateConversationOutputSchema) as ToolOutput,
 		annotations: {
-			title: "Begin a conversation with Spotter agent",
+			title: "Start Analysis",
 			readOnlyHint: true,
 			destructiveHint: false,
 		},
 	},
 	{
-		name: ToolName.SendConversationMessage,
-		description: "Send messages to a conversation with Spotter agent",
+		name: ToolName.SendSessionMessage,
+		description:
+			"Send a message to a session with ThoughtSpot’s analytics agent. The agent may take some time to think and generate a response, so the response will not be returned immediately. Instead, use the `get_session_updates` tool to query for the latest updates on the session. After the agent finishes responding (when `get_session_updates` returns `is_done: true`), you can send another message to the same session to ask follow-up questions without creating a new session.",
 		inputSchema: zodToJsonSchema(SendConversationMessageSchema) as ToolInput,
 		outputSchema: zodToJsonSchema(
 			SendConversationMessageOutputSchema,
 		) as ToolOutput,
 		annotations: {
-			title: "Send messages to a conversation with Spotter agent",
+			title: "Send Analysis Request",
 			readOnlyHint: true,
 			destructiveHint: false,
 		},
 	},
 	{
-		name: ToolName.GetConversationUpdates,
-		description: "Get response updates from a conversation with Spotter agent",
+		name: ToolName.GetSessionUpdates,
+		description:
+			"Get the latest updates from a ThoughtSpot analytics session. Call this after `send_session_message` to retrieve the agent's response. If `is_done` is false, call this tool again to continue polling, as the agent is still generating a response. An empty `session_updates` list while `is_done` is false is normal; it means the agent is still thinking. When `is_done` is true, the agent has finished and the results in `session_updates` are complete, so you can present them to the user or send a follow-up message in the same session.",
 		inputSchema: zodToJsonSchema(GetConversationUpdatesSchema) as ToolInput,
 		outputSchema: zodToJsonSchema(
 			GetConversationUpdatesOutputSchema,
 		) as ToolOutput,
 		annotations: {
-			title: "Get response updates from a conversation with Spotter agent",
+			title: "Check Analysis Updates",
 			readOnlyHint: true,
 			destructiveHint: false,
 		},

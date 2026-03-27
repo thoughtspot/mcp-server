@@ -350,7 +350,7 @@ export class ThoughtSpotService {
 										conversationId,
 										[
 											{
-												type: "text-chunk",
+												type: "text_chunk",
 												text: item.content,
 											},
 										],
@@ -363,9 +363,9 @@ export class ThoughtSpotService {
 										[
 											{
 												type: "answer",
-												answerTitle: item.metadata.title,
-												answerQuery: item.metadata.sage_query,
-												iframeUrl,
+												answer_title: item.metadata.title,
+												answer_query: item.metadata.sage_query,
+												iframe_url: iframeUrl,
 											},
 										],
 									);
