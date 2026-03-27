@@ -31,15 +31,15 @@ export interface SessionInfo {
 }
 
 export interface TextMessage {
-	type: "text" | "text-chunk";
+	type: "text" | "text_chunk";
 	text: string;
 }
 
 export interface AnswerMessage {
 	type: "answer";
-	answerTitle: string;
-	answerQuery: string;
-	iframeUrl: string;
+	answer_title: string;
+	answer_query: string;
+	iframe_url: string;
 }
 
 export type Message = TextMessage | AnswerMessage;

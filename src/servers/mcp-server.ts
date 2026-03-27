@@ -98,7 +98,8 @@ export class MCPServer extends BaseMCPServer {
 		this.trackers.track(TrackEvent.CallTool, { toolName: name });
 
 		switch (name) {
-			case ToolName.Ping: {
+			case ToolName.Ping:
+			case ToolName.CheckConnectivity: {
 				console.log("Received Ping request");
 				if (this.ctx.props.accessToken && this.ctx.props.instanceUrl) {
 					return this.createSuccessResponse("Pong", "Ping successful");
@@ -114,24 +115,24 @@ export class MCPServer extends BaseMCPServer {
 				return this.callGetAnswer(request);
 			}
 
-			case ToolName.CreateConversation: {
-				return this.callCreateConversation(request);
-			}
-
-			case ToolName.SendConversationMessage: {
-				return this.callSendConversationMessage(request);
-			}
-
-			case ToolName.GetConversationUpdates: {
-				return this.callGetConversationUpdates(request);
-			}
-
 			case ToolName.CreateLiveboard: {
 				return this.callCreateLiveboard(request);
 			}
 
 			case ToolName.GetDataSourceSuggestions: {
 				return this.callGetDataSourceSuggestions(request);
+			}
+
+			case ToolName.CreateAnalysisSession: {
+				return this.callCreateConversation(request);
+			}
+
+			case ToolName.SendSessionMessage: {
+				return this.callSendConversationMessage(request);
+			}
+
+			case ToolName.GetSessionUpdates: {
+				return this.callGetConversationUpdates(request);
 			}
 
 			default:
@@ -261,14 +262,15 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 
 	@WithSpan("call-create-conversation")
 	async callCreateConversation(request: z.infer<typeof CallToolRequestSchema>) {
-		const { dataSourceId } = CreateConversationSchema.parse(
+		const { data_source_id } = CreateConversationSchema.parse(
 			request.params.arguments,
 		);
 		const response =
-			await this.getThoughtSpotService().createAgentConversation(dataSourceId);
-
+			await this.getThoughtSpotService().createAgentConversation(
+				data_source_id,
+			);
 		return this.createStructuredContentSuccessResponse(
-			{ conversationId: response.conversation_id },
+			{ session_id: response.conversation_id },
 			"Conversation created successfully",
 		);
 	}
@@ -277,11 +279,11 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 	async callSendConversationMessage(
 		request: z.infer<typeof CallToolRequestSchema>,
 	) {
-		const { conversationId, message } = SendConversationMessageSchema.parse(
+		const { session_id, message } = SendConversationMessageSchema.parse(
 			request.params.arguments,
 		);
 		await this.getThoughtSpotService().sendAgentConversationMessageStreaming(
-			conversationId,
+			session_id,
 			message,
 			this.streamingMessageStorage,
 		);
@@ -296,18 +298,18 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 	async callGetConversationUpdates(
 		request: z.infer<typeof CallToolRequestSchema>,
 	) {
-		const { conversationId } = GetConversationUpdatesSchema.parse(
+		const { session_id } = GetConversationUpdatesSchema.parse(
 			request.params.arguments,
 		);
 		const messagesState =
 			await this.streamingMessageStorage.getNewMessagesAndUpdateBookmark(
-				conversationId,
+				session_id,
 			);
 
 		return this.createStructuredContentSuccessResponse(
 			{
-				conversationUpdates: messagesState.messages,
-				isDone: messagesState.isDone,
+				session_updates: messagesState.messages,
+				is_done: messagesState.isDone,
 			},
 			"Conversation updates retrieved successfully",
 		);

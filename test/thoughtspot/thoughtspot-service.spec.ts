@@ -305,7 +305,7 @@ describe("thoughtspot-service", () => {
 				streamingMessageStorage.appendMessagesAndRestartTtl,
 			).toHaveBeenNthCalledWith(2, "conv-123", [
 				{
-					type: "text-chunk",
+					type: "text_chunk",
 					text: "chunk-1",
 				},
 			]);
@@ -314,9 +314,9 @@ describe("thoughtspot-service", () => {
 			).toHaveBeenNthCalledWith(3, "conv-123", [
 				{
 					type: "answer",
-					answerTitle: "Revenue Answer",
-					answerQuery: "What is revenue?",
-					iframeUrl:
+					answer_title: "Revenue Answer",
+					answer_query: "What is revenue?",
+					iframe_url:
 						"https://test.thoughtspot.com/?tsmcp=true#/embed/conv-assist-answer?sessionId=session-123&genNo=7&acSessionId=ac-session-456&acGenNo=9",
 				},
 			]);

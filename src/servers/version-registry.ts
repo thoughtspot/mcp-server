@@ -1,7 +1,4 @@
-import {
-	toolDefinitionsMCPServer,
-	toolDefinitionsMCPServerSpotter3,
-} from "./tool-definitions";
+import { toolDefinitionsV1, toolDefinitionsV2 } from "./tool-definitions";
 
 /**
  * Version configuration interface
@@ -40,12 +37,12 @@ function getReleaseDateFromVersion(versions: string[]): Date | null {
 export const VERSION_REGISTRY: VersionConfig[] = [
 	{
 		version: ["beta"],
-		tools: [...toolDefinitionsMCPServerSpotter3],
+		tools: [...toolDefinitionsV2],
 		description: "Spotter3 agent conversation tools released",
 	},
 	{
 		version: ["default", "2025-01-01"],
-		tools: [...toolDefinitionsMCPServer],
+		tools: [...toolDefinitionsV1],
 		description: "Base version with getRelevantQuestions and getAnswer tools",
 	},
 ];
