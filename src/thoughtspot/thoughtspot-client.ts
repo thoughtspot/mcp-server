@@ -247,10 +247,10 @@ function addSendAgentConversationMessageStreaming(
 ) {
 	(client as any).sendAgentConversationMessageStreaming = async ({
 		conversation_identifier,
-		messages,
+		message,
 	}: {
 		conversation_identifier: string;
-		messages: string[];
+		message: string;
 	}): Promise<Response> => {
 		const endpoint = "/api/rest/2.0/ai/agent/converse/sse";
 		const fetchOptions = {
@@ -263,7 +263,7 @@ function addSendAgentConversationMessageStreaming(
 			},
 			body: JSON.stringify({
 				conversation_identifier,
-				messages,
+				messages: [message],
 			}),
 		};
 		const response = await fetch(`${instanceUrl}${endpoint}`, fetchOptions);

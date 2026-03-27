@@ -130,9 +130,15 @@ describe("ThoughtSpot Client", () => {
 			expect(client).toHaveProperty("exportUnsavedAnswerTML");
 			expect(client).toHaveProperty("getSessionInfo");
 			expect(client).toHaveProperty("queryGetDataSourceSuggestions");
+			expect(client).toHaveProperty("getAnswerSession");
+			expect(client).toHaveProperty("sendAgentConversationMessageStreaming");
 			expect(typeof client.exportUnsavedAnswerTML).toBe("function");
 			expect(typeof client.getSessionInfo).toBe("function");
 			expect(typeof client.queryGetDataSourceSuggestions).toBe("function");
+			expect(typeof client.getAnswerSession).toBe("function");
+			expect(typeof client.sendAgentConversationMessageStreaming).toBe(
+				"function",
+			);
 		});
 	});
 
@@ -691,6 +697,251 @@ describe("ThoughtSpot Client", () => {
 			const longQuery = "a".repeat(1000);
 			await client.queryGetDataSourceSuggestions(longQuery);
 			expect((fetch as any).mock.calls[2][1].body).toContain(longQuery);
+		});
+	});
+
+	describe("getAnswerSession", () => {
+		let client: any;
+
+		beforeEach(() => {
+			client = getThoughtSpotClient(mockInstanceUrl, mockBearerToken) as any;
+		});
+
+		it("should get answer session successfully", async () => {
+			const mockResponse = {
+				data: {
+					Answer__updateTokens: {
+						id: {
+							sessionId: "session-123",
+							genNo: 2,
+							acSession: {
+								genNo: 5,
+								sessionId: "ac-session-456",
+							},
+						},
+					},
+				},
+			};
+
+			(fetch as any).mockResolvedValue({
+				ok: true,
+				json: vi.fn().mockResolvedValue(mockResponse),
+			});
+
+			const result = await client.getAnswerSession({
+				session_identifier: "session-123",
+				generation_number: 2,
+			});
+
+			expect(fetch).toHaveBeenCalledWith(`${mockInstanceUrl}/prism/`, {
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json",
+					Accept: "application/json",
+					"user-agent": "ThoughtSpot-ts-client",
+					Authorization: `Bearer ${mockBearerToken}`,
+				},
+				body: expect.any(String),
+			});
+
+			const fetchCall = (fetch as any).mock.calls[0];
+			const body = JSON.parse(fetchCall[1].body);
+			expect(body.operationName).toBe("Answer__updateTokens");
+			expect(body.variables.session.sessionId).toBe("session-123");
+			expect(body.variables.session.genNo).toBe(2);
+			expect(body.query).toContain("mutation Answer__updateTokens");
+			expect(body.query).toContain("acSession");
+
+			expect(result).toEqual(mockResponse.data.Answer__updateTokens.id);
+		});
+
+		it("should handle HTTP error responses", async () => {
+			const mockResponse = {
+				ok: false,
+				status: 401,
+				text: vi.fn().mockResolvedValue("Invalid token"),
+			};
+
+			(fetch as any).mockResolvedValue(mockResponse);
+
+			await expect(
+				client.getAnswerSession({
+					session_identifier: "session-123",
+					generation_number: 2,
+				}),
+			).rejects.toThrow(
+				"getAnswerSession failed with status 401: Invalid token",
+			);
+		});
+
+		it("should throw when response is missing answer session", async () => {
+			(fetch as any).mockResolvedValue({
+				ok: true,
+				json: vi.fn().mockResolvedValue({
+					data: {
+						Answer__updateTokens: {},
+					},
+				}),
+			});
+
+			await expect(
+				client.getAnswerSession({
+					session_identifier: "session-123",
+					generation_number: 2,
+				}),
+			).rejects.toThrow("Could not extract answer session from response.");
+		});
+
+		it("should throw when response data is null", async () => {
+			(fetch as any).mockResolvedValue({
+				ok: true,
+				json: vi.fn().mockResolvedValue(null),
+			});
+
+			await expect(
+				client.getAnswerSession({
+					session_identifier: "session-123",
+					generation_number: 2,
+				}),
+			).rejects.toThrow("Could not extract answer session from response.");
+		});
+
+		it("should handle JSON parsing errors", async () => {
+			(fetch as any).mockResolvedValue({
+				ok: true,
+				json: vi.fn().mockRejectedValue(new Error("Invalid JSON response")),
+			});
+
+			await expect(
+				client.getAnswerSession({
+					session_identifier: "session-123",
+					generation_number: 2,
+				}),
+			).rejects.toThrow("Invalid JSON response");
+		});
+
+		it("should use correct headers for answer session request", async () => {
+			(fetch as any).mockResolvedValue({
+				ok: true,
+				json: vi.fn().mockResolvedValue({
+					data: {
+						Answer__updateTokens: {
+							id: {
+								sessionId: "session-123",
+								genNo: 2,
+								acSession: {
+									genNo: 5,
+									sessionId: "ac-session-456",
+								},
+							},
+						},
+					},
+				}),
+			});
+
+			await client.getAnswerSession({
+				session_identifier: "session-123",
+				generation_number: 2,
+			});
+
+			const fetchCall = (fetch as any).mock.calls[0];
+			const headers = fetchCall[1].headers;
+
+			expect(headers["Content-Type"]).toBe("application/json");
+			expect(headers.Accept).toBe("application/json");
+			expect(headers["user-agent"]).toBe("ThoughtSpot-ts-client");
+			expect(headers.Authorization).toBe(`Bearer ${mockBearerToken}`);
+		});
+	});
+
+	describe("sendAgentConversationMessageStreaming", () => {
+		let client: any;
+
+		beforeEach(() => {
+			client = getThoughtSpotClient(mockInstanceUrl, mockBearerToken) as any;
+		});
+
+		it("should send conversation message streaming successfully", async () => {
+			const mockResponse = {
+				ok: true,
+			};
+
+			(fetch as any).mockResolvedValue(mockResponse);
+
+			const result = await client.sendAgentConversationMessageStreaming({
+				conversation_identifier: "foo",
+				message: "bar",
+			});
+
+			expect(fetch).toHaveBeenCalledWith(
+				`${mockInstanceUrl}/api/rest/2.0/ai/agent/converse/sse`,
+				{
+					method: "POST",
+					headers: {
+						"Content-Type": "application/json",
+						Accept: "text/event-stream",
+						"user-agent": "ThoughtSpot-ts-client",
+						Authorization: `Bearer ${mockBearerToken}`,
+					},
+					body: JSON.stringify({
+						conversation_identifier: "foo",
+						messages: ["bar"],
+					}),
+				},
+			);
+
+			expect(result).toEqual(mockResponse);
+		});
+
+		it("should handle fetch errors", async () => {
+			const mockError = new Error("Network error");
+			(fetch as any).mockRejectedValue(mockError);
+
+			await expect(
+				client.sendAgentConversationMessageStreaming({
+					conversation_identifier: "foo",
+					message: "bar",
+				}),
+			).rejects.toThrow("Network error");
+		});
+
+		it("should handle HTTP error responses", async () => {
+			const mockResponse = {
+				ok: false,
+				status: 401,
+				statusText: "Unauthorized",
+				text: vi.fn().mockResolvedValue("Invalid token"),
+			};
+
+			(fetch as any).mockResolvedValue(mockResponse);
+
+			await expect(
+				client.sendAgentConversationMessageStreaming({
+					conversation_identifier: "foo",
+					message: "bar",
+				}),
+			).rejects.toThrow(
+				"sendAgentConversationMessageStreaming failed with status 401: Invalid token",
+			);
+		});
+
+		it("should use correct headers for send agent conversation message streaming request", async () => {
+			(fetch as any).mockResolvedValue({
+				ok: true,
+			});
+
+			await client.sendAgentConversationMessageStreaming({
+				conversation_identifier: "foo",
+				message: "bar",
+			});
+
+			const fetchCall = (fetch as any).mock.calls[0];
+			const headers = fetchCall[1].headers;
+
+			expect(headers["Content-Type"]).toBe("application/json");
+			expect(headers.Accept).toBe("text/event-stream");
+			expect(headers["user-agent"]).toBe("ThoughtSpot-ts-client");
+			expect(headers.Authorization).toBe(`Bearer ${mockBearerToken}`);
 		});
 	});
 

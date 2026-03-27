@@ -16,10 +16,17 @@ import {
 	CreateLiveboardSchema,
 	GetDataSourceSuggestionsSchema,
 	ToolName,
+	CreateConversationSchema,
+	SendConversationMessageSchema,
+	GetConversationUpdatesSchema,
 } from "./tool-definitions";
+import type { StreamingMessagesStorageWithTtl } from "../streaming-message-storage-with-ttl/streaming-message-storage-with-ttl";
 
 export class MCPServer extends BaseMCPServer {
-	constructor(ctx: Context) {
+	constructor(
+		ctx: Context,
+		private streamingMessageStorage: StreamingMessagesStorageWithTtl,
+	) {
 		super(ctx, "ThoughtSpot", "2.0.0");
 	}
 
@@ -108,27 +115,15 @@ export class MCPServer extends BaseMCPServer {
 			}
 
 			case ToolName.CreateConversation: {
-				// TODO(Rifdhan) implement
-				return this.createErrorResponse(
-					"Not implemented",
-					"Tool not implemented yet",
-				);
+				return this.callCreateConversation(request);
 			}
 
 			case ToolName.SendConversationMessage: {
-				// TODO(Rifdhan) implement
-				return this.createErrorResponse(
-					"Not implemented",
-					"Tool not implemented yet",
-				);
+				return this.callSendConversationMessage(request);
 			}
 
 			case ToolName.GetConversationUpdates: {
-				// TODO(Rifdhan) implement
-				return this.createErrorResponse(
-					"Not implemented",
-					"Tool not implemented yet",
-				);
+				return this.callGetConversationUpdates(request);
 			}
 
 			case ToolName.CreateLiveboard: {
@@ -261,6 +256,60 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		return this.createSuccessResponse(
 			successMessage,
 			"Liveboard created successfully",
+		);
+	}
+
+	@WithSpan("call-create-conversation")
+	async callCreateConversation(request: z.infer<typeof CallToolRequestSchema>) {
+		const { dataSourceId } = CreateConversationSchema.parse(
+			request.params.arguments,
+		);
+		const response =
+			await this.getThoughtSpotService().createAgentConversation(dataSourceId);
+
+		return this.createStructuredContentSuccessResponse(
+			{ conversationId: response.conversation_id },
+			"Conversation created successfully",
+		);
+	}
+
+	@WithSpan("call-send-conversation-message")
+	async callSendConversationMessage(
+		request: z.infer<typeof CallToolRequestSchema>,
+	) {
+		const { conversationId, message } = SendConversationMessageSchema.parse(
+			request.params.arguments,
+		);
+		await this.getThoughtSpotService().sendAgentConversationMessageStreaming(
+			conversationId,
+			message,
+			this.streamingMessageStorage,
+		);
+
+		return this.createStructuredContentSuccessResponse(
+			{ success: true },
+			"Conversation message sent successfully",
+		);
+	}
+
+	@WithSpan("call-get-conversation-updates")
+	async callGetConversationUpdates(
+		request: z.infer<typeof CallToolRequestSchema>,
+	) {
+		const { conversationId } = GetConversationUpdatesSchema.parse(
+			request.params.arguments,
+		);
+		const messagesState =
+			await this.streamingMessageStorage.getNewMessagesAndUpdateBookmark(
+				conversationId,
+			);
+
+		return this.createStructuredContentSuccessResponse(
+			{
+				conversationUpdates: messagesState.messages,
+				isDone: messagesState.isDone,
+			},
+			"Conversation updates retrieved successfully",
 		);
 	}
 

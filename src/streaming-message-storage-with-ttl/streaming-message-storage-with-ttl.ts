@@ -1,4 +1,4 @@
-import type { StreamingMessagesState } from "../thoughtspot/types";
+import type { Message, StreamingMessagesState } from "../thoughtspot/types";
 
 const DEFAULT_TTL_SECONDS = 30 * 60; // 30 minutes
 
@@ -19,17 +19,17 @@ export class StreamingMessagesStorageWithTtl {
 
 	public async appendMessagesAndRestartTtl(
 		conversationId: string,
-		newMessages: string[],
-		isDone: boolean,
+		newMessages: Message[],
+		isDone = false,
 	): Promise<void> {
-		const oldState: StreamingMessagesWithTtlState | undefined =
-			await this.storage.get(conversationId);
+		const oldState =
+			await this.storage.get<StreamingMessagesWithTtlState>(conversationId);
 		if (oldState?.timerId) {
 			await this.cancelTimer(oldState.timerId);
 		}
 
 		const timerId = await this.scheduleTimer(this.ttlSeconds, conversationId);
-		await this.storage.put(conversationId, {
+		await this.storage.put<StreamingMessagesWithTtlState>(conversationId, {
 			messages: [...(oldState?.messages ?? []), ...newMessages],
 			isDone,
 			timerId,
@@ -39,16 +39,16 @@ export class StreamingMessagesStorageWithTtl {
 	public async getNewMessagesAndUpdateBookmark(
 		conversationId: string,
 	): Promise<StreamingMessagesState> {
-		const bookmark: number =
-			(await this.storage.get(`${conversationId}-bookmark`)) ?? 0;
+		const bookmark =
+			(await this.storage.get<number>(`${conversationId}-bookmark`)) ?? 0;
 
 		const streamingMessagesState: StreamingMessagesWithTtlState | undefined =
-			await this.storage.get(conversationId);
+			await this.storage.get<StreamingMessagesWithTtlState>(conversationId);
 		if (!streamingMessagesState) {
 			throw new Error("State not found");
 		}
 
-		await this.storage.put(
+		await this.storage.put<number>(
 			`${conversationId}-bookmark`,
 			streamingMessagesState.messages.length,
 		);

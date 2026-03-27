@@ -5,6 +5,7 @@ import type {
 import { SpanStatusCode, trace, context } from "@opentelemetry/api";
 import { getActiveSpan, WithSpan } from "../metrics/tracing/tracing-utils";
 import type { DataSource, SessionInfo, DataSourceSuggestion } from "./types";
+import type { StreamingMessagesStorageWithTtl } from "../streaming-message-storage-with-ttl/streaming-message-storage-with-ttl";
 
 /**
  * Main ThoughtSpot service class using decorator pattern for tracing
@@ -290,7 +291,8 @@ export class ThoughtSpotService {
 	@WithSpan("send-agent-conversation-message-streaming")
 	async sendAgentConversationMessageStreaming(
 		conversationId: string,
-		messages: string[],
+		message: string,
+		streamingMessageStorage: StreamingMessagesStorageWithTtl,
 	): Promise<void> {
 		const span = trace.getSpan(context.active());
 
@@ -301,10 +303,82 @@ export class ThoughtSpotService {
 				this.client as any
 			).sendAgentConversationMessageStreaming({
 				conversation_identifier: conversationId,
-				messages,
+				message,
 			});
 
-			// TODO(Rifdhan): Collect the streaming response asynchronously
+			const reader = response.body?.getReader();
+			if (!reader) {
+				throw new Error("Failed to get reader from response body");
+			}
+
+			setTimeout(async () => {
+				const decoder = new TextDecoder();
+				let buffer = "";
+
+				while (true) {
+					const { done, value } = await reader.read();
+					if (done) {
+						await streamingMessageStorage.appendMessagesAndRestartTtl(
+							conversationId,
+							[],
+							true,
+						);
+						break;
+					}
+
+					buffer += decoder.decode(value, { stream: true });
+					const lines = buffer.split("\n");
+					buffer = lines.pop() || "";
+
+					for (const line of lines) {
+						if (!line.startsWith("data: ")) continue;
+						try {
+							const data = JSON.parse(line.slice(6));
+							for (const item of data) {
+								if (item.type === "text") {
+									await streamingMessageStorage.appendMessagesAndRestartTtl(
+										conversationId,
+										[
+											{
+												type: "text",
+												text: item.content,
+											},
+										],
+									);
+								} else if (item.type === "text-chunk") {
+									await streamingMessageStorage.appendMessagesAndRestartTtl(
+										conversationId,
+										[
+											{
+												type: "text-chunk",
+												text: item.content,
+											},
+										],
+									);
+								} else if (item.type === "answer") {
+									const iframeUrl = `${(this.client as any).instanceUrl}/?tsmcp=true#/embed/conv-assist-answer?sessionId=${item.metadata.session_id}&genNo=${item.metadata.gen_no}&acSessionId=${item.metadata.transaction_id}&acGenNo=${item.metadata.generation_number}`;
+
+									await streamingMessageStorage.appendMessagesAndRestartTtl(
+										conversationId,
+										[
+											{
+												type: "answer",
+												answerTitle: item.metadata.title,
+												answerQuery: item.metadata.sage_query,
+												iframeUrl,
+											},
+										],
+									);
+								} else {
+									console.warn("Unknown event in event stream: ", item);
+								}
+							}
+						} catch (error) {
+							console.error("Error while parsing event stream: ", line, error);
+						}
+					}
+				}
+			});
 
 			span?.setStatus({
 				code: SpanStatusCode.OK,
