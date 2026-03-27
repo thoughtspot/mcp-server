@@ -16,6 +16,8 @@ const mockClient = {
 	singleAnswer: vi.fn(),
 	exportAnswerReport: vi.fn(),
 	exportUnsavedAnswerTML: vi.fn(),
+	createAgentConversation: vi.fn(),
+	sendAgentConversationMessageStreaming: vi.fn(),
 	importMetadataTML: vi.fn(),
 	searchMetadata: vi.fn(),
 	getSessionInfo: vi.fn(),
@@ -174,6 +176,194 @@ describe("thoughtspot-service", () => {
 				questions: [],
 				error: error,
 			});
+		});
+	});
+
+	describe("createAgentConversation", () => {
+		it("should create an agent conversation in auto mode by default", async () => {
+			const mockResponse = {
+				conversation_id: "conv-123",
+			};
+
+			mockClient.createAgentConversation = vi
+				.fn()
+				.mockResolvedValue(mockResponse);
+
+			const service = new ThoughtSpotService(mockClient);
+			const result = await service.createAgentConversation();
+
+			expect(mockClient.createAgentConversation).toHaveBeenCalledWith({
+				metadata_context: {
+					type: "AUTO_MODE",
+				},
+				conversation_settings: {
+					enable_contextual_change_analysis: true,
+					enable_natural_language_answer_generation: true,
+					enable_reasoning: true,
+				},
+			});
+			expect(result).toEqual(mockResponse);
+		});
+
+		it("should create an agent conversation with data source context", async () => {
+			const mockResponse = {
+				conversation_id: "conv-456",
+			};
+
+			mockClient.createAgentConversation = vi
+				.fn()
+				.mockResolvedValue(mockResponse);
+
+			const service = new ThoughtSpotService(mockClient);
+			await service.createAgentConversation("worksheet-123");
+
+			expect(mockClient.createAgentConversation).toHaveBeenCalledWith({
+				metadata_context: {
+					data_source_context: {
+						guid: "worksheet-123",
+					},
+				},
+				conversation_settings: {
+					enable_contextual_change_analysis: true,
+					enable_natural_language_answer_generation: true,
+					enable_reasoning: true,
+				},
+			});
+		});
+
+		it("should throw when agent conversation creation fails", async () => {
+			const error = new Error("Conversation API Error");
+			mockClient.createAgentConversation = vi.fn().mockRejectedValue(error);
+
+			const service = new ThoughtSpotService(mockClient);
+
+			await expect(service.createAgentConversation()).rejects.toThrow(
+				"Conversation API Error",
+			);
+		});
+	});
+
+	describe("sendAgentConversationMessageStreaming", () => {
+		it("should send a streaming message and persist streamed events", async () => {
+			vi.useFakeTimers();
+
+			const encoder = new TextEncoder();
+			const reader = {
+				read: vi
+					.fn()
+					.mockResolvedValueOnce({
+						done: false,
+						value: encoder.encode(
+							'data: [{"type":"text","content":"Hello there"}]\n' +
+								'data: [{"type":"text-chunk","content":"chunk-1"}]\n' +
+								'data: [{"type":"answer","metadata":{"title":"Revenue Answer","sage_query":"What is revenue?","session_id":"session-123","gen_no":7,"transaction_id":"ac-session-456","generation_number":9}}]\n',
+						),
+					})
+					.mockResolvedValueOnce({
+						done: true,
+						value: undefined,
+					}),
+			};
+
+			mockClient.sendAgentConversationMessageStreaming = vi
+				.fn()
+				.mockResolvedValue({
+					body: {
+						getReader: vi.fn().mockReturnValue(reader),
+					},
+				});
+
+			const streamingMessageStorage = {
+				appendMessagesAndRestartTtl: vi.fn().mockResolvedValue(undefined),
+			} as any;
+
+			const service = new ThoughtSpotService(mockClient);
+			await service.sendAgentConversationMessageStreaming(
+				"conv-123",
+				"Show me revenue",
+				streamingMessageStorage,
+			);
+
+			expect(
+				mockClient.sendAgentConversationMessageStreaming,
+			).toHaveBeenCalledWith({
+				conversation_identifier: "conv-123",
+				message: "Show me revenue",
+			});
+
+			await vi.runAllTimersAsync();
+
+			expect(
+				streamingMessageStorage.appendMessagesAndRestartTtl,
+			).toHaveBeenNthCalledWith(1, "conv-123", [
+				{
+					type: "text",
+					text: "Hello there",
+				},
+			]);
+			expect(
+				streamingMessageStorage.appendMessagesAndRestartTtl,
+			).toHaveBeenNthCalledWith(2, "conv-123", [
+				{
+					type: "text-chunk",
+					text: "chunk-1",
+				},
+			]);
+			expect(
+				streamingMessageStorage.appendMessagesAndRestartTtl,
+			).toHaveBeenNthCalledWith(3, "conv-123", [
+				{
+					type: "answer",
+					answerTitle: "Revenue Answer",
+					answerQuery: "What is revenue?",
+					iframeUrl:
+						"https://test.thoughtspot.com/?tsmcp=true#/embed/conv-assist-answer?sessionId=session-123&genNo=7&acSessionId=ac-session-456&acGenNo=9",
+				},
+			]);
+			expect(
+				streamingMessageStorage.appendMessagesAndRestartTtl,
+			).toHaveBeenNthCalledWith(4, "conv-123", [], true);
+
+			vi.useRealTimers();
+		});
+
+		it("should throw when the response body reader is unavailable", async () => {
+			mockClient.sendAgentConversationMessageStreaming = vi
+				.fn()
+				.mockResolvedValue({
+					body: undefined,
+				});
+
+			const service = new ThoughtSpotService(mockClient);
+
+			await expect(
+				service.sendAgentConversationMessageStreaming(
+					"conv-123",
+					"Show me revenue",
+					{
+						appendMessagesAndRestartTtl: vi.fn(),
+					} as any,
+				),
+			).rejects.toThrow("Failed to get reader from response body");
+		});
+
+		it("should throw when sending the streaming message fails", async () => {
+			const error = new Error("Streaming API Error");
+			mockClient.sendAgentConversationMessageStreaming = vi
+				.fn()
+				.mockRejectedValue(error);
+
+			const service = new ThoughtSpotService(mockClient);
+
+			await expect(
+				service.sendAgentConversationMessageStreaming(
+					"conv-123",
+					"Show me revenue",
+					{
+						appendMessagesAndRestartTtl: vi.fn(),
+					} as any,
+				),
+			).rejects.toThrow("Streaming API Error");
 		});
 	});
 
