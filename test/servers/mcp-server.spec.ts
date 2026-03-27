@@ -296,6 +296,44 @@ describe("MCP Server", () => {
 		});
 	});
 
+	describe("Check Connectivity Tool", () => {
+		it("should return error when not authenticated", async () => {
+			const unauthenticatedServer = new MCPServer(
+				{
+					props: {
+						instanceUrl: "",
+						accessToken: "",
+						clientName: {
+							clientId: "test-client-id",
+							clientName: "test-client",
+							registrationDate: Date.now(),
+						},
+					},
+				},
+				new StreamingMessagesStorageWithTtl(null as any, vi.fn(), vi.fn()),
+			);
+			await unauthenticatedServer.init();
+
+			const { callTool } = connect(unauthenticatedServer);
+			const result = await callTool("check_connectivity", {});
+
+			expect(result.isError).toBe(true);
+			expect((result.content as any[])[0].text).toBe(
+				"ERROR: Not authenticated",
+			);
+		});
+
+		it("should return success when authenticated", async () => {
+			await server.init();
+			const { callTool } = connect(server);
+
+			const result = await callTool("check_connectivity", {});
+
+			expect(result.isError).toBeUndefined();
+			expect((result.content as any[])[0].text).toBe("Pong");
+		});
+	});
+
 	describe("Get Relevant Questions Tool", () => {
 		// Using real service with mocked client, no service method mocks needed
 
@@ -1011,6 +1049,128 @@ describe("MCP Server", () => {
 			expect(suggestionsData).toHaveLength(1);
 			expect(suggestionsData[0].header.guid).toBe("ds-789");
 			expect(suggestionsData[0].confidence).toBe(0.95);
+		});
+	});
+
+	describe("Create Analysis Session Tool", () => {
+		it("should create a session and return session_id", async () => {
+			vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
+				getSessionInfo: vi.fn().mockResolvedValue({
+					clusterId: "test-cluster-123",
+					clusterName: "test-cluster",
+					releaseVersion: "10.13.0.cl-110",
+					userGUID: "test-user-123",
+					configInfo: {
+						mixpanelConfig: {
+							devSdkKey: "test-dev-token",
+							prodSdkKey: "test-prod-token",
+							production: false,
+						},
+						selfClusterName: "test-cluster",
+						selfClusterId: "test-cluster-123",
+						enableSpotterDataSourceDiscovery: true,
+					},
+					userName: "test-user",
+					currentOrgId: "test-org",
+					privileges: [],
+				}),
+				createAgentConversation: vi.fn().mockResolvedValue({
+					conversation_id: "conv-abc-123",
+				}),
+				instanceUrl: "https://test.thoughtspot.cloud",
+			} as any);
+
+			await server.init();
+			const { callTool } = connect(server);
+
+			const result = await callTool("create_analysis_session", {});
+
+			expect(result.isError).toBeUndefined();
+			expect((result.structuredContent as any).session_id).toBe("conv-abc-123");
+		});
+
+		it("should create a session with a data_source_id", async () => {
+			const mockCreateAgentConversation = vi.fn().mockResolvedValue({
+				conversation_id: "conv-with-ds-456",
+			});
+
+			vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
+				getSessionInfo: vi.fn().mockResolvedValue({
+					clusterId: "test-cluster-123",
+					clusterName: "test-cluster",
+					releaseVersion: "10.13.0.cl-110",
+					userGUID: "test-user-123",
+					configInfo: {
+						mixpanelConfig: {
+							devSdkKey: "test-dev-token",
+							prodSdkKey: "test-prod-token",
+							production: false,
+						},
+						selfClusterName: "test-cluster",
+						selfClusterId: "test-cluster-123",
+						enableSpotterDataSourceDiscovery: true,
+					},
+					userName: "test-user",
+					currentOrgId: "test-org",
+					privileges: [],
+				}),
+				createAgentConversation: mockCreateAgentConversation,
+				instanceUrl: "https://test.thoughtspot.cloud",
+			} as any);
+
+			await server.init();
+			const { callTool } = connect(server);
+
+			const result = await callTool("create_analysis_session", {
+				data_source_id: "ds-123",
+			});
+
+			expect(result.isError).toBeUndefined();
+			expect((result.structuredContent as any).session_id).toBe(
+				"conv-with-ds-456",
+			);
+			expect(mockCreateAgentConversation).toHaveBeenCalledWith(
+				expect.objectContaining({
+					metadata_context: { data_source_context: { guid: "ds-123" } },
+				}),
+			);
+		});
+
+		it("should handle error from service", async () => {
+			vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
+				getSessionInfo: vi.fn().mockResolvedValue({
+					clusterId: "test-cluster-123",
+					clusterName: "test-cluster",
+					releaseVersion: "10.13.0.cl-110",
+					userGUID: "test-user-123",
+					configInfo: {
+						mixpanelConfig: {
+							devSdkKey: "test-dev-token",
+							prodSdkKey: "test-prod-token",
+							production: false,
+						},
+						selfClusterName: "test-cluster",
+						selfClusterId: "test-cluster-123",
+						enableSpotterDataSourceDiscovery: true,
+					},
+					userName: "test-user",
+					currentOrgId: "test-org",
+					privileges: [],
+				}),
+				createAgentConversation: vi
+					.fn()
+					.mockRejectedValue(new Error("Failed to create conversation")),
+				instanceUrl: "https://test.thoughtspot.cloud",
+			} as any);
+
+			await server.init();
+
+			await expect(
+				server.callCreateConversation({
+					method: "tools/call",
+					params: { name: "create_analysis_session", arguments: {} },
+				}),
+			).rejects.toThrow("Failed to create conversation");
 		});
 	});
 

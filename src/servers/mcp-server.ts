@@ -21,6 +21,7 @@ import {
 	GetConversationUpdatesSchema,
 } from "./tool-definitions";
 import type { StreamingMessagesStorageWithTtl } from "../streaming-message-storage-with-ttl/streaming-message-storage-with-ttl";
+import type { StreamingMessagesState } from "../thoughtspot/types";
 
 export class MCPServer extends BaseMCPServer {
 	constructor(
@@ -301,15 +302,26 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		const { session_id } = GetConversationUpdatesSchema.parse(
 			request.params.arguments,
 		);
-		const messagesState =
-			await this.streamingMessageStorage.getNewMessagesAndUpdateBookmark(
-				session_id,
-			);
+
+		// If no updates yet, poll for up to 10 seconds before returning an empty response
+		let messagesState: StreamingMessagesState;
+		for (let i = 0; i < 10; i++) {
+			messagesState =
+				await this.streamingMessageStorage.getNewMessagesAndUpdateBookmark(
+					session_id,
+				);
+
+			if (messagesState.messages.length > 0 || messagesState.isDone) {
+				break;
+			}
+
+			await new Promise((resolve) => setTimeout(resolve, 1000));
+		}
 
 		return this.createStructuredContentSuccessResponse(
 			{
-				session_updates: messagesState.messages,
-				is_done: messagesState.isDone,
+				session_updates: messagesState!.messages,
+				is_done: messagesState!.isDone,
 			},
 			"Conversation updates retrieved successfully",
 		);
