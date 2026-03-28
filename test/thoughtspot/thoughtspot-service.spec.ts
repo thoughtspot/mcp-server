@@ -293,21 +293,16 @@ describe("thoughtspot-service", () => {
 
 			await vi.runAllTimersAsync();
 
+			// Each data: line is one batched call
 			expect(
 				streamingMessageStorage.appendMessagesAndRestartTtl,
 			).toHaveBeenNthCalledWith(1, "conv-123", [
-				{
-					type: "text",
-					text: "Hello there",
-				},
+				{ type: "text", text: "Hello there" },
 			]);
 			expect(
 				streamingMessageStorage.appendMessagesAndRestartTtl,
 			).toHaveBeenNthCalledWith(2, "conv-123", [
-				{
-					type: "text_chunk",
-					text: "chunk-1",
-				},
+				{ type: "text_chunk", text: "chunk-1" },
 			]);
 			expect(
 				streamingMessageStorage.appendMessagesAndRestartTtl,
@@ -320,9 +315,113 @@ describe("thoughtspot-service", () => {
 						"https://test.thoughtspot.com/?tsmcp=true#/embed/conv-assist-answer?sessionId=session-123&genNo=7&acSessionId=ac-session-456&acGenNo=9",
 				},
 			]);
+			// Final done marker
 			expect(
 				streamingMessageStorage.appendMessagesAndRestartTtl,
 			).toHaveBeenNthCalledWith(4, "conv-123", [], true);
+			expect(
+				streamingMessageStorage.appendMessagesAndRestartTtl,
+			).toHaveBeenCalledTimes(4);
+
+			vi.useRealTimers();
+		});
+
+		it("should batch multiple messages from one 'data:' line into a single call", async () => {
+			vi.useFakeTimers();
+
+			const encoder = new TextEncoder();
+			// One 'data:' line contains three events
+			const reader = {
+				read: vi
+					.fn()
+					.mockResolvedValueOnce({
+						done: false,
+						value: encoder.encode(
+							'data: [{"type":"text","content":"Part 1"},{"type":"text-chunk","content":"chunk-A"},{"type":"text","content":"Part 2"}]\n',
+						),
+					})
+					.mockResolvedValueOnce({ done: true, value: undefined }),
+			};
+
+			mockClient.sendAgentConversationMessageStreaming = vi
+				.fn()
+				.mockResolvedValue({
+					body: { getReader: vi.fn().mockReturnValue(reader) },
+				});
+
+			const streamingMessageStorage = {
+				appendMessagesAndRestartTtl: vi.fn().mockResolvedValue(undefined),
+			} as any;
+
+			const service = new ThoughtSpotService(mockClient);
+			await service.sendAgentConversationMessageStreaming(
+				"conv-456",
+				"batch test",
+				streamingMessageStorage,
+			);
+			await vi.runAllTimersAsync();
+
+			// All three events from the single line go in ONE call
+			expect(
+				streamingMessageStorage.appendMessagesAndRestartTtl,
+			).toHaveBeenNthCalledWith(1, "conv-456", [
+				{ type: "text", text: "Part 1" },
+				{ type: "text_chunk", text: "chunk-A" },
+				{ type: "text", text: "Part 2" },
+			]);
+			// Plus the done marker
+			expect(
+				streamingMessageStorage.appendMessagesAndRestartTtl,
+			).toHaveBeenNthCalledWith(2, "conv-456", [], true);
+			expect(
+				streamingMessageStorage.appendMessagesAndRestartTtl,
+			).toHaveBeenCalledTimes(2);
+
+			vi.useRealTimers();
+		});
+
+		it("should not call appendMessagesAndRestartTtl when a 'data:' line produces no recognised messages", async () => {
+			vi.useFakeTimers();
+
+			const encoder = new TextEncoder();
+			// One 'data:' line with only unknown event types
+			const reader = {
+				read: vi
+					.fn()
+					.mockResolvedValueOnce({
+						done: false,
+						value: encoder.encode(
+							'data: [{"type":"unknown-event","content":"ignored"}]\n',
+						),
+					})
+					.mockResolvedValueOnce({ done: true, value: undefined }),
+			};
+
+			mockClient.sendAgentConversationMessageStreaming = vi
+				.fn()
+				.mockResolvedValue({
+					body: { getReader: vi.fn().mockReturnValue(reader) },
+				});
+
+			const streamingMessageStorage = {
+				appendMessagesAndRestartTtl: vi.fn().mockResolvedValue(undefined),
+			} as any;
+
+			const service = new ThoughtSpotService(mockClient);
+			await service.sendAgentConversationMessageStreaming(
+				"conv-789",
+				"empty test",
+				streamingMessageStorage,
+			);
+			await vi.runAllTimersAsync();
+
+			// Only the done marker should be called — no call for the empty batch
+			expect(
+				streamingMessageStorage.appendMessagesAndRestartTtl,
+			).toHaveBeenCalledTimes(1);
+			expect(
+				streamingMessageStorage.appendMessagesAndRestartTtl,
+			).toHaveBeenCalledWith("conv-789", [], true);
 
 			vi.useRealTimers();
 		});
