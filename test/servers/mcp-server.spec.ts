@@ -1074,7 +1074,7 @@ describe("MCP Server", () => {
 					currentOrgId: "test-org",
 					privileges: [],
 				}),
-				createAgentConversation: vi.fn().mockResolvedValue({
+				createAgentConversationWithAutoMode: vi.fn().mockResolvedValue({
 					conversation_id: "conv-abc-123",
 				}),
 				instanceUrl: "https://test.thoughtspot.cloud",
@@ -1090,9 +1090,11 @@ describe("MCP Server", () => {
 		});
 
 		it("should create a session with a data_source_id", async () => {
-			const mockCreateAgentConversation = vi.fn().mockResolvedValue({
-				conversation_id: "conv-with-ds-456",
-			});
+			const mockCreateAgentConversationWithAutoMode = vi
+				.fn()
+				.mockResolvedValue({
+					conversation_id: "conv-with-ds-456",
+				});
 
 			vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
 				getSessionInfo: vi.fn().mockResolvedValue({
@@ -1114,7 +1116,8 @@ describe("MCP Server", () => {
 					currentOrgId: "test-org",
 					privileges: [],
 				}),
-				createAgentConversation: mockCreateAgentConversation,
+				createAgentConversationWithAutoMode:
+					mockCreateAgentConversationWithAutoMode,
 				instanceUrl: "https://test.thoughtspot.cloud",
 			} as any);
 
@@ -1129,11 +1132,9 @@ describe("MCP Server", () => {
 			expect((result.structuredContent as any).session_id).toBe(
 				"conv-with-ds-456",
 			);
-			expect(mockCreateAgentConversation).toHaveBeenCalledWith(
-				expect.objectContaining({
-					metadata_context: { data_source_context: { guid: "ds-123" } },
-				}),
-			);
+			expect(mockCreateAgentConversationWithAutoMode).toHaveBeenCalledWith({
+				dataSourceId: "ds-123",
+			});
 		});
 
 		it("should handle error from service", async () => {
@@ -1157,7 +1158,7 @@ describe("MCP Server", () => {
 					currentOrgId: "test-org",
 					privileges: [],
 				}),
-				createAgentConversation: vi
+				createAgentConversationWithAutoMode: vi
 					.fn()
 					.mockRejectedValue(new Error("Failed to create conversation")),
 				instanceUrl: "https://test.thoughtspot.cloud",

@@ -253,24 +253,10 @@ export class ThoughtSpotService {
 			span?.addEvent("create-agent-conversation");
 
 			// Use auto mode by default, but support passing an explicit data source context
-			const metadataContext = dataSourceId
-				? {
-						data_source_context: {
-							guid: dataSourceId,
-						},
-					}
-				: {
-						type: "AUTO_MODE" as any, // Not yet supported by SDK but works through API
-					};
-
-			const response = await this.client.createAgentConversation({
-				// TODO(Rifdhan): Which of these flags need to be configurable?
-				metadata_context: metadataContext,
-				conversation_settings: {
-					enable_contextual_change_analysis: true,
-					enable_natural_language_answer_generation: true,
-					enable_reasoning: true,
-				},
+			const response = await (
+				this.client as any
+			).createAgentConversationWithAutoMode({
+				dataSourceId,
 			});
 
 			span?.setStatus({

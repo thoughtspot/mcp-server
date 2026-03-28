@@ -3,6 +3,7 @@ import {
 	ThoughtSpotRestApi,
 } from "@thoughtspot/rest-api-sdk";
 import type {
+	AgentConversation,
 	RequestContext,
 	ResponseContext,
 } from "@thoughtspot/rest-api-sdk";
@@ -36,6 +37,7 @@ export const getThoughtSpotClient = (
 	addGetSessionInfo(client, instanceUrl, bearerToken);
 	addQueryGetDataSourceSuggestions(client, instanceUrl, bearerToken);
 	addGetAnswerSession(client, instanceUrl, bearerToken);
+	addCreateAgentConversationWithAutoMode(client, instanceUrl, bearerToken);
 	addSendAgentConversationMessageStreaming(client, instanceUrl, bearerToken);
 	return client;
 };
@@ -237,6 +239,60 @@ function addGetAnswerSession(client: any, instanceUrl: string, token: string) {
 			throw new Error("Could not extract answer session from response.");
 		}
 		return session;
+	};
+}
+
+function addCreateAgentConversationWithAutoMode(
+	client: any,
+	instanceUrl: string,
+	token: string,
+) {
+	(client as any).createAgentConversationWithAutoMode = async ({
+		dataSourceId,
+	}: {
+		dataSourceId?: string;
+	}): Promise<AgentConversation> => {
+		const endpoint = "/conversation/v2/";
+		const fetchOptions = {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json",
+				Accept: "application/json",
+				"user-agent": "ThoughtSpot-ts-client",
+				Authorization: `Bearer ${token}`,
+			},
+			body: JSON.stringify({
+				context: dataSourceId
+					? {
+							type: "worksheet",
+							worksheet_context: {
+								worksheet_id: dataSourceId,
+							},
+						}
+					: {
+							type: "empty",
+						},
+				conv_settings: {
+					enable_nls: true,
+					enable_why: true,
+					save_chat_enabled: false,
+					enable_tool_permissions: false,
+					enable_search_datasets: !dataSourceId,
+					enable_auto_select_dataset: !dataSourceId,
+				},
+			}),
+		};
+		const response = await fetch(`${instanceUrl}${endpoint}`, fetchOptions);
+
+		if (!response.ok) {
+			const errorText = await response.text();
+			throw new Error(
+				`createAgentConversationWithAutoMode failed with status ${response.status}: ${errorText}`,
+			);
+		}
+
+		const data = (await response.json()) as AgentConversation;
+		return data;
 	};
 }
 
