@@ -16,7 +16,7 @@ const mockClient = {
 	singleAnswer: vi.fn(),
 	exportAnswerReport: vi.fn(),
 	exportUnsavedAnswerTML: vi.fn(),
-	createAgentConversation: vi.fn(),
+	createAgentConversationWithAutoMode: vi.fn(),
 	sendAgentConversationMessageStreaming: vi.fn(),
 	importMetadataTML: vi.fn(),
 	searchMetadata: vi.fn(),
@@ -185,22 +185,17 @@ describe("thoughtspot-service", () => {
 				conversation_id: "conv-123",
 			};
 
-			mockClient.createAgentConversation = vi
+			mockClient.createAgentConversationWithAutoMode = vi
 				.fn()
 				.mockResolvedValue(mockResponse);
 
 			const service = new ThoughtSpotService(mockClient);
 			const result = await service.createAgentConversation();
 
-			expect(mockClient.createAgentConversation).toHaveBeenCalledWith({
-				metadata_context: {
-					type: "AUTO_MODE",
-				},
-				conversation_settings: {
-					enable_contextual_change_analysis: true,
-					enable_natural_language_answer_generation: true,
-					enable_reasoning: true,
-				},
+			expect(
+				mockClient.createAgentConversationWithAutoMode,
+			).toHaveBeenCalledWith({
+				dataSourceId: undefined,
 			});
 			expect(result).toEqual(mockResponse);
 		});
@@ -210,30 +205,25 @@ describe("thoughtspot-service", () => {
 				conversation_id: "conv-456",
 			};
 
-			mockClient.createAgentConversation = vi
+			mockClient.createAgentConversationWithAutoMode = vi
 				.fn()
 				.mockResolvedValue(mockResponse);
 
 			const service = new ThoughtSpotService(mockClient);
 			await service.createAgentConversation("worksheet-123");
 
-			expect(mockClient.createAgentConversation).toHaveBeenCalledWith({
-				metadata_context: {
-					data_source_context: {
-						guid: "worksheet-123",
-					},
-				},
-				conversation_settings: {
-					enable_contextual_change_analysis: true,
-					enable_natural_language_answer_generation: true,
-					enable_reasoning: true,
-				},
+			expect(
+				mockClient.createAgentConversationWithAutoMode,
+			).toHaveBeenCalledWith({
+				dataSourceId: "worksheet-123",
 			});
 		});
 
 		it("should throw when agent conversation creation fails", async () => {
 			const error = new Error("Conversation API Error");
-			mockClient.createAgentConversation = vi.fn().mockRejectedValue(error);
+			mockClient.createAgentConversationWithAutoMode = vi
+				.fn()
+				.mockRejectedValue(error);
 
 			const service = new ThoughtSpotService(mockClient);
 

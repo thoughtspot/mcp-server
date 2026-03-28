@@ -131,11 +131,15 @@ describe("ThoughtSpot Client", () => {
 			expect(client).toHaveProperty("getSessionInfo");
 			expect(client).toHaveProperty("queryGetDataSourceSuggestions");
 			expect(client).toHaveProperty("getAnswerSession");
+			expect(client).toHaveProperty("createAgentConversationWithAutoMode");
 			expect(client).toHaveProperty("sendAgentConversationMessageStreaming");
 			expect(typeof client.exportUnsavedAnswerTML).toBe("function");
 			expect(typeof client.getSessionInfo).toBe("function");
 			expect(typeof client.queryGetDataSourceSuggestions).toBe("function");
 			expect(typeof client.getAnswerSession).toBe("function");
+			expect(typeof client.createAgentConversationWithAutoMode).toBe(
+				"function",
+			);
 			expect(typeof client.sendAgentConversationMessageStreaming).toBe(
 				"function",
 			);
@@ -847,6 +851,132 @@ describe("ThoughtSpot Client", () => {
 			const fetchCall = (fetch as any).mock.calls[0];
 			const headers = fetchCall[1].headers;
 
+			expect(headers["Content-Type"]).toBe("application/json");
+			expect(headers.Accept).toBe("application/json");
+			expect(headers["user-agent"]).toBe("ThoughtSpot-ts-client");
+			expect(headers.Authorization).toBe(`Bearer ${mockBearerToken}`);
+		});
+	});
+
+	describe("createAgentConversationWithAutoMode", () => {
+		let client: any;
+
+		beforeEach(() => {
+			client = getThoughtSpotClient(mockInstanceUrl, mockBearerToken) as any;
+		});
+
+		it("should create an agent conversation without a data source successfully", async () => {
+			const mockConversation = { conversation_id: "conv-123" };
+
+			(fetch as any).mockResolvedValue({
+				ok: true,
+				json: vi.fn().mockResolvedValue(mockConversation),
+			});
+
+			const result = await client.createAgentConversationWithAutoMode({});
+
+			expect(fetch).toHaveBeenCalledWith(
+				`${mockInstanceUrl}/conversation/v2/`,
+				{
+					method: "POST",
+					headers: {
+						"Content-Type": "application/json",
+						Accept: "application/json",
+						"user-agent": "ThoughtSpot-ts-client",
+						Authorization: `Bearer ${mockBearerToken}`,
+					},
+					body: expect.any(String),
+				},
+			);
+
+			const fetchCall = (fetch as any).mock.calls[0];
+			const body = JSON.parse(fetchCall[1].body);
+			expect(body.context).toEqual({ type: "empty" });
+			expect(body.conv_settings.enable_search_datasets).toBe(true);
+			expect(body.conv_settings.enable_auto_select_dataset).toBe(true);
+
+			expect(result).toEqual(mockConversation);
+			expect(result.conversation_id).toBe("conv-123");
+		});
+
+		it("should create an agent conversation with a data source successfully", async () => {
+			const mockConversation = { conversation_id: "conv-456" };
+			const dataSourceId = "worksheet-guid-789";
+
+			(fetch as any).mockResolvedValue({
+				ok: true,
+				json: vi.fn().mockResolvedValue(mockConversation),
+			});
+
+			const result = await client.createAgentConversationWithAutoMode({
+				dataSourceId,
+			});
+
+			const fetchCall = (fetch as any).mock.calls[0];
+			const body = JSON.parse(fetchCall[1].body);
+			expect(body.context).toEqual({
+				type: "worksheet",
+				worksheet_context: { worksheet_id: dataSourceId },
+			});
+			expect(body.conv_settings.enable_search_datasets).toBe(false);
+			expect(body.conv_settings.enable_auto_select_dataset).toBe(false);
+
+			expect(result).toEqual(mockConversation);
+			expect(result.conversation_id).toBe("conv-456");
+		});
+
+		it("should include correct conv_settings in the request body", async () => {
+			(fetch as any).mockResolvedValue({
+				ok: true,
+				json: vi.fn().mockResolvedValue({ conversation_id: "conv-789" }),
+			});
+
+			await client.createAgentConversationWithAutoMode({});
+
+			const fetchCall = (fetch as any).mock.calls[0];
+			const body = JSON.parse(fetchCall[1].body);
+			expect(body.conv_settings).toEqual({
+				enable_nls: true,
+				enable_why: true,
+				save_chat_enabled: false,
+				enable_tool_permissions: false,
+				enable_search_datasets: true,
+				enable_auto_select_dataset: true,
+			});
+		});
+
+		it("should handle HTTP error responses", async () => {
+			(fetch as any).mockResolvedValue({
+				ok: false,
+				status: 401,
+				text: vi.fn().mockResolvedValue("Unauthorized"),
+			});
+
+			await expect(
+				client.createAgentConversationWithAutoMode({}),
+			).rejects.toThrow(
+				"createAgentConversationWithAutoMode failed with status 401: Unauthorized",
+			);
+		});
+
+		it("should handle network errors", async () => {
+			(fetch as any).mockRejectedValue(new Error("Network error"));
+
+			await expect(
+				client.createAgentConversationWithAutoMode({}),
+			).rejects.toThrow("Network error");
+		});
+
+		it("should use correct headers", async () => {
+			(fetch as any).mockResolvedValue({
+				ok: true,
+				json: vi.fn().mockResolvedValue({ conversation_id: "conv-123" }),
+			});
+
+			await client.createAgentConversationWithAutoMode({});
+
+			const fetchCall = (fetch as any).mock.calls[0];
+			const headers = fetchCall[1].headers;
 			expect(headers["Content-Type"]).toBe("application/json");
 			expect(headers.Accept).toBe("application/json");
 			expect(headers["user-agent"]).toBe("ThoughtSpot-ts-client");
