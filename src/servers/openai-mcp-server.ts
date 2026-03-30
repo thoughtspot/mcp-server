@@ -82,6 +82,7 @@ export class OpenAIDeepResearchMCPServer extends BaseMCPServer {
 			resources: [],
 		};
 	}
+
 	protected async readResource(
 		request: z.infer<typeof ReadResourceRequestSchema>,
 	) {
