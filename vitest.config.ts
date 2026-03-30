@@ -21,6 +21,12 @@ export default defineWorkersConfig({
             enabled: true,
             include: ["src/**/*.ts"],
             reporter: ["text", "json", "html", "lcov"],
+            thresholds: {
+                lines: 85,
+                functions: 85,
+                branches: 75,
+                statements: 85,
+            },
         },
         poolOptions: {
             workers: {
