@@ -37,6 +37,9 @@ class Handler {
 		const { clientId } = oauthReqInfo;
 
 		span?.setAttribute("client_id", clientId || "unknown");
+		if (!clientId) {
+			throw new McpServerError({ message: "Missing client ID" }, 400);
+		}
 		if (!oauthReqInfo.codeChallenge) {
 			throw new McpServerError(
 				{ message: "PKCE is required: missing code challenge" },
@@ -48,9 +51,6 @@ class Handler {
 				{ message: "PKCE code challenge method must be S256" },
 				400,
 			);
-		}
-		if (!clientId) {
-			throw new McpServerError({ message: "Missing client ID" }, 400);
 		}
 		const client = await oauthProvider.lookupClient(clientId);
 		return renderApprovalDialog(request, {
