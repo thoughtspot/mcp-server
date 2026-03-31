@@ -84,7 +84,7 @@ export const CreateConversationSchema = z.object({
 });
 
 export const CreateConversationOutputSchema = z.object({
-	session_id: z
+	analytical_session_id: z
 		.string()
 		.describe(
 			"Identifier for the session. Use this to send messages or get updates on the session.",
@@ -92,7 +92,7 @@ export const CreateConversationOutputSchema = z.object({
 });
 
 export const SendConversationMessageSchema = z.object({
-	session_id: z
+	analytical_session_id: z
 		.string()
 		.describe("Identifier of the session to send the message to."),
 	message: z
@@ -107,7 +107,7 @@ export const SendConversationMessageOutputSchema = z.object({
 });
 
 export const GetConversationUpdatesSchema = z.object({
-	session_id: z
+	analytical_session_id: z
 		.string()
 		.describe("Identifier of the session to get updates from."),
 });
@@ -123,6 +123,12 @@ export const ConversationUpdateSchema = z.object({
 		.optional()
 		.describe(
 			"The text content of the message. Only present when `type` is `text` or `text_chunk`. If `type` is `text_chunk`, combine the chunks of text together to form the complete message.",
+		),
+	answer_id: z
+		.string()
+		.optional()
+		.describe(
+			"A unique identifier for the answer. Only present when `type` is `answer`. Use this field to identify this answer when using the `create_dashboard` tool.",
 		),
 	answer_title: z
 		.string()
@@ -200,6 +206,55 @@ export const GetDataSourceSuggestionsSchema = z.object({
          There can be multiple data sources. Each data source can be used to get the data for the user's query using the other tools getRelevantQuestions and getAnswer.`),
 });
 
+export const AnswerSchema = z.object({
+	answer_id: z
+		.string()
+		.describe(
+			"The unique identifier for the answer. Provide the `answer_id` value returned from get_session_updates for an update where `type` is `answer`.",
+		),
+	title: z
+		.string()
+		.describe(
+			"Title of the answer. Provide a brief description of the answer, or the question which the answer is answering.",
+		),
+});
+
+export const CreateDashboardSchema = z.object({
+	title: z.string().describe("Title of the dashboard to be created."),
+	answers: z
+		.array(AnswerSchema)
+		.describe("List of answers to add to the dashboard."),
+	note_tile: z.string().describe(`
+        Create a summary of the answers to the queries asked by the user along with all the analysis done on the data.
+        The output format is an HTML note tile which can have custom styles and formatting. Use emojis, styling and icons to make it more visually appealing.
+        Follow these MANDATORY rules for styling:
+        - Put the whole note tile in a single line and no line breaks. Also there should be no unnecessary white spaces.
+        - The HTML output in the note tile can have white spaces. Use <br> or <tab> if needed to use white spaces in the note tile.
+        - Use padding, margin and line height to create space between the elements in the note tile and make it more readable.
+
+        Use this as an example(ignore the line breaks and white spaces):
+
+        <h2 class=\"theme-module__editor-h2\" dir=\"ltr\" style=\"text-align: center;\">
+	        <span style=\"white-space: pre-wrap;\">\"Heading of note\"</span>
+        </h2>
+        <p class=\"theme-module__editor-paragraph\" dir=\"ltr\">
+            <span style=\"white-space: pre-wrap;\">
+                Comprehensive summary of analysis done and answers to queries asked by user. Use colors and styles in the html to make it more readable and visually appealing.
+                Also add the date and time of the analysis to the note tile in the header of the note tile. The format should be like this: Generated on <date> <time>
+            </span>
+        </p>
+        <div class=\"pinboard-note-tile-module__noteTileBg editor-module__bgNode\"></div>
+        `),
+});
+
+export const CreateDashboardOutputSchema = z.object({
+	link: z
+		.string()
+		.describe(
+			"A URL link to the created dashboard. Provide this link to the user to view the dashboard.",
+		),
+});
+
 export enum ToolName {
 	// V1
 	Ping = "ping",
@@ -212,7 +267,7 @@ export enum ToolName {
 	CreateAnalysisSession = "create_analysis_session",
 	SendSessionMessage = "send_session_message",
 	GetSessionUpdates = "get_session_updates",
-	// CreateDashboard = "create_dashboard", // TODO(Rifdhan) need to implement
+	CreateDashboard = "create_dashboard",
 }
 
 export const toolDefinitionsV1 = [
@@ -286,7 +341,7 @@ export const toolDefinitionsV2 = [
 	{
 		name: ToolName.CreateAnalysisSession,
 		description:
-			"Start an analytical session with ThoughtSpot's analytics agent. This is the first step in a three-step workflow: create a session, send a message, then poll for updates. Once created, use the returned `session_id` to send analytical questions via `send_session_message` and retrieve answers via `get_session_updates`. Sessions are conversational, so you can ask follow-up questions in the same session without creating a new one.",
+			"Start an analytical session with ThoughtSpot's analytics agent. This is the first step in a three-step workflow: create a session, send a message, then poll for updates. Once created, use the returned `analytical_session_id` to send analytical questions via `send_session_message` and retrieve answers via `get_session_updates`. Sessions are conversational, so you can ask follow-up questions in the same session without creating a new one.",
 		inputSchema: zodToJsonSchema(CreateConversationSchema) as ToolInput,
 		outputSchema: zodToJsonSchema(CreateConversationOutputSchema) as ToolOutput,
 		annotations: {
@@ -320,6 +375,17 @@ export const toolDefinitionsV2 = [
 		annotations: {
 			title: "Check Analysis Updates",
 			readOnlyHint: true,
+			destructiveHint: false,
+		},
+	},
+	{
+		name: ToolName.CreateDashboard,
+		description: "Create a dashboard from a list of answers.",
+		inputSchema: zodToJsonSchema(CreateDashboardSchema) as ToolInput,
+		outputSchema: zodToJsonSchema(CreateDashboardOutputSchema) as ToolOutput,
+		annotations: {
+			title: "Create Dashboard",
+			readOnlyHint: false,
 			destructiveHint: false,
 		},
 	},

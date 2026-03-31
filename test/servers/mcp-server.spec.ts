@@ -1053,7 +1053,7 @@ describe("MCP Server", () => {
 	});
 
 	describe("Create Analysis Session Tool", () => {
-		it("should create a session and return session_id", async () => {
+		it("should create a session and return analytical_session_id", async () => {
 			vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
 				getSessionInfo: vi.fn().mockResolvedValue({
 					clusterId: "test-cluster-123",
@@ -1086,7 +1086,9 @@ describe("MCP Server", () => {
 			const result = await callTool("create_analysis_session", {});
 
 			expect(result.isError).toBeUndefined();
-			expect((result.structuredContent as any).session_id).toBe("conv-abc-123");
+			expect((result.structuredContent as any).analytical_session_id).toBe(
+				"conv-abc-123",
+			);
 		});
 
 		it("should create a session with a data_source_id", async () => {
@@ -1129,7 +1131,7 @@ describe("MCP Server", () => {
 			});
 
 			expect(result.isError).toBeUndefined();
-			expect((result.structuredContent as any).session_id).toBe(
+			expect((result.structuredContent as any).analytical_session_id).toBe(
 				"conv-with-ds-456",
 			);
 			expect(mockCreateAgentConversationWithAutoMode).toHaveBeenCalledWith({

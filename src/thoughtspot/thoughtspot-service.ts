@@ -9,6 +9,7 @@ import type {
 	SessionInfo,
 	DataSourceSuggestion,
 	Message,
+	Answer,
 } from "./types";
 import type { StreamingMessagesStorageWithTtl } from "../streaming-message-storage-with-ttl/streaming-message-storage-with-ttl";
 
@@ -215,7 +216,7 @@ export class ThoughtSpotService {
 	 */
 	@WithSpan("get-answer-tml")
 	private async getAnswerTML(
-		question: string,
+		title: string,
 		session_identifier: string,
 		generation_number: number,
 	): Promise<any> {
@@ -224,7 +225,7 @@ export class ThoughtSpotService {
 		try {
 			span?.setAttribute("session_identifier", session_identifier);
 			span?.addEvent("get-answer-tml");
-			console.log("[DEBUG] Getting TML for question: ", question);
+			console.log("[DEBUG] Getting TML for answer: ", title);
 			const tml = await (this.client as any).exportUnsavedAnswerTML({
 				session_identifier,
 				generation_number,
@@ -341,6 +342,10 @@ export class ThoughtSpotService {
 									const iframeUrl = `${(this.client as any).instanceUrl}/?tsmcp=true#/embed/conv-assist-answer?sessionId=${item.metadata.session_id}&genNo=${item.metadata.gen_no}&acSessionId=${item.metadata.transaction_id}&acGenNo=${item.metadata.generation_number}`;
 									newMessages.push({
 										type: "answer",
+										answer_id: JSON.stringify({
+											session_id: item.metadata.session_id,
+											gen_no: item.metadata.gen_no,
+										}),
 										answer_title: item.metadata.title,
 										answer_query: item.metadata.sage_query,
 										iframe_url: iframeUrl,
@@ -465,15 +470,15 @@ export class ThoughtSpotService {
 	 */
 	@WithSpan("fetch-tml-and-create-liveboard")
 	async fetchTMLAndCreateLiveboard(
-		name: string,
-		answers: any[],
+		title: string,
+		answers: Answer[],
 		noteTileParsedHtml: string,
 	): Promise<{ url?: string; error: Error | null }> {
 		const span = getActiveSpan();
 
 		try {
 			span?.setAttributes({
-				liveboard_name: name,
+				liveboard_name: title,
 				answers_count: answers.length,
 			});
 			span?.addEvent("create-answer-tmls");
@@ -481,7 +486,7 @@ export class ThoughtSpotService {
 			const tmls = await Promise.all(
 				answers.map((answer) =>
 					this.getAnswerTML(
-						answer.question,
+						answer.title,
 						answer.session_identifier,
 						answer.generation_number,
 					),
@@ -505,18 +510,18 @@ export class ThoughtSpotService {
 						id: `Viz_${idx + 1}`,
 						answer: {
 							...tml.answer,
-							name: answer.question,
+							name: answer.title,
 						},
 					};
 				})
 				.filter((viz) => viz !== null);
 
 			// Combine note tile first, then visualization answers
-			answers = [noteTitle, ...visualizationAnswers];
+			const tiles = [noteTitle, ...visualizationAnswers];
 
 			span?.addEvent("create-liveboard");
 
-			const liveboardUrl = await this.createLiveboard(name, answers);
+			const liveboardUrl = await this.createLiveboard(title, tiles);
 			return {
 				url: liveboardUrl,
 				error: null,
