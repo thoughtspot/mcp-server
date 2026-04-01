@@ -299,6 +299,7 @@ describe("thoughtspot-service", () => {
 			).toHaveBeenNthCalledWith(3, "conv-123", [
 				{
 					type: "answer",
+					answer_id: '{"session_id":"session-123","gen_no":7}',
 					answer_title: "Revenue Answer",
 					answer_query: "What is revenue?",
 					iframe_url:

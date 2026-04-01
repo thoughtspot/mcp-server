@@ -19,9 +19,10 @@ import {
 	CreateConversationSchema,
 	SendConversationMessageSchema,
 	GetConversationUpdatesSchema,
+	CreateDashboardSchema,
 } from "./tool-definitions";
 import type { StreamingMessagesStorageWithTtl } from "../streaming-message-storage-with-ttl/streaming-message-storage-with-ttl";
-import type { StreamingMessagesState } from "../thoughtspot/types";
+import type { Answer, StreamingMessagesState } from "../thoughtspot/types";
 
 export class MCPServer extends BaseMCPServer {
 	constructor(
@@ -99,6 +100,7 @@ export class MCPServer extends BaseMCPServer {
 		this.trackers.track(TrackEvent.CallTool, { toolName: name });
 
 		switch (name) {
+			// TODO(Rifdhan) separate tools
 			case ToolName.Ping:
 			case ToolName.CheckConnectivity: {
 				console.log("Received Ping request");
@@ -134,6 +136,10 @@ export class MCPServer extends BaseMCPServer {
 
 			case ToolName.GetSessionUpdates: {
 				return this.callGetConversationUpdates(request);
+			}
+
+			case ToolName.CreateDashboard: {
+				return this.callCreateDashboard(request);
 			}
 
 			default:
@@ -271,7 +277,7 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 				data_source_id,
 			);
 		return this.createStructuredContentSuccessResponse(
-			{ session_id: response.conversation_id },
+			{ analytical_session_id: response.conversation_id },
 			"Conversation created successfully",
 		);
 	}
@@ -280,11 +286,10 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 	async callSendConversationMessage(
 		request: z.infer<typeof CallToolRequestSchema>,
 	) {
-		const { session_id, message } = SendConversationMessageSchema.parse(
-			request.params.arguments,
-		);
+		const { analytical_session_id, message } =
+			SendConversationMessageSchema.parse(request.params.arguments);
 		await this.getThoughtSpotService().sendAgentConversationMessageStreaming(
-			session_id,
+			analytical_session_id,
 			message,
 			this.streamingMessageStorage,
 		);
@@ -299,7 +304,7 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 	async callGetConversationUpdates(
 		request: z.infer<typeof CallToolRequestSchema>,
 	) {
-		const { session_id } = GetConversationUpdatesSchema.parse(
+		const { analytical_session_id } = GetConversationUpdatesSchema.parse(
 			request.params.arguments,
 		);
 
@@ -308,7 +313,7 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		for (let i = 0; i < 10; i++) {
 			messagesState =
 				await this.streamingMessageStorage.getNewMessagesAndUpdateBookmark(
-					session_id,
+					analytical_session_id,
 				);
 
 			if (messagesState.messages.length > 0 || messagesState.isDone) {
@@ -324,6 +329,54 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 				is_done: messagesState!.isDone,
 			},
 			"Conversation updates retrieved successfully",
+		);
+	}
+
+	@WithSpan("call-create-dashboard")
+	async callCreateDashboard(request: z.infer<typeof CallToolRequestSchema>) {
+		const { title, answers, note_tile } = CreateDashboardSchema.parse(
+			request.params.arguments,
+		);
+
+		let transformedAnswers: Answer[] = [];
+		try {
+			transformedAnswers = answers.map((answer) => {
+				const { session_id, gen_no } = JSON.parse(answer.answer_id);
+				if (session_id === undefined || gen_no === undefined) {
+					throw new Error(`Invalid answer_id format ${answer.answer_id}`);
+				}
+				return {
+					title: answer.title,
+					session_identifier: session_id,
+					generation_number: gen_no,
+				};
+			});
+		} catch (error) {
+			return this.createErrorResponse(
+				'Invalid answer_id format. Please provide the value returned from the "get_session_updates" tool.',
+				`Error creating dashboard ${error}`,
+			);
+		}
+
+		const liveboard =
+			await this.getThoughtSpotService().fetchTMLAndCreateLiveboard(
+				title,
+				transformedAnswers,
+				note_tile,
+			);
+
+		if (liveboard.error) {
+			return this.createErrorResponse(
+				liveboard.error.message,
+				`Error creating dashboard ${liveboard.error.message}`,
+			);
+		}
+
+		return this.createStructuredContentSuccessResponse(
+			{
+				link: liveboard.url,
+			},
+			"Dashboard created successfully",
 		);
 	}
 

@@ -37,6 +37,7 @@ export interface TextMessage {
 
 export interface AnswerMessage {
 	type: "answer";
+	answer_id: string;
 	answer_title: string;
 	answer_query: string;
 	iframe_url: string;
@@ -47,4 +48,10 @@ export type Message = TextMessage | AnswerMessage;
 export interface StreamingMessagesState {
 	messages: Message[];
 	isDone: boolean;
+}
+
+export interface Answer {
+	title: string;
+	session_identifier: string;
+	generation_number: number;
 }
