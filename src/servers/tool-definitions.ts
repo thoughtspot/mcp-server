@@ -100,6 +100,12 @@ export const SendConversationMessageSchema = z.object({
 		.describe(
 			"A natural language analytical question or follow-up to send to the ThoughtSpot agent.",
 		),
+	additional_context: z
+		.string()
+		.optional()
+		.describe(
+			'Extra information which the Analytics Agent should be aware of while interpreting the `message`. Use this field to provide background or external information relevant to the request, which the Agent would not be aware of. For example, "The user\'s fiscal year starts in April", or "The user is a manager of the West region".',
+		),
 });
 
 export const SendConversationMessageOutputSchema = z.object({

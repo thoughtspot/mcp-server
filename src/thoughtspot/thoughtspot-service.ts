@@ -285,17 +285,22 @@ export class ThoughtSpotService {
 		conversationId: string,
 		message: string,
 		streamingMessageStorage: StreamingMessagesStorageWithTtl,
+		additionalContext?: string | undefined,
 	): Promise<void> {
 		const span = trace.getSpan(context.active());
 
 		try {
 			span?.addEvent("send-agent-conversation-message-streaming");
 
+			const finalMessage = additionalContext
+				? `${message}\n\nAdditional Context:\n${additionalContext}`
+				: message;
+
 			const response = await (
 				this.client as any
 			).sendAgentConversationMessageStreaming({
 				conversation_identifier: conversationId,
-				message,
+				message: finalMessage,
 			});
 
 			const reader = response.body?.getReader();
