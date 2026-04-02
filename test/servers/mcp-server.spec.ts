@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { connect } from "mcp-testing-kit";
 import { MCPServer } from "../../src/servers/mcp-server";
 import * as thoughtspotClient from "../../src/thoughtspot/thoughtspot-client";
+import { ThoughtSpotService } from "../../src/thoughtspot/thoughtspot-service";
 import { MixpanelTracker } from "../../src/metrics/mixpanel/mixpanel";
 import { StreamingMessagesStorageWithTtl } from "../../src/streaming-message-storage-with-ttl/streaming-message-storage-with-ttl";
 
@@ -724,6 +725,52 @@ describe("MCP Server", () => {
 			expect(result.isError).toBe(true);
 			expect((result.content as any[])[0].text).toBe(
 				"ERROR: Failed to create liveboard",
+			);
+		});
+
+		it("should pass answers with correct shape to fetchTMLAndCreateLiveboard", async () => {
+			await server.init();
+			const { callTool } = connect(server);
+
+			const mockFetchTMLAndCreateLiveboard = vi
+				.spyOn(ThoughtSpotService.prototype, "fetchTMLAndCreateLiveboard")
+				.mockResolvedValue({
+					url: "https://test.thoughtspot.cloud/#/pinboard/liveboard-123",
+					error: null,
+				});
+
+			await callTool("createLiveboard", {
+				name: "Revenue Dashboard",
+				answers: [
+					{
+						question: "What is the total revenue?",
+						session_identifier: "session-123",
+						generation_number: 1,
+					},
+					{
+						question: "How many customers?",
+						session_identifier: "session-456",
+						generation_number: 2,
+					},
+				],
+				noteTile: "<p>Summary</p>",
+			});
+
+			expect(mockFetchTMLAndCreateLiveboard).toHaveBeenCalledWith(
+				"Revenue Dashboard",
+				[
+					{
+						title: "What is the total revenue?",
+						session_identifier: "session-123",
+						generation_number: 1,
+					},
+					{
+						title: "How many customers?",
+						session_identifier: "session-456",
+						generation_number: 2,
+					},
+				],
+				"<p>Summary</p>",
 			);
 		});
 	});

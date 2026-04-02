@@ -243,10 +243,15 @@ export class MCPServer extends BaseMCPServer {
 		const { name, answers, noteTile } = CreateLiveboardSchema.parse(
 			request.params.arguments,
 		);
+		const transformedAnswers: Answer[] = answers.map((answer) => ({
+			title: answer.question,
+			session_identifier: answer.session_identifier,
+			generation_number: answer.generation_number,
+		}));
 		const liveboard =
 			await this.getThoughtSpotService().fetchTMLAndCreateLiveboard(
 				name,
-				answers,
+				transformedAnswers,
 				noteTile,
 			);
 
