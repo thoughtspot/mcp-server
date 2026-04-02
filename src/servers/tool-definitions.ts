@@ -279,6 +279,7 @@ export const toolDefinitionsV1 = [
 			title: "Test Connection",
 			readOnlyHint: true,
 			destructiveHint: false,
+			openWorldHint: false,
 		},
 	},
 	{
@@ -287,8 +288,9 @@ export const toolDefinitionsV1 = [
 		inputSchema: zodToJsonSchema(CreateLiveboardSchema) as ToolInput,
 		annotations: {
 			title: "Create Liveboard from Answers",
-			readOnlyHint: true,
+			readOnlyHint: false,
 			destructiveHint: false,
+			openWorldHint: false,
 		},
 	},
 	{
@@ -300,6 +302,7 @@ export const toolDefinitionsV1 = [
 			title: "Get Data Source Suggestions for a Query",
 			readOnlyHint: true,
 			destructiveHint: false,
+			openWorldHint: false,
 		},
 	},
 	{
@@ -313,6 +316,7 @@ export const toolDefinitionsV1 = [
 			title: "Get Relevant Questions for a Query",
 			readOnlyHint: true,
 			destructiveHint: false,
+			openWorldHint: false,
 		},
 	},
 	{
@@ -323,6 +327,7 @@ export const toolDefinitionsV1 = [
 			title: "Get Answer for a Question",
 			readOnlyHint: true,
 			destructiveHint: false,
+			openWorldHint: false,
 		},
 	},
 ];
@@ -336,6 +341,7 @@ export const toolDefinitionsV2 = [
 			title: "Check Connectivity",
 			readOnlyHint: true,
 			destructiveHint: false,
+			openWorldHint: false,
 		},
 	},
 	{
@@ -346,22 +352,24 @@ export const toolDefinitionsV2 = [
 		outputSchema: zodToJsonSchema(CreateConversationOutputSchema) as ToolOutput,
 		annotations: {
 			title: "Start Analysis",
-			readOnlyHint: true,
+			readOnlyHint: false,
 			destructiveHint: false,
+			openWorldHint: false,
 		},
 	},
 	{
 		name: ToolName.SendSessionMessage,
 		description:
-			"Send a message to a session with ThoughtSpot’s analytics agent. The agent may take some time to think and generate a response, so the response will not be returned immediately. Instead, use the `get_session_updates` tool to query for the latest updates on the session. After the agent finishes responding (when `get_session_updates` returns `is_done: true`), you can send another message to the same session to ask follow-up questions without creating a new session.",
+			"Send a message to a session with ThoughtSpot's analytics agent. The agent may take some time to think and generate a response, so the response will not be returned immediately. Instead, use the `get_session_updates` tool to query for the latest updates on the session. After the agent finishes responding (when `get_session_updates` returns `is_done: true`), you can send another message to the same session to ask follow-up questions without creating a new session.",
 		inputSchema: zodToJsonSchema(SendConversationMessageSchema) as ToolInput,
 		outputSchema: zodToJsonSchema(
 			SendConversationMessageOutputSchema,
 		) as ToolOutput,
 		annotations: {
 			title: "Send Analysis Request",
-			readOnlyHint: true,
+			readOnlyHint: false,
 			destructiveHint: false,
+			openWorldHint: false,
 		},
 	},
 	{
@@ -376,6 +384,7 @@ export const toolDefinitionsV2 = [
 			title: "Check Analysis Updates",
 			readOnlyHint: true,
 			destructiveHint: false,
+			openWorldHint: false,
 		},
 	},
 	{

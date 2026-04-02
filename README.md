@@ -15,11 +15,14 @@ Learn more about [ThoughtSpot](https://thoughtspot.com).
 
 Join our [Discord](https://developers.thoughtspot.com/join-discord) to get support.
 
+See our privacy statement [here](https://www.thoughtspot.com/privacy-statement).
+
 ## Table of Contents
 
 - [Connect](#connect)
 - [Usage](#usage)
 - [Demo video](#demo)
+- [Usage Examples](#usage-examples)
 - [Usage in APIs](#usage-in-apis)
   - [OpenAI / ChatGPT](#openai-responses-api)
   - [Claude](#claude-mcp-connector)
@@ -84,6 +87,36 @@ Here is a demo video using Claude Desktop.
 https://github.com/user-attachments/assets/72a5383a-7b2a-4987-857a-b6218d7eea22
 
 Watch on [Loom](https://www.loom.com/share/433988d98a7b41fb8df2239da014169a?sid=ef2032a2-6e9b-4902-bef0-57df5623963e)
+
+## Usage Examples
+
+The following examples show a single conversation that builds progressively,
+starting from data discovery through to a finished Liveboard.
+
+### Example 1: Find the right data source
+**User prompt:** "What data sources are available for analyzing sales performance?"
+
+**What happens:**
+- Server searches available ThoughtSpot data sources and returns the most relevant
+  matches ranked by confidence score
+- If the top two results are within 0.3 confidence of each other, the user is
+  prompted to pick one
+- Otherwise, the highest confidence source is selected automatically
+
+### Example 2: Explore top-selling products
+**User prompt:** "What are my top selling products this year?"
+
+**What happens:**
+- Using the selected data source, the server decomposes the question
+  into sub-questions like "total sales by product ranked highest to lowest this year"
+- Returns data with product names and sales figures, plus an inline chart
+
+### Example 3: Build a multi-metric Liveboard
+**User prompt:** "Create a Liveboard for me from the findings"
+
+**What happens:**
+- Using the generated answers, creates a named ThoughtSpot Liveboard with
+  all charts pinned and returns a link to the Liveboard
 
 ## Usage in APIs
 

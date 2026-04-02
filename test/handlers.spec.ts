@@ -107,7 +107,11 @@ describe("Handlers", () => {
 			const mockOAuthProvider = {
 				parseAuthRequest: vi
 					.fn()
-					.mockResolvedValue({ clientId: "test-client" }),
+					.mockResolvedValue({
+						clientId: "test-client",
+						codeChallenge: "test-code-challenge",
+						codeChallengeMethod: "S256",
+					}),
 				lookupClient: vi.fn().mockResolvedValue({
 					clientId: "test-client",
 					clientName: "Test Client",
