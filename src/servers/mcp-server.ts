@@ -291,12 +291,13 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 	async callSendConversationMessage(
 		request: z.infer<typeof CallToolRequestSchema>,
 	) {
-		const { analytical_session_id, message } =
+		const { analytical_session_id, message, additional_context } =
 			SendConversationMessageSchema.parse(request.params.arguments);
 		await this.getThoughtSpotService().sendAgentConversationMessageStreaming(
 			analytical_session_id,
 			message,
 			this.streamingMessageStorage,
+			additional_context,
 		);
 
 		return this.createStructuredContentSuccessResponse(

@@ -455,6 +455,96 @@ describe("thoughtspot-service", () => {
 				),
 			).rejects.toThrow("Streaming API Error");
 		});
+
+		it("should append additionalContext to the message when provided", async () => {
+			vi.useFakeTimers();
+
+			const encoder = new TextEncoder();
+			const reader = {
+				read: vi
+					.fn()
+					.mockResolvedValueOnce({
+						done: false,
+						value: encoder.encode(
+							'data: [{"type":"text","content":"Hello"}]\n',
+						),
+					})
+					.mockResolvedValueOnce({ done: true, value: undefined }),
+			};
+
+			mockClient.sendAgentConversationMessageStreaming = vi
+				.fn()
+				.mockResolvedValue({
+					body: { getReader: vi.fn().mockReturnValue(reader) },
+				});
+
+			const streamingMessageStorage = {
+				appendMessagesAndRestartTtl: vi.fn().mockResolvedValue(undefined),
+			} as any;
+
+			const service = new ThoughtSpotService(mockClient);
+			await service.sendAgentConversationMessageStreaming(
+				"conv-123",
+				"Show me revenue",
+				streamingMessageStorage,
+				"User is in the EMEA region",
+			);
+
+			expect(
+				mockClient.sendAgentConversationMessageStreaming,
+			).toHaveBeenCalledWith({
+				conversation_identifier: "conv-123",
+				message:
+					"Show me revenue\n\nAdditional Context:\nUser is in the EMEA region",
+			});
+
+			await vi.runAllTimersAsync();
+			vi.useRealTimers();
+		});
+
+		it("should send the message unchanged when additionalContext is not provided", async () => {
+			vi.useFakeTimers();
+
+			const encoder = new TextEncoder();
+			const reader = {
+				read: vi
+					.fn()
+					.mockResolvedValueOnce({
+						done: false,
+						value: encoder.encode(
+							'data: [{"type":"text","content":"Hello"}]\n',
+						),
+					})
+					.mockResolvedValueOnce({ done: true, value: undefined }),
+			};
+
+			mockClient.sendAgentConversationMessageStreaming = vi
+				.fn()
+				.mockResolvedValue({
+					body: { getReader: vi.fn().mockReturnValue(reader) },
+				});
+
+			const streamingMessageStorage = {
+				appendMessagesAndRestartTtl: vi.fn().mockResolvedValue(undefined),
+			} as any;
+
+			const service = new ThoughtSpotService(mockClient);
+			await service.sendAgentConversationMessageStreaming(
+				"conv-123",
+				"Show me revenue",
+				streamingMessageStorage,
+			);
+
+			expect(
+				mockClient.sendAgentConversationMessageStreaming,
+			).toHaveBeenCalledWith({
+				conversation_identifier: "conv-123",
+				message: "Show me revenue",
+			});
+
+			await vi.runAllTimersAsync();
+			vi.useRealTimers();
+		});
 	});
 
 	describe("getAnswerForQuestion", () => {
