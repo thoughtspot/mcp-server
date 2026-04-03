@@ -10,7 +10,11 @@ import type {
 import YAML from "yaml";
 import { of } from "rxjs";
 import type { SessionInfo, DataSourceSuggestionResponse } from "./types";
+import { nanoid } from "nanoid";
 
+/*
+ * Inject custom handlers into the ThoughtSpot client
+ */
 export const getThoughtSpotClient = (
 	instanceUrl: string,
 	bearerToken: string,
@@ -35,7 +39,6 @@ export const getThoughtSpotClient = (
 	(client as any).instanceUrl = instanceUrl;
 	addExportUnsavedAnswerTML(client, instanceUrl, bearerToken);
 	addGetSessionInfo(client, instanceUrl, bearerToken);
-	addQueryGetDataSourceSuggestions(client, instanceUrl, bearerToken);
 	addGetAnswerSession(client, instanceUrl, bearerToken);
 	addCreateAgentConversationWithAutoMode(client, instanceUrl, bearerToken);
 	addSendAgentConversationMessageStreaming(client, instanceUrl, bearerToken);
@@ -62,7 +65,9 @@ mutation GetUnsavedAnswerTML($session: BachSessionIdInput!, $exportDependencies:
   }
 }`;
 
-// This is a workaround until we get the public API for this
+/*
+ * Using custom handler because we don't have a public API for this
+ */
 function addExportUnsavedAnswerTML(
 	client: any,
 	instanceUrl: string,
@@ -100,6 +105,9 @@ function addExportUnsavedAnswerTML(
 	};
 }
 
+/*
+ * Using custom handler because we don't have a public API for this
+ */
 async function addGetSessionInfo(
 	client: any,
 	instanceUrl: string,
@@ -121,55 +129,6 @@ async function addGetSessionInfo(
 		const data: any = await response.json();
 		const info = data.info;
 		return info;
-	};
-}
-
-const getDataSourceSuggestionsQuery = `
-query QueryGetDataSourceSuggestions($request: Input_eureka_DataSourceSuggestionRequest) {
-  queryGetDataSourceSuggestions(request: $request) {
-    dataSources {
-      confidence
-      header {
-        description
-        displayName
-        guid
-      }
-      llmReasoning
-    }
-  }
-}`;
-
-// This is a workaround until we get the public API for this
-function addQueryGetDataSourceSuggestions(
-	client: any,
-	instanceUrl: string,
-	token: string,
-) {
-	(client as any).queryGetDataSourceSuggestions = async (
-		query: string,
-	): Promise<DataSourceSuggestionResponse> => {
-		const endpoint = "/prism/";
-		const fetchOptions = {
-			method: "POST",
-			headers: {
-				"Content-Type": "application/json",
-				Accept: "application/json",
-				"user-agent": "ThoughtSpot-ts-client",
-				Authorization: `Bearer ${token}`,
-			},
-			body: JSON.stringify({
-				query: getDataSourceSuggestionsQuery,
-				variables: {
-					request: {
-						query: query,
-					},
-				},
-				operationName: "QueryGetDataSourceSuggestions",
-			}),
-		};
-		const response = await fetch(`${instanceUrl}${endpoint}`, fetchOptions);
-		const data = (await response.json()) as any;
-		return data.data.queryGetDataSourceSuggestions;
 	};
 }
 
@@ -196,6 +155,9 @@ export interface AnswerSession {
 	};
 }
 
+/*
+ * Using custom handler because we don't have a public API for this
+ */
 function addGetAnswerSession(client: any, instanceUrl: string, token: string) {
 	(client as any).getAnswerSession = async ({
 		session_identifier,
@@ -242,6 +204,9 @@ function addGetAnswerSession(client: any, instanceUrl: string, token: string) {
 	};
 }
 
+/*
+ * Using custom handler because we don't have support for Auto Mode through the public API yet
+ */
 function addCreateAgentConversationWithAutoMode(
 	client: any,
 	instanceUrl: string,
@@ -296,6 +261,12 @@ function addCreateAgentConversationWithAutoMode(
 	};
 }
 
+/*
+ * Using custom handler for two reasons:
+ * 1. The REST API SDK doesn't have streaming response support
+ * 2. The public API itself is exhibiting higher latency than the private API for establishing the
+ *    initial connection, prior to starting the streaming response
+ */
 function addSendAgentConversationMessageStreaming(
 	client: any,
 	instanceUrl: string,
@@ -308,7 +279,8 @@ function addSendAgentConversationMessageStreaming(
 		conversation_identifier: string;
 		message: string;
 	}): Promise<Response> => {
-		const endpoint = "/api/rest/2.0/ai/agent/converse/sse";
+		// Encoding for safety, though for valid IDs it should not make a difference
+		const endpoint = `/conversation/v2/${encodeURIComponent(conversation_identifier)}/query`;
 		const fetchOptions = {
 			method: "POST",
 			headers: {
@@ -318,8 +290,16 @@ function addSendAgentConversationMessageStreaming(
 				Authorization: `Bearer ${token}`,
 			},
 			body: JSON.stringify({
-				conversation_identifier,
-				messages: [message],
+				mode: "spotter", // TODO(Rifdhan) support deep analysis mode
+				id: nanoid(), // TODO(Rifdhan) this will become optional, can remove in the future
+				messages: [
+					{
+						type: "text",
+						// TODO(Rifdhan) this will become optional, can remove in the future
+						id: Math.random().toString(36).substring(2, 12),
+						value: message,
+					},
+				],
 			}),
 		};
 		const response = await fetch(`${instanceUrl}${endpoint}`, fetchOptions);
