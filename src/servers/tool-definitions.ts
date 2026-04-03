@@ -26,7 +26,7 @@ export const GetRelevantQuestionsSchema = z.object({
 	datasourceIds: z
 		.array(z.string())
 		.describe(
-			"The datasources to get questions for, this is the ids of the datasources to get data from. Each id is a GUID string.",
+			"The datasources to get questions for, this is the ids of the datasources to get data from. This field is required. Each id is a GUID string of the format xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx. An example datasource id is 123e4567-e89b-12d3-a456-426614174000. If a datasource name is provided instead of id, use the getDataSourceSuggestions tool to get the corresponding datasource id and use that to get relevant questions.",
 		),
 });
 
@@ -48,8 +48,7 @@ export const GetAnswerSchema = z.object({
 	datasourceId: z
 		.string()
 		.describe(
-			"The datasource to get the answer for, this is the id of the datasource to get data from",
-		),
+			"The datasources to get questions for, this is the ids of the datasources to get data from. This field is required. Each id is a GUID string of the format xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx. An example datasource id is 123e4567-e89b-12d3-a456-426614174000. If a datasource name is provided instead of id, use the getDataSourceSuggestions tool to get the corresponding datasource id and use that to get relevant questions.",		),
 });
 
 export const GetAnswerOutputSchema = z.object({
