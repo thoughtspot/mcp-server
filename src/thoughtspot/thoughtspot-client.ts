@@ -262,15 +262,15 @@ function addCreateAgentConversationWithAutoMode(
 }
 
 /*
- * Using custom handler to generate NanoIDs for agent conversation messages,
- * to ensure uniqueness and avoid collisions,
- * especially in streaming scenarios where multiple messages may be sent in quick succession.
+ * Generator initialized once at module level so the internal buffers and state
+ * are pre-computed once and reused across calls — important in streaming scenarios
+ * where multiple IDs may be generated in quick succession.
  * This will become optional in future
  */
-function getCustomNanoID(alphabet = "_-0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ", size = 12): string {
-	const nanoId = customAlphabet(alphabet, size);
-	return nanoId();
-}
+const generateNanoID = customAlphabet(
+	"_-0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ",
+	12,
+);
 
 /*
  * Using custom handler for two reasons:
@@ -302,7 +302,7 @@ function addSendAgentConversationMessageStreaming(
 			},
 			body: JSON.stringify({
 				mode: "spotter", // TODO(Rifdhan) support deep analysis mode
-				id: getCustomNanoID(),
+				id: generateNanoID(),
 				messages: [
 					{
 						type: "text",
