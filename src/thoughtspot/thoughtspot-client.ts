@@ -9,8 +9,8 @@ import type {
 } from "@thoughtspot/rest-api-sdk";
 import YAML from "yaml";
 import { of } from "rxjs";
-import type { SessionInfo, DataSourceSuggestionResponse } from "./types";
-import { nanoid } from "nanoid";
+import type { SessionInfo } from "./types";
+import { customAlphabet } from "nanoid";
 
 /*
  * Inject custom handlers into the ThoughtSpot client
@@ -262,6 +262,17 @@ function addCreateAgentConversationWithAutoMode(
 }
 
 /*
+ * Using custom handler to generate NanoIDs for agent conversation messages,
+ * to ensure uniqueness and avoid collisions,
+ * especially in streaming scenarios where multiple messages may be sent in quick succession.
+ * This will become optional in future
+ */
+function getCustomNanoID(alphabet = "_-0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ", size = 12): string {
+	const nanoId = customAlphabet(alphabet, size);
+	return nanoId();
+}
+
+/*
  * Using custom handler for two reasons:
  * 1. The REST API SDK doesn't have streaming response support
  * 2. The public API itself is exhibiting higher latency than the private API for establishing the
@@ -291,7 +302,7 @@ function addSendAgentConversationMessageStreaming(
 			},
 			body: JSON.stringify({
 				mode: "spotter", // TODO(Rifdhan) support deep analysis mode
-				id: nanoid(), // TODO(Rifdhan) this will become optional, can remove in the future
+				id: getCustomNanoID(),
 				messages: [
 					{
 						type: "text",
