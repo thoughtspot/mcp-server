@@ -778,6 +778,48 @@ describe("ThoughtSpot Client", () => {
 				mathObject.random = originalMathRandom;
 			}
 		});
+
+		it("should generate id with exactly 12 characters using custom alphabet", async () => {
+			(fetch as any).mockResolvedValue({ ok: true });
+
+			await client.sendAgentConversationMessageStreaming({
+				conversation_identifier: "conv-id",
+				message: "test message",
+			});
+
+			const body = JSON.parse((fetch as any).mock.calls[0][1].body);
+			expect(body.id).toHaveLength(12);
+		});
+
+		it("should generate id using only allowed custom alphabet characters", async () => {
+			(fetch as any).mockResolvedValue({ ok: true });
+
+			await client.sendAgentConversationMessageStreaming({
+				conversation_identifier: "conv-id",
+				message: "test message",
+			});
+
+			const body = JSON.parse((fetch as any).mock.calls[0][1].body);
+			const allowedChars = /^[_\-0-9a-zA-Z]+$/;
+			expect(body.id).toMatch(allowedChars);
+		});
+
+		it("should generate unique ids across consecutive calls to avoid collisions", async () => {
+			(fetch as any).mockResolvedValue({ ok: true });
+
+			await client.sendAgentConversationMessageStreaming({
+				conversation_identifier: "conv-id",
+				message: "first message",
+			});
+			await client.sendAgentConversationMessageStreaming({
+				conversation_identifier: "conv-id",
+				message: "second message",
+			});
+
+			const id1 = JSON.parse((fetch as any).mock.calls[0][1].body).id;
+			const id2 = JSON.parse((fetch as any).mock.calls[1][1].body).id;
+			expect(id1).not.toBe(id2);
+		});
 	});
 
 	describe("GraphQL Queries", () => {
