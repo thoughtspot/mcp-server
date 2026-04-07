@@ -48,7 +48,8 @@ export const GetAnswerSchema = z.object({
 	datasourceId: z
 		.string()
 		.describe(
-			"The datasources to get questions for, this is the ids of the datasources to get data from. This field is required. Each id is a GUID string of the format xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx. An example datasource id is 123e4567-e89b-12d3-a456-426614174000. If a datasource name is provided instead of id, use the getDataSourceSuggestions tool to get the corresponding datasource id and use that to get relevant questions.",		),
+			"The datasources to get questions for, this is the ids of the datasources to get data from. This field is required. Each id is a GUID string of the format xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx. An example datasource id is 123e4567-e89b-12d3-a456-426614174000. If a datasource name is provided instead of id, use the getDataSourceSuggestions tool to get the corresponding datasource id and use that to get relevant questions.",
+		),
 });
 
 export const GetAnswerOutputSchema = z.object({
@@ -73,12 +74,22 @@ export const GetAnswerOutputSchema = z.object({
 		.describe("Information about the fields in the answer"),
 });
 
+export const CheckConnectivitySchema = z.object({});
+
+export const CheckConnectivityOutputSchema = z.object({
+	success: z
+		.boolean()
+		.describe(
+			"Whether the request was successful. If unsuccessful, ask the user to verify their MCP server configuration.",
+		),
+});
+
 export const CreateConversationSchema = z.object({
 	data_source_id: z
 		.string()
 		.optional()
 		.describe(
-			"The data source to query. Provide this when the user has specified or confirmed a data source, or when context makes a particular source obvious. Omit it to let ThoughtSpot automatically select the most relevant source based on the question.",
+			'The ID of the data source to query. Provide this when the user has specified or confirmed a data source, or when context makes a particular source obvious. Omit it to let the Analytics Agent automatically select the most relevant source based on the question. A valid ID follows the following format: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" (for example, "de1b3cfd-1725-400a-b6c7-0cd0f2b70bf1"). If you only have the data source name but not the ID, you can provide it in the `additional_context` field of the `send_session_message` tool instead.',
 		),
 });
 
@@ -86,18 +97,18 @@ export const CreateConversationOutputSchema = z.object({
 	analytical_session_id: z
 		.string()
 		.describe(
-			"Identifier for the session. Use this to send messages or get updates on the session.",
+			"Identifier for the analytical session. Use this to send messages or get updates on the session.",
 		),
 });
 
 export const SendConversationMessageSchema = z.object({
 	analytical_session_id: z
 		.string()
-		.describe("Identifier of the session to send the message to."),
+		.describe("Identifier of the analytical session to send the message to."),
 	message: z
 		.string()
 		.describe(
-			"A natural language analytical question or follow-up to send to the ThoughtSpot agent.",
+			"A natural language analytical question or follow-up to send to the Analytics Agent.",
 		),
 	additional_context: z
 		.string()
@@ -108,26 +119,30 @@ export const SendConversationMessageSchema = z.object({
 });
 
 export const SendConversationMessageOutputSchema = z.object({
-	success: z.boolean().describe("Whether the message was successfully sent."),
+	success: z
+		.boolean()
+		.describe(
+			"Whether the message was successfully sent. If unsuccessful, try sending the message again, or creating a new analytical session.",
+		),
 });
 
 export const GetConversationUpdatesSchema = z.object({
 	analytical_session_id: z
 		.string()
-		.describe("Identifier of the session to get updates from."),
+		.describe("Identifier of the analytical session to get updates from."),
 });
 
 export const ConversationUpdateSchema = z.object({
 	type: z
 		.enum(["text", "text_chunk", "answer"])
 		.describe(
-			"The type of update: `text` or `text_chunk` for a natural language message from the agent, or `answer` for a data visualization with query results. Determines which other fields are populated.",
+			"The type of update: `text` or `text_chunk` for a natural language message from the Analytics Agent, or `answer` for a data visualization with query results. Determines which other fields are populated.",
 		),
 	text: z
 		.string()
 		.optional()
 		.describe(
-			"The text content of the message. Only present when `type` is `text` or `text_chunk`. If `type` is `text_chunk`, combine the chunks of text together to form the complete message.",
+			"The text content of the message. Only present when `type` is `text` or `text_chunk`. If `type` is `text_chunk`, concatenate the chunks of text together in the order received to form the complete message.",
 		),
 	answer_id: z
 		.string()
@@ -145,7 +160,7 @@ export const ConversationUpdateSchema = z.object({
 		.string()
 		.optional()
 		.describe(
-			"The search query ThoughtSpot used to generate the answer. Only present when `type` is `answer`. Useful for explaining to the user what data was queried or diagnosing unexpected results.",
+			"The search query which the Analytics Agent used to generate the answer. Only present when `type` is `answer`. Useful for explaining to the user what data was queried or diagnosing unexpected results.",
 		),
 	iframe_url: z
 		.string()
@@ -159,12 +174,12 @@ export const GetConversationUpdatesOutputSchema = z.object({
 	session_updates: z
 		.array(ConversationUpdateSchema)
 		.describe(
-			"List of updates from the session. This may be an empty list if the agent is still thinking, instead use the `is_done` flag to know whether the agent response is complete.",
+			"List of incremental new updates from the analytical session. Updates returned in a previous response will not be sent again. This may be an empty list if the Analytics Agent is still thinking, instead use the `is_done` flag to know whether the Agent response is complete.",
 		),
 	is_done: z
 		.boolean()
 		.describe(
-			"Whether the ThoughtSpot agent has finished responding. If not `is_done` is false, make another `get_session_updates` call to get the next set of updates.",
+			"Whether the Analytics Agent has finished responding. If `is_done` is false, make another `get_session_updates` call to get the next set of updates.",
 		),
 });
 
@@ -226,30 +241,16 @@ export const AnswerSchema = z.object({
 
 export const CreateDashboardSchema = z.object({
 	title: z.string().describe("Title of the dashboard to be created."),
+	note_tile: z
+		.string()
+		.describe(
+			'Provide a summary of the contents of the dashboard. Fill this with information about the questions asked by the user and the analyses performed to answer those questions. Include any action items or next steps the user should consider taking. The format is raw unescaped HTML, and can include custom styles, text formatting, and colors. Include emojis for visual appeal. At the end, add a line indicating the date the content was generated. The entire content of the `note_tile` should be in a single line with no line breaks. Use <br> or <tab> to add spacing inside the HTML content where needed, but avoid unnecessary whitespace inside the content. Use unescaped raw HTML such as <p> and not &lt;p&gt;. Example content: "<h2>Title of Note Tile</h2><p>Comprehensive summary of questions and answers used to generate the dashboard. Use HTML formatting:<br>- Text styling to highlight <strong>important phrases</strong><br>- 🚀 Emojis for visual appeal<br><br><em style="color: #636e72;">Generated on April 15, 2026</em></p>".',
+		),
 	answers: z
 		.array(AnswerSchema)
-		.describe("List of answers to add to the dashboard."),
-	note_tile: z.string().describe(`
-        Create a summary of the answers to the queries asked by the user along with all the analysis done on the data.
-        The output format is an HTML note tile which can have custom styles and formatting. Use emojis, styling and icons to make it more visually appealing.
-        Follow these MANDATORY rules for styling:
-        - Put the whole note tile in a single line and no line breaks. Also there should be no unnecessary white spaces.
-        - The HTML output in the note tile can have white spaces. Use <br> or <tab> if needed to use white spaces in the note tile.
-        - Use padding, margin and line height to create space between the elements in the note tile and make it more readable.
-
-        Use this as an example(ignore the line breaks and white spaces):
-
-        <h2 class=\"theme-module__editor-h2\" dir=\"ltr\" style=\"text-align: center;\">
-	        <span style=\"white-space: pre-wrap;\">\"Heading of note\"</span>
-        </h2>
-        <p class=\"theme-module__editor-paragraph\" dir=\"ltr\">
-            <span style=\"white-space: pre-wrap;\">
-                Comprehensive summary of analysis done and answers to queries asked by user. Use colors and styles in the html to make it more readable and visually appealing.
-                Also add the date and time of the analysis to the note tile in the header of the note tile. The format should be like this: Generated on <date> <time>
-            </span>
-        </p>
-        <div class=\"pinboard-note-tile-module__noteTileBg editor-module__bgNode\"></div>
-        `),
+		.describe(
+			"List of answers to add to the dashboard. The order of tiles on the dashboard will match the order of answers in this list (top to bottom, left to right).",
+		),
 });
 
 export const CreateDashboardOutputSchema = z.object({
@@ -340,8 +341,10 @@ export const toolDefinitionsV1 = [
 export const toolDefinitionsV2 = [
 	{
 		name: ToolName.CheckConnectivity,
-		description: "Ping tool to test connectivity and authentication",
-		inputSchema: zodToJsonSchema(PingSchema) as ToolInput,
+		description:
+			"Ping tool to test connectivity and authentication. This can be used if other tool calls are failing to verify if the connection is working.",
+		inputSchema: zodToJsonSchema(CheckConnectivitySchema) as ToolInput,
+		outputSchema: zodToJsonSchema(CheckConnectivityOutputSchema) as ToolOutput,
 		annotations: {
 			title: "Check Connectivity",
 			readOnlyHint: true,
@@ -352,11 +355,11 @@ export const toolDefinitionsV2 = [
 	{
 		name: ToolName.CreateAnalysisSession,
 		description:
-			"Start an analytical session with ThoughtSpot's analytics agent. This is the first step in a three-step workflow: create a session, send a message, then poll for updates. Once created, use the returned `analytical_session_id` to send analytical questions via `send_session_message` and retrieve answers via `get_session_updates`. Sessions are conversational, so you can ask follow-up questions in the same session without creating a new one.",
+			"Start an analytical session with the Analytics Agent. This is the first step in a three-step workflow: create a session, send a message, then poll for updates. Once created, use the returned `analytical_session_id` to send analytical questions via `send_session_message` and retrieve answers via `get_session_updates`. Sessions are conversational, so you can ask follow-up questions in the same session without creating a new one. Using a single analytical session is preferable, because it reuses the same data source selection.",
 		inputSchema: zodToJsonSchema(CreateConversationSchema) as ToolInput,
 		outputSchema: zodToJsonSchema(CreateConversationOutputSchema) as ToolOutput,
 		annotations: {
-			title: "Start Analysis",
+			title: "Create Analysis Session",
 			readOnlyHint: false,
 			destructiveHint: false,
 			openWorldHint: false,
@@ -365,13 +368,13 @@ export const toolDefinitionsV2 = [
 	{
 		name: ToolName.SendSessionMessage,
 		description:
-			"Send a message to a session with ThoughtSpot's analytics agent. The agent may take some time to think and generate a response, so the response will not be returned immediately. Instead, use the `get_session_updates` tool to query for the latest updates on the session. After the agent finishes responding (when `get_session_updates` returns `is_done: true`), you can send another message to the same session to ask follow-up questions without creating a new session.",
+			"Send a message to a session with the Analytics Agent. The Agent may take some time to think and generate a response, so the response will not be returned immediately. Instead, use the `get_session_updates` tool to query for the latest updates on the session. After the Agent finishes responding (when `get_session_updates` returns `is_done: true`), you can send another message to the same session to ask follow-up questions without creating a new session. Do not send a new message until the Agent has finished responding to the previous message (when `get_session_updates` returns `is_done: true`). If the user wants to create a dashboard, do not send a message with that request; instead use the `create_dashboard` tool.",
 		inputSchema: zodToJsonSchema(SendConversationMessageSchema) as ToolInput,
 		outputSchema: zodToJsonSchema(
 			SendConversationMessageOutputSchema,
 		) as ToolOutput,
 		annotations: {
-			title: "Send Analysis Request",
+			title: "Send Analysis Session Message",
 			readOnlyHint: false,
 			destructiveHint: false,
 			openWorldHint: false,
@@ -380,13 +383,13 @@ export const toolDefinitionsV2 = [
 	{
 		name: ToolName.GetSessionUpdates,
 		description:
-			"Get the latest updates from a ThoughtSpot analytics session. Call this after `send_session_message` to retrieve the agent's response. If `is_done` is false, call this tool again to continue polling, as the agent is still generating a response. An empty `session_updates` list while `is_done` is false is normal; it means the agent is still thinking. When `is_done` is true, the agent has finished and the results in `session_updates` are complete, so you can present them to the user or send a follow-up message in the same session.",
+			"Get the latest updates from the Analytics Agent. Call this after `send_session_message` to retrieve the Agent's response. If `is_done` is false, call this tool again to continue polling, as the Agent is still generating a response. Even if `is_done` is false, you can use the updates to show status updates or progress to the user. An empty `session_updates` list while `is_done` is false is normal; it means the Agent is still thinking. When `is_done` is true, the Agent has finished and the results in `session_updates` are complete, so you can present them to the user. You can also send a follow-up message in the same session after `is_done` is true.",
 		inputSchema: zodToJsonSchema(GetConversationUpdatesSchema) as ToolInput,
 		outputSchema: zodToJsonSchema(
 			GetConversationUpdatesOutputSchema,
 		) as ToolOutput,
 		annotations: {
-			title: "Check Analysis Updates",
+			title: "Get Analysis Session Updates",
 			readOnlyHint: true,
 			destructiveHint: false,
 			openWorldHint: false,
@@ -394,7 +397,8 @@ export const toolDefinitionsV2 = [
 	},
 	{
 		name: ToolName.CreateDashboard,
-		description: "Create a dashboard from a list of answers.",
+		description:
+			"Create a dashboard from a list of answers, allowing the user to revisit the results later. Use this if the user asks for a dashboard, or asks to save the results from the analysis.",
 		inputSchema: zodToJsonSchema(CreateDashboardSchema) as ToolInput,
 		outputSchema: zodToJsonSchema(CreateDashboardOutputSchema) as ToolOutput,
 		annotations: {

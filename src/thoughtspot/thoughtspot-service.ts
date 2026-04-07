@@ -565,7 +565,7 @@ export class ThoughtSpotService {
 						if (answer.note_tile) {
 							return {
 								visualization_id: `Viz_${idx}`,
-								size: "LARGE",
+								size: "MEDIUM",
 							};
 						}
 						return {

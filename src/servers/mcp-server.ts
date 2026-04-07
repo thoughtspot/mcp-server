@@ -101,9 +101,7 @@ export class MCPServer extends BaseMCPServer {
 
 		switch (name) {
 			// TODO(Rifdhan) separate tools
-			case ToolName.Ping:
-			case ToolName.CheckConnectivity: {
-				console.log("Received Ping request");
+			case ToolName.Ping: {
 				if (this.ctx.props.accessToken && this.ctx.props.instanceUrl) {
 					return this.createSuccessResponse("Pong", "Ping successful");
 				}
@@ -124,6 +122,19 @@ export class MCPServer extends BaseMCPServer {
 
 			case ToolName.GetDataSourceSuggestions: {
 				return this.callGetDataSourceSuggestions(request);
+			}
+
+			case ToolName.CheckConnectivity: {
+				if (!this.ctx.props.accessToken || !this.ctx.props.instanceUrl) {
+					return this.createErrorResponse(
+						"Not authenticated",
+						"Check connectivity failed",
+					);
+				}
+				return this.createStructuredContentSuccessResponse(
+					{ success: true },
+					"Check connectivity successful",
+				);
 			}
 
 			case ToolName.CreateAnalysisSession: {
