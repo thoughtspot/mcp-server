@@ -314,25 +314,44 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			request.params.arguments,
 		);
 
-		// If no updates yet, poll for up to 10 seconds before returning an empty response
-		let messagesState: StreamingMessagesState;
-		for (let i = 0; i < 10; i++) {
-			messagesState =
+		// Rules when fetching conversation updates:
+		// 1. Poll for updates every 500 ms
+		// 2. If conversation is marked done, return immediately
+		// 3. Wait for at least 3 seconds before returning any other updates. We want to avoid
+		//    returning too quickly, which leads to too many get updates tool calls.
+		// 4. If there are no updates after waiting for 10 seconds, return an empty response. We
+		//    want to avoid waiting indefinitely in case of errors or unexpected problems.
+		const messagesState: StreamingMessagesState = {
+			messages: [],
+			isDone: false,
+		};
+		for (let i = 0; i < 20; i++) {
+			// Get latest updates
+			const newMessagesState =
 				await this.streamingMessageStorage.getNewMessagesAndUpdateBookmark(
 					analytical_session_id,
 				);
+			messagesState.messages.push(...newMessagesState.messages);
+			messagesState.isDone = newMessagesState.isDone;
 
-			if (messagesState.messages.length > 0 || messagesState.isDone) {
+			// If conversation is marked done, return immediately
+			if (messagesState.isDone) {
 				break;
 			}
 
-			await new Promise((resolve) => setTimeout(resolve, 1000));
+			// If we have new messages and waited for at least 3 seconds, return the updates
+			if (messagesState.messages.length > 0 && i >= 6) {
+				break;
+			}
+
+			// Wait 500 ms before polling for updates again
+			await new Promise((resolve) => setTimeout(resolve, 500));
 		}
 
 		return this.createStructuredContentSuccessResponse(
 			{
-				session_updates: messagesState!.messages,
-				is_done: messagesState!.isDone,
+				session_updates: messagesState.messages,
+				is_done: messagesState.isDone,
 			},
 			"Conversation updates retrieved successfully",
 		);
