@@ -13,6 +13,20 @@ vi.mock("../../src/metrics/mixpanel/mixpanel", () => ({
 	})),
 }));
 
+// Mock StreamingMessagesStorageWithTtl to avoid DurableObjectStorage dependency
+vi.mock(
+	"../../src/streaming-message-storage-with-ttl/streaming-message-storage-with-ttl",
+	() => ({
+		StreamingMessagesStorageWithTtl: vi.fn().mockImplementation(() => ({
+			initializeConversation: vi.fn().mockResolvedValue(undefined),
+			appendMessagesAndRestartTtl: vi.fn().mockResolvedValue(undefined),
+			getNewMessagesAndUpdateBookmark: vi
+				.fn()
+				.mockResolvedValue({ messages: [], isDone: true }),
+		})),
+	}),
+);
+
 describe("MCP Server", () => {
 	let server: MCPServer;
 	let mockProps: any;

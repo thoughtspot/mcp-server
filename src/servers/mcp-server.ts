@@ -277,10 +277,14 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		const { data_source_id } = CreateConversationSchema.parse(
 			request.params.arguments,
 		);
+
 		const response =
 			await this.getThoughtSpotService().createAgentConversation(
 				data_source_id,
 			);
+		// Conversation is initialized in streamingMessageStorage from callSendConversationMessage,
+		// since that is the common entrypoint for both initial messages and followup messages.
+
 		return this.createStructuredContentSuccessResponse(
 			{ analytical_session_id: response.conversation_id },
 			"Conversation created successfully",
@@ -293,6 +297,18 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 	) {
 		const { analytical_session_id, message, additional_context } =
 			SendConversationMessageSchema.parse(request.params.arguments);
+
+		try {
+			await this.streamingMessageStorage.initializeConversation(
+				analytical_session_id,
+			);
+		} catch (error) {
+			return this.createErrorResponse(
+				"The analytical session has an ongoing response to the previous message. Please continue to call `get_session_updates` until `is_done` is true before sending a followup message.",
+				`Error sending message to conversation ${analytical_session_id}: ${error}`,
+			);
+		}
+
 		await this.getThoughtSpotService().sendAgentConversationMessageStreaming(
 			analytical_session_id,
 			message,
