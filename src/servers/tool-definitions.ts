@@ -74,7 +74,7 @@ export const GetAnswerOutputSchema = z.object({
 		.describe("Information about the fields in the answer"),
 });
 
-export const CheckConnectivitySchema = z.object({});
+export const CheckConnectivityInputSchema = z.object({});
 
 export const CheckConnectivityOutputSchema = z.object({
 	success: z
@@ -84,7 +84,7 @@ export const CheckConnectivityOutputSchema = z.object({
 		),
 });
 
-export const CreateConversationSchema = z.object({
+export const CreateAnalysisSessionInputSchema = z.object({
 	data_source_id: z
 		.string()
 		.optional()
@@ -93,7 +93,7 @@ export const CreateConversationSchema = z.object({
 		),
 });
 
-export const CreateConversationOutputSchema = z.object({
+export const CreateAnalysisSessionOutputSchema = z.object({
 	analytical_session_id: z
 		.string()
 		.describe(
@@ -101,7 +101,7 @@ export const CreateConversationOutputSchema = z.object({
 		),
 });
 
-export const SendConversationMessageSchema = z.object({
+export const SendSessionMessageInputSchema = z.object({
 	analytical_session_id: z
 		.string()
 		.describe("Identifier of the analytical session to send the message to."),
@@ -118,7 +118,7 @@ export const SendConversationMessageSchema = z.object({
 		),
 });
 
-export const SendConversationMessageOutputSchema = z.object({
+export const SendSessionMessageOutputSchema = z.object({
 	success: z
 		.boolean()
 		.describe(
@@ -126,7 +126,7 @@ export const SendConversationMessageOutputSchema = z.object({
 		),
 });
 
-export const GetConversationUpdatesSchema = z.object({
+export const GetSessionUpdatesInputSchema = z.object({
 	analytical_session_id: z
 		.string()
 		.describe("Identifier of the analytical session to get updates from."),
@@ -170,7 +170,7 @@ export const ConversationUpdateSchema = z.object({
 		),
 });
 
-export const GetConversationUpdatesOutputSchema = z.object({
+export const GetSessionUpdatesOutputSchema = z.object({
 	session_updates: z
 		.array(ConversationUpdateSchema)
 		.describe(
@@ -239,7 +239,7 @@ export const AnswerSchema = z.object({
 		),
 });
 
-export const CreateDashboardSchema = z.object({
+export const CreateDashboardInputSchema = z.object({
 	title: z.string().describe("Title of the dashboard to be created."),
 	note_tile: z
 		.string()
@@ -343,7 +343,7 @@ export const toolDefinitionsV2 = [
 		name: ToolName.CheckConnectivity,
 		description:
 			"Ping tool to test connectivity and authentication. This can be used if other tool calls are failing to verify if the connection is working.",
-		inputSchema: zodToJsonSchema(CheckConnectivitySchema) as ToolInput,
+		inputSchema: zodToJsonSchema(CheckConnectivityInputSchema) as ToolInput,
 		outputSchema: zodToJsonSchema(CheckConnectivityOutputSchema) as ToolOutput,
 		annotations: {
 			title: "Check Connectivity",
@@ -356,8 +356,10 @@ export const toolDefinitionsV2 = [
 		name: ToolName.CreateAnalysisSession,
 		description:
 			"Start an analytical session with the Analytics Agent. This is the first step in a three-step workflow: create a session, send a message, then poll for updates. Once created, use the returned `analytical_session_id` to send analytical questions via `send_session_message` and retrieve answers via `get_session_updates`. Sessions are conversational, so you can ask follow-up questions in the same session without creating a new one. Using a single analytical session is preferable, because it reuses the same data source selection.",
-		inputSchema: zodToJsonSchema(CreateConversationSchema) as ToolInput,
-		outputSchema: zodToJsonSchema(CreateConversationOutputSchema) as ToolOutput,
+		inputSchema: zodToJsonSchema(CreateAnalysisSessionInputSchema) as ToolInput,
+		outputSchema: zodToJsonSchema(
+			CreateAnalysisSessionOutputSchema,
+		) as ToolOutput,
 		annotations: {
 			title: "Create Analysis Session",
 			readOnlyHint: false,
@@ -369,10 +371,8 @@ export const toolDefinitionsV2 = [
 		name: ToolName.SendSessionMessage,
 		description:
 			"Send a message to a session with the Analytics Agent. The Agent may take some time to think and generate a response, so the response will not be returned immediately. Instead, use the `get_session_updates` tool to query for the latest updates on the session. After the Agent finishes responding (when `get_session_updates` returns `is_done: true`), you can send another message to the same session to ask follow-up questions without creating a new session. Do not send a new message until the Agent has finished responding to the previous message (when `get_session_updates` returns `is_done: true`). If the user wants to create a dashboard, do not send a message with that request; instead use the `create_dashboard` tool.",
-		inputSchema: zodToJsonSchema(SendConversationMessageSchema) as ToolInput,
-		outputSchema: zodToJsonSchema(
-			SendConversationMessageOutputSchema,
-		) as ToolOutput,
+		inputSchema: zodToJsonSchema(SendSessionMessageInputSchema) as ToolInput,
+		outputSchema: zodToJsonSchema(SendSessionMessageOutputSchema) as ToolOutput,
 		annotations: {
 			title: "Send Analysis Session Message",
 			readOnlyHint: false,
@@ -384,10 +384,8 @@ export const toolDefinitionsV2 = [
 		name: ToolName.GetSessionUpdates,
 		description:
 			"Get the latest updates from the Analytics Agent. Call this after `send_session_message` to retrieve the Agent's response. If `is_done` is false, call this tool again to continue polling, as the Agent is still generating a response. Even if `is_done` is false, you can use the updates to show status updates or progress to the user. An empty `session_updates` list while `is_done` is false is normal; it means the Agent is still thinking. When `is_done` is true, the Agent has finished and the results in `session_updates` are complete, so you can present them to the user. You can also send a follow-up message in the same session after `is_done` is true.",
-		inputSchema: zodToJsonSchema(GetConversationUpdatesSchema) as ToolInput,
-		outputSchema: zodToJsonSchema(
-			GetConversationUpdatesOutputSchema,
-		) as ToolOutput,
+		inputSchema: zodToJsonSchema(GetSessionUpdatesInputSchema) as ToolInput,
+		outputSchema: zodToJsonSchema(GetSessionUpdatesOutputSchema) as ToolOutput,
 		annotations: {
 			title: "Get Analysis Session Updates",
 			readOnlyHint: true,
@@ -399,7 +397,7 @@ export const toolDefinitionsV2 = [
 		name: ToolName.CreateDashboard,
 		description:
 			"Create a dashboard from a list of answers, allowing the user to revisit the results later. Use this if the user asks for a dashboard, or asks to save the results from the analysis.",
-		inputSchema: zodToJsonSchema(CreateDashboardSchema) as ToolInput,
+		inputSchema: zodToJsonSchema(CreateDashboardInputSchema) as ToolInput,
 		outputSchema: zodToJsonSchema(CreateDashboardOutputSchema) as ToolOutput,
 		annotations: {
 			title: "Create Dashboard",
