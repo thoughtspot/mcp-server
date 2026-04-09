@@ -334,7 +334,7 @@ describe("MCP Server", () => {
 
 			expect(result.isError).toBe(true);
 			expect((result.content as any[])[0].text).toBe(
-				"ERROR: Not authenticated",
+				"ERROR: Access token or instance URL not valid",
 			);
 		});
 
@@ -1230,7 +1230,7 @@ describe("MCP Server", () => {
 			await server.init();
 
 			await expect(
-				server.callCreateConversation({
+				server.callCreateAnalysisSession({
 					method: "tools/call",
 					params: { name: "create_analysis_session", arguments: {} },
 				}),

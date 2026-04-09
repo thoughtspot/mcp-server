@@ -16,10 +16,10 @@ import {
 	CreateLiveboardSchema,
 	GetDataSourceSuggestionsSchema,
 	ToolName,
-	CreateConversationSchema,
-	SendConversationMessageSchema,
-	GetConversationUpdatesSchema,
-	CreateDashboardSchema,
+	CreateAnalysisSessionInputSchema,
+	SendSessionMessageInputSchema,
+	GetSessionUpdatesInputSchema,
+	CreateDashboardInputSchema,
 } from "./tool-definitions";
 import type { StreamingMessagesStorageWithTtl } from "../streaming-message-storage-with-ttl/streaming-message-storage-with-ttl";
 import type { Answer, StreamingMessagesState } from "../thoughtspot/types";
@@ -100,7 +100,6 @@ export class MCPServer extends BaseMCPServer {
 		this.trackers.track(TrackEvent.CallTool, { toolName: name });
 
 		switch (name) {
-			// TODO(Rifdhan) separate tools
 			case ToolName.Ping: {
 				if (this.ctx.props.accessToken && this.ctx.props.instanceUrl) {
 					return this.createSuccessResponse("Pong", "Ping successful");
@@ -127,7 +126,7 @@ export class MCPServer extends BaseMCPServer {
 			case ToolName.CheckConnectivity: {
 				if (!this.ctx.props.accessToken || !this.ctx.props.instanceUrl) {
 					return this.createErrorResponse(
-						"Not authenticated",
+						"Access token or instance URL not valid",
 						"Check connectivity failed",
 					);
 				}
@@ -138,15 +137,15 @@ export class MCPServer extends BaseMCPServer {
 			}
 
 			case ToolName.CreateAnalysisSession: {
-				return this.callCreateConversation(request);
+				return this.callCreateAnalysisSession(request);
 			}
 
 			case ToolName.SendSessionMessage: {
-				return this.callSendConversationMessage(request);
+				return this.callSendSessionMessage(request);
 			}
 
 			case ToolName.GetSessionUpdates: {
-				return this.callGetConversationUpdates(request);
+				return this.callGetSessionUpdates(request);
 			}
 
 			case ToolName.CreateDashboard: {
@@ -283,9 +282,11 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		);
 	}
 
-	@WithSpan("call-create-conversation")
-	async callCreateConversation(request: z.infer<typeof CallToolRequestSchema>) {
-		const { data_source_id } = CreateConversationSchema.parse(
+	@WithSpan("call-create-analysis-session")
+	async callCreateAnalysisSession(
+		request: z.infer<typeof CallToolRequestSchema>,
+	) {
+		const { data_source_id } = CreateAnalysisSessionInputSchema.parse(
 			request.params.arguments,
 		);
 
@@ -293,7 +294,7 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			await this.getThoughtSpotService().createAgentConversation(
 				data_source_id,
 			);
-		// Conversation is initialized in streamingMessageStorage from callSendConversationMessage,
+		// Conversation is initialized in streamingMessageStorage from callSendSessionMessage,
 		// since that is the common entrypoint for both initial messages and followup messages.
 
 		return this.createStructuredContentSuccessResponse(
@@ -302,12 +303,10 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		);
 	}
 
-	@WithSpan("call-send-conversation-message")
-	async callSendConversationMessage(
-		request: z.infer<typeof CallToolRequestSchema>,
-	) {
+	@WithSpan("call-send-session-message")
+	async callSendSessionMessage(request: z.infer<typeof CallToolRequestSchema>) {
 		const { analytical_session_id, message, additional_context } =
-			SendConversationMessageSchema.parse(request.params.arguments);
+			SendSessionMessageInputSchema.parse(request.params.arguments);
 
 		try {
 			await this.streamingMessageStorage.initializeConversation(
@@ -333,11 +332,9 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		);
 	}
 
-	@WithSpan("call-get-conversation-updates")
-	async callGetConversationUpdates(
-		request: z.infer<typeof CallToolRequestSchema>,
-	) {
-		const { analytical_session_id } = GetConversationUpdatesSchema.parse(
+	@WithSpan("call-get-session-updates")
+	async callGetSessionUpdates(request: z.infer<typeof CallToolRequestSchema>) {
+		const { analytical_session_id } = GetSessionUpdatesInputSchema.parse(
 			request.params.arguments,
 		);
 
@@ -386,7 +383,7 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 
 	@WithSpan("call-create-dashboard")
 	async callCreateDashboard(request: z.infer<typeof CallToolRequestSchema>) {
-		const { title, answers, note_tile } = CreateDashboardSchema.parse(
+		const { title, answers, note_tile } = CreateDashboardInputSchema.parse(
 			request.params.arguments,
 		);
 

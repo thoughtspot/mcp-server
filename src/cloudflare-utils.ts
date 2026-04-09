@@ -74,6 +74,9 @@ export function instrumentedMCPServer<T extends BaseMCPServer>(
 			await this.cancelSchedule(timerId);
 		}
 
+		/*
+		 * This will be called by the scheduler when a timer gets triggered
+		 */
 		private async onTimerTriggered(conversationId: string): Promise<void> {
 			await this.streamingMessageStorage.onTimerTriggered(conversationId);
 		}
