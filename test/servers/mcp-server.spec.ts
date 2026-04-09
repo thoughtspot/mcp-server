@@ -345,7 +345,7 @@ describe("MCP Server", () => {
 			const result = await callTool("check_connectivity", {});
 
 			expect(result.isError).toBeUndefined();
-			expect((result.content as any[])[0].text).toBe("Pong");
+			expect((result.content as any[])[0].text).toBe('{"success":true}');
 		});
 	});
 
