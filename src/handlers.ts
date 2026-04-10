@@ -329,6 +329,10 @@ app.post("/store-token", async (c) => {
 	}
 });
 
+app.get("/.well-known/openai-apps-challenge", (c) => {
+	return c.text(process.env.OPEN_AI_TOKEN);
+});
+
 app.route("/openapi-spec", openApiSpecHandler);
 
 export default app;
