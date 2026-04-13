@@ -229,7 +229,7 @@ export class MCPServer extends BaseMCPServer {
 
 		if (answer.error) {
 			return this.createErrorResponse(
-				answer.error.message,
+				"Encountered an error while creating the answer. Please check your inputs and try again.",
 				`Error getting answer ${answer.error.message}`,
 			);
 		}
@@ -267,7 +267,7 @@ export class MCPServer extends BaseMCPServer {
 
 		if (liveboard.error) {
 			return this.createErrorResponse(
-				liveboard.error.message,
+				"Encountered an error while creating the liveboard. Please check your inputs and try again.",
 				`Error creating liveboard ${liveboard.error.message}`,
 			);
 		}
@@ -431,7 +431,7 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 
 		if (liveboard.error) {
 			return this.createErrorResponse(
-				liveboard.error.message,
+				"Encountered an error while creating the dashboard. Please check your inputs and try again.",
 				`Error creating dashboard ${liveboard.error.message}`,
 			);
 		}
