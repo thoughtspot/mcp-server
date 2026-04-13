@@ -24,7 +24,6 @@ export class ThoughtSpotService {
 		query?: string,
 	): Promise<DataSource[] | DataSourceSuggestion[] | null> {
 		const span = getActiveSpan();
-		span?.addEvent("discover-data-sources");
 
 		// If a query is provided, use intelligent data source suggestions
 		if (query) {
@@ -184,7 +183,6 @@ export class ThoughtSpotService {
 				"instanceUrl: ",
 				(this.client as any).instanceUrl,
 			);
-			span?.addEvent("get-answer-data");
 			const data = await this.client.exportAnswerReport({
 				session_identifier,
 				generation_number,
@@ -224,7 +222,6 @@ export class ThoughtSpotService {
 
 		try {
 			span?.setAttribute("session_identifier", session_identifier);
-			span?.addEvent("get-answer-tml");
 			console.log("[DEBUG] Getting TML for answer: ", title);
 			const tml = await (this.client as any).exportUnsavedAnswerTML({
 				session_identifier,
@@ -249,10 +246,9 @@ export class ThoughtSpotService {
 		dataSourceId?: string,
 	): Promise<AgentConversation> {
 		const span = trace.getSpan(context.active());
+		span?.setAttribute("data_source_id", dataSourceId ?? "(none)");
 
 		try {
-			span?.addEvent("create-agent-conversation");
-
 			// Use auto mode by default, but support passing an explicit data source context
 			const response = await (
 				this.client as any
@@ -288,10 +284,10 @@ export class ThoughtSpotService {
 		additionalContext?: string | undefined,
 	): Promise<void> {
 		const span = trace.getSpan(context.active());
+		span?.setAttribute("conversation_id", conversationId);
+		span?.setAttribute("has_additional_context", !!additionalContext);
 
 		try {
-			span?.addEvent("send-agent-conversation-message-streaming");
-
 			const finalMessage = additionalContext
 				? `${message}\n\nAdditional Context:\n${additionalContext}`
 				: message;
@@ -305,9 +301,14 @@ export class ThoughtSpotService {
 
 			const reader = response.body?.getReader();
 			if (!reader) {
+				span?.setStatus({
+					code: SpanStatusCode.ERROR,
+					message: "Failed to get reader from response body",
+				});
 				throw new Error("Failed to get reader from response body");
 			}
 
+			// TODO(Rifdhan) need to figure out a story for span tracking of async response
 			setTimeout(async () => {
 				const decoder = new TextDecoder();
 				let buffer = "";
@@ -405,7 +406,6 @@ export class ThoughtSpotService {
 			datasource_id: sourceId,
 			should_get_tml: shouldGetTML,
 		});
-		span?.addEvent("get-answer-for-question");
 
 		console.log(
 			"[DEBUG] Getting answer for sourceId: ",
@@ -549,10 +549,7 @@ export class ThoughtSpotService {
 	@WithSpan("create-liveboard")
 	async createLiveboard(name: string, answers: any[]): Promise<string> {
 		const span = getActiveSpan();
-
-		span?.addEvent("createLiveboard");
 		span?.setAttributes({
-			liveboard_name: name,
 			total_answers: answers.length,
 		});
 

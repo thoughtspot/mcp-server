@@ -7,7 +7,7 @@ import { McpServerError } from "../utils";
 import type { DataSource } from "../thoughtspot/thoughtspot-service";
 import { TrackEvent } from "../metrics";
 import { WithSpan } from "../metrics/tracing/tracing-utils";
-import { SpanStatusCode } from "@opentelemetry/api";
+import { context, SpanStatusCode, trace } from "@opentelemetry/api";
 import { BaseMCPServer, type Context } from "./mcp-server-base";
 import { resolveApiVersion } from "./version-registry";
 import {
@@ -286,14 +286,18 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 	async callCreateAnalysisSession(
 		request: z.infer<typeof CallToolRequestSchema>,
 	) {
+		const span = trace.getSpan(context.active());
 		const { data_source_id } = CreateAnalysisSessionInputSchema.parse(
 			request.params.arguments,
 		);
+		span?.setAttribute("data_source_id", data_source_id ?? "(none)");
 
 		const response =
 			await this.getThoughtSpotService().createAgentConversation(
 				data_source_id,
 			);
+		span?.setAttribute("analytical_session_id", response.conversation_id);
+
 		// Conversation is initialized in streamingMessageStorage from callSendSessionMessage,
 		// since that is the common entrypoint for both initial messages and followup messages.
 
@@ -305,8 +309,11 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 
 	@WithSpan("call-send-session-message")
 	async callSendSessionMessage(request: z.infer<typeof CallToolRequestSchema>) {
+		const span = trace.getSpan(context.active());
 		const { analytical_session_id, message, additional_context } =
 			SendSessionMessageInputSchema.parse(request.params.arguments);
+		span?.setAttribute("analytical_session_id", analytical_session_id);
+		span?.setAttribute("has_additional_context", !!additional_context);
 
 		try {
 			await this.streamingMessageStorage.initializeConversation(
@@ -334,9 +341,11 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 
 	@WithSpan("call-get-session-updates")
 	async callGetSessionUpdates(request: z.infer<typeof CallToolRequestSchema>) {
+		const span = trace.getSpan(context.active());
 		const { analytical_session_id } = GetSessionUpdatesInputSchema.parse(
 			request.params.arguments,
 		);
+		span?.setAttribute("analytical_session_id", analytical_session_id);
 
 		// Rules when fetching conversation updates:
 		// 1. Poll for updates every 500 ms
@@ -349,7 +358,8 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			messages: [],
 			isDone: false,
 		};
-		for (let i = 0; i < 20; i++) {
+		let i = 0;
+		for (; i < 20; i++) {
 			// Get latest updates
 			const newMessagesState =
 				await this.streamingMessageStorage.getNewMessagesAndUpdateBookmark(
@@ -371,6 +381,9 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			// Wait 500 ms before polling for updates again
 			await new Promise((resolve) => setTimeout(resolve, 500));
 		}
+		span?.setAttribute("total_wait_time_ms", i * 500);
+		span?.setAttribute("total_session_updates", messagesState.messages.length);
+		span?.setAttribute("is_done", messagesState.isDone);
 
 		return this.createStructuredContentSuccessResponse(
 			{
@@ -383,9 +396,11 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 
 	@WithSpan("call-create-dashboard")
 	async callCreateDashboard(request: z.infer<typeof CallToolRequestSchema>) {
+		const span = trace.getSpan(context.active());
 		const { title, answers, note_tile } = CreateDashboardInputSchema.parse(
 			request.params.arguments,
 		);
+		span?.setAttribute("total_answers", answers.length);
 
 		let transformedAnswers: Answer[] = [];
 		try {
