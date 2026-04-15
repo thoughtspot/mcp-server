@@ -639,7 +639,7 @@ describe("MCP Server", () => {
 
 			expect(result.isError).toBe(true);
 			expect((result.content as any[])[0].text).toBe(
-				"ERROR: Question not found",
+				"ERROR: Encountered an error while creating the answer. Please check your inputs and try again.",
 			);
 		});
 	});
@@ -738,7 +738,7 @@ describe("MCP Server", () => {
 
 			expect(result.isError).toBe(true);
 			expect((result.content as any[])[0].text).toBe(
-				"ERROR: Failed to create liveboard",
+				"ERROR: Encountered an error while creating the liveboard. Please check your inputs and try again.",
 			);
 		});
 
