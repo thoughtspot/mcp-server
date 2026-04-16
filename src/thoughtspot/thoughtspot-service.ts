@@ -12,6 +12,7 @@ import type {
 	Answer,
 } from "./types";
 import type { StreamingMessagesStorageWithTtl } from "../streaming-message-storage-with-ttl/streaming-message-storage-with-ttl";
+import { processSendAgentConversationMessageStreamingResponse } from "../streaming-utils";
 
 /**
  * Main ThoughtSpot service class using decorator pattern for tracing
@@ -284,8 +285,10 @@ export class ThoughtSpotService {
 		additionalContext?: string | undefined,
 	): Promise<void> {
 		const span = trace.getSpan(context.active());
-		span?.setAttribute("conversation_id", conversationId);
-		span?.setAttribute("has_additional_context", !!additionalContext);
+		span?.setAttributes({
+			conversation_id: conversationId,
+			has_additional_context: !!additionalContext,
+		});
 
 		try {
 			const finalMessage = additionalContext
@@ -308,71 +311,13 @@ export class ThoughtSpotService {
 				throw new Error("Failed to get reader from response body");
 			}
 
-			// TODO(Rifdhan) need to figure out a story for span tracking of async response
-			setTimeout(async () => {
-				const decoder = new TextDecoder();
-				let buffer = "";
-
-				while (true) {
-					const { done, value } = await reader.read();
-					if (done) {
-						await streamingMessageStorage.appendMessagesAndRestartTtl(
-							conversationId,
-							[],
-							true,
-						);
-						break;
-					}
-
-					buffer += decoder.decode(value, { stream: true });
-					const lines = buffer.split("\n");
-					buffer = lines.pop() || "";
-
-					for (const line of lines) {
-						if (!line.startsWith("data: ")) continue;
-						try {
-							const data = JSON.parse(line.slice(6));
-							const newMessages: Message[] = [];
-							for (const item of data) {
-								if (item.type === "text") {
-									newMessages.push({
-										type: "text",
-										text: item.content,
-									});
-								} else if (item.type === "text-chunk") {
-									newMessages.push({
-										type: "text_chunk",
-										text: item.content,
-									});
-								} else if (item.type === "answer") {
-									const iframeUrl = `${(this.client as any).instanceUrl}/?tsmcp=true#/embed/conv-assist-answer?sessionId=${item.metadata.session_id}&genNo=${item.metadata.gen_no}&acSessionId=${item.metadata.transaction_id}&acGenNo=${item.metadata.generation_number}`;
-									newMessages.push({
-										type: "answer",
-										answer_id: JSON.stringify({
-											session_id: item.metadata.session_id,
-											gen_no: item.metadata.gen_no,
-										}),
-										answer_title: item.metadata.title,
-										answer_query: item.metadata.sage_query,
-										iframe_url: iframeUrl,
-									});
-								} else {
-									console.warn("Unknown event in event stream: ", item);
-								}
-							}
-
-							if (newMessages.length > 0) {
-								await streamingMessageStorage.appendMessagesAndRestartTtl(
-									conversationId,
-									newMessages,
-								);
-							}
-						} catch (error) {
-							console.error("Error while parsing event stream: ", line, error);
-						}
-					}
-				}
-			});
+			// We don't await because we want to process the streaming response asynchronously
+			processSendAgentConversationMessageStreamingResponse(
+				conversationId,
+				reader,
+				streamingMessageStorage,
+				(this.client as any).instanceUrl,
+			);
 
 			span?.setStatus({
 				code: SpanStatusCode.OK,
