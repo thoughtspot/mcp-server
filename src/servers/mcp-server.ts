@@ -312,8 +312,10 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		const span = trace.getSpan(context.active());
 		const { analytical_session_id, message, additional_context } =
 			SendSessionMessageInputSchema.parse(request.params.arguments);
-		span?.setAttribute("analytical_session_id", analytical_session_id);
-		span?.setAttribute("has_additional_context", !!additional_context);
+		span?.setAttributes({
+			analytical_session_id,
+			has_additional_context: !!additional_context,
+		});
 
 		try {
 			await this.streamingMessageStorage.initializeConversation(
@@ -381,9 +383,11 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			// Wait 500 ms before polling for updates again
 			await new Promise((resolve) => setTimeout(resolve, 500));
 		}
-		span?.setAttribute("total_wait_time_ms", i * 500);
-		span?.setAttribute("total_session_updates", messagesState.messages.length);
-		span?.setAttribute("is_done", messagesState.isDone);
+		span?.setAttributes({
+			total_wait_time_ms: i * 500,
+			total_session_updates: messagesState.messages.length,
+			is_done: messagesState.isDone,
+		});
 
 		return this.createStructuredContentSuccessResponse(
 			{
