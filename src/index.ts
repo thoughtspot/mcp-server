@@ -14,6 +14,7 @@ import { MCPServer } from "./servers/mcp-server";
 import { apiServer } from "./servers/api-server";
 import { withBearerHandler } from "./bearer";
 import { OpenAIDeepResearchMCPServer } from "./servers/openai-mcp-server";
+import { StorageHandler } from "./storage-handler";
 
 // OTEL configuration function
 const config: ResolveConfigFn = (env: Env, _trigger) => {
@@ -28,6 +29,8 @@ const config: ResolveConfigFn = (env: Env, _trigger) => {
 
 // Create the instrumented ThoughtSpotMCP for the main export
 export const ThoughtSpotMCP = instrumentedMCPServer(MCPServer, config);
+
+export { StorageHandler };
 
 export const ThoughtSpotOpenAIDeepResearchMCP = instrumentedMCPServer(
 	OpenAIDeepResearchMCPServer,
@@ -77,6 +80,28 @@ const oauthProvider = new OAuthProvider({
 			binding: "OPENAI_DEEP_RESEARCH_MCP_OBJECT",
 		}) as any, // TODO: Remove 'any'
 		"/api": apiServer as any, // TODO: Remove 'any'
+		"/storage": {
+			async fetch(
+				request: Request,
+				env: Env,
+				ctx: ExecutionContext,
+			): Promise<Response> {
+				const url = new URL(request.url);
+				// Expect path: /storage/<userGuid>/<endpoint>
+				const match = url.pathname.match(/^\/storage\/([^\/]+)/);
+				if (!match) {
+					return new Response(
+						JSON.stringify({ error: "Missing userGuid in path" }),
+						{ status: 400, headers: { "Content-Type": "application/json" } },
+					);
+				}
+				const userGuid = match[1];
+				// Each unique userGuid maps to its own DO instance
+				const id = env.STORAGE_OBJECT.idFromName(userGuid);
+				const stub = env.STORAGE_OBJECT.get(id);
+				return stub.fetch(request);
+			},
+		} as any,
 	},
 	defaultHandler: withBearerHandler(handler, ThoughtSpotMCP) as any, // TODO: Remove 'any'
 	authorizeEndpoint: "/authorize",
