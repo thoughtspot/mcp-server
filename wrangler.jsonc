@@ -20,6 +20,10 @@
 			{
 				"class_name": "ThoughtSpotOpenAIDeepResearchMCP",
 				"name": "OPENAI_DEEP_RESEARCH_MCP_OBJECT"
+			},
+			{
+				"class_name": "StorageHandler",
+				"name": "STORAGE_OBJECT"
 			}
 		]
 	},
@@ -34,6 +38,12 @@
 			"tag": "v3",
 			"new_sqlite_classes": [
 				"ThoughtSpotOpenAIDeepResearchMCP"
+			]
+		},
+		{
+			"tag": "v4",
+			"new_sqlite_classes": [
+				"StorageHandler"
 			]
 		}
 	],

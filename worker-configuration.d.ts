@@ -4,12 +4,13 @@
 declare namespace Cloudflare {
 	interface GlobalProps {
 		mainModule: typeof import("./src/index");
-		durableNamespaces: "ThoughtSpotMCP" | "ThoughtSpotOpenAIDeepResearchMCP";
+		durableNamespaces: "ThoughtSpotMCP" | "ThoughtSpotOpenAIDeepResearchMCP" | "StorageHandler";
 	}
 	interface Env {
 		OAUTH_KV: KVNamespace;
 		MCP_OBJECT: DurableObjectNamespace<import("./src/index").ThoughtSpotMCP>;
 		OPENAI_DEEP_RESEARCH_MCP_OBJECT: DurableObjectNamespace<import("./src/index").ThoughtSpotOpenAIDeepResearchMCP>;
+		STORAGE_OBJECT: DurableObjectNamespace<import("./src/index").StorageHandler>;
 		ANALYTICS: AnalyticsEngineDataset;
 		ASSETS: Fetcher;
 	}

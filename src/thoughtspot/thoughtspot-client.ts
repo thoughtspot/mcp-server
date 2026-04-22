@@ -225,6 +225,7 @@ function addCreateAgentConversationWithAutoMode(
 				Accept: "application/json",
 				"user-agent": "ThoughtSpot-ts-client",
 				Authorization: `Bearer ${token}`,
+				traceparent: null,
 			},
 			body: JSON.stringify({
 				context: dataSourceId
@@ -299,6 +300,7 @@ function addSendAgentConversationMessageStreaming(
 				Accept: "text/event-stream",
 				"user-agent": "ThoughtSpot-ts-client",
 				Authorization: `Bearer ${token}`,
+				traceparent: null,
 			},
 			body: JSON.stringify({
 				mode: "spotter", // TODO(Rifdhan) support deep analysis mode

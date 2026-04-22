@@ -3,6 +3,7 @@ import { instrumentDO, type ResolveConfigFn } from "@microlabs/otel-cf-workers";
 import type { BaseMCPServer, Context } from "./servers/mcp-server-base";
 import type { Props } from "./utils";
 import { StreamingMessagesStorageWithTtl } from "./streaming-message-storage-with-ttl/streaming-message-storage-with-ttl";
+import { RemoteDurableObjectStorage } from "./streaming-message-storage-with-ttl/remote-durable-object-storage";
 
 export function instrumentedMCPServer<T extends BaseMCPServer>(
 	MCPServer: new (
@@ -13,8 +14,13 @@ export function instrumentedMCPServer<T extends BaseMCPServer>(
 ) {
 	const Agent = class extends McpAgent<Env, any, Props> {
 		streamingMessageStorage = new StreamingMessagesStorageWithTtl(
-			// TODO(Rifdhan) optional chaining is needed to fix test failures, need to investigate
-			this.ctx?.storage,
+			(conversationId: string) =>
+				new RemoteDurableObjectStorage(
+					this.env.STORAGE_OBJECT.get(
+						this.env.STORAGE_OBJECT.idFromName(conversationId),
+					),
+					conversationId,
+				),
 			this.scheduleTimer.bind(this),
 			this.cancelTimer.bind(this),
 		);
