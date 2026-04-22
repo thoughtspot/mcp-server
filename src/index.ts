@@ -131,5 +131,25 @@ const oauthHandler = {
 	},
 };
 
-// Export the instrumented handler
-export default instrument(oauthHandler, config);
+const instrumentedOAuthHandler = instrument(oauthHandler, config);
+
+// Export a handler that strips traceparent before OTEL instrumentation sees it,
+// preventing it from being propagated to downstream calls.
+export default {
+	async fetch(
+		request: Request,
+		env: Env,
+		ctx: ExecutionContext,
+	): Promise<Response> {
+		if (request.headers.has("traceparent")) {
+			console.log(
+				">>> stripping traceparent 3",
+				request.headers.get("traceparent"),
+			);
+			const headers = new Headers(request.headers);
+			headers.delete("traceparent");
+			request = new Request(request, { headers });
+		}
+		return instrumentedOAuthHandler.fetch!(request as any, env, ctx);
+	},
+};
