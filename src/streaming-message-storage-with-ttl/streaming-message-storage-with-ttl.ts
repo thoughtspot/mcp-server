@@ -1,5 +1,15 @@
 import type { Message, StreamingMessagesState } from "../thoughtspot/types";
 
+/**
+ * Minimal key-value storage interface used by StreamingMessagesStorageWithTtl.
+ * Satisfied by both DurableObjectStorage (directly) and RemoteDurableObjectStorage.
+ */
+export interface KeyValueStorage {
+	get<T>(key: string): Promise<T | undefined>;
+	put<T>(key: string, value: T): Promise<void>;
+	delete(keys: string[]): Promise<number>;
+}
+
 /*
  * Notes on race condition avoidance:
  * 1. You can only call initializeConversation on a conversationId that does not exist, or is
@@ -44,8 +54,10 @@ type StreamingMessagesWithTtlState = StreamingMessagesState & {
 };
 
 export class StreamingMessagesStorageWithTtl {
+	private storageCache = new Map<string, KeyValueStorage>();
+
 	constructor(
-		private storage: DurableObjectStorage,
+		private storageFactory: (conversationId: string) => KeyValueStorage,
 		private scheduleTimer: (
 			delaySeconds: number,
 			conversationId: string,
@@ -54,13 +66,23 @@ export class StreamingMessagesStorageWithTtl {
 		private ttlSeconds = DEFAULT_TTL_SECONDS,
 	) {}
 
+	private storageFor(conversationId: string): KeyValueStorage {
+		let storage = this.storageCache.get(conversationId);
+		if (!storage) {
+			storage = this.storageFactory(conversationId);
+			this.storageCache.set(conversationId, storage);
+		}
+		return storage;
+	}
+
 	/*
 	 * Initialize a conversation with the given ID. This can be a brand new conversation, or it can
 	 * be priming an existing conversation which is already marked done for a followup message.
 	 */
 	public async initializeConversation(conversationId: string): Promise<void> {
+		const storage = this.storageFor(conversationId);
 		const streamingMessagesState: StreamingMessagesWithTtlState | undefined =
-			await this.storage.get<StreamingMessagesWithTtlState>(conversationId);
+			await storage.get<StreamingMessagesWithTtlState>(conversationId);
 		if (streamingMessagesState && !streamingMessagesState.isDone) {
 			throw new Error("Conversation already exists and is not marked done");
 		}
@@ -73,7 +95,7 @@ export class StreamingMessagesStorageWithTtl {
 			},
 			streamingMessagesState?.timerId,
 		);
-		await this.storage.put<number>(`${conversationId}-bookmark`, 0);
+		await storage.put<number>(`${conversationId}-bookmark`, 0);
 	}
 
 	public async appendMessagesAndRestartTtl(
@@ -82,7 +104,9 @@ export class StreamingMessagesStorageWithTtl {
 		isDone = false,
 	): Promise<void> {
 		const oldState =
-			await this.storage.get<StreamingMessagesWithTtlState>(conversationId);
+			await this.storageFor(conversationId).get<StreamingMessagesWithTtlState>(
+				conversationId,
+			);
 		if (!oldState) {
 			throw new Error("Conversation not found");
 		}
@@ -103,16 +127,17 @@ export class StreamingMessagesStorageWithTtl {
 	public async getNewMessagesAndUpdateBookmark(
 		conversationId: string,
 	): Promise<StreamingMessagesState> {
+		const storage = this.storageFor(conversationId);
 		const bookmark =
-			(await this.storage.get<number>(`${conversationId}-bookmark`)) ?? 0;
+			(await storage.get<number>(`${conversationId}-bookmark`)) ?? 0;
 
 		const streamingMessagesState: StreamingMessagesWithTtlState | undefined =
-			await this.storage.get<StreamingMessagesWithTtlState>(conversationId);
+			await storage.get<StreamingMessagesWithTtlState>(conversationId);
 		if (!streamingMessagesState) {
 			throw new Error("Conversation not found");
 		}
 
-		await this.storage.put<number>(
+		await storage.put<number>(
 			`${conversationId}-bookmark`,
 			streamingMessagesState.messages.length,
 		);
@@ -125,7 +150,11 @@ export class StreamingMessagesStorageWithTtl {
 	}
 
 	public async onTimerTriggered(conversationId: string): Promise<void> {
-		await this.storage.delete([conversationId, `${conversationId}-bookmark`]);
+		await this.storageFor(conversationId).delete([
+			conversationId,
+			`${conversationId}-bookmark`,
+		]);
+		this.storageCache.delete(conversationId);
 	}
 
 	private async setConversationStateAndRestartTtl(
@@ -138,9 +167,12 @@ export class StreamingMessagesStorageWithTtl {
 		}
 
 		const timerId = await this.scheduleTimer(this.ttlSeconds, conversationId);
-		await this.storage.put<StreamingMessagesWithTtlState>(conversationId, {
-			...newState,
-			timerId,
-		});
+		await this.storageFor(conversationId).put<StreamingMessagesWithTtlState>(
+			conversationId,
+			{
+				...newState,
+				timerId,
+			},
+		);
 	}
 }

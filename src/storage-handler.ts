@@ -1,16 +1,13 @@
 import { DurableObject } from "cloudflare:workers";
 
-type Message = {
-	id: string;
-	content: string;
-	timestamp: number;
-};
-
 /**
  * StorageHandler is a Durable Object that backs the /storage route.
- * Routes are matched on the URL pathname after /storage, e.g.:
- *   POST /storage/putMessage
- *   GET  /storage/readLatest
+ * Each instance is keyed by a user GUID, providing isolated storage per user.
+ *
+ * Routes (sub-path after /storage/<userGuid>):
+ *   GET  /get?key=<key>          → { value: T | null }
+ *   POST /put                    → body: { key, value } → 200
+ *   POST /delete                 → body: { keys: string[] } → { deleted: number }
  */
 export class StorageHandler extends DurableObject {
 	async fetch(request: Request): Promise<Response> {
@@ -20,10 +17,12 @@ export class StorageHandler extends DurableObject {
 		const subPath = url.pathname.replace(/^\/storage\/[^\/]+/, "") || "/";
 
 		switch (subPath) {
-			case "/putMessage":
-				return this.handlePutMessage(request);
-			case "/readLatest":
-				return this.handleReadLatest();
+			case "/get":
+				return this.handleGet(url);
+			case "/put":
+				return this.handlePut(request);
+			case "/delete":
+				return this.handleDelete(request);
 			default:
 				return new Response(
 					JSON.stringify({ error: `Unknown route: ${subPath}` }),
@@ -33,15 +32,31 @@ export class StorageHandler extends DurableObject {
 	}
 
 	/**
-	 * POST /storage/putMessage
-	 * Body: { id: string; content: string }
+	 * GET /get?key=<key>
+	 * Returns { value: T } if found, or { value: null } if not.
 	 */
-	private async handlePutMessage(request: Request): Promise<Response> {
-		if (request.method !== "POST") {
-			return new Response("Method Not Allowed", { status: 405 });
+	private async handleGet(url: URL): Promise<Response> {
+		const key = url.searchParams.get("key");
+		if (!key) {
+			return new Response(JSON.stringify({ error: "Missing key parameter" }), {
+				status: 400,
+				headers: { "Content-Type": "application/json" },
+			});
 		}
 
-		let body: { id: string; content: string };
+		const value = (await this.ctx.storage.get(key)) ?? null;
+		return new Response(JSON.stringify({ value }), {
+			status: 200,
+			headers: { "Content-Type": "application/json" },
+		});
+	}
+
+	/**
+	 * POST /put
+	 * Body: { key: string; value: unknown }
+	 */
+	private async handlePut(request: Request): Promise<Response> {
+		let body: { key: string; value: unknown };
 		try {
 			body = await request.json();
 		} catch {
@@ -51,46 +66,45 @@ export class StorageHandler extends DurableObject {
 			});
 		}
 
-		const { id, content } = body;
-		if (!id || !content) {
-			return new Response(
-				JSON.stringify({ error: "Missing id or content in body" }),
-				{ status: 400, headers: { "Content-Type": "application/json" } },
-			);
+		if (!body.key) {
+			return new Response(JSON.stringify({ error: "Missing key in body" }), {
+				status: 400,
+				headers: { "Content-Type": "application/json" },
+			});
 		}
 
-		const message: Message = { id, content, timestamp: Date.now() };
-		await this.ctx.storage.put(`message:${id}`, message);
-		await this.ctx.storage.put("latest", id);
-
-		return new Response(JSON.stringify(message), {
+		await this.ctx.storage.put(body.key, body.value);
+		return new Response(JSON.stringify({ ok: true }), {
 			status: 200,
 			headers: { "Content-Type": "application/json" },
 		});
 	}
 
 	/**
-	 * GET /storage/readLatest
-	 * Returns the most recently stored message.
+	 * POST /delete
+	 * Body: { keys: string[] }
+	 * Returns: { deleted: number }
 	 */
-	private async handleReadLatest(): Promise<Response> {
-		const latestId = await this.ctx.storage.get<string>("latest");
-		if (!latestId) {
-			return new Response(JSON.stringify({ error: "No messages stored" }), {
-				status: 404,
+	private async handleDelete(request: Request): Promise<Response> {
+		let body: { keys: string[] };
+		try {
+			body = await request.json();
+		} catch {
+			return new Response(JSON.stringify({ error: "Invalid JSON body" }), {
+				status: 400,
 				headers: { "Content-Type": "application/json" },
 			});
 		}
 
-		const message = await this.ctx.storage.get<Message>(`message:${latestId}`);
-		if (!message) {
-			return new Response(JSON.stringify({ error: "Message not found" }), {
-				status: 404,
-				headers: { "Content-Type": "application/json" },
-			});
+		if (!Array.isArray(body.keys)) {
+			return new Response(
+				JSON.stringify({ error: "Missing or invalid keys array" }),
+				{ status: 400, headers: { "Content-Type": "application/json" } },
+			);
 		}
 
-		return new Response(JSON.stringify(message), {
+		const deleted = await this.ctx.storage.delete(body.keys);
+		return new Response(JSON.stringify({ deleted }), {
 			status: 200,
 			headers: { "Content-Type": "application/json" },
 		});
