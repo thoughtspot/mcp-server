@@ -7,5 +7,6 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 
 cd "$REPO_ROOT"
 
-echo "Running staged Biome lint checks..."
-npm run lint:staged --silent
+echo "Running staged Biome checks..."
+npm run check:staged --silent
+git update-index --again

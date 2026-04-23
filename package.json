@@ -15,6 +15,7 @@
     "deploy": "wrangler deploy",
     "format": "biome format --write",
     "lint": "biome lint",
+    "check:staged": "biome check --write --staged --no-errors-on-unmatched",
     "lint:staged": "biome lint --staged --no-errors-on-unmatched",
     "lint:fix": "biome lint --write",
     "test": "vitest run",
