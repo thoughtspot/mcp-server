@@ -15,12 +15,16 @@
     "deploy": "wrangler deploy",
     "format": "biome format --write",
     "lint": "biome lint",
+    "check:staged": "biome check --write --staged --no-errors-on-unmatched",
+    "lint:staged": "biome lint --staged --no-errors-on-unmatched",
     "lint:fix": "biome lint --write",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "bin": "node --import tsx ./src/stdio.ts",
-    "run:deploy": "tsx deploy/index.ts"
+    "run:deploy": "tsx deploy/index.ts",
+    "hooks:install": "node ./scripts/install-git-hooks.mjs",
+    "prepare": "node ./scripts/install-git-hooks.mjs"
   },
   "keywords": [],
   "author": "",
