@@ -11,6 +11,7 @@ import { instrumentedMCPServer } from "./cloudflare-utils";
 import { MCPServer } from "./servers/mcp-server";
 import { apiServer } from "./servers/api-server";
 import { withBearerHandler } from "./bearer";
+import { withRequestMetrics } from "./metrics/runtime/request-metrics";
 import { OpenAIDeepResearchMCPServer } from "./servers/openai-mcp-server";
 
 // OTEL configuration function
@@ -115,11 +116,13 @@ export default {
 		env: Env,
 		ctx: ExecutionContext,
 	): Promise<Response> {
-		if (HEADERS_TO_STRIP.some((header) => request.headers.has(header))) {
-			const headers = new Headers(request.headers);
-			HEADERS_TO_STRIP.forEach((header) => headers.delete(header));
-			request = new Request(request, { headers });
-		}
-		return instrumentedOAuthHandler.fetch!(request, env, ctx);
+		return withRequestMetrics(env as unknown as Record<string, unknown>, ctx, async () => {
+			if (HEADERS_TO_STRIP.some((header) => request.headers.has(header))) {
+				const headers = new Headers(request.headers);
+				HEADERS_TO_STRIP.forEach((header) => headers.delete(header));
+				request = new Request(request, { headers });
+			}
+			return instrumentedOAuthHandler.fetch!(request, env, ctx);
+		});
 	},
 };
