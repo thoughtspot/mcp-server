@@ -136,7 +136,6 @@ export function createConfiguredMetricsSink(
 			return sinks.analyticsEngineSink ?? new NoopMetricsSink();
 		case "grafana":
 			return sinks.grafanaSink ?? new NoopMetricsSink();
-		case "both":
 		default:
 			return new CompositeMetricsSink([
 				sinks.analyticsEngineSink ?? new NoopMetricsSink(),

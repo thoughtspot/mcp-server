@@ -102,6 +102,8 @@ export const APPROVED_METRIC_LABEL_KEYS = [
 ] as const;
 
 export const FORBIDDEN_METRIC_LABEL_KEYS = [
+	// These are repo-known high-cardinality or sensitive fields that must never
+	// be promoted into metric labels, even if someone tries to pass them.
 	"instanceUrl",
 	"userGUID",
 	"userName",

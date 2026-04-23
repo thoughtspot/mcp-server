@@ -93,19 +93,20 @@ export class RequestMetricsRecorder implements MetricsRecorder {
 	}
 
 	private async flushInternal(): Promise<void> {
+		this.flushed = true;
+		const observations = this.snapshot();
+
 		try {
-			if (this.observations.length === 0) {
+			if (observations.length === 0) {
 				return;
 			}
 
 			await this.options.sink.flush({
-				observations: this.snapshot(),
+				observations,
 				resourceAttributes: { ...this.options.resourceAttributes },
 			});
 		} catch (error) {
 			console.error("[metrics] Flush failed", error);
-		} finally {
-			this.flushed = true;
 		}
 	}
 }
