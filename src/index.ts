@@ -2,13 +2,11 @@ import { trace } from "@opentelemetry/api";
 import {
 	instrument,
 	type ResolveConfigFn,
-	instrumentDO,
 	type TraceConfig,
 } from "@microlabs/otel-cf-workers";
 import OAuthProvider from "@cloudflare/workers-oauth-provider";
 
 import handler from "./handlers";
-import type { Props } from "./utils";
 import { instrumentedMCPServer } from "./cloudflare-utils";
 import { MCPServer } from "./servers/mcp-server";
 import { apiServer } from "./servers/api-server";
@@ -106,5 +104,22 @@ const oauthHandler = {
 	},
 };
 
-// Export the instrumented handler
-export default instrument(oauthHandler, config);
+const instrumentedOAuthHandler = instrument(oauthHandler, config);
+
+// OTEL instrumentation automatically uses or passing along some headers from upstream calls, so we
+// need to strip them from the request before OTEL sees them if we don't want that to happen
+const HEADERS_TO_STRIP = ["traceparent", "tracestate"];
+export default {
+	async fetch(
+		request: Request<unknown, IncomingRequestCfProperties<unknown>>,
+		env: Env,
+		ctx: ExecutionContext,
+	): Promise<Response> {
+		if (HEADERS_TO_STRIP.some((header) => request.headers.has(header))) {
+			const headers = new Headers(request.headers);
+			HEADERS_TO_STRIP.forEach((header) => headers.delete(header));
+			request = new Request(request, { headers });
+		}
+		return instrumentedOAuthHandler.fetch!(request, env, ctx);
+	},
+};
