@@ -100,6 +100,42 @@ describe("RequestMetricsRecorder", () => {
 		expect(errorSpy).toHaveBeenCalled();
 	});
 
+	it("rejects new metrics once a flush has started", async () => {
+		let resolveFlush!: () => void;
+		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+		const flushSpy = vi.fn().mockImplementation(
+			() =>
+				new Promise<void>((resolve) => {
+					resolveFlush = resolve;
+				}),
+		);
+		const recorder = new RequestMetricsRecorder({
+			sink: { flush: flushSpy },
+		});
+
+		recorder.count(METRIC_NAMES.httpRequestsTotal);
+		const flushPromise = recorder.flush();
+		recorder.histogram(METRIC_NAMES.httpRequestDurationMs, 25);
+
+		expect(recorder.snapshot()).toHaveLength(1);
+		expect(warnSpy).toHaveBeenCalledWith(
+			`[metrics] Ignoring metric recorded after flush: ${METRIC_NAMES.httpRequestDurationMs}`,
+		);
+
+		resolveFlush();
+		await flushPromise;
+
+		expect(flushSpy).toHaveBeenCalledWith({
+			observations: [
+				expect.objectContaining({
+					name: METRIC_NAMES.httpRequestsTotal,
+					kind: "counter",
+				}),
+			],
+			resourceAttributes: {},
+		});
+	});
+
 	it("ignores metrics recorded after the recorder has been flushed", async () => {
 		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
 		const flushSpy = vi.fn().mockResolvedValue(undefined);
