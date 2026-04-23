@@ -1,0 +1,11 @@
+#!/bin/sh
+# thoughtspot-mcp-server-hook
+
+set -eu
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+
+cd "$REPO_ROOT"
+
+echo "Running staged Biome lint checks..."
+npm run lint:staged --silent
