@@ -165,9 +165,7 @@ describe("sendAgentConversationMessageStreaming — nano ID integration", () => 
 		const body = JSON.parse(options.body);
 
 		// Endpoint construction
-		expect(url).toBe(
-			`${INSTANCE_URL}/conversation/v2/${conversationId}/query`,
-		);
+		expect(url).toBe(`${INSTANCE_URL}/conversation/v2/${conversationId}/query`);
 
 		// The id must be present, valid length, and from the correct alphabet
 		expect(body.id).toHaveLength(NANO_ID_SIZE);

@@ -30,12 +30,16 @@ export interface SessionInfo {
 	enableSpotterDataSourceDiscovery?: boolean;
 }
 
-export interface TextMessage {
+export interface BaseMessage {
+	is_thinking: boolean;
+}
+
+export interface TextMessage extends BaseMessage {
 	type: "text" | "text_chunk";
 	text: string;
 }
 
-export interface AnswerMessage {
+export interface AnswerMessage extends BaseMessage {
 	type: "answer";
 	answer_id: string;
 	answer_title: string;
