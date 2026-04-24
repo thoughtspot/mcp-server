@@ -29,9 +29,18 @@ function createMockStorage() {
 }
 
 // Sample messages used across tests
-const textMessage: Message = { type: "text", text: "Hello" };
-const chunkMessage: Message = { type: "text_chunk", text: " world" };
+const textMessage: Message = {
+	is_thinking: false,
+	type: "text",
+	text: "Hello",
+};
+const chunkMessage: Message = {
+	is_thinking: false,
+	type: "text_chunk",
+	text: " world",
+};
 const answerMessage: Message = {
+	is_thinking: false,
 	type: "answer",
 	answer_id: "ans-1",
 	answer_title: "My Answer",
