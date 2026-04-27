@@ -75,7 +75,7 @@ export abstract class BaseMCPServer extends Server {
 			const self = this as any;
 			self._clientCapabilities = request.params.capabilities;
 			self._clientVersion = request.params.clientInfo;
-			console.log(`[DEBUG] Client capabilety: ${JSON.stringify(self._clientCapabilities)}`);
+			console.log(`[DEBUG] Client capabiletydsdfsdfasd: ${JSON.stringify(self._clientCapabilities)}`);
 			return {
 				protocolVersion: LATEST_PROTOCOL_VERSION,
 				capabilities: self.getCapabilities(),
