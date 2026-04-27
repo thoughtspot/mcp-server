@@ -5,6 +5,8 @@ import {
 	ToolSchema,
 	ListResourcesRequestSchema,
 	ReadResourceRequestSchema,
+	InitializeRequestSchema,
+	LATEST_PROTOCOL_VERSION,
 	type ListToolsResult,
 } from "@modelcontextprotocol/sdk/types.js";
 import type { z } from "zod";
@@ -63,6 +65,22 @@ export abstract class BaseMCPServer extends Server {
 				},
 			},
 		);
+
+		// Override the default initialize handler to always negotiate up to LATEST_PROTOCOL_VERSION
+		// (2025-11-25). The SDK default echoes back whatever version the client requests, even if
+		// it is older than the latest supported version. This ensures clients benefit from the
+		// full feature set of 2025-11-25 regardless of which version they advertised.
+		this.setRequestHandler(InitializeRequestSchema, (request) => {
+			// biome-ignore lint/suspicious/noExplicitAny: accessing private SDK fields to override protocol version negotiation
+			const self = this as any;
+			self._clientCapabilities = request.params.capabilities;
+			self._clientVersion = request.params.clientInfo;
+			return {
+				protocolVersion: LATEST_PROTOCOL_VERSION,
+				capabilities: self.getCapabilities(),
+				serverInfo: self._serverInfo,
+			};
+		});
 	}
 
 	/**
