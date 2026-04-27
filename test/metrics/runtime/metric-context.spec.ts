@@ -1,44 +1,42 @@
 import { describe, expect, it } from "vitest";
 import {
+	EXPLICIT_ROUTE_CONTEXTS,
 	getApiSurface,
 	getAuthMode,
 	getRouteGroup,
 	getStatusClass,
 	getTransport,
+	resolvePathMetricContext,
 	resolveRequestMetricContext,
 } from "../../../src/metrics/runtime/metric-context";
 
 describe("metric-context", () => {
-	it("maps known request paths to route groups", () => {
-		expect(getRouteGroup("/")).toBe("root");
-		expect(getRouteGroup("/authorize")).toBe("authorize");
-		expect(getRouteGroup("/callback")).toBe("callback");
-		expect(getRouteGroup("/store-token")).toBe("store_token");
-		expect(getRouteGroup("/mcp")).toBe("mcp");
-		expect(getRouteGroup("/sse")).toBe("sse");
-		expect(getRouteGroup("/openai/mcp")).toBe("openai_mcp");
-		expect(getRouteGroup("/openai/sse")).toBe("openai_sse");
-		expect(getRouteGroup("/bearer/mcp")).toBe("bearer_mcp");
-		expect(getRouteGroup("/bearer/sse")).toBe("bearer_sse");
-		expect(getRouteGroup("/token/mcp")).toBe("token_mcp");
-		expect(getRouteGroup("/token/sse")).toBe("token_sse");
+	it("maps explicit request paths through the shared route context table", () => {
+		for (const [pathname, context] of Object.entries(EXPLICIT_ROUTE_CONTEXTS)) {
+			expect(resolvePathMetricContext(pathname)).toEqual(context);
+			expect(getRouteGroup(pathname)).toBe(context.routeGroup);
+			expect(getTransport(pathname)).toBe(context.transport);
+			expect(getApiSurface(pathname)).toBe(context.apiSurface);
+			expect(getAuthMode(pathname)).toBe(context.authMode);
+		}
+	});
+
+	it("maps known grouped request paths to route groups", () => {
 		expect(getRouteGroup("/api/resources/datasources")).toBe("api");
 		expect(getRouteGroup("/not-a-route")).toBe("unknown");
 	});
 
-	it("derives transport from the request path", () => {
-		expect(getTransport("/mcp")).toBe("mcp");
-		expect(getTransport("/bearer/mcp")).toBe("mcp");
-		expect(getTransport("/openai/sse")).toBe("sse");
+	it("derives transport from fallback request paths", () => {
+		expect(getTransport("/future/mcp")).toBe("mcp");
+		expect(getTransport("/future/sse")).toBe("sse");
 		expect(getTransport("/authorize")).toBe("http");
 	});
 
-	it("derives API surface from the request path", () => {
-		expect(getApiSurface("/openai/mcp")).toBe("openai_mcp");
+	it("derives API surface from fallback request paths", () => {
+		expect(getApiSurface("/openai/future-endpoint")).toBe("openai_mcp");
 		expect(getApiSurface("/api/resources/datasources")).toBe("api");
-		expect(getApiSurface("/mcp")).toBe("mcp");
-		expect(getApiSurface("/bearer/sse")).toBe("mcp");
-		expect(getApiSurface("/token/mcp")).toBe("mcp");
+		expect(getApiSurface("/bearer/future-endpoint")).toBe("mcp");
+		expect(getApiSurface("/token/future-endpoint")).toBe("mcp");
 		expect(getApiSurface("/")).toBe("static");
 		expect(getApiSurface("/authorize")).toBe("oauth");
 		expect(getApiSurface("/callback")).toBe("oauth");
@@ -46,10 +44,9 @@ describe("metric-context", () => {
 		expect(getApiSurface("/mystery")).toBe("unknown");
 	});
 
-	it("derives auth mode from the request path", () => {
-		expect(getAuthMode("/bearer/mcp")).toBe("bearer");
-		expect(getAuthMode("/token/sse")).toBe("token");
-		expect(getAuthMode("/mcp")).toBe("oauth");
+	it("derives auth mode from fallback request paths", () => {
+		expect(getAuthMode("/bearer/future-endpoint")).toBe("bearer");
+		expect(getAuthMode("/token/future-endpoint")).toBe("token");
 		expect(getAuthMode("/openai/mcp")).toBe("oauth");
 		expect(getAuthMode("/api/resources/datasources")).toBe("oauth");
 		expect(getAuthMode("/")).toBe("none");

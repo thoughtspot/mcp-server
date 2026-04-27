@@ -1,17 +1,17 @@
-import { trace } from "@opentelemetry/api";
+import OAuthProvider from "@cloudflare/workers-oauth-provider";
 import {
-	instrument,
 	type ResolveConfigFn,
 	type TraceConfig,
+	instrument,
 } from "@microlabs/otel-cf-workers";
-import OAuthProvider from "@cloudflare/workers-oauth-provider";
+import { trace } from "@opentelemetry/api";
 
-import handler from "./handlers";
-import { instrumentedMCPServer } from "./cloudflare-utils";
-import { MCPServer } from "./servers/mcp-server";
-import { apiServer } from "./servers/api-server";
 import { withBearerHandler } from "./bearer";
+import { instrumentedMCPServer } from "./cloudflare-utils";
+import handler from "./handlers";
 import { withRequestMetrics } from "./metrics/runtime/request-metrics";
+import { apiServer } from "./servers/api-server";
+import { MCPServer } from "./servers/mcp-server";
 import { OpenAIDeepResearchMCPServer } from "./servers/openai-mcp-server";
 import { ConversationStorageServer } from "./servers/conversation-storage-server";
 
@@ -119,13 +119,18 @@ export default {
 		env: Env,
 		ctx: ExecutionContext,
 	): Promise<Response> {
-		return withRequestMetrics(env as unknown as Record<string, unknown>, ctx, async () => {
-			if (HEADERS_TO_STRIP.some((header) => request.headers.has(header))) {
-				const headers = new Headers(request.headers);
-				HEADERS_TO_STRIP.forEach((header) => headers.delete(header));
-				request = new Request(request, { headers });
-			}
-			return instrumentedOAuthHandler.fetch!(request, env, ctx);
-		});
+		if (HEADERS_TO_STRIP.some((header) => request.headers.has(header))) {
+			const headers = new Headers(request.headers);
+			HEADERS_TO_STRIP.forEach((header) => headers.delete(header));
+			request = new Request(request, { headers });
+		}
+
+		return withRequestMetrics(
+			env as unknown as Record<string, unknown>,
+			ctx,
+			async () => {
+				return instrumentedOAuthHandler.fetch!(request, env, ctx);
+			},
+		);
 	},
 };
