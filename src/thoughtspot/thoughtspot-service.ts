@@ -11,7 +11,6 @@ import type {
 	Message,
 	Answer,
 } from "./types";
-import type { StreamingMessagesStorageWithTtl } from "../streaming-message-storage-with-ttl/streaming-message-storage-with-ttl";
 import { processSendAgentConversationMessageStreamingResponse } from "../streaming-utils";
 
 /**
@@ -281,7 +280,11 @@ export class ThoughtSpotService {
 	async sendAgentConversationMessageStreaming(
 		conversationId: string,
 		message: string,
-		streamingMessageStorage: StreamingMessagesStorageWithTtl,
+		appendStoredMessages: (
+			conversationId: string,
+			messages: Message[],
+			isDone?: boolean,
+		) => Promise<void>,
 		additionalContext?: string | undefined,
 	): Promise<void> {
 		const span = trace.getSpan(context.active());
@@ -315,7 +318,7 @@ export class ThoughtSpotService {
 			processSendAgentConversationMessageStreamingResponse(
 				conversationId,
 				reader,
-				streamingMessageStorage,
+				appendStoredMessages,
 				(this.client as any).instanceUrl,
 			);
 

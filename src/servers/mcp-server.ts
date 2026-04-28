@@ -317,11 +317,14 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			has_additional_context: !!additional_context,
 		});
 
+		const storageService = this.getStorageService();
 		try {
-			await this.streamingMessageStorage.initializeConversation(
-				analytical_session_id,
-			);
+			await storageService.initializeConversation(analytical_session_id);
 		} catch (error) {
+			console.error(
+				"Error initializing conversation in storage service:",
+				error,
+			);
 			return this.createErrorResponse(
 				"The analytical session has an ongoing response to the previous message. Please continue to call `get_session_updates` until `is_done` is true before sending a followup message.",
 				`Error sending message to conversation ${analytical_session_id}: ${error}`,
@@ -331,7 +334,7 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		await this.getThoughtSpotService().sendAgentConversationMessageStreaming(
 			analytical_session_id,
 			message,
-			this.streamingMessageStorage,
+			storageService.appendMessages.bind(storageService),
 			additional_context,
 		);
 
@@ -356,6 +359,7 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		//    returning too quickly, which leads to too many get updates tool calls.
 		// 4. If there are no updates after waiting for 10 seconds, return an empty response. We
 		//    want to avoid waiting indefinitely in case of errors or unexpected problems.
+		const storageService = this.getStorageService();
 		const messagesState: StreamingMessagesState = {
 			messages: [],
 			isDone: false,
@@ -363,10 +367,9 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		let i = 0;
 		for (; i < 20; i++) {
 			// Get latest updates
-			const newMessagesState =
-				await this.streamingMessageStorage.getNewMessagesAndUpdateBookmark(
-					analytical_session_id,
-				);
+			const newMessagesState = await storageService.getNewMessages(
+				analytical_session_id,
+			);
 			messagesState.messages.push(...newMessagesState.messages);
 			messagesState.isDone = newMessagesState.isDone;
 

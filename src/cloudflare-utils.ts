@@ -18,7 +18,10 @@ export function instrumentedMCPServer<T extends BaseMCPServer>(
 			this.scheduleTimer.bind(this),
 			this.cancelTimer.bind(this),
 		);
-		server = new MCPServer(this as Context, this.streamingMessageStorage);
+		server = new MCPServer(
+			this as unknown as Context,
+			this.streamingMessageStorage,
+		);
 
 		// Argument of type 'typeof ThoughtSpotMCPWrapper' is not assignable to parameter of type 'DOClass'.
 		// Cannot assign a 'protected' constructor type to a 'public' constructor type.

@@ -3,27 +3,30 @@ import type { Message, StreamingMessagesState } from "../thoughtspot/types";
 /**
  * Client for the ConversationStorageServer Durable Object.
  *
- * Provides typed methods for each HTTP endpoint exposed by the server:
+ * Communicates directly with the DO via its stub (bypassing the OAuth layer), mapping to the
+ * following HTTP endpoints exposed by the server:
  *   POST  /storage/<conversationId>/initialize —> initializeConversation
  *   POST  /storage/<conversationId>/append     —> appendMessagesAndRestartTtl
  *   GET   /storage/<conversationId>/messages   —> getNewMessagesAndUpdateBookmark
  */
 export class StorageServiceClient {
-	constructor(
-		private readonly baseUrl: string,
-		private readonly authToken: string,
-	) {}
+	constructor(private readonly namespace: DurableObjectNamespace) {}
 
 	private headers(): HeadersInit {
 		return {
 			"Content-Type": "application/json",
 			Accept: "application/json",
-			Authorization: `Bearer ${this.authToken}`,
 		};
 	}
 
+	private stubFor(conversationId: string): DurableObjectStub {
+		const id = this.namespace.idFromName(conversationId);
+		return this.namespace.get(id);
+	}
+
+	// DO stubs ignore the hostname; we use a placeholder so the path is parsed correctly.
 	private url(conversationId: string, operation: string): string {
-		return `${this.baseUrl}/storage/${encodeURIComponent(conversationId)}/${operation}`;
+		return `https://internal/storage/${encodeURIComponent(conversationId)}/${operation}`;
 	}
 
 	/**
@@ -32,10 +35,10 @@ export class StorageServiceClient {
 	 * to prime it for a follow-up message.
 	 */
 	async initializeConversation(conversationId: string): Promise<void> {
-		const response = await fetch(this.url(conversationId, "initialize"), {
-			method: "POST",
-			headers: this.headers(),
-		});
+		const response = await this.stubFor(conversationId).fetch(
+			this.url(conversationId, "initialize"),
+			{ method: "POST", headers: this.headers() },
+		);
 
 		if (!response.ok) {
 			const body = await response.text();
@@ -56,11 +59,10 @@ export class StorageServiceClient {
 	): Promise<void> {
 		const body: StreamingMessagesState = { messages, isDone };
 
-		const response = await fetch(this.url(conversationId, "append"), {
-			method: "POST",
-			headers: this.headers(),
-			body: JSON.stringify(body),
-		});
+		const response = await this.stubFor(conversationId).fetch(
+			this.url(conversationId, "append"),
+			{ method: "POST", headers: this.headers(), body: JSON.stringify(body) },
+		);
 
 		if (!response.ok) {
 			const text = await response.text();
@@ -78,10 +80,10 @@ export class StorageServiceClient {
 	async getNewMessages(
 		conversationId: string,
 	): Promise<StreamingMessagesState> {
-		const response = await fetch(this.url(conversationId, "messages"), {
-			method: "GET",
-			headers: this.headers(),
-		});
+		const response = await this.stubFor(conversationId).fetch(
+			this.url(conversationId, "messages"),
+			{ method: "GET", headers: this.headers() },
+		);
 
 		if (!response.ok) {
 			const text = await response.text();

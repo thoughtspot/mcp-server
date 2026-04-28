@@ -66,21 +66,6 @@ function createMCPRouter(
 	};
 }
 
-const conversationStorageHandler = {
-	async fetch(request: Request, env: Env): Promise<Response> {
-		const url = new URL(request.url);
-		// Path format: /storage/<conversation-id>[/<operation>]
-		const parts = url.pathname.split("/");
-		const conversationId = parts[2];
-		if (!conversationId) {
-			return new Response("Missing conversation ID", { status: 400 });
-		}
-		const id = env.CONVERSATION_STORAGE_OBJECT.idFromName(conversationId);
-		const stub = env.CONVERSATION_STORAGE_OBJECT.get(id);
-		return stub.fetch(request);
-	},
-};
-
 // Create the OAuth provider instance
 const oauthProvider = new OAuthProvider({
 	apiHandlers: {
@@ -93,7 +78,6 @@ const oauthProvider = new OAuthProvider({
 			binding: "OPENAI_DEEP_RESEARCH_MCP_OBJECT",
 		}) as any, // TODO: Remove 'any'
 		"/api": apiServer as any, // TODO: Remove 'any'
-		"/storage": conversationStorageHandler as any, // TODO: Remove 'any'
 	},
 	defaultHandler: withBearerHandler(handler, ThoughtSpotMCP) as any, // TODO: Remove 'any'
 	authorizeEndpoint: "/authorize",

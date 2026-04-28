@@ -19,8 +19,10 @@ function makeReader(chunks: string[]): ReadableStreamDefaultReader {
 
 // Mock storage
 function makeMockStorage() {
+	const fn = vi.fn(async () => {});
 	return {
-		appendMessagesAndRestartTtl: vi.fn(async () => {}),
+		appendMessages: fn,
+		appendMessagesAndRestartTtl: fn,
 	};
 }
 
@@ -48,7 +50,7 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		await processSendAgentConversationMessageStreamingResponse(
 			CONV_ID,
 			reader,
-			storage as any,
+			storage.appendMessages,
 			INSTANCE_URL,
 		);
 
@@ -68,7 +70,7 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		await processSendAgentConversationMessageStreamingResponse(
 			CONV_ID,
 			reader,
-			storage as any,
+			storage.appendMessages,
 			INSTANCE_URL,
 		);
 
@@ -91,7 +93,7 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		await processSendAgentConversationMessageStreamingResponse(
 			CONV_ID,
 			reader,
-			storage as any,
+			storage.appendMessages,
 			INSTANCE_URL,
 		);
 
@@ -108,7 +110,7 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		await processSendAgentConversationMessageStreamingResponse(
 			CONV_ID,
 			reader,
-			storage as any,
+			storage.appendMessages,
 			INSTANCE_URL,
 		);
 
@@ -125,7 +127,7 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		await processSendAgentConversationMessageStreamingResponse(
 			CONV_ID,
 			reader,
-			storage as any,
+			storage.appendMessages,
 			INSTANCE_URL,
 		);
 
@@ -150,7 +152,7 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		await processSendAgentConversationMessageStreamingResponse(
 			CONV_ID,
 			reader,
-			storage as any,
+			storage.appendMessages,
 			INSTANCE_URL,
 		);
 
@@ -184,7 +186,7 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		await processSendAgentConversationMessageStreamingResponse(
 			CONV_ID,
 			reader,
-			storage as any,
+			storage.appendMessages,
 			INSTANCE_URL,
 		);
 
@@ -209,7 +211,7 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		await processSendAgentConversationMessageStreamingResponse(
 			CONV_ID,
 			reader,
-			storage as any,
+			storage.appendMessages,
 			INSTANCE_URL,
 		);
 
@@ -226,7 +228,7 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		await processSendAgentConversationMessageStreamingResponse(
 			CONV_ID,
 			reader,
-			storage as any,
+			storage.appendMessages,
 			INSTANCE_URL,
 		);
 
@@ -251,7 +253,7 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		await processSendAgentConversationMessageStreamingResponse(
 			CONV_ID,
 			reader,
-			storage as any,
+			storage.appendMessages,
 			INSTANCE_URL,
 		);
 
@@ -273,7 +275,7 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		await processSendAgentConversationMessageStreamingResponse(
 			CONV_ID,
 			reader,
-			storage as any,
+			storage.appendMessages,
 			INSTANCE_URL,
 		);
 
@@ -290,7 +292,7 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		await processSendAgentConversationMessageStreamingResponse(
 			CONV_ID,
 			reader,
-			storage as any,
+			storage.appendMessages,
 			INSTANCE_URL,
 		);
 
@@ -310,7 +312,7 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		await processSendAgentConversationMessageStreamingResponse(
 			CONV_ID,
 			reader,
-			storage as any,
+			storage.appendMessages,
 			INSTANCE_URL,
 		);
 
@@ -328,7 +330,7 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		await processSendAgentConversationMessageStreamingResponse(
 			CONV_ID,
 			reader,
-			storage as any,
+			storage.appendMessages,
 			INSTANCE_URL,
 		);
 
@@ -350,7 +352,7 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		await processSendAgentConversationMessageStreamingResponse(
 			CONV_ID,
 			reader,
-			storage as any,
+			storage.appendMessages,
 			INSTANCE_URL,
 		);
 
@@ -368,7 +370,7 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		await processSendAgentConversationMessageStreamingResponse(
 			CONV_ID,
 			reader,
-			storage as any,
+			storage.appendMessages,
 			INSTANCE_URL,
 		);
 
@@ -402,7 +404,7 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		await processSendAgentConversationMessageStreamingResponse(
 			CONV_ID,
 			reader,
-			storage as any,
+			storage.appendMessages,
 			INSTANCE_URL,
 		);
 

@@ -8,13 +8,14 @@ import {
 	type ListToolsResult,
 } from "@modelcontextprotocol/sdk/types.js";
 import type { z } from "zod";
-import { context, type Span, SpanStatusCode } from "@opentelemetry/api";
+import { type Span, SpanStatusCode } from "@opentelemetry/api";
 import { getActiveSpan, withSpan } from "../metrics/tracing/tracing-utils";
 import { Trackers, type Tracker, TrackEvent } from "../metrics";
 import type { Props } from "../utils";
 import { MixpanelTracker } from "../metrics/mixpanel/mixpanel";
 import { getThoughtSpotClient } from "../thoughtspot/thoughtspot-client";
 import { ThoughtSpotService } from "../thoughtspot/thoughtspot-service";
+import { StorageServiceClient } from "../storage-service/storage-service";
 
 const ToolInputSchema = ToolSchema.shape.inputSchema;
 type ToolInput = z.infer<typeof ToolInputSchema>;
@@ -39,6 +40,7 @@ export type ToolResponse = SuccessResponse | ErrorResponse;
 
 export interface Context {
 	props: Props;
+	env: Env;
 }
 
 export abstract class BaseMCPServer extends Server {
@@ -170,6 +172,13 @@ export abstract class BaseMCPServer extends Server {
 			],
 			structuredContent,
 		};
+	}
+
+	protected getStorageService(): StorageServiceClient {
+		return new StorageServiceClient(
+			this.ctx.env
+				.CONVERSATION_STORAGE_OBJECT as unknown as DurableObjectNamespace,
+		);
 	}
 
 	protected getThoughtSpotService() {
