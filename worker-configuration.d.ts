@@ -10,6 +10,7 @@ declare namespace Cloudflare {
 		OAUTH_KV: KVNamespace;
 		MCP_OBJECT: DurableObjectNamespace<import("./src/index").ThoughtSpotMCP>;
 		OPENAI_DEEP_RESEARCH_MCP_OBJECT: DurableObjectNamespace<import("./src/index").ThoughtSpotOpenAIDeepResearchMCP>;
+		CONVERSATION_STORAGE_OBJECT: DurableObjectNamespace<import("./src/index").ConversationStorageServer>;
 		ANALYTICS: AnalyticsEngineDataset;
 		ASSETS: Fetcher;
 	}
