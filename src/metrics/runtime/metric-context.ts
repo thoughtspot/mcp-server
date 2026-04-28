@@ -1,3 +1,4 @@
+import { PUBLIC_ROUTES, PUBLIC_ROUTE_PREFIXES } from "../../routes";
 import type {
 	ApiSurface,
 	AuthMode,
@@ -17,77 +18,107 @@ export type RequestMetricContext = {
 // requires a single metadata update instead of touching multiple helper
 // functions.
 export const EXPLICIT_ROUTE_CONTEXTS = {
-	"/": {
+	[PUBLIC_ROUTES.root]: {
 		routeGroup: "root",
 		transport: "http",
 		apiSurface: "static",
 		authMode: "none",
 	},
-	"/authorize": {
+	[PUBLIC_ROUTES.hello]: {
+		routeGroup: "hello",
+		transport: "http",
+		apiSurface: "static",
+		authMode: "none",
+	},
+	[PUBLIC_ROUTES.authorize]: {
 		routeGroup: "authorize",
 		transport: "http",
 		apiSurface: "oauth",
 		authMode: "none",
 	},
-	"/callback": {
+	[PUBLIC_ROUTES.callback]: {
 		routeGroup: "callback",
 		transport: "http",
 		apiSurface: "oauth",
 		authMode: "none",
 	},
-	"/store-token": {
+	[PUBLIC_ROUTES.storeToken]: {
 		routeGroup: "store_token",
 		transport: "http",
 		apiSurface: "oauth",
 		authMode: "none",
 	},
-	"/mcp": {
+	[PUBLIC_ROUTES.oauthToken]: {
+		routeGroup: "oauth_token",
+		transport: "http",
+		apiSurface: "oauth",
+		authMode: "none",
+	},
+	[PUBLIC_ROUTES.register]: {
+		routeGroup: "register",
+		transport: "http",
+		apiSurface: "oauth",
+		authMode: "none",
+	},
+	[PUBLIC_ROUTES.mcp]: {
 		routeGroup: "mcp",
 		transport: "mcp",
 		apiSurface: "mcp",
 		authMode: "oauth",
 	},
-	"/sse": {
+	[PUBLIC_ROUTES.sse]: {
 		routeGroup: "sse",
 		transport: "sse",
 		apiSurface: "mcp",
 		authMode: "oauth",
 	},
-	"/openai/mcp": {
+	[PUBLIC_ROUTES.openaiMcp]: {
 		routeGroup: "openai_mcp",
 		transport: "mcp",
 		apiSurface: "openai_mcp",
 		authMode: "oauth",
 	},
-	"/openai/sse": {
+	[PUBLIC_ROUTES.openaiSse]: {
 		routeGroup: "openai_sse",
 		transport: "sse",
 		apiSurface: "openai_mcp",
 		authMode: "oauth",
 	},
-	"/bearer/mcp": {
+	[PUBLIC_ROUTES.bearerMcp]: {
 		routeGroup: "bearer_mcp",
 		transport: "mcp",
 		apiSurface: "mcp",
 		authMode: "bearer",
 	},
-	"/bearer/sse": {
+	[PUBLIC_ROUTES.bearerSse]: {
 		routeGroup: "bearer_sse",
 		transport: "sse",
 		apiSurface: "mcp",
 		authMode: "bearer",
 	},
-	"/token/mcp": {
+	[PUBLIC_ROUTES.tokenMcp]: {
 		routeGroup: "token_mcp",
 		transport: "mcp",
 		apiSurface: "mcp",
 		authMode: "token",
 	},
-	"/token/sse": {
+	[PUBLIC_ROUTES.tokenSse]: {
 		routeGroup: "token_sse",
 		transport: "sse",
 		apiSurface: "mcp",
 		authMode: "token",
+	},
+	[PUBLIC_ROUTES.openaiAppsChallenge]: {
+		routeGroup: "openai_apps_challenge",
+		transport: "http",
+		apiSurface: "static",
+		authMode: "none",
+	},
+	[PUBLIC_ROUTES.openapiSpec]: {
+		routeGroup: "openapi_spec",
+		transport: "http",
+		apiSurface: "static",
+		authMode: "none",
 	},
 } as const satisfies Record<string, RequestMetricContext>;
 
@@ -113,38 +144,49 @@ function getExplicitRouteContext(
 	];
 }
 
+function matchesRoutePrefix(pathname: string, prefix: string): boolean {
+	return pathname === prefix || pathname.startsWith(`${prefix}/`);
+}
+
 function inferTransport(pathname: string): Transport {
-	if (pathname.endsWith("/mcp") || pathname === "/mcp") {
+	if (pathname.endsWith(PUBLIC_ROUTES.mcp) || pathname === PUBLIC_ROUTES.mcp) {
 		return "mcp";
 	}
-	if (pathname.endsWith("/sse") || pathname === "/sse") {
+	if (pathname.endsWith(PUBLIC_ROUTES.sse) || pathname === PUBLIC_ROUTES.sse) {
 		return "sse";
 	}
 	return "http";
 }
 
 function inferApiSurface(pathname: string): ApiSurface {
+	if (matchesRoutePrefix(pathname, PUBLIC_ROUTE_PREFIXES.api)) {
+		return "api";
+	}
 	if (pathname.startsWith("/openai/")) {
 		return "openai_mcp";
 	}
-	if (pathname.startsWith("/api")) {
-		return "api";
-	}
 	if (
-		pathname === "/mcp" ||
-		pathname === "/sse" ||
-		pathname.startsWith("/bearer/") ||
-		pathname.startsWith("/token/")
+		pathname === PUBLIC_ROUTES.mcp ||
+		pathname === PUBLIC_ROUTES.sse ||
+		matchesRoutePrefix(pathname, PUBLIC_ROUTE_PREFIXES.bearer) ||
+		matchesRoutePrefix(pathname, PUBLIC_ROUTE_PREFIXES.token)
 	) {
 		return "mcp";
 	}
-	if (pathname === "/") {
+	if (
+		pathname === PUBLIC_ROUTES.root ||
+		pathname === PUBLIC_ROUTES.hello ||
+		pathname === PUBLIC_ROUTES.openaiAppsChallenge ||
+		pathname === PUBLIC_ROUTES.openapiSpec
+	) {
 		return "static";
 	}
 	if (
-		pathname === "/authorize" ||
-		pathname === "/callback" ||
-		pathname === "/store-token"
+		pathname === PUBLIC_ROUTES.authorize ||
+		pathname === PUBLIC_ROUTES.callback ||
+		pathname === PUBLIC_ROUTES.storeToken ||
+		pathname === PUBLIC_ROUTES.oauthToken ||
+		pathname === PUBLIC_ROUTES.register
 	) {
 		return "oauth";
 	}
@@ -152,25 +194,30 @@ function inferApiSurface(pathname: string): ApiSurface {
 }
 
 function inferAuthMode(pathname: string): AuthMode {
-	if (pathname.startsWith("/bearer/")) {
+	if (matchesRoutePrefix(pathname, PUBLIC_ROUTE_PREFIXES.bearer)) {
 		return "bearer";
 	}
-	if (pathname.startsWith("/token/")) {
+	if (matchesRoutePrefix(pathname, PUBLIC_ROUTE_PREFIXES.token)) {
 		return "token";
 	}
 	if (
-		pathname === "/mcp" ||
-		pathname === "/sse" ||
+		pathname === PUBLIC_ROUTES.mcp ||
+		pathname === PUBLIC_ROUTES.sse ||
 		pathname.startsWith("/openai/") ||
-		pathname.startsWith("/api")
+		matchesRoutePrefix(pathname, PUBLIC_ROUTE_PREFIXES.api)
 	) {
 		return "oauth";
 	}
 	if (
-		pathname === "/" ||
-		pathname === "/authorize" ||
-		pathname === "/callback" ||
-		pathname === "/store-token"
+		pathname === PUBLIC_ROUTES.root ||
+		pathname === PUBLIC_ROUTES.hello ||
+		pathname === PUBLIC_ROUTES.authorize ||
+		pathname === PUBLIC_ROUTES.callback ||
+		pathname === PUBLIC_ROUTES.storeToken ||
+		pathname === PUBLIC_ROUTES.oauthToken ||
+		pathname === PUBLIC_ROUTES.register ||
+		pathname === PUBLIC_ROUTES.openaiAppsChallenge ||
+		pathname === PUBLIC_ROUTES.openapiSpec
 	) {
 		return "none";
 	}
@@ -185,7 +232,7 @@ export function resolvePathMetricContext(
 		return explicitContext;
 	}
 
-	if (pathname.startsWith("/api")) {
+	if (matchesRoutePrefix(pathname, PUBLIC_ROUTE_PREFIXES.api)) {
 		return API_ROUTE_CONTEXT;
 	}
 

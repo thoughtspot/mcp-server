@@ -13,17 +13,21 @@ describe("metric-types", () => {
 	});
 
 	it("normalizes labels and drops forbidden or unknown keys", () => {
-		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+		const warnSpy = vi
+			.spyOn(console, "warn")
+			.mockImplementation(() => undefined);
 
 		const labels = normalizeMetricLabels({
 			route_group: "mcp",
 			outcome: "success",
+			is_thinking: true,
 			instanceUrl: "https://tenant.thoughtspot.cloud",
 			unexpected_key: "value",
 			tool_name: undefined,
 		});
 
 		expect(labels).toEqual({
+			is_thinking: "true",
 			outcome: "success",
 			route_group: "mcp",
 		});

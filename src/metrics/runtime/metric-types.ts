@@ -97,6 +97,7 @@ export const APPROVED_METRIC_LABEL_KEYS = [
 	"tool_name",
 	"upstream_operation",
 	"message_type",
+	"is_thinking",
 	"is_done",
 	"operation",
 ] as const;
@@ -128,7 +129,9 @@ const FORBIDDEN_METRIC_LABEL_KEYS_SET = new Set<string>(
 export type MetricLabelKey = (typeof APPROVED_METRIC_LABEL_KEYS)[number];
 export type MetricLabelValue = string | number | boolean;
 export type MetricLabels = Partial<Record<MetricLabelKey, string>>;
-export type MetricLabelInput = Partial<Record<MetricLabelKey, MetricLabelValue>> &
+export type MetricLabelInput = Partial<
+	Record<MetricLabelKey, MetricLabelValue>
+> &
 	Record<string, MetricLabelValue | null | undefined>;
 
 export type MetricOutcome =
@@ -140,13 +143,18 @@ export type MetricOutcome =
 
 export type RouteGroup =
 	| "root"
+	| "hello"
 	| "authorize"
 	| "callback"
 	| "store_token"
+	| "oauth_token"
+	| "register"
 	| "mcp"
 	| "sse"
 	| "openai_mcp"
 	| "openai_sse"
+	| "openai_apps_challenge"
+	| "openapi_spec"
 	| "api"
 	| "bearer_mcp"
 	| "bearer_sse"
@@ -156,16 +164,20 @@ export type RouteGroup =
 
 export type Transport = "mcp" | "sse" | "http" | "unknown";
 export type AuthMode = "oauth" | "bearer" | "token" | "none" | "unknown";
-export type ApiSurface = "mcp" | "openai_mcp" | "api" | "oauth" | "static" | "unknown";
+export type ApiSurface =
+	| "mcp"
+	| "openai_mcp"
+	| "api"
+	| "oauth"
+	| "static"
+	| "unknown";
 export type StatusClass = "1xx" | "2xx" | "3xx" | "4xx" | "5xx" | "unknown";
 
 function warnOnInvalidMetricLabel(key: string, reason: string) {
 	console.warn(`[metrics] Dropping label "${key}": ${reason}`);
 }
 
-export function normalizeMetricLabels(
-	labels?: MetricLabelInput,
-): MetricLabels {
+export function normalizeMetricLabels(labels?: MetricLabelInput): MetricLabels {
 	if (!labels) {
 		return {};
 	}

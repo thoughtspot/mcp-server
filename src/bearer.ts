@@ -1,6 +1,7 @@
 import type { ThoughtSpotMCP } from ".";
 import type honoApp from "./handlers";
 import { validateAndSanitizeUrl } from "./oauth-manager/oauth-utils";
+import { PUBLIC_ROUTES, PUBLIC_ROUTE_PREFIXES } from "./routes";
 
 /**
  * Handler function for bearer/token authentication endpoints
@@ -62,12 +63,12 @@ function handleTokenAuth(
 
 	// Route to appropriate handler
 	const pathname = url.pathname;
-	if (pathname.endsWith("/mcp")) {
-		return MCPServer.serve("/mcp").fetch(req, env, ctx);
+	if (pathname.endsWith(PUBLIC_ROUTES.mcp)) {
+		return MCPServer.serve(PUBLIC_ROUTES.mcp).fetch(req, env, ctx);
 	}
 
-	if (pathname.endsWith("/sse")) {
-		return MCPServer.serveSSE("/sse").fetch(req, env, ctx);
+	if (pathname.endsWith(PUBLIC_ROUTES.sse)) {
+		return MCPServer.serveSSE(PUBLIC_ROUTES.sse).fetch(req, env, ctx);
 	}
 
 	return new Response("Not found", { status: 404 });
@@ -79,13 +80,13 @@ export function withBearerHandler(
 ) {
 	// These endpoints do NOT support api-version query params (will be removed in future)
 	// Use /token endpoints instead for new implementations
-	app.mount("/bearer", (req, env, ctx) => {
+	app.mount(PUBLIC_ROUTE_PREFIXES.bearer, (req, env, ctx) => {
 		return handleTokenAuth(req, env, ctx, MCPServer, false);
 	});
 
 	// NEW: /token endpoints - supports api-version query params
 	// Recommended for all new implementations
-	app.mount("/token", (req, env, ctx) => {
+	app.mount(PUBLIC_ROUTE_PREFIXES.token, (req, env, ctx) => {
 		return handleTokenAuth(req, env, ctx, MCPServer, true);
 	});
 
