@@ -73,12 +73,14 @@ export const processSendAgentConversationMessageStreamingResponse = async (
 							if (item.type === "text") {
 								nTextMessagesParsed++;
 								newMessages.push({
+									is_thinking: item.metadata?.type === "thinking",
 									type: "text",
 									text: item.content,
 								});
 							} else if (item.type === "text-chunk") {
 								nTextMessagesParsed++;
 								newMessages.push({
+									is_thinking: item.metadata?.type === "thinking",
 									type: "text_chunk",
 									text: item.content,
 								});
@@ -86,6 +88,7 @@ export const processSendAgentConversationMessageStreamingResponse = async (
 								nAnswerMessagesParsed++;
 								const iframeUrl = `${instanceUrl}/?tsmcp=true#/embed/conv-assist-answer?sessionId=${item.metadata?.session_id}&genNo=${item.metadata?.gen_no}&acSessionId=${item.metadata?.transaction_id}&acGenNo=${item.metadata?.generation_number}`;
 								newMessages.push({
+									is_thinking: item.metadata?.type === "thinking",
 									type: "answer",
 									answer_id: JSON.stringify({
 										session_id: item.metadata?.session_id,
@@ -113,6 +116,7 @@ export const processSendAgentConversationMessageStreamingResponse = async (
 									message: item,
 								});
 								newMessages.push({
+									is_thinking: false,
 									type: "text",
 									text: item.display_message || "Something went wrong",
 								});

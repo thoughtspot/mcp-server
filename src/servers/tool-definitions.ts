@@ -138,6 +138,11 @@ export const ConversationUpdateSchema = z.object({
 		.describe(
 			"The type of update: `text` or `text_chunk` for a natural language message from the Analytics Agent, or `answer` for a data visualization with query results. Determines which other fields are populated.",
 		),
+	is_thinking: z
+		.boolean()
+		.describe(
+			"Whether this update is part of the Analytics Agent's thinking process. Use this to separate thinking updates from final result updates. You can use the thinking updates to show intermediate status or progress updates to the user.",
+		),
 	text: z
 		.string()
 		.optional()
