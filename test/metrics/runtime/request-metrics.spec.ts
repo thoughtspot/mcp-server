@@ -222,6 +222,26 @@ describe("withRequestMetrics", () => {
 		);
 	});
 
+	it("uses the Analytics Engine binding as the default analytics sink", async () => {
+		const analyticsDataset = { writeDataPoint: vi.fn() };
+		const recorder = createRequestMetricsRecorder({
+			METRICS_SINK_MODE: "analytics_engine",
+			ANALYTICS: analyticsDataset,
+		});
+
+		recorder.count(METRIC_NAMES.httpRequestsTotal, 1, {
+			route_group: "mcp",
+		});
+		await recorder.flush();
+
+		expect(analyticsDataset.writeDataPoint).toHaveBeenCalledTimes(1);
+		expect(analyticsDataset.writeDataPoint).toHaveBeenCalledWith(
+			expect.objectContaining({
+				indexes: expect.arrayContaining([METRIC_NAMES.httpRequestsTotal]),
+			}),
+		);
+	});
+
 	it("does not fail the request when waitUntil rejects scheduling", async () => {
 		const errorSpy = vi
 			.spyOn(console, "error")
