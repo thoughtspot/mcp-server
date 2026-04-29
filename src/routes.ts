@@ -21,6 +21,7 @@ export const PUBLIC_ROUTES = {
 export const PUBLIC_ROUTE_PREFIXES = {
 	api: "/api",
 	bearer: "/bearer",
+	openapiSpec: PUBLIC_ROUTES.openapiSpec,
 	token: "/token",
 } as const;
 

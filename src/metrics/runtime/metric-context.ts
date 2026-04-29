@@ -129,6 +129,13 @@ const API_ROUTE_CONTEXT: RequestMetricContext = {
 	authMode: "oauth",
 };
 
+const OPENAPI_SPEC_ROUTE_CONTEXT: RequestMetricContext = {
+	routeGroup: "openapi_spec",
+	transport: "http",
+	apiSurface: "static",
+	authMode: "none",
+};
+
 const UNKNOWN_ROUTE_CONTEXT: RequestMetricContext = {
 	routeGroup: "unknown",
 	transport: "http",
@@ -177,7 +184,7 @@ function inferApiSurface(pathname: string): ApiSurface {
 		pathname === PUBLIC_ROUTES.root ||
 		pathname === PUBLIC_ROUTES.hello ||
 		pathname === PUBLIC_ROUTES.openaiAppsChallenge ||
-		pathname === PUBLIC_ROUTES.openapiSpec
+		matchesRoutePrefix(pathname, PUBLIC_ROUTE_PREFIXES.openapiSpec)
 	) {
 		return "static";
 	}
@@ -217,7 +224,7 @@ function inferAuthMode(pathname: string): AuthMode {
 		pathname === PUBLIC_ROUTES.oauthToken ||
 		pathname === PUBLIC_ROUTES.register ||
 		pathname === PUBLIC_ROUTES.openaiAppsChallenge ||
-		pathname === PUBLIC_ROUTES.openapiSpec
+		matchesRoutePrefix(pathname, PUBLIC_ROUTE_PREFIXES.openapiSpec)
 	) {
 		return "none";
 	}
@@ -234,6 +241,10 @@ export function resolvePathMetricContext(
 
 	if (matchesRoutePrefix(pathname, PUBLIC_ROUTE_PREFIXES.api)) {
 		return API_ROUTE_CONTEXT;
+	}
+
+	if (matchesRoutePrefix(pathname, PUBLIC_ROUTE_PREFIXES.openapiSpec)) {
+		return OPENAPI_SPEC_ROUTE_CONTEXT;
 	}
 
 	return {

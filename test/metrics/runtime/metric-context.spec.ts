@@ -37,6 +37,9 @@ describe("metric-context", () => {
 		expect(
 			getRouteGroup(`${PUBLIC_ROUTE_PREFIXES.api}/resources/datasources`),
 		).toBe("api");
+		expect(
+			getRouteGroup(`${PUBLIC_ROUTE_PREFIXES.openapiSpec}/tools/ping`),
+		).toBe("openapi_spec");
 		expect(getRouteGroup("/not-a-route")).toBe("unknown");
 	});
 
@@ -51,6 +54,9 @@ describe("metric-context", () => {
 		expect(
 			getApiSurface(`${PUBLIC_ROUTE_PREFIXES.api}/resources/datasources`),
 		).toBe("api");
+		expect(
+			getApiSurface(`${PUBLIC_ROUTE_PREFIXES.openapiSpec}/tools/ping`),
+		).toBe("static");
 		expect(getApiSurface("/bearer/future-endpoint")).toBe("mcp");
 		expect(getApiSurface("/token/future-endpoint")).toBe("mcp");
 		expect(getApiSurface(PUBLIC_ROUTES.root)).toBe("static");
@@ -67,6 +73,9 @@ describe("metric-context", () => {
 		expect(
 			getAuthMode(`${PUBLIC_ROUTE_PREFIXES.api}/resources/datasources`),
 		).toBe("oauth");
+		expect(getAuthMode(`${PUBLIC_ROUTE_PREFIXES.openapiSpec}/tools/ping`)).toBe(
+			"none",
+		);
 		expect(getAuthMode(PUBLIC_ROUTES.root)).toBe("none");
 		expect(getAuthMode(PUBLIC_ROUTES.authorize)).toBe("none");
 		expect(getAuthMode(PUBLIC_ROUTES.callback)).toBe("none");
