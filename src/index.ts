@@ -1,18 +1,20 @@
-import { trace } from "@opentelemetry/api";
+import OAuthProvider from "@cloudflare/workers-oauth-provider";
 import {
-	instrument,
 	type ResolveConfigFn,
 	type TraceConfig,
+	instrument,
 } from "@microlabs/otel-cf-workers";
-import OAuthProvider from "@cloudflare/workers-oauth-provider";
+import { trace } from "@opentelemetry/api";
 
-import handler from "./handlers";
-import { instrumentedMCPServer } from "./cloudflare-utils";
-import { MCPServer } from "./servers/mcp-server";
-import { apiServer } from "./servers/api-server";
 import { withBearerHandler } from "./bearer";
-import { OpenAIDeepResearchMCPServer } from "./servers/openai-mcp-server";
+import { instrumentedMCPServer } from "./cloudflare-utils";
+import handler from "./handlers";
+import { withRequestMetrics } from "./metrics/runtime/request-metrics";
+import { PUBLIC_ROUTES, PUBLIC_ROUTE_PREFIXES } from "./routes";
+import { apiServer } from "./servers/api-server";
 import { ConversationStorageServer } from "./servers/conversation-storage-server";
+import { MCPServer } from "./servers/mcp-server";
+import { OpenAIDeepResearchMCPServer } from "./servers/openai-mcp-server";
 
 export { ConversationStorageServer };
 
@@ -69,20 +71,34 @@ function createMCPRouter(
 // Create the OAuth provider instance
 const oauthProvider = new OAuthProvider({
 	apiHandlers: {
-		"/mcp": createMCPRouter("/mcp", ThoughtSpotMCP, "serve") as any,
-		"/sse": createMCPRouter("/sse", ThoughtSpotMCP, "serveSSE") as any,
-		"/openai/mcp": ThoughtSpotOpenAIDeepResearchMCP.serve("/openai/mcp", {
-			binding: "OPENAI_DEEP_RESEARCH_MCP_OBJECT",
-		}) as any, // TODO: Remove 'any'
-		"/openai/sse": ThoughtSpotOpenAIDeepResearchMCP.serveSSE("/openai/sse", {
-			binding: "OPENAI_DEEP_RESEARCH_MCP_OBJECT",
-		}) as any, // TODO: Remove 'any'
-		"/api": apiServer as any, // TODO: Remove 'any'
+		[PUBLIC_ROUTES.mcp]: createMCPRouter(
+			PUBLIC_ROUTES.mcp,
+			ThoughtSpotMCP,
+			"serve",
+		) as any,
+		[PUBLIC_ROUTES.sse]: createMCPRouter(
+			PUBLIC_ROUTES.sse,
+			ThoughtSpotMCP,
+			"serveSSE",
+		) as any,
+		[PUBLIC_ROUTES.openaiMcp]: ThoughtSpotOpenAIDeepResearchMCP.serve(
+			PUBLIC_ROUTES.openaiMcp,
+			{
+				binding: "OPENAI_DEEP_RESEARCH_MCP_OBJECT",
+			},
+		) as any, // TODO: Remove 'any'
+		[PUBLIC_ROUTES.openaiSse]: ThoughtSpotOpenAIDeepResearchMCP.serveSSE(
+			PUBLIC_ROUTES.openaiSse,
+			{
+				binding: "OPENAI_DEEP_RESEARCH_MCP_OBJECT",
+			},
+		) as any, // TODO: Remove 'any'
+		[PUBLIC_ROUTE_PREFIXES.api]: apiServer as any, // TODO: Remove 'any'
 	},
 	defaultHandler: withBearerHandler(handler, ThoughtSpotMCP) as any, // TODO: Remove 'any'
-	authorizeEndpoint: "/authorize",
-	tokenEndpoint: "/token",
-	clientRegistrationEndpoint: "/register",
+	authorizeEndpoint: PUBLIC_ROUTES.authorize,
+	tokenEndpoint: PUBLIC_ROUTES.oauthToken,
+	clientRegistrationEndpoint: PUBLIC_ROUTES.register,
 });
 
 // Wrap the OAuth provider with a handler that includes tracing
@@ -123,6 +139,13 @@ export default {
 			HEADERS_TO_STRIP.forEach((header) => headers.delete(header));
 			request = new Request(request, { headers });
 		}
-		return instrumentedOAuthHandler.fetch!(request, env, ctx);
+
+		return withRequestMetrics(
+			env as unknown as Record<string, unknown>,
+			ctx,
+			async () => {
+				return instrumentedOAuthHandler.fetch!(request, env, ctx);
+			},
+		);
 	},
 };

@@ -2,20 +2,21 @@ import type {
 	AuthRequest,
 	OAuthHelpers,
 } from "@cloudflare/workers-oauth-provider";
+import { type Span, SpanStatusCode, context, trace } from "@opentelemetry/api";
 import { Hono } from "hono";
-import type { Props } from "./utils";
-import { McpServerError } from "./utils";
+import { decodeBase64Url, encodeBase64Url } from "hono/utils/encode";
+import { any } from "zod";
+import { openApiSpecHandler } from "./api-schemas/open-api-spec";
+import { WithSpan, getActiveSpan } from "./metrics/tracing/tracing-utils";
 import {
+	buildSamlRedirectUrl,
 	parseRedirectApproval,
 	renderApprovalDialog,
-	buildSamlRedirectUrl,
 } from "./oauth-manager/oauth-utils";
 import { renderTokenCallback } from "./oauth-manager/token-utils";
-import { any } from "zod";
-import { encodeBase64Url, decodeBase64Url } from "hono/utils/encode";
-import { getActiveSpan, WithSpan } from "./metrics/tracing/tracing-utils";
-import { context, type Span, SpanStatusCode, trace } from "@opentelemetry/api";
-import { openApiSpecHandler } from "./api-schemas/open-api-spec";
+import { PUBLIC_ROUTES } from "./routes";
+import type { Props } from "./utils";
+import { McpServerError } from "./utils";
 
 const app = new Hono<{ Bindings: Env & { OAUTH_PROVIDER: OAuthHelpers } }>();
 
@@ -235,17 +236,17 @@ class Handler {
 
 const handler = new Handler();
 
-app.get("/", async (c) => {
+app.get(PUBLIC_ROUTES.root, async (c) => {
 	const response = await handler.serveIndex(c.env);
 	return response;
 });
 
-app.get("/hello", async (c) => {
+app.get(PUBLIC_ROUTES.hello, async (c) => {
 	const result = await handler.helloWorld();
 	return c.json(result);
 });
 
-app.get("/authorize", async (c) => {
+app.get(PUBLIC_ROUTES.authorize, async (c) => {
 	try {
 		const response = await handler.getAuthorize(
 			c.req.raw,
@@ -257,7 +258,7 @@ app.get("/authorize", async (c) => {
 	}
 });
 
-app.post("/authorize", async (c) => {
+app.post(PUBLIC_ROUTES.authorize, async (c) => {
 	try {
 		const redirectUrl = await handler.postAuthorize(c.req.raw, c.req.url);
 		return Response.redirect(redirectUrl);
@@ -272,7 +273,7 @@ app.post("/authorize", async (c) => {
 	}
 });
 
-app.get("/callback", async (c) => {
+app.get(PUBLIC_ROUTES.callback, async (c) => {
 	try {
 		const htmlContent = await handler.handleCallback(
 			c.req.raw,
@@ -300,7 +301,7 @@ app.get("/callback", async (c) => {
 	}
 });
 
-app.post("/store-token", async (c) => {
+app.post(PUBLIC_ROUTES.storeToken, async (c) => {
 	try {
 		const result = await handler.storeToken(c.req.raw, c.env.OAUTH_PROVIDER);
 		return new Response(JSON.stringify(result), {
@@ -329,10 +330,10 @@ app.post("/store-token", async (c) => {
 	}
 });
 
-app.get("/.well-known/openai-apps-challenge", (c) => {
+app.get(PUBLIC_ROUTES.openaiAppsChallenge, (c) => {
 	return c.text(process.env.OPEN_AI_TOKEN);
 });
 
-app.route("/openapi-spec", openApiSpecHandler);
+app.route(PUBLIC_ROUTES.openapiSpec, openApiSpecHandler);
 
 export default app;
