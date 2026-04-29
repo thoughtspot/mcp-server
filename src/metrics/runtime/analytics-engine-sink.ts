@@ -182,7 +182,11 @@ export class AnalyticsEngineMetricsSink implements MetricsSink {
 			payload.observations.map(async (observation) => {
 				try {
 					await this.dataset.writeDataPoint(
-						toAnalyticsEngineDataPoint(observation, payload.resourceAttributes),
+						toAnalyticsEngineDataPoint(
+							observation,
+							payload.resourceAttributes,
+							payload.eventIdentity,
+						),
 					);
 				} catch (error) {
 					console.warn(

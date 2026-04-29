@@ -113,6 +113,32 @@ describe("AnalyticsEngineMetricsSink", () => {
 		);
 	});
 
+	it("maps request-scoped event identity into Analytics Engine indexes", async () => {
+		const dataset = { writeDataPoint: vi.fn() };
+		const sink = new AnalyticsEngineMetricsSink(dataset);
+
+		await sink.flush({
+			observations: [observation],
+			resourceAttributes: {},
+			eventIdentity: {
+				tenantId: "tenant-123",
+				userId: "user-456",
+			},
+		});
+
+		expect(dataset.writeDataPoint).toHaveBeenCalledWith(
+			expect.objectContaining({
+				indexes: [
+					ANALYTICS_ENGINE_SCHEMA_VERSION,
+					"tool",
+					METRIC_NAMES.toolCallsTotal,
+					"tenant-123",
+					"user-456",
+				],
+			}),
+		);
+	});
+
 	it("continues writing remaining data points when one write fails", async () => {
 		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 		const secondObservation = {

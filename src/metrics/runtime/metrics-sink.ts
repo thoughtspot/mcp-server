@@ -20,9 +20,15 @@ export type MetricResourceAttributes = Partial<
 	>
 >;
 
+export type MetricEventIdentity = {
+	tenantId?: string;
+	userId?: string;
+};
+
 export type MetricsFlushPayload = {
 	observations: readonly MetricObservation[];
 	resourceAttributes: MetricResourceAttributes;
+	eventIdentity?: MetricEventIdentity;
 };
 
 export interface MetricsSink {
