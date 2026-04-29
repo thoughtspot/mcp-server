@@ -102,6 +102,7 @@ export function getAnalyticsEngineMetricFamily(
 			return "tool";
 		case METRIC_NAMES.resourceReadsTotal:
 			return "resource";
+		case METRIC_NAMES.sessionsStartedTotal:
 		case METRIC_NAMES.oauthAuthorizeRequestsTotal:
 		case METRIC_NAMES.oauthAuthorizeSubmitTotal:
 		case METRIC_NAMES.oauthCallbackTotal:
@@ -127,6 +128,12 @@ export function getAnalyticsEngineMetricFamily(
 		case METRIC_NAMES.dashboardsCreatedTotal:
 		case METRIC_NAMES.dashboardTilesCount:
 			return "dashboard";
+		default: {
+			const _exhaustiveCheck: never = name;
+			throw new Error(
+				`Unhandled Analytics Engine metric family: ${_exhaustiveCheck}`,
+			);
+		}
 	}
 }
 

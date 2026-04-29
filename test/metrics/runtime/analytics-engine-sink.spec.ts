@@ -64,23 +64,23 @@ describe("AnalyticsEngineMetricsSink", () => {
 	});
 
 	it("classifies every metric name into a stable event family", () => {
-		expect(getAnalyticsEngineMetricFamily(METRIC_NAMES.httpRequestsTotal)).toBe(
+		const validFamilies = [
+			"analysis",
+			"auth",
+			"dashboard",
 			"http",
-		);
-		expect(getAnalyticsEngineMetricFamily(METRIC_NAMES.toolDurationMs)).toBe(
+			"resource",
+			"stream_storage",
 			"tool",
-		);
+			"upstream",
+		];
+
+		for (const name of Object.values(METRIC_NAMES)) {
+			expect(validFamilies).toContain(getAnalyticsEngineMetricFamily(name));
+		}
 		expect(
-			getAnalyticsEngineMetricFamily(METRIC_NAMES.upstreamCallsTotal),
-		).toBe("upstream");
-		expect(
-			getAnalyticsEngineMetricFamily(
-				METRIC_NAMES.analysisFirstNonEmptyResponseMs,
-			),
-		).toBe("analysis");
-		expect(
-			getAnalyticsEngineMetricFamily(METRIC_NAMES.dashboardTilesCount),
-		).toBe("dashboard");
+			getAnalyticsEngineMetricFamily(METRIC_NAMES.sessionsStartedTotal),
+		).toBe("auth");
 	});
 
 	it("writes one data point per observation", async () => {
