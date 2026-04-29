@@ -9,8 +9,6 @@ import type {
 // Helpers
 // ---------------------------------------------------------------------------
 
-const BASE_URL = "https://example.com";
-const AUTH_TOKEN = "test-token";
 const CONVERSATION_ID = "conv-abc123";
 
 const textMessage: Message = { type: "text", text: "Hello" };
@@ -23,32 +21,37 @@ const answerMessage: Message = {
 	iframe_url: "https://example.com/answer/1",
 };
 
-function mockFetchOk(body: unknown = { ok: true }): void {
-	vi.stubGlobal(
-		"fetch",
-		vi.fn().mockResolvedValue(
-			new Response(JSON.stringify(body), {
-				status: 200,
+// Captured request from the stub's last fetch call
+let lastStubRequest: Request | undefined;
+
+function makeNamespaceMock(
+	responseBody: unknown = { ok: true },
+	status = 200,
+): DurableObjectNamespace {
+	lastStubRequest = undefined;
+	const stub = {
+		fetch: vi.fn(async (input: RequestInfo, init?: RequestInit) => {
+			lastStubRequest = new Request(input, init);
+			const body =
+				typeof responseBody === "string"
+					? responseBody
+					: JSON.stringify(responseBody);
+			return new Response(body, {
+				status,
 				headers: { "Content-Type": "application/json" },
-			}),
-		),
-	);
+			});
+		}),
+	} as unknown as DurableObjectStub;
+
+	return {
+		idFromName: vi.fn(() => ({ toString: () => "stub-id" }) as DurableObjectId),
+		get: vi.fn(() => stub),
+	} as unknown as DurableObjectNamespace;
 }
 
-function mockFetchError(status: number, body: string): void {
-	vi.stubGlobal(
-		"fetch",
-		vi.fn().mockResolvedValue(new Response(body, { status })),
-	);
-}
-
-function lastFetchCall(): { url: string; init: RequestInit } {
-	const mockFn = vi.mocked(fetch);
-	const [url, init] = mockFn.mock.calls[mockFn.mock.calls.length - 1] as [
-		string,
-		RequestInit,
-	];
-	return { url, init };
+function lastRequest(): Request {
+	if (!lastStubRequest) throw new Error("No stub request recorded");
+	return lastStubRequest;
 }
 
 // ---------------------------------------------------------------------------
@@ -57,11 +60,12 @@ function lastFetchCall(): { url: string; init: RequestInit } {
 
 describe("StorageServiceClient", () => {
 	let client: StorageServiceClient;
+	let namespaceMock: DurableObjectNamespace;
 
 	beforeEach(() => {
 		vi.restoreAllMocks();
-		vi.unstubAllGlobals();
-		client = new StorageServiceClient(BASE_URL, AUTH_TOKEN);
+		namespaceMock = makeNamespaceMock();
+		client = new StorageServiceClient(namespaceMock);
 	});
 
 	// -------------------------------------------------------------------------
@@ -70,46 +74,33 @@ describe("StorageServiceClient", () => {
 
 	describe("initializeConversation", () => {
 		it("sends POST to /storage/<id>/initialize", async () => {
-			mockFetchOk();
-
 			await client.initializeConversation(CONVERSATION_ID);
 
-			const { url, init } = lastFetchCall();
-			expect(url).toBe(`${BASE_URL}/storage/${CONVERSATION_ID}/initialize`);
-			expect(init.method).toBe("POST");
-		});
-
-		it("sends the Authorization header", async () => {
-			mockFetchOk();
-
-			await client.initializeConversation(CONVERSATION_ID);
-
-			const { init } = lastFetchCall();
-			expect((init.headers as Record<string, string>).Authorization).toBe(
-				`Bearer ${AUTH_TOKEN}`,
+			const req = lastRequest();
+			expect(req.url).toBe(
+				`https://internal/storage/${CONVERSATION_ID}/initialize`,
 			);
+			expect(req.method).toBe("POST");
 		});
 
 		it("URL-encodes the conversation ID", async () => {
-			mockFetchOk();
-
 			await client.initializeConversation("conv with spaces/and-slash");
 
-			const { url } = lastFetchCall();
-			expect(url).toBe(
-				`${BASE_URL}/storage/conv%20with%20spaces%2Fand-slash/initialize`,
+			const req = lastRequest();
+			expect(req.url).toBe(
+				"https://internal/storage/conv%20with%20spaces%2Fand-slash/initialize",
 			);
 		});
 
 		it("resolves without error on a 200 response", async () => {
-			mockFetchOk();
 			await expect(
 				client.initializeConversation(CONVERSATION_ID),
 			).resolves.toBeUndefined();
 		});
 
 		it("throws when the server returns a non-ok status", async () => {
-			mockFetchError(500, "Something went wrong");
+			namespaceMock = makeNamespaceMock("Something went wrong", 500);
+			client = new StorageServiceClient(namespaceMock);
 
 			await expect(
 				client.initializeConversation(CONVERSATION_ID),
@@ -117,7 +108,11 @@ describe("StorageServiceClient", () => {
 		});
 
 		it("includes the error body in the thrown error message", async () => {
-			mockFetchError(400, "Conversation already exists and is not marked done");
+			namespaceMock = makeNamespaceMock(
+				"Conversation already exists and is not marked done",
+				400,
+			);
+			client = new StorageServiceClient(namespaceMock);
 
 			await expect(
 				client.initializeConversation(CONVERSATION_ID),
@@ -131,67 +126,47 @@ describe("StorageServiceClient", () => {
 
 	describe("appendMessages", () => {
 		it("sends POST to /storage/<id>/append", async () => {
-			mockFetchOk();
-
 			await client.appendMessages(CONVERSATION_ID, [textMessage]);
 
-			const { url, init } = lastFetchCall();
-			expect(url).toBe(`${BASE_URL}/storage/${CONVERSATION_ID}/append`);
-			expect(init.method).toBe("POST");
+			const req = lastRequest();
+			expect(req.url).toBe(
+				`https://internal/storage/${CONVERSATION_ID}/append`,
+			);
+			expect(req.method).toBe("POST");
 		});
 
 		it("sends messages and isDone=false in the request body by default", async () => {
-			mockFetchOk();
-
 			await client.appendMessages(CONVERSATION_ID, [textMessage, chunkMessage]);
 
-			const { init } = lastFetchCall();
-			const body = JSON.parse(init.body as string) as StreamingMessagesState;
+			const body = (await lastRequest().json()) as StreamingMessagesState;
 			expect(body.messages).toEqual([textMessage, chunkMessage]);
 			expect(body.isDone).toBe(false);
 		});
 
 		it("sends isDone=true when specified", async () => {
-			mockFetchOk();
-
 			await client.appendMessages(CONVERSATION_ID, [answerMessage], true);
 
-			const { init } = lastFetchCall();
-			const body = JSON.parse(init.body as string) as StreamingMessagesState;
+			const body = (await lastRequest().json()) as StreamingMessagesState;
 			expect(body.isDone).toBe(true);
 		});
 
-		it("sends the Authorization header", async () => {
-			mockFetchOk();
-
-			await client.appendMessages(CONVERSATION_ID, []);
-
-			const { init } = lastFetchCall();
-			expect((init.headers as Record<string, string>).Authorization).toBe(
-				`Bearer ${AUTH_TOKEN}`,
-			);
-		});
-
 		it("sends Content-Type: application/json", async () => {
-			mockFetchOk();
-
 			await client.appendMessages(CONVERSATION_ID, []);
 
-			const { init } = lastFetchCall();
-			expect((init.headers as Record<string, string>)["Content-Type"]).toBe(
+			expect(lastRequest().headers.get("Content-Type")).toBe(
 				"application/json",
 			);
 		});
 
 		it("resolves without error on a 200 response", async () => {
-			mockFetchOk();
 			await expect(
 				client.appendMessages(CONVERSATION_ID, [textMessage]),
 			).resolves.toBeUndefined();
 		});
 
 		it("throws when the server returns a non-ok status", async () => {
-			mockFetchError(500, "Conversation not found");
+			namespaceMock = makeNamespaceMock("Conversation not found", 500);
+			client = new StorageServiceClient(namespaceMock);
 
 			await expect(
 				client.appendMessages(CONVERSATION_ID, [textMessage]),
@@ -199,10 +174,11 @@ describe("StorageServiceClient", () => {
 		});
 
 		it("includes the error body in the thrown error message", async () => {
-			mockFetchError(
-				400,
+			namespaceMock = makeNamespaceMock(
 				"Cannot append messages to a conversation marked done",
+				400,
 			);
+			client = new StorageServiceClient(namespaceMock);
 
 			await expect(
 				client.appendMessages(CONVERSATION_ID, [textMessage]),
@@ -216,28 +192,16 @@ describe("StorageServiceClient", () => {
 
 	describe("getNewMessages", () => {
 		it("sends GET to /storage/<id>/messages", async () => {
-			const state: StreamingMessagesState = {
-				messages: [textMessage],
-				isDone: false,
-			};
-			mockFetchOk(state);
+			namespaceMock = makeNamespaceMock({ messages: [textMessage], isDone: false });
+			client = new StorageServiceClient(namespaceMock);
 
 			await client.getNewMessages(CONVERSATION_ID);
 
-			const { url, init } = lastFetchCall();
-			expect(url).toBe(`${BASE_URL}/storage/${CONVERSATION_ID}/messages`);
-			expect(init.method).toBe("GET");
-		});
-
-		it("sends the Authorization header", async () => {
-			mockFetchOk({ messages: [], isDone: false });
-
-			await client.getNewMessages(CONVERSATION_ID);
-
-			const { init } = lastFetchCall();
-			expect((init.headers as Record<string, string>).Authorization).toBe(
-				`Bearer ${AUTH_TOKEN}`,
+			const req = lastRequest();
+			expect(req.url).toBe(
+				`https://internal/storage/${CONVERSATION_ID}/messages`,
 			);
+			expect(req.method).toBe("GET");
 		});
 
 		it("returns the parsed StreamingMessagesState", async () => {
@@ -245,7 +209,8 @@ describe("StorageServiceClient", () => {
 				messages: [textMessage, answerMessage],
 				isDone: true,
 			};
-			mockFetchOk(state);
+			namespaceMock = makeNamespaceMock(state);
+			client = new StorageServiceClient(namespaceMock);
 
 			const result = await client.getNewMessages(CONVERSATION_ID);
 
@@ -253,7 +218,8 @@ describe("StorageServiceClient", () => {
 		});
 
 		it("returns an empty messages array when there are no new messages", async () => {
-			mockFetchOk({ messages: [], isDone: false });
+			namespaceMock = makeNamespaceMock({ messages: [], isDone: false });
+			client = new StorageServiceClient(namespaceMock);
 
 			const result = await client.getNewMessages(CONVERSATION_ID);
 
@@ -262,7 +228,8 @@ describe("StorageServiceClient", () => {
 		});
 
 		it("throws when the server returns a non-ok status", async () => {
-			mockFetchError(404, "Conversation not found");
+			namespaceMock = makeNamespaceMock("Conversation not found", 404);
+			client = new StorageServiceClient(namespaceMock);
 
 			await expect(client.getNewMessages(CONVERSATION_ID)).rejects.toThrow(
 				"Failed to get messages (404)",
@@ -270,7 +237,8 @@ describe("StorageServiceClient", () => {
 		});
 
 		it("includes the error body in the thrown error message", async () => {
-			mockFetchError(500, "Internal error");
+			namespaceMock = makeNamespaceMock("Internal error", 500);
+			client = new StorageServiceClient(namespaceMock);
 
 			await expect(client.getNewMessages(CONVERSATION_ID)).rejects.toThrow(
 				"Internal error",

@@ -1,5 +1,4 @@
 import type { Message } from "./thoughtspot/types";
-import type { StreamingMessagesStorageWithTtl } from "./streaming-message-storage-with-ttl/streaming-message-storage-with-ttl";
 import { withSpan } from "./metrics/tracing/tracing-utils";
 import { type Span, SpanStatusCode } from "@opentelemetry/api";
 
@@ -11,7 +10,11 @@ import { type Span, SpanStatusCode } from "@opentelemetry/api";
 export const processSendAgentConversationMessageStreamingResponse = async (
 	conversationId: string,
 	streamingResponseReader: ReadableStreamDefaultReader,
-	streamingMessageStorage: StreamingMessagesStorageWithTtl,
+	appendStoredMessages: (
+		conversationId: string,
+		messages: Message[],
+		isDone?: boolean,
+	) => Promise<void>,
 	instanceUrl: string,
 ) => {
 	return await withSpan(
@@ -33,11 +36,7 @@ export const processSendAgentConversationMessageStreamingResponse = async (
 
 					// If stream is marked done, mark the conversation as done and exit
 					if (done) {
-						await streamingMessageStorage.appendMessagesAndRestartTtl(
-							conversationId,
-							[],
-							true,
-						);
+						await appendStoredMessages(conversationId, [], true);
 						break;
 					}
 
@@ -129,10 +128,7 @@ export const processSendAgentConversationMessageStreamingResponse = async (
 
 					// If we parsed any new messages, store them in the storage
 					if (newMessages.length > 0) {
-						await streamingMessageStorage.appendMessagesAndRestartTtl(
-							conversationId,
-							newMessages,
-						);
+						await appendStoredMessages(conversationId, newMessages);
 					}
 				}
 			} catch (error) {
