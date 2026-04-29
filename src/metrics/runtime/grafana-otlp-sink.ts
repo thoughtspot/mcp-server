@@ -257,9 +257,10 @@ function aggregateObservations(
 		const attributeSetKey = getAttributeSetKey(attributes);
 		const dataPoint = aggregated.get(attributeSetKey) ?? {
 			attributes,
-			bucketCounts: new Array(HISTOGRAM_BUCKETS_MS.length + 1).fill(
-				0,
-			) as number[],
+			bucketCounts:
+				kind === "histogram"
+					? (new Array(HISTOGRAM_BUCKETS_MS.length + 1).fill(0) as number[])
+					: [],
 			count: 0,
 			timestampMs: observation.timestampMs,
 			value: 0,
