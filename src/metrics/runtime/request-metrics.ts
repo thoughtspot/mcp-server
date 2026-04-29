@@ -1,3 +1,4 @@
+import { createGrafanaOtlpMetricsSink } from "./grafana-otlp-sink";
 import {
 	type MetricsRecorder,
 	NOOP_METRICS_RECORDER,
@@ -38,13 +39,26 @@ export function clearMetricsRecorderFromExecutionContext(
 	delete (ctx as MetricsExecutionContext)[METRICS_RECORDER_SYMBOL];
 }
 
+function createDefaultConfiguredMetricsSinks(
+	env: MetricsEnvLike | undefined,
+	sinks: ConfiguredMetricsSinks,
+): ConfiguredMetricsSinks {
+	return {
+		analyticsEngineSink: sinks.analyticsEngineSink,
+		grafanaSink: sinks.grafanaSink ?? createGrafanaOtlpMetricsSink(env),
+	};
+}
+
 export function createRequestMetricsRecorder(
 	env?: MetricsEnvLike,
 	sinks: ConfiguredMetricsSinks = {},
 ): MetricsRecorder {
 	try {
 		const config = resolveMetricsRuntimeConfig(env);
-		const sink = createConfiguredMetricsSink(config, sinks);
+		const sink = createConfiguredMetricsSink(
+			config,
+			createDefaultConfiguredMetricsSinks(env, sinks),
+		);
 
 		return new RequestMetricsRecorder({
 			sink,

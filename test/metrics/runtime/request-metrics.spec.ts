@@ -194,6 +194,34 @@ describe("withRequestMetrics", () => {
 		);
 	});
 
+	it("uses Grafana OTLP config as the default grafana sink", async () => {
+		const fetchSpy = vi
+			.spyOn(globalThis, "fetch")
+			.mockResolvedValue(new Response(null, { status: 200 }));
+		const recorder = createRequestMetricsRecorder({
+			METRICS_SINK_MODE: "grafana",
+			GRAFANA_OTLP_ENDPOINT: "https://otlp.example.com/otlp",
+			GRAFANA_OTLP_AUTH_HEADER: "Bearer test",
+		});
+
+		recorder.count(METRIC_NAMES.httpRequestsTotal, 1, {
+			route_group: "mcp",
+		});
+		await recorder.flush();
+
+		expect(fetchSpy).toHaveBeenCalledWith(
+			"https://otlp.example.com/otlp/v1/metrics",
+			expect.objectContaining({
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json",
+					Authorization: "Bearer test",
+				},
+				body: expect.any(String),
+			}),
+		);
+	});
+
 	it("does not fail the request when waitUntil rejects scheduling", async () => {
 		const errorSpy = vi
 			.spyOn(console, "error")
