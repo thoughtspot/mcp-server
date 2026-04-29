@@ -178,18 +178,20 @@ export class AnalyticsEngineMetricsSink implements MetricsSink {
 	constructor(private readonly dataset: AnalyticsEngineDatasetLike) {}
 
 	async flush(payload: MetricsFlushPayload): Promise<void> {
-		for (const observation of payload.observations) {
-			try {
-				await this.dataset.writeDataPoint(
-					toAnalyticsEngineDataPoint(observation, payload.resourceAttributes),
-				);
-			} catch (error) {
-				console.warn(
-					`[metrics] Failed to write Analytics Engine data point for ${observation.name}`,
-					error,
-				);
-			}
-		}
+		await Promise.all(
+			payload.observations.map(async (observation) => {
+				try {
+					await this.dataset.writeDataPoint(
+						toAnalyticsEngineDataPoint(observation, payload.resourceAttributes),
+					);
+				} catch (error) {
+					console.warn(
+						`[metrics] Failed to write Analytics Engine data point for ${observation.name}`,
+						error,
+					);
+				}
+			}),
+		);
 	}
 }
 
