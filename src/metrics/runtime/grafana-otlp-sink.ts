@@ -86,6 +86,14 @@ type GrafanaOtlpMetricsSinkOptions = GrafanaOtlpSinkConfig & {
 	fetchFn?: typeof fetch;
 };
 
+type AggregatedMetricDataPoint = {
+	attributes: OtlpAttribute[];
+	bucketCounts: number[];
+	count: number;
+	timestampMs: number;
+	value: number;
+};
+
 const OTLP_SCOPE_NAME = "thoughtspot.mcp.metrics.runtime";
 const OTLP_AGGREGATION_TEMPORALITY_DELTA = 1;
 const JSON_HEADERS = {
@@ -187,16 +195,16 @@ function toAttributes(
 }
 
 function toTimeUnixNano(timestampMs: number): string {
-	return String(Math.trunc(timestampMs * 1_000_000));
+	return (BigInt(Math.trunc(timestampMs * 1_000)) * 1_000n).toString();
 }
 
-function getHistogramBucketCounts(value: number): string[] {
+function getHistogramBucketCounts(value: number): number[] {
 	const bucketCounts = new Array(HISTOGRAM_BUCKETS_MS.length + 1).fill(
 		0,
 	) as number[];
 	const bucketIndex = HISTOGRAM_BUCKETS_MS.findIndex((bound) => value <= bound);
 	bucketCounts[bucketIndex === -1 ? bucketCounts.length - 1 : bucketIndex] = 1;
-	return bucketCounts.map(String);
+	return bucketCounts;
 }
 
 function groupObservationsByMetric(
@@ -211,33 +219,79 @@ function groupObservationsByMetric(
 	return grouped;
 }
 
-function observationLabelsToAttributes(
-	observation: MetricObservation,
-): OtlpAttribute[] {
-	return toAttributes(observation.labels);
+function getAttributeSetKey(attributes: readonly OtlpAttribute[]): string {
+	return JSON.stringify(attributes);
 }
 
 function toNumberDataPoint(
-	observation: MetricObservation,
+	observation: AggregatedMetricDataPoint,
 ): OtlpNumberDataPoint {
 	return {
-		attributes: observationLabelsToAttributes(observation),
+		attributes: observation.attributes,
 		asDouble: observation.value,
 		timeUnixNano: toTimeUnixNano(observation.timestampMs),
 	};
 }
 
 function toHistogramDataPoint(
-	observation: MetricObservation,
+	observation: AggregatedMetricDataPoint,
 ): OtlpHistogramDataPoint {
 	return {
-		attributes: observationLabelsToAttributes(observation),
-		count: "1",
+		attributes: observation.attributes,
+		count: String(observation.count),
 		sum: observation.value,
-		bucketCounts: getHistogramBucketCounts(observation.value),
+		bucketCounts: observation.bucketCounts.map(String),
 		explicitBounds: HISTOGRAM_BUCKETS_MS,
 		timeUnixNano: toTimeUnixNano(observation.timestampMs),
 	};
+}
+
+function aggregateObservations(
+	kind: MetricKind,
+	observations: readonly MetricObservation[],
+): AggregatedMetricDataPoint[] {
+	const aggregated = new Map<string, AggregatedMetricDataPoint>();
+
+	for (const observation of observations) {
+		const attributes = toAttributes(observation.labels);
+		const attributeSetKey = getAttributeSetKey(attributes);
+		const dataPoint = aggregated.get(attributeSetKey) ?? {
+			attributes,
+			bucketCounts: new Array(HISTOGRAM_BUCKETS_MS.length + 1).fill(
+				0,
+			) as number[],
+			count: 0,
+			timestampMs: observation.timestampMs,
+			value: 0,
+		};
+
+		switch (kind) {
+			case "counter":
+				dataPoint.value += observation.value;
+				dataPoint.count += 1;
+				dataPoint.timestampMs = observation.timestampMs;
+				break;
+			case "gauge":
+				dataPoint.value = observation.value;
+				dataPoint.count = 1;
+				dataPoint.timestampMs = observation.timestampMs;
+				break;
+			case "histogram": {
+				const bucketCounts = getHistogramBucketCounts(observation.value);
+				for (const [index, bucketCount] of bucketCounts.entries()) {
+					dataPoint.bucketCounts[index] += bucketCount;
+				}
+				dataPoint.value += observation.value;
+				dataPoint.count += 1;
+				dataPoint.timestampMs = observation.timestampMs;
+				break;
+			}
+		}
+
+		aggregated.set(attributeSetKey, dataPoint);
+	}
+
+	return [...aggregated.values()];
 }
 
 function toOtlpMetric(
@@ -245,6 +299,8 @@ function toOtlpMetric(
 	kind: MetricKind,
 	observations: readonly MetricObservation[],
 ): OtlpMetric {
+	const dataPoints = aggregateObservations(kind, observations);
+
 	switch (kind) {
 		case "counter":
 			return {
@@ -252,14 +308,14 @@ function toOtlpMetric(
 				sum: {
 					aggregationTemporality: OTLP_AGGREGATION_TEMPORALITY_DELTA,
 					isMonotonic: true,
-					dataPoints: observations.map(toNumberDataPoint),
+					dataPoints: dataPoints.map(toNumberDataPoint),
 				},
 			};
 		case "gauge":
 			return {
 				name,
 				gauge: {
-					dataPoints: observations.map(toNumberDataPoint),
+					dataPoints: dataPoints.map(toNumberDataPoint),
 				},
 			};
 		case "histogram":
@@ -267,7 +323,7 @@ function toOtlpMetric(
 				name,
 				histogram: {
 					aggregationTemporality: OTLP_AGGREGATION_TEMPORALITY_DELTA,
-					dataPoints: observations.map(toHistogramDataPoint),
+					dataPoints: dataPoints.map(toHistogramDataPoint),
 				},
 			};
 	}

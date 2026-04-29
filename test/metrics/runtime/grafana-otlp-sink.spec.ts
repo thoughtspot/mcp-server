@@ -111,6 +111,119 @@ describe("GrafanaOtlpMetricsSink", () => {
 		});
 	});
 
+	it("aggregates observations with identical attributes before export", () => {
+		const otlpPayload = toOtlpMetricsPayload({
+			observations: [
+				{
+					kind: "counter",
+					name: METRIC_NAMES.httpRequestsTotal,
+					value: 1,
+					labels: {
+						route_group: "mcp",
+						status_class: "2xx",
+					},
+					timestampMs: 1_714_000_000_100,
+				},
+				{
+					kind: "counter",
+					name: METRIC_NAMES.httpRequestsTotal,
+					value: 2,
+					labels: {
+						status_class: "2xx",
+						route_group: "mcp",
+					},
+					timestampMs: 1_714_000_000_123.456,
+				},
+				{
+					kind: "histogram",
+					name: METRIC_NAMES.httpRequestDurationMs,
+					value: 25,
+					labels: {
+						route_group: "mcp",
+					},
+					timestampMs: 1_714_000_000_200,
+				},
+				{
+					kind: "histogram",
+					name: METRIC_NAMES.httpRequestDurationMs,
+					value: 75,
+					labels: {
+						route_group: "mcp",
+					},
+					timestampMs: 1_714_000_000_201,
+				},
+				{
+					kind: "gauge",
+					name: METRIC_NAMES.httpInflightRequests,
+					value: 1,
+					labels: {
+						route_group: "mcp",
+					},
+					timestampMs: 1_714_000_000_300,
+				},
+				{
+					kind: "gauge",
+					name: METRIC_NAMES.httpInflightRequests,
+					value: 4,
+					labels: {
+						route_group: "mcp",
+					},
+					timestampMs: 1_714_000_000_301,
+				},
+			],
+			resourceAttributes: {},
+		});
+		const [counterMetric, histogramMetric, gaugeMetric] =
+			otlpPayload.resourceMetrics[0].scopeMetrics[0].metrics;
+
+		expect(counterMetric).toMatchObject({
+			sum: {
+				dataPoints: [
+					{
+						asDouble: 3,
+						timeUnixNano: "1714000000123456000",
+					},
+				],
+			},
+		});
+		expect(counterMetric.sum.dataPoints).toHaveLength(1);
+		expect(histogramMetric).toMatchObject({
+			histogram: {
+				dataPoints: [
+					{
+						count: "2",
+						sum: 100,
+						bucketCounts: [
+							"1",
+							"0",
+							"1",
+							"0",
+							"0",
+							"0",
+							"0",
+							"0",
+							"0",
+							"0",
+							"0",
+						],
+					},
+				],
+			},
+		});
+		expect(histogramMetric.histogram.dataPoints).toHaveLength(1);
+		expect(gaugeMetric).toMatchObject({
+			gauge: {
+				dataPoints: [
+					{
+						asDouble: 4,
+						timeUnixNano: "1714000000301000000",
+					},
+				],
+			},
+		});
+		expect(gaugeMetric.gauge.dataPoints).toHaveLength(1);
+	});
+
 	it("posts OTLP JSON to the normalized metrics endpoint", async () => {
 		const fetchFn = vi
 			.fn()
