@@ -96,6 +96,7 @@ type AggregatedMetricDataPoint = {
 
 const OTLP_SCOPE_NAME = "thoughtspot.mcp.metrics.runtime";
 const OTLP_AGGREGATION_TEMPORALITY_DELTA = 1;
+const MAX_EXPORT_ERROR_BODY_LENGTH = 1_000;
 const JSON_HEADERS = {
 	"Content-Type": "application/json",
 };
@@ -161,11 +162,16 @@ function readOtlpAuthorizationHeader(
 }
 
 function encodeBase64(value: string): string {
-	if (typeof btoa === "function") {
-		return btoa(value);
-	}
 	if (typeof Buffer !== "undefined") {
 		return Buffer.from(value, "utf8").toString("base64");
+	}
+	if (typeof TextEncoder !== "undefined" && typeof btoa === "function") {
+		const bytes = new TextEncoder().encode(value);
+		let binary = "";
+		for (const byte of bytes) {
+			binary += String.fromCharCode(byte);
+		}
+		return btoa(binary);
 	}
 	throw new Error("No base64 encoder is available for Grafana OTLP auth");
 }
@@ -195,7 +201,13 @@ function toAttributes(
 }
 
 function toTimeUnixNano(timestampMs: number): string {
-	return (BigInt(Math.trunc(timestampMs * 1_000)) * 1_000n).toString();
+	const integerMs = Math.trunc(timestampMs);
+	const fractionalMs = timestampMs - integerMs;
+	const fractionalMicros = Math.round(fractionalMs * 1_000);
+	return (
+		BigInt(integerMs) * 1_000_000n +
+		BigInt(fractionalMicros) * 1_000n
+	).toString();
 }
 
 function getHistogramBucketCounts(value: number): number[] {
@@ -354,6 +366,14 @@ function buildRequestHeaders(config: GrafanaOtlpSinkConfig): HeadersInit {
 		: JSON_HEADERS;
 }
 
+async function getExportErrorBody(response: Response): Promise<string> {
+	const text = await response.text();
+	if (text.length <= MAX_EXPORT_ERROR_BODY_LENGTH) {
+		return text;
+	}
+	return `${text.slice(0, MAX_EXPORT_ERROR_BODY_LENGTH)}...`;
+}
+
 export function toOtlpMetricsPayload(
 	payload: MetricsFlushPayload,
 ): OtlpMetricsPayload {
@@ -438,7 +458,7 @@ export class GrafanaOtlpMetricsSink implements MetricsSink {
 
 		if (!response.ok) {
 			throw new Error(
-				`Grafana OTLP metrics export failed with status ${response.status}: ${await response.text()}`,
+				`Grafana OTLP metrics export failed with status ${response.status}: ${await getExportErrorBody(response)}`,
 			);
 		}
 	}

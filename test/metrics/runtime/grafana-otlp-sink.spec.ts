@@ -274,6 +274,30 @@ describe("GrafanaOtlpMetricsSink", () => {
 		);
 	});
 
+	it("encodes Grafana Cloud Basic auth credentials as UTF-8", async () => {
+		const fetchFn = vi
+			.fn()
+			.mockResolvedValue(new Response(null, { status: 200 }));
+		const sink = new GrafanaOtlpMetricsSink({
+			endpoint: "https://otlp.example.com/otlp",
+			username: "üser",
+			apiToken: "päss",
+			fetchFn,
+		});
+
+		await sink.flush(payload);
+
+		expect(fetchFn).toHaveBeenCalledWith(
+			"https://otlp.example.com/otlp/v1/metrics",
+			expect.objectContaining({
+				headers: {
+					"Content-Type": "application/json",
+					Authorization: "Basic w7xzZXI6cMOkc3M=",
+				},
+			}),
+		);
+	});
+
 	it("skips export when there are no observations", async () => {
 		const fetchFn = vi.fn();
 		const sink = new GrafanaOtlpMetricsSink({
@@ -297,6 +321,20 @@ describe("GrafanaOtlpMetricsSink", () => {
 
 		await expect(sink.flush(payload)).rejects.toThrow(
 			"Grafana OTLP metrics export failed with status 401: bad token",
+		);
+	});
+
+	it("truncates large export error bodies", async () => {
+		const fetchFn = vi
+			.fn()
+			.mockResolvedValue(new Response("x".repeat(1_010), { status: 500 }));
+		const sink = new GrafanaOtlpMetricsSink({
+			endpoint: "https://otlp.example.com",
+			fetchFn,
+		});
+
+		await expect(sink.flush(payload)).rejects.toThrow(
+			`Grafana OTLP metrics export failed with status 500: ${"x".repeat(1_000)}...`,
 		);
 	});
 
