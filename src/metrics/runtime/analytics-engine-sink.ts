@@ -17,7 +17,7 @@ export type AnalyticsEngineDataPointLike = {
 };
 
 export type AnalyticsEngineDatasetLike = {
-	writeDataPoint(event?: AnalyticsEngineDataPointLike): void;
+	writeDataPoint(event?: AnalyticsEngineDataPointLike): Promise<void> | void;
 };
 
 export const ANALYTICS_ENGINE_SCHEMA_VERSION = "mcp_metrics_v1";
@@ -179,9 +179,16 @@ export class AnalyticsEngineMetricsSink implements MetricsSink {
 
 	async flush(payload: MetricsFlushPayload): Promise<void> {
 		for (const observation of payload.observations) {
-			this.dataset.writeDataPoint(
-				toAnalyticsEngineDataPoint(observation, payload.resourceAttributes),
-			);
+			try {
+				await this.dataset.writeDataPoint(
+					toAnalyticsEngineDataPoint(observation, payload.resourceAttributes),
+				);
+			} catch (error) {
+				console.warn(
+					`[metrics] Failed to write Analytics Engine data point for ${observation.name}`,
+					error,
+				);
+			}
 		}
 	}
 }

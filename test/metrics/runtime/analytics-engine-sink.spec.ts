@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	ANALYTICS_ENGINE_SCHEMA_VERSION,
 	AnalyticsEngineMetricsSink,
@@ -10,6 +10,10 @@ import { METRIC_NAMES } from "../../../src/metrics/runtime/metric-types";
 import type { MetricObservation } from "../../../src/metrics/runtime/metrics-sink";
 
 describe("AnalyticsEngineMetricsSink", () => {
+	afterEach(() => {
+		vi.restoreAllMocks();
+	});
+
 	const observation = {
 		kind: "counter",
 		name: METRIC_NAMES.toolCallsTotal,
@@ -106,6 +110,32 @@ describe("AnalyticsEngineMetricsSink", () => {
 				],
 				doubles: [2, 1_714_000_000_000],
 			}),
+		);
+	});
+
+	it("continues writing remaining data points when one write fails", async () => {
+		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+		const secondObservation = {
+			...observation,
+			name: METRIC_NAMES.httpRequestsTotal,
+		} satisfies MetricObservation;
+		const dataset = {
+			writeDataPoint: vi
+				.fn()
+				.mockRejectedValueOnce(new Error("write failed"))
+				.mockResolvedValueOnce(undefined),
+		};
+		const sink = new AnalyticsEngineMetricsSink(dataset);
+
+		await sink.flush({
+			observations: [observation, secondObservation],
+			resourceAttributes: {},
+		});
+
+		expect(dataset.writeDataPoint).toHaveBeenCalledTimes(2);
+		expect(warnSpy).toHaveBeenCalledWith(
+			`[metrics] Failed to write Analytics Engine data point for ${METRIC_NAMES.toolCallsTotal}`,
+			expect.any(Error),
 		);
 	});
 
