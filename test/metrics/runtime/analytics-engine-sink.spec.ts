@@ -146,10 +146,11 @@ describe("AnalyticsEngineMetricsSink", () => {
 			name: METRIC_NAMES.httpRequestsTotal,
 		} satisfies MetricObservation;
 		const dataset = {
-			writeDataPoint: vi
-				.fn()
-				.mockRejectedValueOnce(new Error("write failed"))
-				.mockResolvedValueOnce(undefined),
+			writeDataPoint: vi.fn((dataPoint) => {
+				if (dataPoint?.indexes?.[2] === METRIC_NAMES.toolCallsTotal) {
+					throw new Error("write failed");
+				}
+			}),
 		};
 		const sink = new AnalyticsEngineMetricsSink(dataset);
 

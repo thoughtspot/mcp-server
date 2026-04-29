@@ -17,7 +17,7 @@ export type AnalyticsEngineDataPointLike = {
 };
 
 export type AnalyticsEngineDatasetLike = {
-	writeDataPoint(event?: AnalyticsEngineDataPointLike): Promise<void> | void;
+	writeDataPoint(event?: AnalyticsEngineDataPointLike): void;
 };
 
 export const ANALYTICS_ENGINE_SCHEMA_VERSION = "mcp_metrics_v1";
@@ -178,24 +178,22 @@ export class AnalyticsEngineMetricsSink implements MetricsSink {
 	constructor(private readonly dataset: AnalyticsEngineDatasetLike) {}
 
 	async flush(payload: MetricsFlushPayload): Promise<void> {
-		await Promise.all(
-			payload.observations.map(async (observation) => {
-				try {
-					await this.dataset.writeDataPoint(
-						toAnalyticsEngineDataPoint(
-							observation,
-							payload.resourceAttributes,
-							payload.eventIdentity,
-						),
-					);
-				} catch (error) {
-					console.warn(
-						`[metrics] Failed to write Analytics Engine data point for ${observation.name}`,
-						error,
-					);
-				}
-			}),
-		);
+		for (const observation of payload.observations) {
+			try {
+				this.dataset.writeDataPoint(
+					toAnalyticsEngineDataPoint(
+						observation,
+						payload.resourceAttributes,
+						payload.eventIdentity,
+					),
+				);
+			} catch (error) {
+				console.warn(
+					`[metrics] Failed to write Analytics Engine data point for ${observation.name}`,
+					error,
+				);
+			}
+		}
 	}
 }
 
