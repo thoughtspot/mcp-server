@@ -2,6 +2,7 @@ import {
 	type MetricsRecorder,
 	RequestMetricsRecorder,
 } from "./metrics-recorder";
+import { NoopMetricsSink } from "./noop-sink";
 import {
 	type ConfiguredMetricsSinks,
 	type MetricsEnvLike,
@@ -41,13 +42,45 @@ export function createRequestMetricsRecorder(
 	env?: MetricsEnvLike,
 	sinks: ConfiguredMetricsSinks = {},
 ): RequestMetricsRecorder {
-	const config = resolveMetricsRuntimeConfig(env);
-	const sink = createConfiguredMetricsSink(config, sinks);
+	try {
+		const config = resolveMetricsRuntimeConfig(env);
+		const sink = createConfiguredMetricsSink(config, sinks);
 
-	return new RequestMetricsRecorder({
-		sink,
-		resourceAttributes: config.resourceAttributes,
-	});
+		return new RequestMetricsRecorder({
+			sink,
+			resourceAttributes: config.resourceAttributes,
+		});
+	} catch (error) {
+		console.error(
+			"[metrics] Failed to initialize request metrics recorder; using noop sink",
+			error,
+		);
+		return new RequestMetricsRecorder({
+			sink: new NoopMetricsSink(),
+			resourceAttributes: {},
+		});
+	}
+}
+
+function scheduleRequestMetricsFlush(
+	recorder: MetricsRecorder,
+	ctx: ExecutionContext,
+): void {
+	let flushPromise: Promise<void>;
+	try {
+		flushPromise = recorder.flush().catch((error) => {
+			console.error("[metrics] Failed to execute request metrics flush", error);
+		});
+	} catch (error) {
+		console.error("[metrics] Failed to execute request metrics flush", error);
+		return;
+	}
+
+	try {
+		ctx.waitUntil(flushPromise);
+	} catch (error) {
+		console.error("[metrics] Failed to schedule request metrics flush", error);
+	}
 }
 
 export async function withRequestMetrics<T>(
@@ -62,7 +95,7 @@ export async function withRequestMetrics<T>(
 	try {
 		return await handler(recorder);
 	} finally {
-		await recorder.flush(ctx);
+		scheduleRequestMetricsFlush(recorder, ctx);
 		clearMetricsRecorderFromExecutionContext(ctx);
 	}
 }

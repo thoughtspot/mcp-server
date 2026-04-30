@@ -60,19 +60,28 @@ describe("RequestMetricsRecorder", () => {
 		});
 	});
 
-	it("schedules the flush with waitUntil when an execution context is provided", async () => {
+	it("returns the same in-flight flush promise when called repeatedly", async () => {
+		let resolveFlush!: () => void;
 		const flushSpy = vi.fn().mockResolvedValue(undefined);
-		const waitUntil = vi.fn();
+		flushSpy.mockImplementationOnce(
+			() =>
+				new Promise<void>((resolve) => {
+					resolveFlush = resolve;
+				}),
+		);
 		const recorder = new RequestMetricsRecorder({
 			sink: { flush: flushSpy },
 		});
 
 		recorder.count(METRIC_NAMES.httpRequestsTotal);
-		const flushPromise = recorder.flush({ waitUntil } as ExecutionContext);
+		const firstFlushPromise = recorder.flush();
+		const secondFlushPromise = recorder.flush();
 
-		expect(waitUntil).toHaveBeenCalledTimes(1);
-		expect(waitUntil).toHaveBeenCalledWith(flushPromise);
-		await flushPromise;
+		expect(secondFlushPromise).toBe(firstFlushPromise);
+		expect(flushSpy).toHaveBeenCalledTimes(1);
+
+		resolveFlush();
+		await firstFlushPromise;
 		expect(flushSpy).toHaveBeenCalledTimes(1);
 	});
 

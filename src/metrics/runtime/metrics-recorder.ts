@@ -21,7 +21,7 @@ export interface MetricsRecorder {
 	count(name: MetricName, value?: number, labels?: MetricLabelInput): void;
 	histogram(name: MetricName, value: number, labels?: MetricLabelInput): void;
 	gauge(name: MetricName, value: number, labels?: MetricLabelInput): void;
-	flush(ctx?: Pick<ExecutionContext, "waitUntil">): Promise<void>;
+	flush(): Promise<void>;
 	snapshot(): readonly MetricObservation[];
 }
 
@@ -48,13 +48,9 @@ export class RequestMetricsRecorder implements MetricsRecorder {
 		return [...this.observations];
 	}
 
-	async flush(ctx?: Pick<ExecutionContext, "waitUntil">): Promise<void> {
+	flush(): Promise<void> {
 		if (!this.flushPromise) {
 			this.flushPromise = this.flushInternal();
-		}
-
-		if (ctx) {
-			ctx.waitUntil(this.flushPromise);
 		}
 
 		return this.flushPromise;
