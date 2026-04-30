@@ -21,9 +21,24 @@ export interface MetricsRecorder {
 	count(name: MetricName, value?: number, labels?: MetricLabelInput): void;
 	histogram(name: MetricName, value: number, labels?: MetricLabelInput): void;
 	gauge(name: MetricName, value: number, labels?: MetricLabelInput): void;
-	flush(ctx?: Pick<ExecutionContext, "waitUntil">): Promise<void>;
+	flush(): Promise<void>;
 	snapshot(): readonly MetricObservation[];
 }
+
+const NOOP_FLUSH_PROMISE: Promise<void> = Promise.resolve();
+const NOOP_METRIC_OBSERVATIONS: readonly MetricObservation[] = [];
+
+export const NOOP_METRICS_RECORDER: MetricsRecorder = {
+	count(_name, _value, _labels): void {},
+	histogram(_name, _value, _labels): void {},
+	gauge(_name, _value, _labels): void {},
+	flush(): Promise<void> {
+		return NOOP_FLUSH_PROMISE;
+	},
+	snapshot(): readonly MetricObservation[] {
+		return NOOP_METRIC_OBSERVATIONS;
+	},
+};
 
 export class RequestMetricsRecorder implements MetricsRecorder {
 	private readonly observations: MetricObservation[] = [];
@@ -48,13 +63,9 @@ export class RequestMetricsRecorder implements MetricsRecorder {
 		return [...this.observations];
 	}
 
-	async flush(ctx?: Pick<ExecutionContext, "waitUntil">): Promise<void> {
+	flush(): Promise<void> {
 		if (!this.flushPromise) {
 			this.flushPromise = this.flushInternal();
-		}
-
-		if (ctx) {
-			ctx.waitUntil(this.flushPromise);
 		}
 
 		return this.flushPromise;
