@@ -36,6 +36,9 @@ function createMockStorage() {
 			deleteAlarm: vi.fn(async (): Promise<void> => {
 				alarm = null;
 			}),
+			deleteAll: vi.fn(async (): Promise<void> => {
+				store.clear();
+			}),
 		},
 	};
 }
@@ -59,14 +62,23 @@ function makeRequest(
 }
 
 // Sample messages
-const textMessage: Message = { type: "text", text: "Hello" };
-const chunkMessage: Message = { type: "text_chunk", text: " world" };
+const textMessage: Message = {
+	type: "text",
+	text: "Hello",
+	is_thinking: false,
+};
+const chunkMessage: Message = {
+	type: "text_chunk",
+	text: " world",
+	is_thinking: false,
+};
 const answerMessage: Message = {
 	type: "answer",
 	answer_id: "ans-1",
 	answer_title: "My Answer",
 	answer_query: "SELECT 1",
 	iframe_url: "https://example.com/answer/1",
+	is_thinking: false,
 };
 
 // ---------------------------------------------------------------------------
@@ -112,16 +124,17 @@ describe("ConversationStorageServer", () => {
 		it("stores empty messages and isDone=false", async () => {
 			await server.fetch(makeRequest("POST", "initialize"));
 
-			const state = mock.store.get(
-				"streaming-messages-state",
-			) as StreamingMessagesState;
-			expect(state).toMatchObject({ messages: [], isDone: false });
+			expect(mock.store.get("is-done")).toBe(false);
+			// No message keys should exist yet
+			expect(mock.store.has("message-0")).toBe(false);
 		});
 
 		it("sets bookmark to 0", async () => {
 			await server.fetch(makeRequest("POST", "initialize"));
 
-			expect(mock.store.get("streaming-messages-bookmark")).toBe(0);
+			// write-bookmark and read-bookmark are lazily initialised to 0
+			expect(mock.store.get("write-bookmark") ?? 0).toBe(0);
+			expect(mock.store.get("read-bookmark") ?? 0).toBe(0);
 		});
 
 		it("schedules a TTL alarm", async () => {
@@ -152,10 +165,7 @@ describe("ConversationStorageServer", () => {
 			const res = await server.fetch(makeRequest("POST", "initialize"));
 			expect(res.status).toBe(200);
 
-			const state = mock.store.get(
-				"streaming-messages-state",
-			) as StreamingMessagesState;
-			expect(state).toMatchObject({ messages: [], isDone: false });
+			expect(mock.store.get("is-done")).toBe(false);
 		});
 	});
 
@@ -182,10 +192,8 @@ describe("ConversationStorageServer", () => {
 				makeRequest("POST", "append", { messages: [textMessage] }),
 			);
 
-			const state = mock.store.get(
-				"streaming-messages-state",
-			) as StreamingMessagesState;
-			expect(state.messages).toEqual([textMessage]);
+			expect(mock.store.get("message-0")).toEqual(textMessage);
+			expect(mock.store.get("write-bookmark")).toBe(1);
 		});
 
 		it("accumulates messages across multiple calls", async () => {
@@ -198,14 +206,10 @@ describe("ConversationStorageServer", () => {
 				}),
 			);
 
-			const state = mock.store.get(
-				"streaming-messages-state",
-			) as StreamingMessagesState;
-			expect(state.messages).toEqual([
-				textMessage,
-				chunkMessage,
-				answerMessage,
-			]);
+			expect(mock.store.get("message-0")).toEqual(textMessage);
+			expect(mock.store.get("message-1")).toEqual(chunkMessage);
+			expect(mock.store.get("message-2")).toEqual(answerMessage);
+			expect(mock.store.get("write-bookmark")).toBe(3);
 		});
 
 		it("marks the conversation done when isDone is true", async () => {
@@ -216,10 +220,7 @@ describe("ConversationStorageServer", () => {
 				}),
 			);
 
-			const state = mock.store.get(
-				"streaming-messages-state",
-			) as StreamingMessagesState;
-			expect(state.isDone).toBe(true);
+			expect(mock.store.get("is-done")).toBe(true);
 		});
 
 		it("restarts the TTL alarm on each call", async () => {
@@ -345,8 +346,10 @@ describe("ConversationStorageServer", () => {
 		it("deletes the conversation state and bookmark", async () => {
 			await server.alarm();
 
-			expect(mock.store.has("streaming-messages-state")).toBe(false);
-			expect(mock.store.has("streaming-messages-bookmark")).toBe(false);
+			expect(mock.store.has("is-done")).toBe(false);
+			expect(mock.store.has("message-0")).toBe(false);
+			expect(mock.store.has("write-bookmark")).toBe(false);
+			expect(mock.store.has("read-bookmark")).toBe(false);
 		});
 
 		it("causes subsequent append to return 500", async () => {
