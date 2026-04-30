@@ -149,7 +149,7 @@ describe("withRequestMetrics", () => {
 		);
 	});
 
-	it("falls back to a noop sink when metrics config resolution throws", async () => {
+	it("falls back to a noop recorder when metrics config resolution throws", async () => {
 		const errorSpy = vi
 			.spyOn(console, "error")
 			.mockImplementation(() => undefined);
@@ -162,14 +162,15 @@ describe("withRequestMetrics", () => {
 
 		recorder.count(METRIC_NAMES.httpRequestsTotal);
 		await expect(recorder.flush()).resolves.toBeUndefined();
+		expect(recorder.snapshot()).toEqual([]);
 
 		expect(errorSpy).toHaveBeenCalledWith(
-			"[metrics] Failed to initialize request metrics recorder; using noop sink",
+			"[metrics] Failed to initialize request metrics recorder; using noop recorder",
 			expect.any(Error),
 		);
 	});
 
-	it("falls back to a noop sink when sink construction throws", async () => {
+	it("falls back to a noop recorder when sink construction throws", async () => {
 		const errorSpy = vi
 			.spyOn(console, "error")
 			.mockImplementation(() => undefined);
@@ -185,9 +186,10 @@ describe("withRequestMetrics", () => {
 
 		recorder.count(METRIC_NAMES.httpRequestsTotal);
 		await expect(recorder.flush()).resolves.toBeUndefined();
+		expect(recorder.snapshot()).toEqual([]);
 
 		expect(errorSpy).toHaveBeenCalledWith(
-			"[metrics] Failed to initialize request metrics recorder; using noop sink",
+			"[metrics] Failed to initialize request metrics recorder; using noop recorder",
 			expect.any(Error),
 		);
 	});

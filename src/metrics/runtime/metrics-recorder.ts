@@ -25,6 +25,21 @@ export interface MetricsRecorder {
 	snapshot(): readonly MetricObservation[];
 }
 
+const NOOP_FLUSH_PROMISE: Promise<void> = Promise.resolve();
+const NOOP_METRIC_OBSERVATIONS: readonly MetricObservation[] = [];
+
+export const NOOP_METRICS_RECORDER: MetricsRecorder = {
+	count(_name, _value, _labels): void {},
+	histogram(_name, _value, _labels): void {},
+	gauge(_name, _value, _labels): void {},
+	flush(): Promise<void> {
+		return NOOP_FLUSH_PROMISE;
+	},
+	snapshot(): readonly MetricObservation[] {
+		return NOOP_METRIC_OBSERVATIONS;
+	},
+};
+
 export class RequestMetricsRecorder implements MetricsRecorder {
 	private readonly observations: MetricObservation[] = [];
 	private flushPromise?: Promise<void>;

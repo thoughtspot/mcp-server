@@ -1,8 +1,8 @@
 import {
 	type MetricsRecorder,
+	NOOP_METRICS_RECORDER,
 	RequestMetricsRecorder,
 } from "./metrics-recorder";
-import { NoopMetricsSink } from "./noop-sink";
 import {
 	type ConfiguredMetricsSinks,
 	type MetricsEnvLike,
@@ -41,7 +41,7 @@ export function clearMetricsRecorderFromExecutionContext(
 export function createRequestMetricsRecorder(
 	env?: MetricsEnvLike,
 	sinks: ConfiguredMetricsSinks = {},
-): RequestMetricsRecorder {
+): MetricsRecorder {
 	try {
 		const config = resolveMetricsRuntimeConfig(env);
 		const sink = createConfiguredMetricsSink(config, sinks);
@@ -52,13 +52,10 @@ export function createRequestMetricsRecorder(
 		});
 	} catch (error) {
 		console.error(
-			"[metrics] Failed to initialize request metrics recorder; using noop sink",
+			"[metrics] Failed to initialize request metrics recorder; using noop recorder",
 			error,
 		);
-		return new RequestMetricsRecorder({
-			sink: new NoopMetricsSink(),
-			resourceAttributes: {},
-		});
+		return NOOP_METRICS_RECORDER;
 	}
 }
 
