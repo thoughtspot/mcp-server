@@ -5,7 +5,9 @@ import { RequestMetricsRecorder } from "../../../src/metrics/runtime/metrics-rec
 describe("RequestMetricsRecorder", () => {
 	it("records normalized observations and flushes them once", async () => {
 		const flushSpy = vi.fn().mockResolvedValue(undefined);
-		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+		const warnSpy = vi
+			.spyOn(console, "warn")
+			.mockImplementation(() => undefined);
 		const recorder = new RequestMetricsRecorder({
 			sink: { flush: flushSpy },
 			resourceAttributes: { "service.name": "thoughtspot-mcp-server" },
@@ -78,7 +80,9 @@ describe("RequestMetricsRecorder", () => {
 		const recorder = new RequestMetricsRecorder({
 			sink: { flush: vi.fn().mockResolvedValue(undefined) },
 		});
-		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+		const warnSpy = vi
+			.spyOn(console, "warn")
+			.mockImplementation(() => undefined);
 
 		recorder.histogram(METRIC_NAMES.httpRequestsTotal, 10);
 
@@ -87,7 +91,9 @@ describe("RequestMetricsRecorder", () => {
 	});
 
 	it("swallows sink flush failures", async () => {
-		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+		const errorSpy = vi
+			.spyOn(console, "error")
+			.mockImplementation(() => undefined);
 		const recorder = new RequestMetricsRecorder({
 			sink: {
 				flush: vi.fn().mockRejectedValue(new Error("flush failed")),
@@ -102,7 +108,9 @@ describe("RequestMetricsRecorder", () => {
 
 	it("rejects new metrics once a flush has started", async () => {
 		let resolveFlush!: () => void;
-		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+		const warnSpy = vi
+			.spyOn(console, "warn")
+			.mockImplementation(() => undefined);
 		const flushSpy = vi.fn().mockImplementation(
 			() =>
 				new Promise<void>((resolve) => {
@@ -137,7 +145,9 @@ describe("RequestMetricsRecorder", () => {
 	});
 
 	it("ignores metrics recorded after the recorder has been flushed", async () => {
-		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+		const warnSpy = vi
+			.spyOn(console, "warn")
+			.mockImplementation(() => undefined);
 		const flushSpy = vi.fn().mockResolvedValue(undefined);
 		const recorder = new RequestMetricsRecorder({
 			sink: { flush: flushSpy },
@@ -155,7 +165,9 @@ describe("RequestMetricsRecorder", () => {
 	});
 
 	it("ignores non-finite metric values", () => {
-		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+		const warnSpy = vi
+			.spyOn(console, "warn")
+			.mockImplementation(() => undefined);
 		const recorder = new RequestMetricsRecorder({
 			sink: { flush: vi.fn().mockResolvedValue(undefined) },
 		});
@@ -168,7 +180,9 @@ describe("RequestMetricsRecorder", () => {
 	});
 
 	it("does not flush empty observations but still closes the recorder", async () => {
-		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+		const warnSpy = vi
+			.spyOn(console, "warn")
+			.mockImplementation(() => undefined);
 		const flushSpy = vi.fn().mockResolvedValue(undefined);
 		const recorder = new RequestMetricsRecorder({
 			sink: { flush: flushSpy },

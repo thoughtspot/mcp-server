@@ -1,6 +1,6 @@
-import { MixpanelClient } from "./mixpanel-client";
 import type { SessionInfo } from "../../thoughtspot/types";
 import type { Tracker } from "../index";
+import { MixpanelClient } from "./mixpanel-client";
 
 export class MixpanelTracker implements Tracker {
 	private mixpanel: MixpanelClient;

@@ -18,7 +18,9 @@ describe("runtime sinks", () => {
 	it("logs rejected sinks but still resolves the composite flush", async () => {
 		const payload = { observations: [], resourceAttributes: {} };
 		const failure = new Error("grafana unavailable");
-		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+		const errorSpy = vi
+			.spyOn(console, "error")
+			.mockImplementation(() => undefined);
 		const sink = new CompositeMetricsSink([
 			{ flush: vi.fn().mockRejectedValue(failure) },
 			{ flush: vi.fn().mockResolvedValue(undefined) },

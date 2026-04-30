@@ -39,7 +39,9 @@ describe("runtime-config", () => {
 	});
 
 	it("warns and defaults for unknown sink mode and deployment environment", () => {
-		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+		const warnSpy = vi
+			.spyOn(console, "warn")
+			.mockImplementation(() => undefined);
 
 		expect(resolveMetricsSinkMode("mystery")).toBe("both");
 		expect(resolveMetricsDeploymentEnvironment("qa")).toBe("production");

@@ -1,6 +1,6 @@
 import { CompositeMetricsSink } from "./composite-sink";
-import { NoopMetricsSink } from "./noop-sink";
 import type { MetricResourceAttributes, MetricsSink } from "./metrics-sink";
+import { NoopMetricsSink } from "./noop-sink";
 
 export type MetricsSinkMode = "none" | "analytics_engine" | "grafana" | "both";
 export type MetricsDeploymentEnvironment = "production" | "local";
@@ -113,7 +113,11 @@ export function resolveMetricsRuntimeConfig(
 			"DEPLOYMENT_ENVIRONMENT",
 		),
 	);
-	const serviceVersion = readConfigValue(env, "SERVICE_VERSION", "npm_package_version");
+	const serviceVersion = readConfigValue(
+		env,
+		"SERVICE_VERSION",
+		"npm_package_version",
+	);
 
 	return {
 		sinkMode,

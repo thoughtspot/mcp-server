@@ -1,9 +1,12 @@
-import { RequestMetricsRecorder, type MetricsRecorder } from "./metrics-recorder";
 import {
-	createConfiguredMetricsSink,
-	resolveMetricsRuntimeConfig,
+	type MetricsRecorder,
+	RequestMetricsRecorder,
+} from "./metrics-recorder";
+import {
 	type ConfiguredMetricsSinks,
 	type MetricsEnvLike,
+	createConfiguredMetricsSink,
+	resolveMetricsRuntimeConfig,
 } from "./runtime-config";
 
 const METRICS_RECORDER_SYMBOL = Symbol.for(
