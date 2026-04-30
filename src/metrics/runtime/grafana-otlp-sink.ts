@@ -210,13 +210,9 @@ function toTimeUnixNano(timestampMs: number): string {
 	).toString();
 }
 
-function getHistogramBucketCounts(value: number): number[] {
-	const bucketCounts = new Array(HISTOGRAM_BUCKETS_MS.length + 1).fill(
-		0,
-	) as number[];
+function getHistogramBucketIndex(value: number): number {
 	const bucketIndex = HISTOGRAM_BUCKETS_MS.findIndex((bound) => value <= bound);
-	bucketCounts[bucketIndex === -1 ? bucketCounts.length - 1 : bucketIndex] = 1;
-	return bucketCounts;
+	return bucketIndex === -1 ? HISTOGRAM_BUCKETS_MS.length : bucketIndex;
 }
 
 function groupObservationsByMetric(
@@ -290,10 +286,8 @@ function aggregateObservations(
 				dataPoint.timestampMs = observation.timestampMs;
 				break;
 			case "histogram": {
-				const bucketCounts = getHistogramBucketCounts(observation.value);
-				for (const [index, bucketCount] of bucketCounts.entries()) {
-					dataPoint.bucketCounts[index] += bucketCount;
-				}
+				const bucketIndex = getHistogramBucketIndex(observation.value);
+				dataPoint.bucketCounts[bucketIndex] += 1;
 				dataPoint.value += observation.value;
 				dataPoint.count += 1;
 				dataPoint.timestampMs = observation.timestampMs;
