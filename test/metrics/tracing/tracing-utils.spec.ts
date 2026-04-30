@@ -1,9 +1,9 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { trace, context } from "@opentelemetry/api";
+import { context, trace } from "@opentelemetry/api";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+	WithSpan,
 	getActiveSpan,
 	withSpan,
-	WithSpan,
 	withSpanNamed,
 } from "../../../src/metrics/tracing/tracing-utils";
 

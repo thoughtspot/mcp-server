@@ -1,9 +1,9 @@
 import {
-	getMetricKind,
-	normalizeMetricLabels,
 	type MetricKind,
 	type MetricLabelInput,
 	type MetricName,
+	getMetricKind,
+	normalizeMetricLabels,
 } from "./metric-types";
 import type {
 	MetricObservation,

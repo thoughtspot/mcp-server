@@ -1,5 +1,5 @@
 // tracing-utils.ts
-import { type Span, trace, context } from "@opentelemetry/api";
+import { type Span, context, trace } from "@opentelemetry/api";
 
 export function getActiveSpan(spanOverride?: Span): Span | undefined {
 	return spanOverride ?? trace.getSpan(context.active());
