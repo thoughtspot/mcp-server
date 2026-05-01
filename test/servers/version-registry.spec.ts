@@ -16,19 +16,24 @@ function isValidApiVersion(apiVersion: string): boolean {
 
 describe("Version Registry", () => {
 	describe("resolveApiVersion", () => {
-		it("should return default version when no apiVersion is provided", () => {
-			const result = resolveApiVersion(null);
-			expect(result.version).toContain("default");
+		it("should throw for null apiVersion", () => {
+			expect(() => resolveApiVersion(null as any)).toThrow();
 		});
 
-		it("should return default version when undefined is provided", () => {
+		it("should return latest version when undefined is provided", () => {
 			const result = resolveApiVersion(undefined);
-			expect(result.version).toContain("default");
+			expect(result.version).toContain("latest");
 		});
 
 		it("should return beta version when 'beta' is specified", () => {
 			const result = resolveApiVersion("beta");
 			expect(result.version).toContain("beta");
+		});
+
+		it("should return latest stable version when 'latest' is specified", () => {
+			const result = resolveApiVersion("latest");
+			expect(result.version).toContain("latest");
+			expect(result.version).not.toContain("beta");
 		});
 
 		it("should resolve exact date match", () => {
@@ -46,10 +51,10 @@ describe("Version Registry", () => {
 			expect(result.version).toContain("2025-01-01");
 		});
 
-		it("should return default version when date is before all versions", () => {
+		it("should return oldest version when date is before all versions", () => {
 			// Use a date before the earliest version in VERSION_REGISTRY
 			const result = resolveApiVersion("2020-01-01");
-			expect(result.version).toContain("default");
+			expect(result.version).toContain("backwards-compatibility-default");
 		});
 
 		it("should exclude beta from date-based resolution", () => {
@@ -58,25 +63,23 @@ describe("Version Registry", () => {
 			expect(result.version).not.toContain("beta");
 		});
 
-		it("should return default version for invalid date format", () => {
-			const result = resolveApiVersion("invalid-date");
-			expect(result.version).toContain("default");
+		it("should throw for invalid date format", () => {
+			expect(() => resolveApiVersion("invalid-date")).toThrow();
 		});
 
-		it("should return default version for malformed date", () => {
-			const result = resolveApiVersion("2025-13-01");
-			expect(result.version).toContain("default");
+		it("should throw for malformed date", () => {
+			expect(() => resolveApiVersion("2025-13-01")).toThrow();
 		});
 
-		it("should return default version for partial date", () => {
-			const result = resolveApiVersion("2025-03");
-			expect(result.version).toContain("default");
+		it("should throw for partial date", () => {
+			expect(() => resolveApiVersion("2025-03")).toThrow();
 		});
 
 		it("should handle future dates", () => {
 			const result = resolveApiVersion("2030-01-01");
-			// Only dated entry is 2025-01-01, so future dates resolve to it
-			expect(result.version).toContain("2025-01-01");
+			// Resolves to the latest dated stable entry
+			expect(result.version).toContain("latest");
+			expect(result.version).not.toContain("beta");
 		});
 	});
 
@@ -89,16 +92,16 @@ describe("Version Registry", () => {
 			expect(isValidApiVersion("2025-03-01")).toBe(true);
 		});
 
-		it("should return true for invalid format (falls back to default)", () => {
-			expect(isValidApiVersion("invalid")).toBe(true);
+		it("should return false for invalid format (throws)", () => {
+			expect(isValidApiVersion("invalid")).toBe(false);
 		});
 
-		it("should return true for malformed date (falls back to default)", () => {
-			expect(isValidApiVersion("2025-13-45")).toBe(true);
+		it("should return false for malformed date (throws)", () => {
+			expect(isValidApiVersion("2025-13-45")).toBe(false);
 		});
 
-		it("should return true for partial date (falls back to default)", () => {
-			expect(isValidApiVersion("2025-03")).toBe(true);
+		it("should return false for partial date (throws)", () => {
+			expect(isValidApiVersion("2025-03")).toBe(false);
 		});
 	});
 
@@ -106,7 +109,8 @@ describe("Version Registry", () => {
 		it("should return all version identifiers", () => {
 			const versions = VERSION_REGISTRY.flatMap((v) => v.version);
 			expect(versions).toContain("beta");
-			expect(versions).toContain("default");
+			expect(versions).toContain("backwards-compatibility-default");
+			expect(versions).toContain("latest");
 			expect(versions).toContain("2025-01-01");
 			expect(versions.length).toBeGreaterThan(0);
 		});
@@ -170,9 +174,10 @@ describe("Version Registry", () => {
 	describe("Date range resolution", () => {
 		// Registry:
 		//   ["beta"] → Spotter3 tools (no date, only reachable via "beta")
-		//   ["default", "2025-01-01"] → base MCP tools
+		//   ["latest", "2026-05-01"] → newest stable entry
+		//   ["backwards-compatibility-default", "2025-01-01"] → base MCP tools
 		it.each([
-			// Before all dated versions → falls back to default (2025-01-01)
+			// Before all dated versions → falls back to oldest (2025-01-01)
 			{
 				apiVersion: "2020-01-01",
 				expectedVersionDate: "2025-01-01",
@@ -183,7 +188,7 @@ describe("Version Registry", () => {
 				expectedVersionDate: "2025-01-01",
 				label: "day before earliest version",
 			},
-			// On or after 2025-01-01 → resolves to 2025-01-01 (only dated entry)
+			// On or after 2025-01-01 but before 2026-05-01 → resolves to 2025-01-01
 			{
 				apiVersion: "2025-01-01",
 				expectedVersionDate: "2025-01-01",
@@ -204,14 +209,20 @@ describe("Version Registry", () => {
 				expectedVersionDate: "2025-01-01",
 				label: "end of 2025",
 			},
+			// On or after 2026-05-01 → resolves to latest stable (2026-05-01)
 			{
-				apiVersion: "2026-01-01",
-				expectedVersionDate: "2025-01-01",
+				apiVersion: "2026-05-01",
+				expectedVersionDate: "2026-05-01",
+				label: "exact match for latest version",
+			},
+			{
+				apiVersion: "2026-06-01",
+				expectedVersionDate: "2026-05-01",
 				label: "start of 2026",
 			},
 			{
 				apiVersion: "2030-01-01",
-				expectedVersionDate: "2025-01-01",
+				expectedVersionDate: "2026-05-01",
 				label: "far future date",
 			},
 		])(
@@ -230,9 +241,14 @@ describe("Version Registry", () => {
 				label: "beta identifier",
 			},
 			{
-				apiVersion: "default",
-				expectedIdentifier: "default",
-				label: "default identifier",
+				apiVersion: "backwards-compatibility-default",
+				expectedIdentifier: "backwards-compatibility-default",
+				label: "backwards-compatibility-default identifier",
+			},
+			{
+				apiVersion: "latest",
+				expectedIdentifier: "latest",
+				label: "latest identifier",
 			},
 		])(
 			"$label: apiVersion=$apiVersion → contains $expectedIdentifier",
@@ -242,27 +258,23 @@ describe("Version Registry", () => {
 			},
 		);
 
-		// Invalid versions → fall back to default
+		// Invalid versions → throw
 		it.each([
 			{ apiVersion: "beta2", label: "unknown identifier" },
 			{ apiVersion: "invalid", label: "invalid string" },
 			{ apiVersion: "2025-13-01", label: "malformed date" },
-		])(
-			"$label: apiVersion=$apiVersion → falls back to default",
-			({ apiVersion }) => {
-				const result = resolveApiVersion(apiVersion);
-				expect(result.version).toContain("default");
-			},
-		);
+		])("$label: apiVersion=$apiVersion → throws", ({ apiVersion }) => {
+			expect(() => resolveApiVersion(apiVersion)).toThrow();
+		});
 
-		// Null/undefined → default
-		it.each([
-			{ apiVersion: null, label: "null" },
-			{ apiVersion: undefined, label: "undefined" },
-		])("$label → resolves to default (2025-01-01)", ({ apiVersion }) => {
-			const result = resolveApiVersion(apiVersion);
-			expect(result.version).toContain("default");
-			expect(result.version).toContain("2025-01-01");
+		// Null → throws; undefined → resolves to latest
+		it("null → throws", () => {
+			expect(() => resolveApiVersion(null as any)).toThrow();
+		});
+
+		it("undefined → resolves to latest", () => {
+			const result = resolveApiVersion(undefined);
+			expect(result.version).toContain("latest");
 		});
 	});
 });

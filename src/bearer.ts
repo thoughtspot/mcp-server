@@ -9,15 +9,15 @@ import { PUBLIC_ROUTES, PUBLIC_ROUTE_PREFIXES } from "./routes";
  * @param env - Environment bindings
  * @param ctx - Execution context
  * @param MCPServer - MCP server instance
- * @param supportApiVersion - Whether to support api-version query param
+ * @param apiVersionOverride - Optional API version override (ignore value in request)
  */
 function handleTokenAuth(
 	req: Request,
 	env: Env,
 	ctx: ExecutionContext,
 	MCPServer: typeof ThoughtSpotMCP,
-	supportApiVersion: boolean,
-): Response {
+	apiVersionOverride?: string,
+): Response | Promise<Response> {
 	const authHeader = req.headers.get("authorization");
 	if (!authHeader) {
 		return new Response("Bearer token is required", { status: 400 });
@@ -51,12 +51,10 @@ function handleTokenAuth(
 		clientName,
 	};
 
-	// Add api-version support only for /token endpoints (supports "beta" or "YYYY-MM-DD" format)
-	if (supportApiVersion) {
-		const apiVersion = url.searchParams.get("api-version");
-		if (apiVersion) {
-			props.apiVersion = apiVersion;
-		}
+	// Resolve API version to use
+	const apiVersion = apiVersionOverride ?? url.searchParams.get("api-version");
+	if (apiVersion) {
+		props.apiVersion = apiVersion;
 	}
 
 	(ctx as any).props = props;
@@ -81,13 +79,19 @@ export function withBearerHandler(
 	// These endpoints do NOT support api-version query params (will be removed in future)
 	// Use /token endpoints instead for new implementations
 	app.mount(PUBLIC_ROUTE_PREFIXES.bearer, (req, env, ctx) => {
-		return handleTokenAuth(req, env, ctx, MCPServer, false);
+		return handleTokenAuth(
+			req,
+			env,
+			ctx,
+			MCPServer,
+			"backwards-compatibility-default",
+		);
 	});
 
 	// NEW: /token endpoints - supports api-version query params
 	// Recommended for all new implementations
 	app.mount(PUBLIC_ROUTE_PREFIXES.token, (req, env, ctx) => {
-		return handleTokenAuth(req, env, ctx, MCPServer, true);
+		return handleTokenAuth(req, env, ctx, MCPServer);
 	});
 
 	return app;

@@ -1,5 +1,7 @@
 import { toolDefinitionsV1, toolDefinitionsV2 } from "./tool-definitions";
 
+const YYYY_MM_DD_DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
+
 /**
  * Version configuration interface
  */
@@ -13,26 +15,23 @@ export interface VersionConfig {
 }
 
 /**
- * Parses the release date from a version's date identifiers
- * @param versions - The version identifiers array (e.g., ["beta", "2026-03-25"])
- * @returns The parsed date from the first valid YYYY-MM-DD string in the array, or null if none found
+ * Given a list of version names, returns a date if there is a valid date-based version identifier.
+ * This should always be the last entry in the list if present.
  */
 function getReleaseDateFromVersion(versions: string[]): Date | null {
-	const dateVersion = versions.find((v) => /^\d{4}-\d{2}-\d{2}$/.test(v));
-	if (dateVersion) {
-		return new Date(dateVersion);
+	const possibleDateVersion = versions[versions.length - 1];
+	const isDate = YYYY_MM_DD_DATE_REGEX.test(possibleDateVersion);
+	if (!isDate) {
+		return null;
 	}
-	return null;
+	return new Date(possibleDateVersion);
 }
 
 /**
- * Version registry mapping version identifiers to their configurations
- *
- * IMPORTANT: Versions MUST be ordered by release date (newest first).
- * When adding new versions, ensure they are inserted in the correct position
- * to maintain this ordering, as the resolution logic depends on it.
- * There should always be a "default" stable version that serves as the fallback for
- * any requests without a specified version or with a date before all versions.
+ * Version registry, with respective tools to expose by API version. The "version" field can
+ * contain multiple identifiers for the same version. Important ordering rules:
+ * - Entries in the registry must be in chronological order, with newest first
+ * - Entries in the "version" field must include the plain date (if present) as the last entry
  */
 export const VERSION_REGISTRY: VersionConfig[] = [
 	{
@@ -41,39 +40,22 @@ export const VERSION_REGISTRY: VersionConfig[] = [
 		description: "Spotter3 agent conversation tools released",
 	},
 	{
-		version: ["default", "2025-01-01"],
+		version: ["latest", "2026-05-01"],
+		tools: [...toolDefinitionsV2],
+		description: "Spotter3 agent conversation tools released",
+	},
+	{
+		version: ["backwards-compatibility-default", "2025-01-01"],
 		tools: [...toolDefinitionsV1],
 		description: "Base version with getRelevantQuestions and getAnswer tools",
 	},
 ];
 
-function getDefaultVersionConfig() {
-	const defaultVersion = VERSION_REGISTRY.find((v) =>
-		v.version.includes("default"),
-	);
-	if (defaultVersion) {
-		return defaultVersion;
-	}
-	if (VERSION_REGISTRY.length > 0) {
-		return VERSION_REGISTRY[0];
-	}
-	throw new Error("No available API versions in registry.");
-}
-
 /**
- * Resolves an API version string to a version configuration
- * @param apiVersion - The API version string (e.g., "beta", "2025-03-01", or null for default)
- * @returns The resolved version configuration
+ * Resolves an API version string to a version configuration, defaulting to latest
  */
-export function resolveApiVersion(
-	apiVersion: string | null | undefined,
-): VersionConfig {
-	// No version specified - return the entry marked as "default"
-	if (!apiVersion) {
-		return getDefaultVersionConfig();
-	}
-
-	// Check for exact match (including "beta")
+export function resolveApiVersion(apiVersion = "latest"): VersionConfig {
+	// Check for exact match (including non-dates like "beta", "latest", etc)
 	const exactMatch = VERSION_REGISTRY.find((v) =>
 		v.version.includes(apiVersion),
 	);
@@ -81,31 +63,36 @@ export function resolveApiVersion(
 		return exactMatch;
 	}
 
-	// Try to parse as date (YYYY-MM-DD format)
-	const dateMatch = apiVersion.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-	if (!dateMatch) {
-		return getDefaultVersionConfig();
+	// Try to parse as date
+	const isDate = YYYY_MM_DD_DATE_REGEX.test(apiVersion);
+	if (!isDate) {
+		throw new Error(
+			`Invalid date format in API version, expected YYYY-MM-DD: ${apiVersion}`,
+		);
 	}
 
 	const requestedDate = new Date(apiVersion);
-
-	// Validate the date is valid
 	if (Number.isNaN(requestedDate.getTime())) {
-		return getDefaultVersionConfig();
+		throw new Error(
+			`Invalid date format in API version, expected YYYY-MM-DD: ${apiVersion}`,
+		);
 	}
 
-	// Find the latest version released on or before the requested date
-	// Entries without a date identifier are excluded from date-based resolution
-	// Note: No sort needed as VERSION_REGISTRY is already ordered by release date (newest first)
-	const matchingVersion = VERSION_REGISTRY.filter((v) => {
+	// Find the newest version on or before the requested date. Note that the version registry is
+	// already ordered from newest to oldest. We ignore any entries without a date-based version.
+	const matchingVersion = VERSION_REGISTRY.find((v) => {
 		const releaseDate = getReleaseDateFromVersion(v.version);
 		return releaseDate !== null && releaseDate <= requestedDate;
-	})[0];
-
+	});
 	if (matchingVersion) {
 		return matchingVersion;
 	}
 
-	// If no version found on or before the date, return the default entry
-	return getDefaultVersionConfig();
+	// If requesting an API version older than the oldest available version, return the oldest
+	// available version
+	console.warn(
+		"Requested API version is older than all available versions, defaulting to oldest available version",
+		apiVersion,
+	);
+	return VERSION_REGISTRY[VERSION_REGISTRY.length - 1];
 }

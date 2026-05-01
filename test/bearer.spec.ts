@@ -177,6 +177,7 @@ describe("Bearer Handler", () => {
 				accessToken: "my-access-token",
 				instanceUrl: "https://my-instance.thoughtspot.cloud",
 				clientName: "Custom Test Client",
+				apiVersion: "backwards-compatibility-default",
 			});
 
 			// Verify the response
@@ -201,6 +202,7 @@ describe("Bearer Handler", () => {
 				accessToken: "my-access-token",
 				instanceUrl: "https://my-instance.thoughtspot.cloud",
 				clientName: "Bearer Token client",
+				apiVersion: "backwards-compatibility-default",
 			});
 
 			// Verify the response
@@ -479,8 +481,8 @@ describe("Bearer Handler", () => {
 		});
 	});
 
-	describe("DEPRECATED: /bearer endpoints - No API Version Support", () => {
-		it("should NOT inject apiVersion even when query param is present on /bearer/mcp", async () => {
+	describe("DEPRECATED: /bearer endpoints - Fixed API Version Override", () => {
+		it("should use backwards-compatibility-default apiVersion and ignore query param on /bearer/mcp", async () => {
 			const appWithBearer = withBearerHandler(app, ThoughtSpotMCP);
 
 			const request = new Request(
@@ -494,15 +496,15 @@ describe("Bearer Handler", () => {
 
 			await appWithBearer.fetch(request, mockEnv, mockCtx);
 
-			// LEGACY: /bearer endpoints do NOT support api-version for backward compatibility
+			// LEGACY: /bearer endpoints always use backwards-compatibility-default, ignoring any query param
 			expect(mockCtx.props).toMatchObject({
 				accessToken: "test-token",
 				instanceUrl: "https://test.thoughtspot.cloud",
 			});
-			expect(mockCtx.props.apiVersion).toBeUndefined();
+			expect(mockCtx.props.apiVersion).toBe("backwards-compatibility-default");
 		});
 
-		it("should NOT inject apiVersion even when query param is present on /bearer/sse", async () => {
+		it("should use backwards-compatibility-default apiVersion and ignore query param on /bearer/sse", async () => {
 			const appWithBearer = withBearerHandler(app, ThoughtSpotMCP);
 
 			const request = new Request(
@@ -516,12 +518,12 @@ describe("Bearer Handler", () => {
 
 			await appWithBearer.fetch(request, mockEnv, mockCtx);
 
-			// LEGACY: /bearer endpoints do NOT support api-version
+			// LEGACY: /bearer endpoints always use backwards-compatibility-default, ignoring any query param
 			expect(mockCtx.props).toMatchObject({
 				accessToken: "test-token",
 				instanceUrl: "https://test.thoughtspot.cloud",
 			});
-			expect(mockCtx.props.apiVersion).toBeUndefined();
+			expect(mockCtx.props.apiVersion).toBe("backwards-compatibility-default");
 		});
 	});
 
