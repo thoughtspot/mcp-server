@@ -1,12 +1,20 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+	ANALYTICS_ENGINE_BLOB_FIELDS,
+	ANALYTICS_ENGINE_DOUBLE_FIELDS,
+	ANALYTICS_ENGINE_INDEX_FIELDS,
+	ANALYTICS_ENGINE_LABEL_FIELDS,
+	ANALYTICS_ENGINE_RESOURCE_ATTRIBUTE_FIELDS,
 	ANALYTICS_ENGINE_SCHEMA_VERSION,
 	AnalyticsEngineMetricsSink,
 	createAnalyticsEngineMetricsSink,
 	getAnalyticsEngineMetricFamily,
 	toAnalyticsEngineDataPoint,
 } from "../../../src/metrics/runtime/analytics-engine-sink";
-import { METRIC_NAMES } from "../../../src/metrics/runtime/metric-types";
+import {
+	APPROVED_METRIC_LABEL_KEYS,
+	METRIC_NAMES,
+} from "../../../src/metrics/runtime/metric-types";
 import type { MetricObservation } from "../../../src/metrics/runtime/metrics-sink";
 
 describe("AnalyticsEngineMetricsSink", () => {
@@ -85,6 +93,35 @@ describe("AnalyticsEngineMetricsSink", () => {
 		expect(
 			getAnalyticsEngineMetricFamily(METRIC_NAMES.sessionsStartedTotal),
 		).toBe("auth");
+	});
+
+	it("keeps the Analytics Engine schema aligned with approved labels and resource attributes", () => {
+		expect(ANALYTICS_ENGINE_LABEL_FIELDS).toEqual(APPROVED_METRIC_LABEL_KEYS);
+		expect(ANALYTICS_ENGINE_RESOURCE_ATTRIBUTE_FIELDS).toEqual([
+			["deployment_environment", "deployment.environment"],
+			["service_name", "service.name"],
+			["service_namespace", "service.namespace"],
+			["service_version", "service.version"],
+		]);
+		expect(ANALYTICS_ENGINE_INDEX_FIELDS).toEqual([
+			"schema_version",
+			"event_family",
+			"metric_name",
+			"tenant_id",
+			"user_id",
+		]);
+		expect(ANALYTICS_ENGINE_BLOB_FIELDS).toEqual([
+			"metric_kind",
+			...APPROVED_METRIC_LABEL_KEYS,
+			"deployment_environment",
+			"service_name",
+			"service_namespace",
+			"service_version",
+		]);
+		expect(ANALYTICS_ENGINE_DOUBLE_FIELDS).toEqual([
+			"metric_value",
+			"timestamp_ms",
+		]);
 	});
 
 	it("writes one data point per observation", async () => {
@@ -172,5 +209,8 @@ describe("AnalyticsEngineMetricsSink", () => {
 		).toBeInstanceOf(AnalyticsEngineMetricsSink);
 		expect(createAnalyticsEngineMetricsSink(undefined)).toBeUndefined();
 		expect(createAnalyticsEngineMetricsSink({})).toBeUndefined();
+		expect(
+			createAnalyticsEngineMetricsSink({ writeDataPoint: "not-a-function" }),
+		).toBeUndefined();
 	});
 });

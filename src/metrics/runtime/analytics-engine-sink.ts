@@ -1,4 +1,5 @@
 import {
+	APPROVED_METRIC_LABEL_KEYS,
 	METRIC_NAMES,
 	type MetricLabels,
 	type MetricName,
@@ -30,25 +31,22 @@ export const ANALYTICS_ENGINE_INDEX_FIELDS = [
 	"user_id",
 ] as const;
 
+export const ANALYTICS_ENGINE_LABEL_FIELDS = APPROVED_METRIC_LABEL_KEYS;
+
+export const ANALYTICS_ENGINE_RESOURCE_ATTRIBUTE_FIELDS = [
+	["deployment_environment", "deployment.environment"],
+	["service_name", "service.name"],
+	["service_namespace", "service.namespace"],
+	["service_version", "service.version"],
+] as const satisfies readonly (readonly [
+	string,
+	keyof MetricResourceAttributes,
+])[];
+
 export const ANALYTICS_ENGINE_BLOB_FIELDS = [
 	"metric_kind",
-	"route_group",
-	"transport",
-	"auth_mode",
-	"api_surface",
-	"api_version",
-	"outcome",
-	"status_class",
-	"tool_name",
-	"upstream_operation",
-	"message_type",
-	"is_thinking",
-	"is_done",
-	"operation",
-	"deployment_environment",
-	"service_name",
-	"service_namespace",
-	"service_version",
+	...ANALYTICS_ENGINE_LABEL_FIELDS,
+	...ANALYTICS_ENGINE_RESOURCE_ATTRIBUTE_FIELDS.map(([field]) => field),
 ] as const;
 
 export const ANALYTICS_ENGINE_DOUBLE_FIELDS = [
@@ -152,23 +150,12 @@ export function toAnalyticsEngineDataPoint(
 		],
 		blobs: [
 			observation.kind,
-			getLabel(observation.labels, "route_group"),
-			getLabel(observation.labels, "transport"),
-			getLabel(observation.labels, "auth_mode"),
-			getLabel(observation.labels, "api_surface"),
-			getLabel(observation.labels, "api_version"),
-			getLabel(observation.labels, "outcome"),
-			getLabel(observation.labels, "status_class"),
-			getLabel(observation.labels, "tool_name"),
-			getLabel(observation.labels, "upstream_operation"),
-			getLabel(observation.labels, "message_type"),
-			getLabel(observation.labels, "is_thinking"),
-			getLabel(observation.labels, "is_done"),
-			getLabel(observation.labels, "operation"),
-			getResourceAttribute(resourceAttributes, "deployment.environment"),
-			getResourceAttribute(resourceAttributes, "service.name"),
-			getResourceAttribute(resourceAttributes, "service.namespace"),
-			getResourceAttribute(resourceAttributes, "service.version"),
+			...ANALYTICS_ENGINE_LABEL_FIELDS.map((key) =>
+				getLabel(observation.labels, key),
+			),
+			...ANALYTICS_ENGINE_RESOURCE_ATTRIBUTE_FIELDS.map(([, key]) =>
+				getResourceAttribute(resourceAttributes, key),
+			),
 		],
 		doubles: [observation.value, observation.timestampMs],
 	};
@@ -197,18 +184,22 @@ export class AnalyticsEngineMetricsSink implements MetricsSink {
 	}
 }
 
-export function createAnalyticsEngineMetricsSink(
+function isAnalyticsEngineDatasetLike(
 	dataset: unknown,
-): AnalyticsEngineMetricsSink | undefined {
-	if (
+): dataset is AnalyticsEngineDatasetLike {
+	return (
 		typeof dataset === "object" &&
 		dataset !== null &&
 		"writeDataPoint" in dataset &&
 		typeof dataset.writeDataPoint === "function"
-	) {
-		return new AnalyticsEngineMetricsSink(
-			dataset as AnalyticsEngineDatasetLike,
-		);
+	);
+}
+
+export function createAnalyticsEngineMetricsSink(
+	dataset: unknown,
+): AnalyticsEngineMetricsSink | undefined {
+	if (isAnalyticsEngineDatasetLike(dataset)) {
+		return new AnalyticsEngineMetricsSink(dataset);
 	}
 
 	return undefined;
