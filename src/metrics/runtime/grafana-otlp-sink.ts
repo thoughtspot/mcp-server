@@ -176,7 +176,7 @@ function encodeBase64(value: string): string {
 	throw new Error("No base64 encoder is available for Grafana OTLP auth");
 }
 
-function toOtlpValue(value: MetricLabelValue | string): OtlpAttributeValue {
+function toOtlpValue(value: MetricLabelValue): OtlpAttributeValue {
 	if (typeof value === "boolean") {
 		return { boolValue: value };
 	}
@@ -186,8 +186,8 @@ function toOtlpValue(value: MetricLabelValue | string): OtlpAttributeValue {
 	return { stringValue: value };
 }
 
-function toAttributes(
-	attributes: Record<string, MetricLabelValue | string | undefined>,
+function toOtlpAttributes(
+	attributes: Record<string, MetricLabelValue | undefined>,
 ): OtlpAttribute[] {
 	return Object.keys(attributes)
 		.sort()
@@ -202,11 +202,13 @@ function toAttributes(
 
 function toTimeUnixNano(timestampMs: number): string {
 	const integerMs = Math.trunc(timestampMs);
-	const fractionalMs = timestampMs - integerMs;
-	const fractionalMicros = Math.round(fractionalMs * 1_000);
+	const remainderNs = Math.round((timestampMs - integerMs) * 1_000_000);
+	const carryMs = Math.trunc(remainderNs / 1_000_000);
+	const normalizedRemainderNs = remainderNs - carryMs * 1_000_000;
+
 	return (
-		BigInt(integerMs) * 1_000_000n +
-		BigInt(fractionalMicros) * 1_000n
+		(BigInt(integerMs) + BigInt(carryMs)) * 1_000_000n +
+		BigInt(normalizedRemainderNs)
 	).toString();
 }
 
@@ -261,7 +263,7 @@ function aggregateObservations(
 	const aggregated = new Map<string, AggregatedMetricDataPoint>();
 
 	for (const observation of observations) {
-		const attributes = toAttributes(observation.labels);
+		const attributes = toOtlpAttributes(observation.labels);
 		const attributeSetKey = getAttributeSetKey(attributes);
 		const dataPoint = aggregated.get(attributeSetKey) ?? {
 			attributes,
@@ -341,7 +343,7 @@ function normalizeOtlpMetricsEndpoint(endpoint: string): string {
 	return trimmed.endsWith("/v1/metrics") ? trimmed : `${trimmed}/v1/metrics`;
 }
 
-function buildAuthorizationHeader(
+function buildAuthorizationHeaderValue(
 	config: Pick<GrafanaOtlpSinkConfig, "apiToken" | "authHeader" | "username">,
 ): string | undefined {
 	if (config.authHeader) {
@@ -354,7 +356,7 @@ function buildAuthorizationHeader(
 }
 
 function buildRequestHeaders(config: GrafanaOtlpSinkConfig): HeadersInit {
-	const authorization = buildAuthorizationHeader(config);
+	const authorization = buildAuthorizationHeaderValue(config);
 	return authorization
 		? { ...JSON_HEADERS, Authorization: authorization }
 		: JSON_HEADERS;
@@ -365,7 +367,8 @@ async function getExportErrorBody(response: Response): Promise<string> {
 	if (text.length <= MAX_EXPORT_ERROR_BODY_LENGTH) {
 		return text;
 	}
-	return `${text.slice(0, MAX_EXPORT_ERROR_BODY_LENGTH)}...`;
+	const truncatedLength = Math.max(0, MAX_EXPORT_ERROR_BODY_LENGTH - 3);
+	return `${text.slice(0, truncatedLength)}...`;
 }
 
 export function toOtlpMetricsPayload(
@@ -377,7 +380,7 @@ export function toOtlpMetricsPayload(
 		resourceMetrics: [
 			{
 				resource: {
-					attributes: toAttributes(payload.resourceAttributes),
+					attributes: toOtlpAttributes(payload.resourceAttributes),
 				},
 				scopeMetrics: [
 					{

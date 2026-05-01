@@ -132,7 +132,7 @@ describe("GrafanaOtlpMetricsSink", () => {
 						status_class: "2xx",
 						route_group: "mcp",
 					},
-					timestampMs: 1_714_000_000_123.456,
+					timestampMs: 1_714_000_000_123.5,
 				},
 				{
 					kind: "histogram",
@@ -181,7 +181,7 @@ describe("GrafanaOtlpMetricsSink", () => {
 				dataPoints: [
 					{
 						asDouble: 3,
-						timeUnixNano: "1714000000123456000",
+						timeUnixNano: "1714000000123500000",
 					},
 				],
 			},
@@ -222,6 +222,34 @@ describe("GrafanaOtlpMetricsSink", () => {
 			},
 		});
 		expect(gaugeMetric.gauge.dataPoints).toHaveLength(1);
+	});
+
+	it("keeps nanosecond precision when fractional milliseconds round up a microsecond", () => {
+		const otlpPayload = toOtlpMetricsPayload({
+			observations: [
+				{
+					kind: "counter",
+					name: METRIC_NAMES.httpRequestsTotal,
+					value: 1,
+					labels: {
+						route_group: "mcp",
+					},
+					timestampMs: 1_714_000_000_123.9995,
+				},
+			],
+			resourceAttributes: {},
+		});
+		const [metric] = otlpPayload.resourceMetrics[0].scopeMetrics[0].metrics;
+
+		expect(metric).toMatchObject({
+			sum: {
+				dataPoints: [
+					{
+						timeUnixNano: "1714000000123999512",
+					},
+				],
+			},
+		});
 	});
 
 	it("posts OTLP JSON to the normalized metrics endpoint", async () => {
@@ -334,7 +362,7 @@ describe("GrafanaOtlpMetricsSink", () => {
 		});
 
 		await expect(sink.flush(payload)).rejects.toThrow(
-			`Grafana OTLP metrics export failed with status 500: ${"x".repeat(1_000)}...`,
+			`Grafana OTLP metrics export failed with status 500: ${"x".repeat(997)}...`,
 		);
 	});
 
