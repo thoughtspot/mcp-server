@@ -110,52 +110,16 @@ function getProcessEnvValue(name: string): string | undefined {
 
 function readConfigValue(
 	env: GrafanaOtlpEnvLike | undefined,
-	...keys: string[]
+	key: string,
 ): string | undefined {
-	for (const key of keys) {
-		const envValue = env?.[key];
-		if (typeof envValue === "string" && envValue.length > 0) {
-			return envValue;
-		}
-
-		const processEnvValue = getProcessEnvValue(key);
-		if (processEnvValue && processEnvValue.length > 0) {
-			return processEnvValue;
-		}
+	const envValue = env?.[key];
+	if (typeof envValue === "string" && envValue.length > 0) {
+		return envValue;
 	}
 
-	return undefined;
-}
-
-function decodeHeaderValue(value: string): string {
-	try {
-		return decodeURIComponent(value);
-	} catch {
-		return value;
-	}
-}
-
-function readOtlpAuthorizationHeader(
-	env: GrafanaOtlpEnvLike | undefined,
-): string | undefined {
-	const rawHeaders = readConfigValue(env, "OTEL_EXPORTER_OTLP_HEADERS");
-	if (!rawHeaders) {
-		return undefined;
-	}
-
-	for (const header of rawHeaders.split(",")) {
-		const separatorIndex = header.indexOf("=");
-		if (separatorIndex === -1) {
-			continue;
-		}
-
-		const key = header.slice(0, separatorIndex).trim().toLowerCase();
-		if (key !== "authorization") {
-			continue;
-		}
-
-		const value = header.slice(separatorIndex + 1).trim();
-		return value ? decodeHeaderValue(value) : undefined;
+	const processEnvValue = getProcessEnvValue(key);
+	if (processEnvValue && processEnvValue.length > 0) {
+		return processEnvValue;
 	}
 
 	return undefined;
@@ -398,36 +362,16 @@ export function toOtlpMetricsPayload(
 export function resolveGrafanaOtlpSinkConfig(
 	env?: GrafanaOtlpEnvLike,
 ): GrafanaOtlpSinkConfig | undefined {
-	const endpoint = readConfigValue(
-		env,
-		"GRAFANA_OTLP_METRICS_ENDPOINT",
-		"GRAFANA_OTLP_ENDPOINT",
-		"OTEL_EXPORTER_OTLP_METRICS_ENDPOINT",
-		"OTEL_EXPORTER_OTLP_ENDPOINT",
-	);
+	const endpoint = readConfigValue(env, "GRAFANA_OTLP_ENDPOINT");
 	if (!endpoint) {
 		return undefined;
 	}
 
 	return {
 		endpoint: normalizeOtlpMetricsEndpoint(endpoint),
-		username: readConfigValue(
-			env,
-			"GRAFANA_OTLP_USERNAME",
-			"GRAFANA_CLOUD_ACCOUNT_ID",
-			"GRAFANA_CLOUD_INSTANCE_ID",
-		),
-		apiToken: readConfigValue(
-			env,
-			"GRAFANA_OTLP_API_TOKEN",
-			"GRAFANA_CLOUD_API_TOKEN",
-		),
-		authHeader:
-			readConfigValue(
-				env,
-				"GRAFANA_OTLP_AUTH_HEADER",
-				"OTEL_EXPORTER_OTLP_AUTH_HEADER",
-			) ?? readOtlpAuthorizationHeader(env),
+		username: readConfigValue(env, "GRAFANA_OTLP_USERNAME"),
+		apiToken: readConfigValue(env, "GRAFANA_OTLP_API_TOKEN"),
+		authHeader: readConfigValue(env, "GRAFANA_OTLP_AUTH_HEADER"),
 	};
 }
 

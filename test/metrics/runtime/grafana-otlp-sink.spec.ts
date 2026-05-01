@@ -302,7 +302,7 @@ describe("GrafanaOtlpMetricsSink", () => {
 		);
 	});
 
-	it("encodes Grafana Cloud Basic auth credentials as UTF-8", async () => {
+	it("encodes Basic auth credentials as UTF-8", async () => {
 		const fetchFn = vi
 			.fn()
 			.mockResolvedValue(new Response(null, { status: 200 }));
@@ -366,12 +366,12 @@ describe("GrafanaOtlpMetricsSink", () => {
 		);
 	});
 
-	it("resolves config from Grafana and OTLP environment names", () => {
+	it("resolves config from canonical Grafana environment names", () => {
 		expect(
 			resolveGrafanaOtlpSinkConfig({
 				GRAFANA_OTLP_ENDPOINT: "https://otlp.example.com/otlp",
-				GRAFANA_CLOUD_ACCOUNT_ID: "12345",
-				GRAFANA_CLOUD_API_TOKEN: "test-api-token",
+				GRAFANA_OTLP_USERNAME: "12345",
+				GRAFANA_OTLP_API_TOKEN: "test-api-token",
 			}),
 		).toEqual({
 			endpoint: "https://otlp.example.com/otlp/v1/metrics",
@@ -381,24 +381,23 @@ describe("GrafanaOtlpMetricsSink", () => {
 		});
 		expect(
 			resolveGrafanaOtlpSinkConfig({
-				OTEL_EXPORTER_OTLP_ENDPOINT: "https://collector.example.com",
+				GRAFANA_OTLP_ENDPOINT: "https://collector.example.com",
+				GRAFANA_OTLP_AUTH_HEADER: "Bearer test",
 			}),
 		).toMatchObject({
 			endpoint: "https://collector.example.com/v1/metrics",
+			authHeader: "Bearer test",
 		});
 		expect(resolveGrafanaOtlpSinkConfig()).toBeUndefined();
 	});
 
-	it("supports Grafana Cloud generated OTLP headers", () => {
+	it("ignores non-canonical OTLP environment names", () => {
 		expect(
 			resolveGrafanaOtlpSinkConfig({
 				OTEL_EXPORTER_OTLP_ENDPOINT: "https://otlp.example.com/otlp",
 				OTEL_EXPORTER_OTLP_HEADERS: "Authorization=Basic%20abc123",
 			}),
-		).toMatchObject({
-			endpoint: "https://otlp.example.com/otlp/v1/metrics",
-			authHeader: "Basic abc123",
-		});
+		).toBeUndefined();
 	});
 
 	it("only creates a sink when an OTLP endpoint is configured", () => {
