@@ -191,12 +191,16 @@ export abstract class BaseMCPServer extends Server {
 	}
 
 	protected async initializeService(): Promise<void> {
-		this.sessionInfo = await this.getThoughtSpotService().getSessionInfo();
-		const mixpanel = new MixpanelTracker(
-			this.sessionInfo,
-			this.ctx.props.clientName,
-		);
-		this.addTracker(mixpanel);
+		try {
+			this.sessionInfo = await this.getThoughtSpotService().getSessionInfo();
+			const mixpanel = new MixpanelTracker(
+				this.sessionInfo,
+				this.ctx.props.clientName,
+			);
+			this.addTracker(mixpanel);
+		} catch (error) {
+			console.error("Error initializing session info:", error);
+		}
 	}
 
 	/**

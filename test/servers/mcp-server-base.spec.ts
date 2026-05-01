@@ -278,6 +278,35 @@ describe("MCP Server Base", () => {
 		});
 	});
 
+	describe("initializeService", () => {
+		it("should catch and log error if getSessionInfo throws", async () => {
+			vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
+				getSessionInfo: vi
+					.fn()
+					.mockRejectedValue(new Error("Session info fetch failed")),
+				searchMetadata: vi.fn().mockResolvedValue([]),
+				instanceUrl: "https://test.thoughtspot.cloud",
+			} as any);
+
+			const consoleErrorSpy = vi
+				.spyOn(console, "error")
+				.mockImplementation(() => {});
+
+			const testServer = new TestMCPServer(
+				{ props: mockProps } as any,
+				null as any,
+			);
+			await expect(testServer.init()).resolves.not.toThrow();
+
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				"Error initializing session info:",
+				expect.any(Error),
+			);
+
+			consoleErrorSpy.mockRestore();
+		});
+	});
+
 	describe("Server Initialization", () => {
 		it("should initialize with custom server name and version", () => {
 			const customServer = new TestMCPServer(
