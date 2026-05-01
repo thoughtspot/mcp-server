@@ -9,7 +9,7 @@ import { TrackEvent } from "../metrics";
 import { WithSpan } from "../metrics/tracing/tracing-utils";
 import { context, SpanStatusCode, trace } from "@opentelemetry/api";
 import { BaseMCPServer, type Context } from "./mcp-server-base";
-import { resolveApiVersion } from "./version-registry";
+import { resolveApiVersion, type VersionConfig } from "./version-registry";
 import {
 	GetRelevantQuestionsSchema,
 	GetAnswerSchema,
@@ -32,9 +32,28 @@ export class MCPServer extends BaseMCPServer {
 		super(ctx, "ThoughtSpot", "2.0.0");
 	}
 
+	@WithSpan("call-list-tools")
 	protected async listTools() {
+		const span = this.initSpanWithCommonAttributes();
+		span?.setAttribute(
+			"api_version_requested",
+			this.ctx.props.apiVersion ?? "(not passed)",
+		);
+
 		// Resolve the API version to get the appropriate tool configuration
-		const versionConfig = resolveApiVersion(this.ctx.props.apiVersion);
+		let versionConfig: VersionConfig;
+		try {
+			versionConfig = resolveApiVersion(this.ctx.props.apiVersion);
+		} catch (error) {
+			console.error("Error resolving API version, using default:", error);
+			span?.recordException(error as Error);
+			versionConfig = resolveApiVersion();
+		}
+		span?.setAttribute(
+			"api_version_resolved",
+			// The plain date will be the last entry if multiple labels
+			versionConfig.version[versionConfig.version.length - 1],
+		);
 
 		// Get base tools from version config
 		let tools = [...versionConfig.tools];

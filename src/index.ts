@@ -51,16 +51,20 @@ function createMCPRouter(
 			ctx: ExecutionContext,
 		): Promise<Response> {
 			const url = new URL(request.url);
-			const apiVersion = url.searchParams.get("api-version");
+			let apiVersion = url.searchParams.get("api-version");
 
-			// Inject apiVersion into props if provided (supports "beta" or "YYYY-MM-DD" format)
-			if (apiVersion) {
-				const originalProps = (ctx as any).props || {};
-				(ctx as any).props = {
-					...originalProps,
-					apiVersion,
-				};
+			// TODO(Rifdhan): this is a temporary backwards compatibility measure. In the future
+			// we will use latest by default.
+			if (!apiVersion) {
+				apiVersion = "backwards-compatibility-default";
 			}
+
+			// Inject apiVersion into props
+			const originalProps = (ctx as any).props || {};
+			(ctx as any).props = {
+				...originalProps,
+				apiVersion,
+			};
 
 			// Route to the appropriate serve method
 			return serverClass[serveMethod](path, options).fetch(request, env, ctx);

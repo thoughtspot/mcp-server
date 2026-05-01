@@ -178,14 +178,14 @@ describe("MCP Server", () => {
 
 			const result = await listTools();
 
-			// Common tools (2) + Standard tools (2) + DataSourceDiscovery (1) = 5
+			// V2 tools (latest version): 5 tools
 			expect(result.tools).toHaveLength(5);
 			expect(result.tools?.map((t) => t.name)).toEqual([
-				"ping",
-				"createLiveboard",
-				"getDataSourceSuggestions",
-				"getRelevantQuestions",
-				"getAnswer",
+				"check_connectivity",
+				"create_analysis_session",
+				"send_session_message",
+				"get_session_updates",
+				"create_dashboard",
 			]);
 		});
 
@@ -195,32 +195,27 @@ describe("MCP Server", () => {
 
 			const result = await listTools();
 
-			const pingTool = result.tools?.find((t) => t.name === "ping");
-			expect(pingTool?.description).toBe(
-				"Simple ping tool to test connectivity and Auth",
+			const connectivityTool = result.tools?.find(
+				(t) => t.name === "check_connectivity",
+			);
+			expect(connectivityTool?.description).toBe(
+				"Ping tool to test connectivity and authentication. This can be used if other tool calls are failing to verify if the connection is working.",
 			);
 
-			const questionsTool = result.tools?.find(
-				(t) => t.name === "getRelevantQuestions",
+			const sessionTool = result.tools?.find(
+				(t) => t.name === "create_analysis_session",
 			);
-			expect(questionsTool?.description).toBe(
-				"Get relevant data questions from ThoughtSpot database",
-			);
+			expect(sessionTool).toBeDefined();
 
-			const answerTool = result.tools?.find((t) => t.name === "getAnswer");
-			expect(answerTool?.description).toBe(
-				"Get the answer to a question from ThoughtSpot database",
+			const dashboardTool = result.tools?.find(
+				(t) => t.name === "create_dashboard",
 			);
-
-			const liveboardTool = result.tools?.find(
-				(t) => t.name === "createLiveboard",
-			);
-			expect(liveboardTool?.description).toBe(
-				"Create a liveboard from a list of answers",
+			expect(dashboardTool?.description).toBe(
+				"Create a dashboard from a list of answers, allowing the user to revisit the results later. Use this if the user asks for a dashboard, or asks to save the results from the analysis.",
 			);
 		});
 
-		it("should return 4 tools when enableSpotterDataSourceDiscovery is false", async () => {
+		it("should return 5 tools regardless of enableSpotterDataSourceDiscovery when using latest (V2)", async () => {
 			// Mock getThoughtSpotClient with enableSpotterDataSourceDiscovery set to false
 			vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
 				getSessionInfo: vi.fn().mockResolvedValue({
@@ -256,20 +251,15 @@ describe("MCP Server", () => {
 
 			const result = await listTools();
 
-			// Common tools (2) + Standard tools (2) = 4 (no datasource discovery)
-			expect(result.tools).toHaveLength(4);
+			// V2 tools don't have a datasource discovery tool, so filtering has no effect
+			expect(result.tools).toHaveLength(5);
 			expect(result.tools?.map((t) => t.name)).toEqual([
-				"ping",
-				"createLiveboard",
-				"getRelevantQuestions",
-				"getAnswer",
+				"check_connectivity",
+				"create_analysis_session",
+				"send_session_message",
+				"get_session_updates",
+				"create_dashboard",
 			]);
-
-			// Verify that getDataSourceSuggestions is not included
-			const dataSourceTool = result.tools?.find(
-				(t) => t.name === "getDataSourceSuggestions",
-			);
-			expect(dataSourceTool).toBeUndefined();
 		});
 	});
 
