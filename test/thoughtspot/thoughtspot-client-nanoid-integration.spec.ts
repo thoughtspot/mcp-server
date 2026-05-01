@@ -7,12 +7,12 @@
  * carry a unique, well-formed ID.
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { getThoughtSpotClient } from "../../src/thoughtspot/thoughtspot-client";
 import {
-	createBearerAuthenticationConfig,
 	ThoughtSpotRestApi,
+	createBearerAuthenticationConfig,
 } from "@thoughtspot/rest-api-sdk";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { getThoughtSpotClient } from "../../src/thoughtspot/thoughtspot-client";
 
 // Mock only the SDK plumbing — nanoid is intentionally NOT mocked so that the
 // real customAlphabet implementation is exercised.
@@ -21,8 +21,6 @@ vi.mock("@thoughtspot/rest-api-sdk", () => ({
 	ThoughtSpotRestApi: vi.fn(),
 }));
 
-global.fetch = vi.fn();
-
 const CUSTOM_ALPHABET =
 	"_-0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
 const NANO_ID_SIZE = 12;
@@ -30,6 +28,8 @@ const ALLOWED_CHARS_RE = /^[_\-0-9a-zA-Z]+$/;
 
 const INSTANCE_URL = "https://integration-test.thoughtspot.com";
 const BEARER_TOKEN = "integration-test-token";
+
+let fetchMock: ReturnType<typeof vi.fn>;
 
 function buildClient() {
 	const mockConfig = { middleware: [] };
@@ -42,13 +42,11 @@ function buildClient() {
 }
 
 function mockOkFetch() {
-	(fetch as any).mockResolvedValue({ ok: true });
+	fetchMock.mockResolvedValue({ ok: true });
 }
 
 function parsedBodies(): any[] {
-	return (fetch as any).mock.calls.map((call: any[]) =>
-		JSON.parse(call[1].body),
-	);
+	return fetchMock.mock.calls.map((call: any[]) => JSON.parse(call[1].body));
 }
 
 describe("sendAgentConversationMessageStreaming — nano ID integration", () => {
@@ -56,10 +54,13 @@ describe("sendAgentConversationMessageStreaming — nano ID integration", () => 
 
 	beforeEach(() => {
 		vi.clearAllMocks();
+		fetchMock = vi.fn();
+		vi.stubGlobal("fetch", fetchMock);
 		client = buildClient();
 	});
 
 	afterEach(() => {
+		vi.unstubAllGlobals();
 		vi.restoreAllMocks();
 	});
 
@@ -161,7 +162,7 @@ describe("sendAgentConversationMessageStreaming — nano ID integration", () => 
 			message: userMessage,
 		});
 
-		const [url, options] = (fetch as any).mock.calls[0];
+		const [url, options] = fetchMock.mock.calls[0];
 		const body = JSON.parse(options.body);
 
 		// Endpoint construction
