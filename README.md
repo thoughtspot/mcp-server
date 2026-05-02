@@ -40,19 +40,18 @@ See our privacy statement [here](https://www.thoughtspot.com/privacy-statement).
 
 ## Connect
 
-If using a client which supports remote MCPs natively (Claude.ai etc) then just enter:
+As of May 1, 2026, the ThoughtSpot MCP Server supports Spotter 3, enabling advanced analytics, forecasting, multi-step reasoning, and deep research. The new MCP tools support real-time streaming and session-based conversations.
 
-MCP Server URL: 
+The server uses date-based versioning via the `?api-version=YYYY-MM-DD` query parameter. Appending this to your MCP server URL pins your integration to a specific version (or the closest earlier version if an exact match doesn't exist). Each new version may introduce new tools, enhancements, or bug fixes.
 
-```
-https://agent.thoughtspot.app/mcp
-```
-Preferred Auth method: Oauth
+ OAuth apps (plug-and-play integrations for Claude, ChatGPT, or custom OAuth apps):
+- https://agent.thoughtspot.app/mcp?api-version=latest — Always points to the latest version.
+- https://agent.thoughtspot.app/mcp?api-version=YYYY-MM-DD — Pins to a specific version. Example: `?api-version=2026-04-30`.
+- https://agent.thoughtspot.app/mcp — Not recommended. Currently points to the baseline version with legacy MCP tools.
 
-- For OpenAI ChatGPT Deep Research, add the URL as:
-```js
-https://agent.thoughtspot.app/openai/mcp
-```
+ Bearer token apps (custom apps using bearer tokens):
+- https://agent.thoughtspot.app/token/mcp — Always points to the latest version.
+- https://agent.thoughtspot.app/token/mcp?api-version=YYYY-MM-DD — Pins to a specific version.  Example: `?api-version=2026-04-30`.
 
 To configure this MCP server in your MCP client (such as Claude Desktop, Windsurf, Cursor, etc.) which do not support remote MCPs, add the following configuration to your MCP client settings:
 
@@ -63,7 +62,7 @@ To configure this MCP server in your MCP client (such as Claude Desktop, Windsur
       "command": "npx",
       "args": [
          "mcp-remote",
-         "https://agent.thoughtspot.app/mcp"
+         "https://agent.thoughtspot.app/mcp?api-version=latest"
       ]
     }
   }
@@ -391,28 +390,25 @@ The ThoughtSpot MCP Server supports API versioning to access different tool sets
 **Version Formats:**
 - **Beta version**: `?api-version=beta` - Access the latest beta features
 - **Date-based version**: `?api-version=YYYY-MM-DD` - Access tools from a specific release date or the latest version on or before that date
-- **Default** (no parameter): Returns the stable default tool set
+- **Default** (no parameter): Returns the latest stable tool set
 
 **Examples:**
 ```bash
 # Beta version (latest experimental features)
 https://agent.thoughtspot.app/token/mcp?api-version=beta
 
-# Specific date version (Spotter3 agent tools)
-https://agent.thoughtspot.app/token/mcp?api-version=2025-03-01
+# Specific date version (Spotter 3 agent tools)
+https://agent.thoughtspot.app/token/mcp?api-version=2026-05-01
 
-# Date range resolution (returns latest version ≤ specified date)
+# Date range resolution (returns newest version ≤ specified date)
 https://agent.thoughtspot.app/token/mcp?api-version=2025-03-15
-
-# Default version (stable tools)
-https://agent.thoughtspot.app/token/mcp
 ```
 
 **Available Versions:**
 - `beta`: Latest beta features with Spotter3 agent conversation tools
-- `2025-03-01`: Spotter3 agent conversation tools (`createConversation`, `sendConversationMessage`, `getConversationUpdates`)
-- `2024-12-01`: Base MCP tools (`getRelevantQuestions`, `getAnswer`, `getDataSourceSuggestions`)
-- `default`: Stable base tools (same as `2024-12-01`)
+- `latest`: Most recent non-beta version
+- `2026-05-01`: Spotter 3 agent conversation tools (`create_analysis_session`, `send_session_message`, `get_session_updates`)
+- `2025-01-01`: Base MCP tools (`getRelevantQuestions`, `getAnswer`, `getDataSourceSuggestions`)
 
 **Note:** The `/bearer/*` endpoints always return the default stable tool set and ignore the `api-version` parameter for backward compatibility.
 
