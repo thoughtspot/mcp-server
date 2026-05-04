@@ -194,6 +194,34 @@ describe("withRequestMetrics", () => {
 		);
 	});
 
+	it("uses Grafana OTLP config as the default grafana sink", async () => {
+		const fetchSpy = vi
+			.spyOn(globalThis, "fetch")
+			.mockResolvedValue(new Response(null, { status: 200 }));
+		const recorder = createRequestMetricsRecorder({
+			METRICS_SINK_MODE: "grafana",
+			GRAFANA_OTLP_ENDPOINT: "https://otlp.example.com/otlp",
+			GRAFANA_OTLP_AUTH_HEADER: "Bearer test",
+		});
+
+		recorder.count(METRIC_NAMES.httpRequestsTotal, 1, {
+			route_group: "mcp",
+		});
+		await recorder.flush();
+
+		expect(fetchSpy).toHaveBeenCalledWith(
+			"https://otlp.example.com/otlp/v1/metrics",
+			expect.objectContaining({
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json",
+					Authorization: "Bearer test",
+				},
+				body: expect.any(String),
+			}),
+		);
+	});
+
 	it("does not fail the request when waitUntil rejects scheduling", async () => {
 		const errorSpy = vi
 			.spyOn(console, "error")
@@ -252,6 +280,46 @@ describe("withRequestMetrics", () => {
 		expect(errorSpy).toHaveBeenCalledWith(
 			"[metrics] Flush failed",
 			expect.any(Error),
+		);
+	});
+
+	it("reuses the default Grafana sink for the same env object", async () => {
+		const fetchSpy = vi
+			.spyOn(globalThis, "fetch")
+			.mockResolvedValue(new Response(null, { status: 200 }));
+		const env = {
+			METRICS_SINK_MODE: "grafana",
+			GRAFANA_OTLP_ENDPOINT: "https://otlp.example.com/first",
+			GRAFANA_OTLP_AUTH_HEADER: "Bearer first",
+		};
+		const firstRecorder = createRequestMetricsRecorder(env);
+
+		env.GRAFANA_OTLP_ENDPOINT = "https://otlp.example.com/second";
+		env.GRAFANA_OTLP_AUTH_HEADER = "Bearer second";
+		const secondRecorder = createRequestMetricsRecorder(env);
+
+		firstRecorder.count(METRIC_NAMES.httpRequestsTotal, 1, {
+			route_group: "mcp",
+		});
+		secondRecorder.count(METRIC_NAMES.httpRequestsTotal, 1, {
+			route_group: "mcp",
+		});
+		await firstRecorder.flush();
+		await secondRecorder.flush();
+
+		expect(fetchSpy).toHaveBeenCalledTimes(2);
+		expect(fetchSpy).toHaveBeenCalledWith(
+			"https://otlp.example.com/first/v1/metrics",
+			expect.objectContaining({
+				headers: {
+					"Content-Type": "application/json",
+					Authorization: "Bearer first",
+				},
+			}),
+		);
+		expect(fetchSpy).not.toHaveBeenCalledWith(
+			"https://otlp.example.com/second/v1/metrics",
+			expect.anything(),
 		);
 	});
 

@@ -1,8 +1,10 @@
+import { createGrafanaOtlpMetricsSink } from "./grafana-otlp-sink";
 import {
 	type MetricsRecorder,
 	NOOP_METRICS_RECORDER,
 	RequestMetricsRecorder,
 } from "./metrics-recorder";
+import type { MetricsSink } from "./metrics-sink";
 import {
 	type ConfiguredMetricsSinks,
 	type MetricsEnvLike,
@@ -13,6 +15,7 @@ import {
 const METRICS_RECORDER_SYMBOL = Symbol.for(
 	"thoughtspot.mcp.metrics.requestRecorder",
 );
+const GRAFANA_SINK_CACHE = new WeakMap<object, MetricsSink>();
 
 type MetricsExecutionContext = ExecutionContext & {
 	[METRICS_RECORDER_SYMBOL]?: MetricsRecorder;
@@ -38,13 +41,45 @@ export function clearMetricsRecorderFromExecutionContext(
 	delete (ctx as MetricsExecutionContext)[METRICS_RECORDER_SYMBOL];
 }
 
+function getCachedGrafanaSink(
+	env: MetricsEnvLike | undefined,
+): MetricsSink | undefined {
+	if (!env || typeof env !== "object") {
+		return createGrafanaOtlpMetricsSink(env);
+	}
+
+	const cachedSink = GRAFANA_SINK_CACHE.get(env);
+	if (cachedSink) {
+		return cachedSink;
+	}
+
+	const sink = createGrafanaOtlpMetricsSink(env);
+	if (sink) {
+		GRAFANA_SINK_CACHE.set(env, sink);
+	}
+	return sink;
+}
+
+function createDefaultConfiguredMetricsSinks(
+	env: MetricsEnvLike | undefined,
+	sinks: ConfiguredMetricsSinks,
+): ConfiguredMetricsSinks {
+	return {
+		analyticsEngineSink: sinks.analyticsEngineSink,
+		grafanaSink: sinks.grafanaSink ?? getCachedGrafanaSink(env),
+	};
+}
+
 export function createRequestMetricsRecorder(
 	env?: MetricsEnvLike,
 	sinks: ConfiguredMetricsSinks = {},
 ): MetricsRecorder {
 	try {
 		const config = resolveMetricsRuntimeConfig(env);
-		const sink = createConfiguredMetricsSink(config, sinks);
+		const sink = createConfiguredMetricsSink(
+			config,
+			createDefaultConfiguredMetricsSinks(env, sinks),
+		);
 
 		return new RequestMetricsRecorder({
 			sink,
