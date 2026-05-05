@@ -1,8 +1,13 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { withBearerHandler } from "../src/bearer";
-import { ThoughtSpotMCP } from "../src";
 import { Hono } from "hono";
-import { encodeBase64Url, decodeBase64Url } from "hono/utils/encode";
+import { decodeBase64Url, encodeBase64Url } from "hono/utils/encode";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { ThoughtSpotMCP } from "../src";
+import { withBearerHandler } from "../src/bearer";
+import { METRIC_NAMES } from "../src/metrics/runtime/metric-types";
+import {
+	createRequestMetricsRecorder,
+	setMetricsRecorderOnExecutionContext,
+} from "../src/metrics/runtime/request-metrics";
 
 // For correctly-typed Request
 const IncomingRequest = Request<unknown, IncomingRequestCfProperties>;
@@ -212,6 +217,32 @@ describe("Bearer Handler", () => {
 	});
 
 	describe("Authorization Header Parsing", () => {
+		it("records bearer auth metrics for rejected requests", async () => {
+			const appWithBearer = withBearerHandler(app, ThoughtSpotMCP);
+			const recorder = createRequestMetricsRecorder();
+			setMetricsRecorderOnExecutionContext(
+				mockCtx as ExecutionContext,
+				recorder,
+			);
+
+			const request = new Request("https://example.com/bearer/mcp");
+			const result = await appWithBearer.fetch(request, mockEnv, mockCtx);
+
+			expect(result.status).toBe(400);
+			expect(recorder.snapshot()).toContainEqual(
+				expect.objectContaining({
+					kind: "counter",
+					name: METRIC_NAMES.bearerAuthRequestsTotal,
+					value: 1,
+					labels: {
+						outcome: "client_error",
+						route_group: "bearer_mcp",
+						transport: "mcp",
+					},
+				}),
+			);
+		});
+
 		it("should return 400 when authorization header is missing", async () => {
 			const appWithBearer = withBearerHandler(app, ThoughtSpotMCP);
 

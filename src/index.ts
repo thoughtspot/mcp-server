@@ -9,7 +9,10 @@ import { trace } from "@opentelemetry/api";
 import { withBearerHandler } from "./bearer";
 import { instrumentedMCPServer } from "./cloudflare-utils";
 import handler from "./handlers";
-import { withRequestMetrics } from "./metrics/runtime/request-metrics";
+import {
+	recordHttpRequestMetrics,
+	withRequestMetrics,
+} from "./metrics/runtime/request-metrics";
 import { PUBLIC_ROUTES, PUBLIC_ROUTE_PREFIXES } from "./routes";
 import { apiServer } from "./servers/api-server";
 import { ConversationStorageServer } from "./servers/conversation-storage-server";
@@ -147,8 +150,33 @@ export default {
 		return withRequestMetrics(
 			env as unknown as Record<string, unknown>,
 			ctx,
-			async () => {
-				return instrumentedOAuthHandler.fetch!(request, env, ctx);
+			async (recorder) => {
+				const requestStartMs = Date.now();
+
+				try {
+					const response = await instrumentedOAuthHandler.fetch!(
+						request,
+						env,
+						ctx,
+					);
+					recordHttpRequestMetrics(
+						recorder,
+						request,
+						response,
+						ctx,
+						Date.now() - requestStartMs,
+					);
+					return response;
+				} catch (error) {
+					recordHttpRequestMetrics(
+						recorder,
+						request,
+						new Response(null, { status: 500 }),
+						ctx,
+						Date.now() - requestStartMs,
+					);
+					throw error;
+				}
 			},
 		);
 	},
