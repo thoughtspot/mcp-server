@@ -19,12 +19,36 @@ function createMockStorage() {
 			return alarm;
 		},
 		storage: {
-			get: vi.fn(async <T>(key: string): Promise<T | undefined> => {
-				return store.get(key) as T | undefined;
-			}),
-			put: vi.fn(async (key: string, value: unknown): Promise<void> => {
-				store.set(key, value);
-			}),
+			get: vi.fn(
+				async <T>(
+					keyOrKeys: string | string[],
+				): Promise<T | undefined | Map<string, T>> => {
+					if (Array.isArray(keyOrKeys)) {
+						const result = new Map<string, T>();
+						for (const key of keyOrKeys) {
+							if (store.has(key)) {
+								result.set(key, store.get(key) as T);
+							}
+						}
+						return result;
+					}
+					return store.get(keyOrKeys) as T | undefined;
+				},
+			),
+			put: vi.fn(
+				async (
+					keyOrEntries: string | Record<string, unknown>,
+					value?: unknown,
+				): Promise<void> => {
+					if (typeof keyOrEntries === "string") {
+						store.set(keyOrEntries, value);
+					} else {
+						for (const [k, v] of Object.entries(keyOrEntries)) {
+							store.set(k, v);
+						}
+					}
+				},
+			),
 			delete: vi.fn(async (keys: string[]): Promise<void> => {
 				for (const key of keys) {
 					store.delete(key);
@@ -80,6 +104,18 @@ const answerMessage: Message = {
 	iframe_url: "https://example.com/answer/1",
 	is_thinking: false,
 };
+
+// Generate an array of N simple text messages
+function generateMessages(n: number): Message[] {
+	return Array.from({ length: n }, (_, i) => ({
+		type: "text",
+		text: `Message ${i}`,
+		is_thinking: false,
+	}));
+}
+
+// The storage batch size used by ConversationStorageServer (must match the constant in the source)
+const STORAGE_BATCH_SIZE = 127;
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -252,6 +288,61 @@ describe("ConversationStorageServer", () => {
 			);
 			expect(res.status).toBe(500);
 		});
+
+		// -------------------------------------------------------------------
+		// Batching
+		// -------------------------------------------------------------------
+
+		it("stores exactly STORAGE_BATCH_SIZE messages in a single put call", async () => {
+			// STORAGE_BATCH_SIZE - 1 messages + write-bookmark = STORAGE_BATCH_SIZE entries → 1 batch
+			const messages = generateMessages(STORAGE_BATCH_SIZE - 1);
+			await server.fetch(makeRequest("POST", "append", { messages }));
+
+			expect(mock.storage.put).toHaveBeenCalledOnce();
+			expect(mock.store.get("write-bookmark")).toBe(STORAGE_BATCH_SIZE - 1);
+			expect(mock.store.get("message-0")).toEqual(messages[0]);
+			expect(mock.store.get(`message-${STORAGE_BATCH_SIZE - 2}`)).toEqual(
+				messages[STORAGE_BATCH_SIZE - 2],
+			);
+		});
+
+		it("splits into two put calls when messages exceed STORAGE_BATCH_SIZE", async () => {
+			// STORAGE_BATCH_SIZE messages + write-bookmark = STORAGE_BATCH_SIZE + 1 entries → 2 batches
+			const messages = generateMessages(STORAGE_BATCH_SIZE);
+			await server.fetch(makeRequest("POST", "append", { messages }));
+
+			expect(mock.storage.put).toHaveBeenCalledTimes(2);
+			expect(mock.store.get("write-bookmark")).toBe(STORAGE_BATCH_SIZE);
+			for (let i = 0; i < STORAGE_BATCH_SIZE; i++) {
+				expect(mock.store.get(`message-${i}`)).toEqual(messages[i]);
+			}
+		});
+
+		it("splits into two put calls when isDone adds an extra entry over the batch limit", async () => {
+			// STORAGE_BATCH_SIZE messages + write-bookmark + is-done = STORAGE_BATCH_SIZE + 2 entries → 2 batches
+			const messages = generateMessages(STORAGE_BATCH_SIZE);
+			await server.fetch(
+				makeRequest("POST", "append", { messages, isDone: true }),
+			);
+
+			expect(mock.storage.put).toHaveBeenCalledTimes(2);
+			expect(mock.store.get("write-bookmark")).toBe(STORAGE_BATCH_SIZE);
+			expect(mock.store.get("is-done")).toBe(true);
+			for (let i = 0; i < STORAGE_BATCH_SIZE; i++) {
+				expect(mock.store.get(`message-${i}`)).toEqual(messages[i]);
+			}
+		});
+
+		it("correctly stores messages across three or more batches", async () => {
+			const count = STORAGE_BATCH_SIZE * 2 + 10;
+			const messages = generateMessages(count);
+			await server.fetch(makeRequest("POST", "append", { messages }));
+
+			expect(mock.store.get("write-bookmark")).toBe(count);
+			for (let i = 0; i < count; i++) {
+				expect(mock.store.get(`message-${i}`)).toEqual(messages[i]);
+			}
+		});
 	});
 
 	// -------------------------------------------------------------------------
@@ -328,6 +419,73 @@ describe("ConversationStorageServer", () => {
 
 			const res = await server.fetch(makeRequest("GET", "messages"));
 			expect(res.status).toBe(500);
+		});
+
+		// -------------------------------------------------------------------
+		// Batching
+		// -------------------------------------------------------------------
+
+		it("retrieves exactly STORAGE_BATCH_SIZE messages in a single get call", async () => {
+			const messages = generateMessages(STORAGE_BATCH_SIZE);
+			await server.fetch(makeRequest("POST", "append", { messages }));
+			vi.clearAllMocks();
+
+			const res = await server.fetch(makeRequest("GET", "messages"));
+			const body = (await res.json()) as StreamingMessagesState;
+
+			// 1 get for getIsDoneAndReadWriteBookmarks + 1 get for the STORAGE_BATCH_SIZE message keys
+			expect(mock.storage.get).toHaveBeenCalledTimes(2);
+			expect(body.messages).toHaveLength(STORAGE_BATCH_SIZE);
+			expect(body.messages).toEqual(messages);
+		});
+
+		it("splits into two get calls when fetching more than STORAGE_BATCH_SIZE messages", async () => {
+			const count = STORAGE_BATCH_SIZE + 1;
+			const messages = generateMessages(count);
+			await server.fetch(makeRequest("POST", "append", { messages }));
+			vi.clearAllMocks();
+
+			const res = await server.fetch(makeRequest("GET", "messages"));
+			const body = (await res.json()) as StreamingMessagesState;
+
+			// 1 get for getIsDoneAndReadWriteBookmarks + 2 get batches for the message keys
+			expect(mock.storage.get).toHaveBeenCalledTimes(3);
+			expect(body.messages).toHaveLength(count);
+			expect(body.messages).toEqual(messages);
+		});
+
+		it("correctly retrieves messages across three or more get batches", async () => {
+			const count = STORAGE_BATCH_SIZE * 2 + 10;
+			const messages = generateMessages(count);
+			await server.fetch(makeRequest("POST", "append", { messages }));
+			vi.clearAllMocks();
+
+			const res = await server.fetch(makeRequest("GET", "messages"));
+			const body = (await res.json()) as StreamingMessagesState;
+
+			expect(body.messages).toHaveLength(count);
+			expect(body.messages).toEqual(messages);
+		});
+
+		it("only fetches new messages across batches after bookmark advances", async () => {
+			const firstBatch = generateMessages(STORAGE_BATCH_SIZE + 5);
+			await server.fetch(
+				makeRequest("POST", "append", { messages: firstBatch }),
+			);
+			// Consume first batch
+			await server.fetch(makeRequest("GET", "messages"));
+
+			const secondBatch = generateMessages(STORAGE_BATCH_SIZE + 3);
+			await server.fetch(
+				makeRequest("POST", "append", { messages: secondBatch }),
+			);
+			vi.clearAllMocks();
+
+			const res = await server.fetch(makeRequest("GET", "messages"));
+			const body = (await res.json()) as StreamingMessagesState;
+
+			expect(body.messages).toHaveLength(secondBatch.length);
+			expect(body.messages).toEqual(secondBatch);
 		});
 	});
 
