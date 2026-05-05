@@ -2,9 +2,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MixpanelTracker } from "../../../src/metrics/mixpanel/mixpanel";
 import type { SessionInfo } from "../../../src/thoughtspot/types";
 
-// Mock fetch globally for integration tests
-global.fetch = vi.fn();
-
 describe("Mixpanel Integration Tests", () => {
 	const mockSessionInfo: SessionInfo = {
 		mixpanelToken: "test-mixpanel-token",
@@ -28,6 +25,7 @@ describe("Mixpanel Integration Tests", () => {
 	let consoleDebugSpy: any;
 
 	beforeEach(() => {
+		vi.stubGlobal("fetch", vi.fn());
 		vi.clearAllMocks();
 
 		// Mock console methods properly
@@ -37,6 +35,7 @@ describe("Mixpanel Integration Tests", () => {
 
 	afterEach(() => {
 		vi.restoreAllMocks();
+		vi.unstubAllGlobals();
 	});
 
 	describe("end-to-end tracking", () => {

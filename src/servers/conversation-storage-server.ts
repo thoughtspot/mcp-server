@@ -2,6 +2,7 @@ import { isBoolean, isNumber } from "lodash";
 import type { Message, StreamingMessagesState } from "../thoughtspot/types";
 
 const DEFAULT_TTL_MS = 30 * 60 * 1000; // 30 minutes
+const STORAGE_BATCH_SIZE = 127; // Cloudflare DO bulk get/put limit is 128, we use 127 to be safe
 
 const MESSAGE_KEY_PREFIX = "message-";
 const IS_DONE_KEY = "is-done";
@@ -87,10 +88,9 @@ export class ConversationStorageServer {
 
 	/*
 	 * Append new messages to the conversation, starting at the current state of WRITE_BOOKMARK and
-	 * saving the new state of WRITE_BOOKMARK after. We write the isDone flag state after writing
-	 * all messages, so that if a reader is executing concurrently, they will never think the
-	 * conversation is done without having already seen all messages. We also restart the TTL for
-	 * the conversation after all writes are done.
+	 * saving the new state of WRITE_BOOKMARK after. Writes are done un bulk, but batched if there
+	 * are too many operations. The isDone flag is always in the last batch, so that any reader
+	 * will never think the conversation is done before all messages have been written.
 	 */
 	private async appendMessagesAndRestartTtl(
 		newMessages: Message[],
@@ -107,49 +107,54 @@ export class ConversationStorageServer {
 		}
 
 		let idx = (await this.state.storage.get<number>(WRITE_BOOKMARK_KEY)) ?? 0;
+		const entriesToStore = {} as Record<string, Message | number | boolean>;
 		for (const message of newMessages) {
-			await this.state.storage.put<Message>(
-				`${MESSAGE_KEY_PREFIX}${idx}`,
-				message,
-			);
+			entriesToStore[`${MESSAGE_KEY_PREFIX}${idx}`] = message;
 			idx++;
 		}
-		await this.state.storage.put<number>(WRITE_BOOKMARK_KEY, idx);
+		entriesToStore[WRITE_BOOKMARK_KEY] = idx;
 
 		if (isDone) {
-			await this.state.storage.put<boolean>(IS_DONE_KEY, true);
+			entriesToStore[IS_DONE_KEY] = true;
 		}
 
+		// Perform all writes in batches, then restart TTL
+		await this.putInBatches(entriesToStore);
 		await this.restartTtl();
 	}
 
 	/*
 	 * Retrieve all new messages since the last time this was called. We use a READ_BOOKMARK to
 	 * track the index of the last returned message, and update it when returning new messages. We
-	 * read the isDone flag state before reading messages, so that if a writer is executing
-	 * concurrently, we will only see isDone=true if all messages have already been written. Note
-	 * that we don't restart the TTL here, since it is only meant to be based on writes.
+	 * use WRITE_BOOKMARK to know up to which index new messages have been written.
 	 */
 	private async getNewMessagesAndUpdateBookmark(): Promise<StreamingMessagesState> {
-		const isDone = await this.state.storage.get<boolean>(IS_DONE_KEY);
+		const [isDone, readBookmark, writeBookmark] =
+			await this.getIsDoneAndReadWriteBookmarks();
 		if (!isBoolean(isDone)) {
 			throw new Error(`Conversation ${this.conversationId} not found`);
 		}
 
-		let bookmark =
-			(await this.state.storage.get<number>(READ_BOOKMARK_KEY)) ?? 0;
+		const keys = [];
+		for (let i = readBookmark; i < writeBookmark; i++) {
+			keys.push(MESSAGE_KEY_PREFIX + i);
+		}
+
 		const newMessages: Message[] = [];
-		while (true) {
-			const message = await this.state.storage.get<Message>(
-				`${MESSAGE_KEY_PREFIX}${bookmark}`,
-			);
+		const messagesMap = await this.getInBatches<Message>(keys);
+		for (let i = readBookmark; i < writeBookmark; i++) {
+			const message = messagesMap.get(MESSAGE_KEY_PREFIX + i);
 			if (!message) {
-				break;
+				console.warn(
+					`Expected message at index ${i} for conversation ${this.conversationId} not found`,
+					{ readBookmark, writeBookmark },
+				);
+				continue;
 			}
 			newMessages.push(message);
-			bookmark++;
 		}
-		await this.state.storage.put<number>(READ_BOOKMARK_KEY, bookmark);
+
+		await this.state.storage.put<number>(READ_BOOKMARK_KEY, writeBookmark);
 
 		return {
 			messages: newMessages,
@@ -157,42 +162,85 @@ export class ConversationStorageServer {
 		};
 	}
 
+	/*
+	 * Perform bulk get operations in batches up to STORAGE_BATCH_SIZE
+	 */
+	private async getInBatches<T>(keys: string[]): Promise<Map<string, T>> {
+		const result = new Map<string, T>();
+		for (let i = 0; i < keys.length; i += STORAGE_BATCH_SIZE) {
+			const batch = keys.slice(i, i + STORAGE_BATCH_SIZE);
+			const batchResult = await this.state.storage.get<T>(batch);
+			for (const [k, v] of batchResult) {
+				result.set(k, v);
+			}
+		}
+		return result;
+	}
+
+	/*
+	 * Perform bulk put operations in batches up to STORAGE_BATCH_SIZE
+	 */
+	private async putInBatches(entries: Record<string, unknown>): Promise<void> {
+		const keys = Object.keys(entries);
+		for (let i = 0; i < keys.length; i += STORAGE_BATCH_SIZE) {
+			const batchKeys = keys.slice(i, i + STORAGE_BATCH_SIZE);
+			const batch = Object.fromEntries(batchKeys.map((k) => [k, entries[k]]));
+			await this.state.storage.put(batch);
+		}
+	}
+
+	/*
+	 * Restart TTL timer by canceling any old alarm and scheduling a new one for DEFAULT_TTL_MS
+	 */
 	private async restartTtl(): Promise<void> {
-		// Cancel any existing alarm and schedule a fresh one
 		await this.state.storage.deleteAlarm();
 		await this.state.storage.setAlarm(Date.now() + DEFAULT_TTL_MS);
 	}
 
 	async alarm(): Promise<void> {
 		// Check for any abnormalities in the state prior to deleting
-		const isDone = await this.state.storage.get<boolean>(IS_DONE_KEY);
+		const [isDone, readBookmark, writeBookmark] =
+			await this.getIsDoneAndReadWriteBookmarks();
 		if (!isBoolean(isDone) || !isDone) {
 			console.warn(
 				`Conversation ${this.conversationId} expired without being marked done`,
 				{
 					isDone,
+					readBookmark,
+					writeBookmark,
 				},
 			);
 		}
-		const writeBookmark =
-			await this.state.storage.get<number>(WRITE_BOOKMARK_KEY);
-		const readBookmark =
-			await this.state.storage.get<number>(READ_BOOKMARK_KEY);
-		if (!isNumber(writeBookmark)) {
-			console.warn(
-				`Conversation ${this.conversationId} expired without any messages written`,
-			);
-		} else if (!isNumber(readBookmark) || writeBookmark !== readBookmark) {
+		if (writeBookmark !== readBookmark) {
 			console.warn(
 				`Conversation ${this.conversationId} expired with unread messages`,
 				{
-					writeBookmark,
+					isDone,
 					readBookmark,
+					writeBookmark,
 				},
 			);
 		}
 
 		// Delete everything in storage
 		await this.state.storage.deleteAll();
+	}
+
+	/*
+	 * Retrieve 3 fields from storage in one transaction: isDone, readBookmark, and writeBookmark
+	 */
+	async getIsDoneAndReadWriteBookmarks(): Promise<
+		[boolean | undefined, number, number]
+	> {
+		const result = await this.state.storage.get<boolean | number>([
+			IS_DONE_KEY,
+			READ_BOOKMARK_KEY,
+			WRITE_BOOKMARK_KEY,
+		]);
+		return [
+			result.get(IS_DONE_KEY) as boolean,
+			(result.get(READ_BOOKMARK_KEY) as number) ?? 0,
+			(result.get(WRITE_BOOKMARK_KEY) as number) ?? 0,
+		];
 	}
 }
