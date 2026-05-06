@@ -5,6 +5,7 @@ import { MCPServer } from "../../src/servers/mcp-server";
 import { StreamingMessagesStorageWithTtl } from "../../src/streaming-message-storage-with-ttl/streaming-message-storage-with-ttl";
 import * as thoughtspotClient from "../../src/thoughtspot/thoughtspot-client";
 import { ThoughtSpotService } from "../../src/thoughtspot/thoughtspot-service";
+import { makeRequest } from "./helpers";
 
 // Mock the MixpanelTracker
 vi.mock("../../src/metrics/mixpanel/mixpanel", () => ({
@@ -1527,8 +1528,11 @@ describe("MCP Server", () => {
 	});
 
 	describe("Create Dashboard Tool", () => {
-		it("should create dashboard and return a URL link on success", async () => {
+		beforeEach(async () => {
 			await server.init();
+		});
+
+		it("should create dashboard and return a URL link on success", async () => {
 			vi.spyOn(server as any, "getThoughtSpotService").mockReturnValue({
 				fetchTMLAndCreateLiveboard: vi.fn().mockResolvedValue({
 					url: "https://test.thoughtspot.cloud/#/pinboard/dashboard-guid-123",
@@ -1556,7 +1560,6 @@ describe("MCP Server", () => {
 		});
 
 		it("should return error when answer_id has invalid format", async () => {
-			await server.init();
 			const { callTool } = connect(server);
 
 			const result = await callTool("create_dashboard", {
@@ -1572,7 +1575,6 @@ describe("MCP Server", () => {
 		});
 
 		it("should return error when answers list is empty", async () => {
-			await server.init();
 			vi.spyOn(server as any, "getThoughtSpotService").mockReturnValue({
 				fetchTMLAndCreateLiveboard: vi.fn().mockResolvedValue({
 					error: new Error("No visualizations to import"),
@@ -1593,7 +1595,6 @@ describe("MCP Server", () => {
 		});
 
 		it("should return error when answer_id is valid JSON but missing required fields", async () => {
-			await server.init();
 			const { callTool } = connect(server);
 
 			const result = await callTool("create_dashboard", {
@@ -1616,7 +1617,6 @@ describe("MCP Server", () => {
 				error: null,
 			});
 
-			await server.init();
 			vi.spyOn(server as any, "getThoughtSpotService").mockReturnValue({
 				fetchTMLAndCreateLiveboard: mockFetchTML,
 			});
@@ -1700,11 +1700,6 @@ describe("MCP Server", () => {
 					),
 			});
 
-			const makeRequest = (name: string, args: Record<string, unknown>) => ({
-				method: "tools/call" as const,
-				params: { name, arguments: args },
-			});
-
 			const sendResult = await server.callSendSessionMessage(
 				makeRequest("send_session_message", {
 					analytical_session_id: "session-e2e-123",
@@ -1745,19 +1740,14 @@ describe("MCP Server", () => {
 				sendAgentConversationMessageStreaming: mockSendStreaming,
 			});
 
-			const makeRequest = (args: Record<string, unknown>) => ({
-				method: "tools/call" as const,
-				params: { name: "send_session_message", arguments: args },
-			});
-
 			await server.callSendSessionMessage(
-				makeRequest({
+				makeRequest("send_session_message", {
 					analytical_session_id: "shared-session-123",
 					message: "What is total revenue?",
 				}),
 			);
 			await server.callSendSessionMessage(
-				makeRequest({
+				makeRequest("send_session_message", {
 					analytical_session_id: "shared-session-123",
 					message: "Break it down by region",
 				}),
@@ -1786,19 +1776,14 @@ describe("MCP Server", () => {
 				sendAgentConversationMessageStreaming: mockSendStreaming,
 			});
 
-			const makeRequest = (args: Record<string, unknown>) => ({
-				method: "tools/call" as const,
-				params: { name: "send_session_message", arguments: args },
-			});
-
 			await server.callSendSessionMessage(
-				makeRequest({
+				makeRequest("send_session_message", {
 					analytical_session_id: "session-no-ctx",
 					message: "What is total revenue?",
 				}),
 			);
 			await server.callSendSessionMessage(
-				makeRequest({
+				makeRequest("send_session_message", {
 					analytical_session_id: "session-with-ctx",
 					message: "What is total revenue?",
 					additional_context: "Fiscal year starts in April",

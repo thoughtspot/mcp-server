@@ -28,6 +28,13 @@ import { StreamingMessagesStorageWithTtl } from "../../src/streaming-message-sto
 import { processSendAgentConversationMessageStreamingResponse } from "../../src/streaming-utils";
 import * as thoughtspotClient from "../../src/thoughtspot/thoughtspot-client";
 import type { Message } from "../../src/thoughtspot/types";
+import { makeRequest } from "./helpers";
+
+vi.mock("../../src/metrics/mixpanel/mixpanel", () => ({
+	MixpanelTracker: class {
+		track() {}
+	},
+}));
 
 // ---------------------------------------------------------------------------
 // Infrastructure helpers
@@ -150,14 +157,6 @@ function makeReader(chunks: string[]): ReadableStreamDefaultReader {
 		cancel: vi.fn(),
 		releaseLock: vi.fn(),
 	} as unknown as ReadableStreamDefaultReader;
-}
-
-/** Build a tools/call request shape for direct server method calls. */
-function makeRequest(name: string, args: Record<string, unknown>) {
-	return {
-		method: "tools/call" as const,
-		params: { name, arguments: args },
-	};
 }
 
 // ---------------------------------------------------------------------------
