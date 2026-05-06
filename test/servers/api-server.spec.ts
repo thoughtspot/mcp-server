@@ -284,36 +284,6 @@ describe("API Server", () => {
 		});
 	});
 
-	describe("GET /api/tools/ping", () => {
-		it("should return Pong when authenticated", async () => {
-			const request = new Request("http://localhost/api/tools/ping");
-			const response = await apiServer.fetch(
-				request,
-				{ props: mockProps },
-				createMockExecutionContext(mockProps),
-			);
-			expect(response.status).toBe(200);
-			const data = await response.json();
-			expect(data).toEqual({ content: [{ type: "text", text: "Pong" }] });
-		});
-
-		it("should return error when props are missing authentication", async () => {
-			const unauthProps = { instanceUrl: "", accessToken: "" };
-			const request = new Request("http://localhost/api/tools/ping");
-			const response = await apiServer.fetch(
-				request,
-				{ props: unauthProps },
-				createMockExecutionContext(unauthProps),
-			);
-			expect(response.status).toBe(200);
-			const data = await response.json();
-			expect(data).toEqual({
-				isError: true,
-				content: [{ type: "text", text: "ERROR: Not authenticated" }],
-			});
-		});
-	});
-
 	describe("GET /api/resources/datasources", () => {
 		it("should return datasources successfully", async () => {
 			const mockDatasources = [

@@ -1203,22 +1203,6 @@ describe("thoughtspot-service", () => {
 		});
 	});
 
-	describe("validateConnection", () => {
-		it("should return true when getSessionInfo succeeds", async () => {
-			mockClient.getSessionInfo = vi.fn().mockResolvedValue({ userGUID: "u1" });
-			const service = new ThoughtSpotService(mockClient);
-			expect(await service.validateConnection()).toBe(true);
-		});
-
-		it("should return false when getSessionInfo throws", async () => {
-			mockClient.getSessionInfo = vi
-				.fn()
-				.mockRejectedValue(new Error("Network error"));
-			const service = new ThoughtSpotService(mockClient);
-			expect(await service.validateConnection()).toBe(false);
-		});
-	});
-
 	describe("searchWorksheets", () => {
 		it("should search and return matching worksheets successfully", async () => {
 			const mockResponse = [

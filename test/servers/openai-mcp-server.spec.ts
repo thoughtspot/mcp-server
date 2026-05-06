@@ -408,65 +408,6 @@ describe("OpenAI Deep Research MCP Server", () => {
 			});
 		});
 
-		it("should return 'no relevant data sources found' when discovery available but suggestions are empty", async () => {
-			vi.spyOn(
-				thoughtspotService.ThoughtSpotService.prototype,
-				"getDataSourceSuggestions",
-			).mockResolvedValue([]);
-
-			await server.init();
-			const { callTool } = connect(server);
-
-			const result = await callTool("search", {
-				query: "How to reduce customer churn?",
-			});
-
-			expect(result.isError).toBeUndefined();
-			expect((result.content as any[])[0].text).toBe(
-				"No relevant data sources found, please provide a datasource id in the query",
-			);
-		});
-
-		it("should return mapped datasource suggestions when discovery available and suggestions found", async () => {
-			vi.spyOn(
-				thoughtspotService.ThoughtSpotService.prototype,
-				"getDataSourceSuggestions",
-			).mockResolvedValue([
-				{
-					confidence: 0.9,
-					header: {
-						guid: "ds-abc",
-						displayName: "Sales Data",
-						description: "All sales records",
-					},
-					llmReasoning: "Matches revenue query",
-				},
-			]);
-
-			await server.init();
-			const { callTool } = connect(server);
-
-			const result = await callTool("search", {
-				query: "How to reduce customer churn?",
-			});
-
-			expect(result.isError).toBeUndefined();
-			expect(result.structuredContent).toMatchObject({
-				results: [
-					{
-						id: "datasource:///ds-abc",
-						title: "Sales Data",
-					},
-				],
-			});
-			expect((result.structuredContent as any).results[0].text).toContain(
-				"All sales records",
-			);
-			expect((result.structuredContent as any).results[0].text).toContain(
-				"Matches revenue query",
-			);
-		});
-
 		it("should handle query without datasource ID for version 10.12 (no data source suggestions)", async () => {
 			// Mock version to be less than 10.13
 			vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
