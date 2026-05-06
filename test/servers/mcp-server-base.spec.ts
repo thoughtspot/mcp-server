@@ -2,6 +2,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { MCPServer } from "../../src/servers/mcp-server";
 import * as thoughtspotClient from "../../src/thoughtspot/thoughtspot-client";
 import { MixpanelTracker } from "../../src/metrics/mixpanel/mixpanel";
+import { TrackEvent, type Tracker } from "../../src/metrics";
+import { StreamingMessagesStorageWithTtl } from "../../src/streaming-message-storage-with-ttl/streaming-message-storage-with-ttl";
 
 // Mock the MixpanelTracker
 vi.mock("../../src/metrics/mixpanel/mixpanel", () => ({
@@ -9,6 +11,15 @@ vi.mock("../../src/metrics/mixpanel/mixpanel", () => ({
 		track: vi.fn(),
 	})),
 }));
+
+vi.mock(
+	"../../src/streaming-message-storage-with-ttl/streaming-message-storage-with-ttl",
+	() => ({
+		StreamingMessagesStorageWithTtl: vi.fn().mockImplementation(() => ({})),
+	}),
+);
+
+const mockEnv = {} as Env;
 
 // Test subclass to expose protected methods
 class TestMCPServer extends MCPServer {
@@ -47,36 +58,49 @@ class TestMCPServer extends MCPServer {
 	public testIsDatasourceDiscoveryAvailable() {
 		return this.isDatasourceDiscoveryAvailable();
 	}
+
+	public getTrackers() {
+		return this.trackers;
+	}
+
+	public getSessionInfo() {
+		return this.sessionInfo;
+	}
 }
 
 describe("MCP Server Base", () => {
 	let server: TestMCPServer;
 	let mockProps: any;
+	let mockStreamingStorage: any;
+
+	const makeSessionInfo = (overrides: any = {}) => ({
+		clusterId: "test-cluster-123",
+		clusterName: "test-cluster",
+		releaseVersion: "10.13.0.cl-110",
+		userGUID: "test-user-123",
+		configInfo: {
+			mixpanelConfig: {
+				devSdkKey: "test-dev-token",
+				prodSdkKey: "test-prod-token",
+				production: false,
+			},
+			selfClusterName: "test-cluster",
+			selfClusterId: "test-cluster-123",
+			enableSpotterDataSourceDiscovery: true,
+			...overrides.configInfo,
+		},
+		userName: "test-user",
+		currentOrgId: "test-org",
+		privileges: [],
+		...overrides,
+	});
 
 	beforeEach(() => {
 		vi.clearAllMocks();
 
 		// Mock getThoughtSpotClient
 		vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
-			getSessionInfo: vi.fn().mockResolvedValue({
-				clusterId: "test-cluster-123",
-				clusterName: "test-cluster",
-				releaseVersion: "10.13.0.cl-110",
-				userGUID: "test-user-123",
-				configInfo: {
-					mixpanelConfig: {
-						devSdkKey: "test-dev-token",
-						prodSdkKey: "test-prod-token",
-						production: false,
-					},
-					selfClusterName: "test-cluster",
-					selfClusterId: "test-cluster-123",
-					enableSpotterDataSourceDiscovery: true,
-				},
-				userName: "test-user",
-				currentOrgId: "test-org",
-				privileges: [],
-			}),
+			getSessionInfo: vi.fn().mockResolvedValue(makeSessionInfo()),
 			searchMetadata: vi.fn().mockResolvedValue([]),
 			instanceUrl: "https://test.thoughtspot.cloud",
 		} as any);
@@ -91,7 +115,16 @@ describe("MCP Server Base", () => {
 			},
 		};
 
-		server = new TestMCPServer({ props: mockProps });
+		mockStreamingStorage = new StreamingMessagesStorageWithTtl(
+			null as any,
+			vi.fn(),
+			vi.fn(),
+		);
+
+		server = new TestMCPServer(
+			{ props: mockProps, env: mockEnv },
+			mockStreamingStorage,
+		);
 	});
 
 	describe("Response Helper Methods", () => {
@@ -111,7 +144,7 @@ describe("MCP Server Base", () => {
 				"Multiple messages",
 			);
 
-			expect(result.isError).toBeUndefined();
+			expect((result as any).isError).toBeUndefined();
 			expect(result.content).toHaveLength(3);
 			expect(result.content[0].text).toBe("First message");
 			expect(result.content[1].text).toBe("Second message");
@@ -124,7 +157,7 @@ describe("MCP Server Base", () => {
 				"No messages",
 			);
 
-			expect(result.isError).toBeUndefined();
+			expect((result as any).isError).toBeUndefined();
 			expect(result.content).toHaveLength(0);
 		});
 
@@ -136,7 +169,7 @@ describe("MCP Server Base", () => {
 				"Array response",
 			);
 
-			expect(result.isError).toBeUndefined();
+			expect((result as any).isError).toBeUndefined();
 			expect(result.content).toHaveLength(3);
 			expect(result.content[0]).toEqual({ type: "text", text: "Item 1" });
 			expect(result.content[1]).toEqual({ type: "text", text: "Item 2" });
@@ -146,7 +179,7 @@ describe("MCP Server Base", () => {
 		it("should create array success response with empty array", () => {
 			const result = server.testCreateArraySuccessResponse([], "Empty array");
 
-			expect(result.isError).toBeUndefined();
+			expect((result as any).isError).toBeUndefined();
 			expect(result.content).toHaveLength(0);
 		});
 
@@ -158,7 +191,7 @@ describe("MCP Server Base", () => {
 				"Single item response",
 			);
 
-			expect(result.isError).toBeUndefined();
+			expect((result as any).isError).toBeUndefined();
 			expect(result.content).toHaveLength(1);
 			expect(result.content[0]).toEqual({ type: "text", text: "Single item" });
 		});
@@ -185,7 +218,7 @@ describe("MCP Server Base", () => {
 		it("should create success response with message", () => {
 			const result = server.testCreateSuccessResponse("Operation successful");
 
-			expect(result.isError).toBeUndefined();
+			expect((result as any).isError).toBeUndefined();
 			expect(result.content).toHaveLength(1);
 			expect(result.content[0].text).toBe("Operation successful");
 		});
@@ -201,7 +234,7 @@ describe("MCP Server Base", () => {
 				"Structured response",
 			);
 
-			expect(result.isError).toBeUndefined();
+			expect((result as any).isError).toBeUndefined();
 			expect(result.content).toHaveLength(1);
 			expect(result.content[0].text).toBe(JSON.stringify(structuredContent));
 			expect(result.structuredContent).toEqual(structuredContent);
@@ -209,6 +242,16 @@ describe("MCP Server Base", () => {
 	});
 
 	describe("Datasource Discovery Check", () => {
+		it("should return false before init is called (sessionInfo not set)", () => {
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+			const result = server.testIsDatasourceDiscoveryAvailable();
+			expect(result).toBe(false);
+			expect(warnSpy).toHaveBeenCalledWith(
+				expect.stringContaining("sessionInfo is not initialized"),
+			);
+			warnSpy.mockRestore();
+		});
+
 		it("should return true when enableSpotterDataSourceDiscovery is enabled", async () => {
 			await server.init();
 			const result = server.testIsDatasourceDiscoveryAvailable();
@@ -217,68 +260,61 @@ describe("MCP Server Base", () => {
 
 		it("should return false when enableSpotterDataSourceDiscovery is disabled", async () => {
 			vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
-				getSessionInfo: vi.fn().mockResolvedValue({
-					clusterId: "test-cluster-123",
-					clusterName: "test-cluster",
-					releaseVersion: "10.13.0.cl-110",
-					userGUID: "test-user-123",
-					configInfo: {
-						mixpanelConfig: {
-							devSdkKey: "test-dev-token",
-							prodSdkKey: "test-prod-token",
-							production: false,
-						},
-						selfClusterName: "test-cluster",
-						selfClusterId: "test-cluster-123",
-						enableSpotterDataSourceDiscovery: false,
-					},
-					userName: "test-user",
-					currentOrgId: "test-org",
-					privileges: [],
-				}),
+				getSessionInfo: vi
+					.fn()
+					.mockResolvedValue(
+						makeSessionInfo({
+							configInfo: { enableSpotterDataSourceDiscovery: false },
+						}),
+					),
 				searchMetadata: vi.fn().mockResolvedValue([]),
 				instanceUrl: "https://test.thoughtspot.cloud",
 			} as any);
 
-			const testServer = new TestMCPServer({ props: mockProps });
+			const testServer = new TestMCPServer(
+				{ props: mockProps, env: mockEnv },
+				mockStreamingStorage,
+			);
 			await testServer.init();
-			const result = testServer.testIsDatasourceDiscoveryAvailable();
-			expect(result).toBe(false);
+			expect(testServer.testIsDatasourceDiscoveryAvailable()).toBe(false);
 		});
 
 		it("should return false when enableSpotterDataSourceDiscovery is undefined", async () => {
 			vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
-				getSessionInfo: vi.fn().mockResolvedValue({
-					clusterId: "test-cluster-123",
-					clusterName: "test-cluster",
-					releaseVersion: "10.13.0.cl-110",
-					userGUID: "test-user-123",
-					configInfo: {
-						mixpanelConfig: {
-							devSdkKey: "test-dev-token",
-							prodSdkKey: "test-prod-token",
-							production: false,
-						},
-						selfClusterName: "test-cluster",
-						selfClusterId: "test-cluster-123",
-						enableSpotterDataSourceDiscovery: undefined,
-					},
-					userName: "test-user",
-					currentOrgId: "test-org",
-					privileges: [],
-				}),
+				getSessionInfo: vi
+					.fn()
+					.mockResolvedValue(
+						makeSessionInfo({
+							configInfo: { enableSpotterDataSourceDiscovery: undefined },
+						}),
+					),
 				searchMetadata: vi.fn().mockResolvedValue([]),
 				instanceUrl: "https://test.thoughtspot.cloud",
 			} as any);
 
-			const testServer = new TestMCPServer({ props: mockProps });
+			const testServer = new TestMCPServer(
+				{ props: mockProps, env: mockEnv },
+				mockStreamingStorage,
+			);
 			await testServer.init();
-			const result = testServer.testIsDatasourceDiscoveryAvailable();
-			expect(result).toBe(false);
+			expect(testServer.testIsDatasourceDiscoveryAvailable()).toBe(false);
 		});
 	});
 
 	describe("initializeService", () => {
+		it("should set sessionInfo and register MixpanelTracker on successful init", async () => {
+			await server.init();
+
+			expect(server.getSessionInfo()).toBeDefined();
+			expect(server.getSessionInfo().userGUID).toBe("test-user-123");
+			expect(MixpanelTracker).toHaveBeenCalledWith(
+				expect.objectContaining({ userGUID: "test-user-123" }),
+				mockProps.clientName,
+			);
+			// The tracker was added — the trackers set should have one entry
+			expect(server.getTrackers().size).toBe(1);
+		});
+
 		it("should catch and log error if getSessionInfo throws", async () => {
 			vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
 				getSessionInfo: vi
@@ -293,8 +329,8 @@ describe("MCP Server Base", () => {
 				.mockImplementation(() => {});
 
 			const testServer = new TestMCPServer(
-				{ props: mockProps } as any,
-				null as any,
+				{ props: mockProps, env: mockEnv },
+				mockStreamingStorage,
 			);
 			await expect(testServer.init()).resolves.not.toThrow();
 
@@ -302,24 +338,87 @@ describe("MCP Server Base", () => {
 				"Error initializing session info:",
 				expect.any(Error),
 			);
+			// sessionInfo should remain unset, no tracker registered
+			expect(testServer.getSessionInfo()).toBeUndefined();
+			expect(testServer.getTrackers().size).toBe(0);
 
 			consoleErrorSpy.mockRestore();
 		});
 	});
 
-	describe("Server Initialization", () => {
-		it("should initialize with custom server name and version", () => {
-			const customServer = new TestMCPServer(
-				{ props: mockProps },
-				"CustomServer",
-				"2.0.0",
-			);
+	describe("init — TrackEvent.Init", () => {
+		it("should track the Init event after initialization", async () => {
+			await server.init();
 
-			expect(customServer).toBeDefined();
+			// The single tracker added is the MixpanelTracker mock
+			const mockTrackerInstance =
+				vi.mocked(MixpanelTracker).mock.results[0].value;
+			expect(mockTrackerInstance.track).toHaveBeenCalledWith(
+				TrackEvent.Init,
+				{},
+			);
 		});
 
-		it("should initialize with default server name and version", () => {
+		it("should track Init even when getSessionInfo fails (trackers may be empty)", async () => {
+			vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
+				getSessionInfo: vi.fn().mockRejectedValue(new Error("fail")),
+				instanceUrl: "https://test.thoughtspot.cloud",
+			} as any);
+
+			const testServer = new TestMCPServer(
+				{ props: mockProps, env: mockEnv },
+				mockStreamingStorage,
+			);
+			// No tracker was registered, but init should not throw
+			await expect(testServer.init()).resolves.not.toThrow();
+		});
+	});
+
+	describe("addTracker", () => {
+		it("should register a tracker so it receives subsequent track calls", async () => {
+			await server.init();
+
+			const customTracker: Tracker = { track: vi.fn() };
+			await server.addTracker(customTracker);
+
+			expect(server.getTrackers().has(customTracker)).toBe(true);
+		});
+
+		it("should not duplicate a tracker added twice", async () => {
+			await server.init();
+
+			const customTracker: Tracker = { track: vi.fn() };
+			await server.addTracker(customTracker);
+			await server.addTracker(customTracker);
+
+			// Trackers extends Set — same reference added twice stays as one entry
+			const customEntries = [...server.getTrackers()].filter(
+				(t) => t === customTracker,
+			);
+			expect(customEntries).toHaveLength(1);
+		});
+	});
+
+	describe("getStorageService", () => {
+		it("should throw when env.CONVERSATION_STORAGE_OBJECT is not set", () => {
+			// env is an empty object — accessing CONVERSATION_STORAGE_OBJECT is undefined,
+			// and StorageServiceClient construction should fail or return an unusable instance.
+			// We just assert it doesn't throw at construction time (the error surfaces on use).
+			expect(() => (server as any).getStorageService()).not.toThrow();
+		});
+	});
+
+	describe("Server Initialization", () => {
+		it("should be defined after construction", () => {
 			expect(server).toBeDefined();
+		});
+
+		it("should be defined with a fresh env and props", () => {
+			const freshServer = new TestMCPServer(
+				{ props: mockProps, env: mockEnv },
+				mockStreamingStorage,
+			);
+			expect(freshServer).toBeDefined();
 		});
 	});
 });

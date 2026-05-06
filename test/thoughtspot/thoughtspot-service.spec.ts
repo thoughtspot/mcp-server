@@ -362,6 +362,200 @@ describe("thoughtspot-service", () => {
 			await vi.runAllTimersAsync();
 			vi.useRealTimers();
 		});
+
+		it("should call appendStoredMessages with parsed text messages and mark done when stream ends", async () => {
+			const encoder = new TextEncoder();
+			const reader = {
+				read: vi
+					.fn()
+					.mockResolvedValueOnce({
+						done: false,
+						value: encoder.encode(
+							'data: [{"type":"text","content":"The revenue is $1M"}]\n',
+						),
+					})
+					.mockResolvedValueOnce({ done: true, value: undefined }),
+			};
+
+			mockClient.sendAgentConversationMessageStreaming = vi
+				.fn()
+				.mockResolvedValue({
+					body: { getReader: vi.fn().mockReturnValue(reader) },
+				});
+
+			const appendStoredMessages = vi.fn().mockResolvedValue(undefined);
+
+			const service = new ThoughtSpotService(mockClient);
+			await service.sendAgentConversationMessageStreaming(
+				"conv-123",
+				"Show me revenue",
+				appendStoredMessages,
+			);
+
+			// Wait for the fire-and-forget async loop to complete
+			await vi.waitFor(() => {
+				expect(appendStoredMessages).toHaveBeenLastCalledWith(
+					"conv-123",
+					[],
+					true,
+				);
+			});
+
+			expect(appendStoredMessages).toHaveBeenCalledWith("conv-123", [
+				{ is_thinking: false, type: "text", text: "The revenue is $1M" },
+			]);
+			// Final call marks the conversation as done
+			expect(appendStoredMessages).toHaveBeenLastCalledWith(
+				"conv-123",
+				[],
+				true,
+			);
+		});
+
+		it("should call appendStoredMessages with parsed answer messages", async () => {
+			const encoder = new TextEncoder();
+			const answerEvent = JSON.stringify([
+				{
+					type: "answer",
+					metadata: {
+						session_id: "sess-abc",
+						gen_no: 2,
+						transaction_id: "txn-xyz",
+						generation_number: 1,
+						title: "Revenue by Region",
+						sage_query: "revenue by region",
+					},
+				},
+			]);
+			const reader = {
+				read: vi
+					.fn()
+					.mockResolvedValueOnce({
+						done: false,
+						value: encoder.encode(`data: ${answerEvent}\n`),
+					})
+					.mockResolvedValueOnce({ done: true, value: undefined }),
+			};
+
+			mockClient.sendAgentConversationMessageStreaming = vi
+				.fn()
+				.mockResolvedValue({
+					body: { getReader: vi.fn().mockReturnValue(reader) },
+				});
+
+			const appendStoredMessages = vi.fn().mockResolvedValue(undefined);
+
+			const service = new ThoughtSpotService(mockClient);
+			await service.sendAgentConversationMessageStreaming(
+				"conv-123",
+				"Show me revenue by region",
+				appendStoredMessages,
+			);
+
+			await vi.waitFor(() => {
+				expect(appendStoredMessages).toHaveBeenLastCalledWith(
+					"conv-123",
+					[],
+					true,
+				);
+			});
+
+			expect(appendStoredMessages).toHaveBeenCalledWith("conv-123", [
+				{
+					is_thinking: false,
+					type: "answer",
+					answer_id: JSON.stringify({ session_id: "sess-abc", gen_no: 2 }),
+					answer_title: "Revenue by Region",
+					answer_query: "revenue by region",
+					iframe_url:
+						"https://test.thoughtspot.com/?tsmcp=true#/embed/conv-assist-answer?sessionId=sess-abc&genNo=2&acSessionId=txn-xyz&acGenNo=1",
+				},
+			]);
+			expect(appendStoredMessages).toHaveBeenLastCalledWith(
+				"conv-123",
+				[],
+				true,
+			);
+		});
+
+		it("should skip heartbeat lines and blank lines during streaming", async () => {
+			const encoder = new TextEncoder();
+			const reader = {
+				read: vi
+					.fn()
+					.mockResolvedValueOnce({
+						done: false,
+						value: encoder.encode(
+							': heartbeat\n\ndata: [{"type":"text","content":"Done"}]\n',
+						),
+					})
+					.mockResolvedValueOnce({ done: true, value: undefined }),
+			};
+
+			mockClient.sendAgentConversationMessageStreaming = vi
+				.fn()
+				.mockResolvedValue({
+					body: { getReader: vi.fn().mockReturnValue(reader) },
+				});
+
+			const appendStoredMessages = vi.fn().mockResolvedValue(undefined);
+
+			const service = new ThoughtSpotService(mockClient);
+			await service.sendAgentConversationMessageStreaming(
+				"conv-123",
+				"Test",
+				appendStoredMessages,
+			);
+
+			await vi.waitFor(() => {
+				expect(appendStoredMessages).toHaveBeenLastCalledWith(
+					"conv-123",
+					[],
+					true,
+				);
+			});
+
+			// Only the actual text message should be stored, not heartbeats/blanks
+			expect(appendStoredMessages).toHaveBeenCalledWith("conv-123", [
+				{ is_thinking: false, type: "text", text: "Done" },
+			]);
+		});
+
+		it("should correctly identify thinking messages via metadata type", async () => {
+			const encoder = new TextEncoder();
+			const reader = {
+				read: vi
+					.fn()
+					.mockResolvedValueOnce({
+						done: false,
+						value: encoder.encode(
+							'data: [{"type":"text","content":"Thinking...","metadata":{"type":"thinking"}}]\n',
+						),
+					})
+					.mockResolvedValueOnce({ done: true, value: undefined }),
+			};
+
+			mockClient.sendAgentConversationMessageStreaming = vi
+				.fn()
+				.mockResolvedValue({
+					body: { getReader: vi.fn().mockReturnValue(reader) },
+				});
+
+			const appendStoredMessages = vi.fn().mockResolvedValue(undefined);
+
+			const service = new ThoughtSpotService(mockClient);
+			await service.sendAgentConversationMessageStreaming(
+				"conv-123",
+				"Test",
+				appendStoredMessages,
+			);
+
+			await vi.waitFor(() => {
+				expect(appendStoredMessages).toHaveBeenCalledWith("conv-123", [
+					{ is_thinking: true, type: "text", text: "Thinking..." },
+				]);
+			});
+		});
 	});
 
 	describe("getAnswerForQuestion", () => {
