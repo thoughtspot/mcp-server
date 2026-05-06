@@ -7,6 +7,7 @@ import {
 	recordBearerAuthRequestMetric,
 	recordHttpRequestMetrics,
 	recordStatusMetric,
+	resolveApiVersionLabels,
 	resolveCanonicalApiVersionLabel,
 	setMetricsRecorderOnExecutionContext,
 	withRequestMetrics,
@@ -379,6 +380,7 @@ describe("withRequestMetrics", () => {
 				labels: {
 					api_surface: "mcp",
 					api_version: "beta",
+					api_version_mode: "beta",
 					auth_mode: "oauth",
 					outcome: "success",
 					route_group: "mcp",
@@ -393,6 +395,7 @@ describe("withRequestMetrics", () => {
 				labels: {
 					api_surface: "mcp",
 					api_version: "beta",
+					api_version_mode: "beta",
 					auth_mode: "oauth",
 					outcome: "success",
 					route_group: "mcp",
@@ -402,11 +405,11 @@ describe("withRequestMetrics", () => {
 		]);
 	});
 
-	it("labels versioned MCP routes as default when no explicit API version is requested", () => {
+	it("labels unversioned token routes as latest when no explicit API version is requested", () => {
 		const ctx = {} as ExecutionContext;
 		const request = new Request("https://example.com/token/mcp");
 
-		expect(resolveCanonicalApiVersionLabel(request, ctx)).toBe("default");
+		expect(resolveCanonicalApiVersionLabel(request, ctx)).toBe("latest");
 	});
 
 	it("uses the effective default surface when bearer routes ignore an api-version query", () => {
@@ -420,6 +423,35 @@ describe("withRequestMetrics", () => {
 		);
 
 		expect(resolveCanonicalApiVersionLabel(request, ctx)).toBe("default");
+	});
+
+	it("labels legacy OAuth routes as implicit default when no selector is provided", () => {
+		const request = new Request("https://example.com/mcp");
+
+		expect(resolveApiVersionLabels(request, {} as ExecutionContext)).toEqual({
+			apiVersion: "default",
+			apiVersionMode: "implicit_default",
+		});
+	});
+
+	it("labels unversioned token routes as following latest", () => {
+		const request = new Request("https://example.com/token/mcp");
+
+		expect(resolveApiVersionLabels(request, {} as ExecutionContext)).toEqual({
+			apiVersion: "latest",
+			apiVersionMode: "latest",
+		});
+	});
+
+	it("labels date-based token routes as pinned even when they currently resolve to latest", () => {
+		const request = new Request(
+			"https://example.com/token/mcp?api-version=2026-05-01",
+		);
+
+		expect(resolveApiVersionLabels(request, {} as ExecutionContext)).toEqual({
+			apiVersion: "latest",
+			apiVersionMode: "pinned",
+		});
 	});
 
 	it("maps stable date-based versions onto the latest label", () => {

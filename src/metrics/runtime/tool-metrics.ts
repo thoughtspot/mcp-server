@@ -1,6 +1,7 @@
 import { ZodError } from "zod";
 import { McpServerError } from "../../utils";
 import {
+	type ApiVersionMode,
 	METRIC_NAMES,
 	type MetricLabelInput,
 	type MetricOutcome,
@@ -37,6 +38,7 @@ function buildToolMetricLabels(
 	apiSurface: ToolMetricApiSurface,
 	outcome: MetricOutcome,
 	apiVersion?: string,
+	apiVersionMode?: ApiVersionMode,
 ): MetricLabelInput {
 	const labels: MetricLabelInput = {
 		tool_name: toolName,
@@ -46,6 +48,9 @@ function buildToolMetricLabels(
 
 	if (apiVersion) {
 		labels.api_version = apiVersion;
+	}
+	if (apiVersionMode) {
+		labels.api_version_mode = apiVersionMode;
 	}
 
 	return labels;
@@ -86,12 +91,14 @@ export function recordToolInvocationMetrics(
 	outcome: MetricOutcome,
 	durationMs: number,
 	apiVersion?: string,
+	apiVersionMode?: ApiVersionMode,
 ): void {
 	const labels = buildToolMetricLabels(
 		toolName,
 		apiSurface,
 		outcome,
 		apiVersion,
+		apiVersionMode,
 	);
 
 	recorder.count(METRIC_NAMES.toolCallsTotal, 1, labels);
@@ -134,6 +141,7 @@ export function recordUpstreamStreamStartedMetric(
 
 export function recordUpstreamStreamMessageMetric(
 	recorder: MetricsRecorder | undefined,
+	operation: UpstreamOperation,
 	messageType: UpstreamStreamMessageType,
 	isThinking: boolean,
 ): void {
@@ -142,6 +150,7 @@ export function recordUpstreamStreamMessageMetric(
 	}
 
 	recorder.count(METRIC_NAMES.upstreamStreamMessagesTotal, 1, {
+		upstream_operation: operation,
 		message_type: messageType,
 		is_thinking: isThinking,
 	});

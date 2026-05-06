@@ -371,23 +371,24 @@ export class ThoughtSpotService {
 				? `${message}\n\nAdditional Context:\n${additionalContext}`
 				: message;
 
-			const response = await this.observeUpstreamCall(
+			// Validate the response body inside the observed call so an unusable streaming
+			// response is counted as `upstream_error` instead of a false success.
+			const reader = await this.observeUpstreamCall(
 				UPSTREAM_OPERATION_NAMES.sendAgentConversationMessageStreaming,
-				() =>
-					(this.client as any).sendAgentConversationMessageStreaming({
+				async () => {
+					const response = await (
+						this.client as any
+					).sendAgentConversationMessageStreaming({
 						conversation_identifier: conversationId,
 						message: finalMessage,
-					}),
+					});
+					const reader = response.body?.getReader();
+					if (!reader) {
+						throw new Error("Failed to get reader from response body");
+					}
+					return reader;
+				},
 			);
-
-			const reader = response.body?.getReader();
-			if (!reader) {
-				span?.setStatus({
-					code: SpanStatusCode.ERROR,
-					message: "Failed to get reader from response body",
-				});
-				throw new Error("Failed to get reader from response body");
-			}
 
 			const streamRecorder = this.createStreamMetricsRecorder();
 			recordUpstreamStreamStartedMetric(

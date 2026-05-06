@@ -11,6 +11,7 @@ import { type Span, SpanStatusCode } from "@opentelemetry/api";
 import type { z } from "zod";
 import { TrackEvent, type Tracker, Trackers } from "../metrics";
 import { MixpanelTracker } from "../metrics/mixpanel/mixpanel";
+import type { ApiVersionMode } from "../metrics/runtime/metric-types";
 import {
 	type MetricsRecorder,
 	scheduleMetricsFlush,
@@ -215,6 +216,10 @@ export abstract class BaseMCPServer extends Server {
 		return undefined;
 	}
 
+	protected getToolMetricApiVersionModeLabel(): ApiVersionMode | undefined {
+		return undefined;
+	}
+
 	protected getMetricEventIdentity(): MetricEventIdentity | undefined {
 		if (!this.sessionInfo) {
 			return undefined;
@@ -262,6 +267,7 @@ export abstract class BaseMCPServer extends Server {
 				outcome,
 				durationMs,
 				this.getToolMetricApiVersionLabel(),
+				this.getToolMetricApiVersionModeLabel(),
 			);
 		} catch (error) {
 			console.error(

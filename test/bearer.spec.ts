@@ -603,7 +603,7 @@ describe("Bearer Handler", () => {
 			});
 		});
 
-		it("should not inject apiVersion when query param is not present on /token/mcp", async () => {
+		it("should default unversioned /token/mcp requests to latest", async () => {
 			const appWithBearer = withBearerHandler(app, ThoughtSpotMCP);
 
 			const request = new Request("https://example.com/token/mcp", {
@@ -614,12 +614,12 @@ describe("Bearer Handler", () => {
 
 			await appWithBearer.fetch(request, mockEnv, mockCtx);
 
-			// Verify that props do not have apiVersion
+			// Verify that props reflect the effective served surface
 			expect(mockCtx.props).toMatchObject({
 				accessToken: "test-token",
 				instanceUrl: "https://test.thoughtspot.cloud",
+				apiVersion: "latest",
 			});
-			expect(mockCtx.props.apiVersion).toBeUndefined();
 		});
 
 		it("should inject apiVersion with date format on /token/mcp", async () => {
@@ -739,7 +739,7 @@ describe("Bearer Handler", () => {
 			const result = await appWithBearer.fetch(request, mockEnv, mockCtx);
 
 			expect(result.status).toBe(200);
-			expect(mockCtx.props.apiVersion).toBeUndefined();
+			expect(mockCtx.props.apiVersion).toBe("latest");
 		});
 
 		it("should require bearer token on /token/mcp", async () => {

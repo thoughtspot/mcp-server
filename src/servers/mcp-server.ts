@@ -5,6 +5,7 @@ import type {
 import { SpanStatusCode, context, trace } from "@opentelemetry/api";
 import type { z } from "zod";
 import { TrackEvent } from "../metrics";
+import type { ApiVersionMode } from "../metrics/runtime/metric-types";
 import type { MetricsRecorder } from "../metrics/runtime/metrics-recorder";
 import { getCanonicalResolvedApiVersion } from "../metrics/runtime/request-metrics";
 import type { ToolMetricApiSurface } from "../metrics/runtime/tool-metrics";
@@ -50,6 +51,32 @@ export class MCPServer extends BaseMCPServer {
 		} catch {
 			return "unknown";
 		}
+	}
+
+	protected getToolMetricApiVersionModeLabel(): ApiVersionMode | undefined {
+		const apiVersion = this.ctx.props.apiVersion;
+		if (typeof apiVersion !== "string" || apiVersion.length === 0) {
+			return "implicit_default";
+		}
+
+		// Tool calls inherit the session-level version selection from the transport props.
+		// Together with `api_version`, this lets us answer:
+		// - "who is still on legacy/v1?" via `api_version=default`
+		// - "who is pinned vs following latest?" via `api_version_mode`
+		if (apiVersion === "beta") {
+			return "beta";
+		}
+		if (apiVersion === "latest") {
+			return "latest";
+		}
+		if (apiVersion === "backwards-compatibility-default") {
+			return "implicit_default";
+		}
+		if (/^\d{4}-\d{2}-\d{2}$/.test(apiVersion)) {
+			return "pinned";
+		}
+
+		return "unknown";
 	}
 
 	@WithSpan("call-list-tools")

@@ -91,9 +91,14 @@ async function handleTokenAuth(
 			clientName,
 		};
 
-		// Resolve API version to use
+		// Stamp the effective served surface into props so downstream request/tool metrics
+		// can distinguish:
+		// - `api_version=default` => tenants still on the legacy/v1 surface
+		// - `api_version_mode=pinned|latest` => pinned callers vs callers following latest
 		const apiVersion =
-			apiVersionOverride ?? url.searchParams.get("api-version");
+			apiVersionOverride ??
+			url.searchParams.get("api-version") ??
+			(authRouteFamily === "token" ? "latest" : undefined);
 		if (apiVersion) {
 			props.apiVersion = apiVersion;
 		}

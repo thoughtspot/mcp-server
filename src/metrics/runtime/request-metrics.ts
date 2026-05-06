@@ -3,6 +3,7 @@ import { createAnalyticsEngineMetricsSink } from "./analytics-engine-sink";
 import { createGrafanaOtlpMetricsSink } from "./grafana-otlp-sink";
 import { getStatusClass, resolveRequestMetricContext } from "./metric-context";
 import {
+	type ApiVersionMode,
 	METRIC_NAMES,
 	type MetricLabelInput,
 	type MetricName,
@@ -104,13 +105,40 @@ export function getCanonicalResolvedApiVersion(apiVersion: string): string {
 	return "unknown";
 }
 
-export function resolveCanonicalApiVersionLabel(
+type ApiVersionLabels = {
+	apiVersion?: string;
+	apiVersionMode?: ApiVersionMode;
+};
+
+function getRequestedApiVersionMode(
+	requestedApiVersion: string,
+): ApiVersionMode {
+	if (requestedApiVersion === "beta") {
+		return "beta";
+	}
+	if (requestedApiVersion === "latest") {
+		return "latest";
+	}
+	if (/^\d{4}-\d{2}-\d{2}$/.test(requestedApiVersion)) {
+		return "pinned";
+	}
+	return "unknown";
+}
+
+/**
+ * We intentionally split version labeling into two dimensions:
+ * - `api_version`: the effective served surface (`default` vs `latest`), which answers
+ *   "which tenants are still on legacy/v1?"
+ * - `api_version_mode`: how the caller selected that surface, which answers
+ *   "which tenants are pinned vs simply following the latest surface?"
+ */
+export function resolveApiVersionLabels(
 	request: Request,
 	ctx: ExecutionContext,
-): string | undefined {
+): ApiVersionLabels {
 	const requestContext = resolveRequestMetricContext(request);
 	if (!VERSIONED_REQUEST_ROUTE_GROUPS.has(requestContext.routeGroup)) {
-		return undefined;
+		return {};
 	}
 
 	const requestedApiVersion = new URL(request.url).searchParams.get(
@@ -118,26 +146,70 @@ export function resolveCanonicalApiVersionLabel(
 	);
 	const effectiveApiVersion = (ctx as MetricsExecutionContext).props
 		?.apiVersion;
+	if (requestedApiVersion) {
+		const apiVersionSource =
+			typeof effectiveApiVersion === "string" && effectiveApiVersion.length > 0
+				? effectiveApiVersion
+				: requestedApiVersion;
+		try {
+			return {
+				apiVersion: getCanonicalResolvedApiVersion(apiVersionSource),
+				apiVersionMode: getRequestedApiVersionMode(requestedApiVersion),
+			};
+		} catch {
+			return {
+				apiVersion: "unknown",
+				apiVersionMode: "unknown",
+			};
+		}
+	}
+
 	if (
 		typeof effectiveApiVersion === "string" &&
 		effectiveApiVersion.length > 0
 	) {
 		try {
-			return getCanonicalResolvedApiVersion(effectiveApiVersion);
+			const apiVersion = getCanonicalResolvedApiVersion(effectiveApiVersion);
+			return {
+				apiVersion,
+				apiVersionMode:
+					apiVersion === "default"
+						? "implicit_default"
+						: apiVersion === "latest"
+							? "latest"
+							: apiVersion === "beta"
+								? "beta"
+								: "unknown",
+			};
 		} catch {
-			return "unknown";
+			return {
+				apiVersion: "unknown",
+				apiVersionMode: "unknown",
+			};
 		}
 	}
 
-	if (!requestedApiVersion) {
-		return "default";
+	if (
+		requestContext.routeGroup === "token_mcp" ||
+		requestContext.routeGroup === "token_sse"
+	) {
+		return {
+			apiVersion: "latest",
+			apiVersionMode: "latest",
+		};
 	}
 
-	try {
-		return getCanonicalResolvedApiVersion(requestedApiVersion);
-	} catch {
-		return "unknown";
-	}
+	return {
+		apiVersion: "default",
+		apiVersionMode: "implicit_default",
+	};
+}
+
+export function resolveCanonicalApiVersionLabel(
+	request: Request,
+	ctx: ExecutionContext,
+): string | undefined {
+	return resolveApiVersionLabels(request, ctx).apiVersion;
 }
 
 export function recordStatusMetric(
@@ -186,7 +258,7 @@ export function recordHttpRequestMetrics(
 ): void {
 	const requestContext = resolveRequestMetricContext(request);
 	const outcome = getMetricOutcomeForStatus(response.status);
-	const apiVersion = resolveCanonicalApiVersionLabel(request, ctx);
+	const { apiVersion, apiVersionMode } = resolveApiVersionLabels(request, ctx);
 	const baseLabels: MetricLabelInput = {
 		route_group: requestContext.routeGroup,
 		transport: requestContext.transport,
@@ -197,6 +269,9 @@ export function recordHttpRequestMetrics(
 
 	if (apiVersion) {
 		baseLabels.api_version = apiVersion;
+	}
+	if (apiVersionMode) {
+		baseLabels.api_version_mode = apiVersionMode;
 	}
 
 	recorder.count(METRIC_NAMES.httpRequestsTotal, 1, {

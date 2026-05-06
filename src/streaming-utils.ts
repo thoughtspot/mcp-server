@@ -1,6 +1,9 @@
 import { type Span, SpanStatusCode } from "@opentelemetry/api";
 import type { MetricsRecorder } from "./metrics/runtime/metrics-recorder";
-import { recordUpstreamStreamMessageMetric } from "./metrics/runtime/tool-metrics";
+import {
+	UPSTREAM_OPERATION_NAMES,
+	recordUpstreamStreamMessageMetric,
+} from "./metrics/runtime/tool-metrics";
 import { withSpan } from "./metrics/tracing/tracing-utils";
 import type { Message } from "./thoughtspot/types";
 
@@ -23,6 +26,10 @@ export const processSendAgentConversationMessageStreamingResponse = async (
 	return await withSpan(
 		"process-send-agent-conversation-message-streaming-response",
 		async (span: Span) => {
+			// Include the operation on every stream-message metric so future streamed
+			// upstream calls do not collapse into the same series.
+			const upstreamOperation =
+				UPSTREAM_OPERATION_NAMES.sendAgentConversationMessageStreaming;
 			span.setAttribute("conversation_id", conversationId);
 			let nTextMessagesParsed = 0;
 			let nAnswerMessagesParsed = 0;
@@ -76,6 +83,7 @@ export const processSendAgentConversationMessageStreamingResponse = async (
 								nTextMessagesParsed++;
 								recordUpstreamStreamMessageMetric(
 									recorder,
+									upstreamOperation,
 									"text",
 									item.metadata?.type === "thinking",
 								);
@@ -88,6 +96,7 @@ export const processSendAgentConversationMessageStreamingResponse = async (
 								nTextMessagesParsed++;
 								recordUpstreamStreamMessageMetric(
 									recorder,
+									upstreamOperation,
 									"text_chunk",
 									item.metadata?.type === "thinking",
 								);
@@ -100,6 +109,7 @@ export const processSendAgentConversationMessageStreamingResponse = async (
 								nAnswerMessagesParsed++;
 								recordUpstreamStreamMessageMetric(
 									recorder,
+									upstreamOperation,
 									"answer",
 									item.metadata?.type === "thinking",
 								);
@@ -126,7 +136,12 @@ export const processSendAgentConversationMessageStreamingResponse = async (
 								nMessagesIgnored++;
 							} else if (item.type === "error") {
 								console.error("Error event in event stream: ", item);
-								recordUpstreamStreamMessageMetric(recorder, "error", false);
+								recordUpstreamStreamMessageMetric(
+									recorder,
+									upstreamOperation,
+									"error",
+									false,
+								);
 								spanHasError = true;
 								span.setStatus({
 									code: SpanStatusCode.ERROR,

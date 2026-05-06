@@ -330,6 +330,9 @@ describe("thoughtspot-service", () => {
 					(dataPoint) =>
 						dataPoint.indexes?.[2] ===
 							METRIC_NAMES.upstreamStreamMessagesTotal &&
+						dataPoint.blobs?.includes(
+							"send_agent_conversation_message_streaming",
+						) &&
 						dataPoint.blobs?.includes("text") &&
 						dataPoint.blobs?.includes("false"),
 				),
@@ -339,13 +342,26 @@ describe("thoughtspot-service", () => {
 		});
 
 		it("should throw when the response body reader is unavailable", async () => {
+			const analyticsDataset = {
+				writeDataPoint: vi.fn(),
+			};
+			const recorder = createRequestMetricsRecorder({
+				METRICS_SINK_MODE: "analytics_engine",
+				ANALYTICS: analyticsDataset,
+			});
 			mockClient.sendAgentConversationMessageStreaming = vi
 				.fn()
 				.mockResolvedValue({
 					body: undefined,
 				});
 
-			const service = new ThoughtSpotService(mockClient);
+			const service = new ThoughtSpotService(mockClient, {
+				recorder,
+				metricsEnv: {
+					METRICS_SINK_MODE: "analytics_engine",
+					ANALYTICS: analyticsDataset,
+				},
+			});
 
 			await expect(
 				service.sendAgentConversationMessageStreaming(
@@ -356,6 +372,28 @@ describe("thoughtspot-service", () => {
 					} as any,
 				),
 			).rejects.toThrow("Failed to get reader from response body");
+
+			await recorder.flush();
+
+			const dataPoints = analyticsDataset.writeDataPoint.mock.calls.map(
+				([dataPoint]) => dataPoint,
+			);
+			expect(
+				dataPoints.some(
+					(dataPoint) =>
+						dataPoint.indexes?.[2] === METRIC_NAMES.upstreamCallsTotal &&
+						dataPoint.blobs?.includes(
+							"send_agent_conversation_message_streaming",
+						) &&
+						dataPoint.blobs?.includes("upstream_error"),
+				),
+			).toBe(true);
+			expect(
+				dataPoints.some(
+					(dataPoint) =>
+						dataPoint.indexes?.[2] === METRIC_NAMES.upstreamStreamsStartedTotal,
+				),
+			).toBe(false);
 		});
 
 		it("should throw when sending the streaming message fails", async () => {

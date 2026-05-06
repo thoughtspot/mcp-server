@@ -21,6 +21,11 @@ vi.mock("../src/metrics/tracing/tracing-utils", () => ({
 	},
 }));
 
+import { METRIC_NAMES } from "../src/metrics/runtime/metric-types";
+import {
+	type MetricsRecorder,
+	NOOP_METRICS_RECORDER,
+} from "../src/metrics/runtime/metrics-recorder";
 import { processSendAgentConversationMessageStreamingResponse } from "../src/streaming-utils";
 
 // Helper to build a ReadableStreamDefaultReader from an array of string chunks
@@ -105,6 +110,34 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 			CONV_ID,
 			[],
 			true,
+		);
+	});
+
+	it("records upstream operation on stream message metrics", async () => {
+		const storage = makeMockStorage();
+		const recorder: MetricsRecorder = {
+			...NOOP_METRICS_RECORDER,
+			count: vi.fn(),
+		};
+		const line = `data: ${JSON.stringify([{ type: "text", content: "Hello world", metadata: {} }])}\n`;
+		const reader = makeReader([line]);
+
+		await processSendAgentConversationMessageStreamingResponse(
+			CONV_ID,
+			reader,
+			storage.appendMessages,
+			INSTANCE_URL,
+			recorder,
+		);
+
+		expect(recorder.count).toHaveBeenCalledWith(
+			METRIC_NAMES.upstreamStreamMessagesTotal,
+			1,
+			expect.objectContaining({
+				upstream_operation: "send_agent_conversation_message_streaming",
+				message_type: "text",
+				is_thinking: false,
+			}),
 		);
 	});
 
