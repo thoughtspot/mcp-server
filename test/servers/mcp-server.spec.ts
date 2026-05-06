@@ -241,13 +241,8 @@ describe("MCP Server", () => {
 				instanceUrl: "https://test.thoughtspot.cloud",
 			} as any);
 
-			// Create a new server instance to pick up the new mock
-			const testServer = new MCPServer(
-				{ props: mockProps },
-				new StreamingMessagesStorageWithTtl(null as any, vi.fn(), vi.fn()),
-			);
-			await testServer.init();
-			const { listTools } = connect(testServer);
+			await server.init();
+			const { listTools } = connect(server);
 
 			const result = await listTools();
 
@@ -1278,17 +1273,13 @@ describe("MCP Server", () => {
 				instanceUrl: "https://test.thoughtspot.cloud",
 			} as any);
 
-			const testServer = new MCPServer(
-				{ props: mockProps },
-				new StreamingMessagesStorageWithTtl(null as any, vi.fn(), vi.fn()),
-			);
-			vi.spyOn(testServer as any, "getStorageService").mockReturnValue({
+			vi.spyOn(server as any, "getStorageService").mockReturnValue({
 				initializeConversation: vi.fn().mockResolvedValue(undefined),
 				appendMessages: vi.fn().mockResolvedValue(undefined),
 			});
-			await testServer.init();
+			await server.init();
 
-			const { callTool } = connect(testServer);
+			const { callTool } = connect(server);
 			const result = await callTool("send_session_message", {
 				analytical_session_id: "session-abc-123",
 				message: "What is the total revenue?",
@@ -1299,20 +1290,16 @@ describe("MCP Server", () => {
 		});
 
 		it("should return error when conversation has an ongoing message", async () => {
-			const testServer = new MCPServer(
-				{ props: mockProps },
-				new StreamingMessagesStorageWithTtl(null as any, vi.fn(), vi.fn()),
-			);
-			vi.spyOn(testServer as any, "getStorageService").mockReturnValue({
+			vi.spyOn(server as any, "getStorageService").mockReturnValue({
 				initializeConversation: vi
 					.fn()
 					.mockRejectedValue(
 						new Error("Conversation already exists and is not marked done"),
 					),
 			});
-			await testServer.init();
+			await server.init();
 
-			const { callTool } = connect(testServer);
+			const { callTool } = connect(server);
 			const result = await callTool("send_session_message", {
 				analytical_session_id: "session-abc-123",
 				message: "Follow-up question",
@@ -1325,23 +1312,19 @@ describe("MCP Server", () => {
 		});
 
 		it("should propagate error when streaming service throws", async () => {
-			const testServer = new MCPServer(
-				{ props: mockProps },
-				new StreamingMessagesStorageWithTtl(null as any, vi.fn(), vi.fn()),
-			);
-			vi.spyOn(testServer as any, "getStorageService").mockReturnValue({
+			vi.spyOn(server as any, "getStorageService").mockReturnValue({
 				initializeConversation: vi.fn().mockResolvedValue(undefined),
 				appendMessages: vi.fn().mockResolvedValue(undefined),
 			});
-			await testServer.init();
-			vi.spyOn(testServer as any, "getThoughtSpotService").mockReturnValue({
+			await server.init();
+			vi.spyOn(server as any, "getThoughtSpotService").mockReturnValue({
 				sendAgentConversationMessageStreaming: vi
 					.fn()
 					.mockRejectedValue(new Error("Service unavailable")),
 			});
 
 			await expect(
-				testServer.callSendSessionMessage({
+				server.callSendSessionMessage({
 					method: "tools/call",
 					params: {
 						name: "send_session_message",
@@ -1375,19 +1358,15 @@ describe("MCP Server", () => {
 				is_thinking: false,
 			};
 
-			const testServer = new MCPServer(
-				{ props: mockProps },
-				new StreamingMessagesStorageWithTtl(null as any, vi.fn(), vi.fn()),
-			);
-			vi.spyOn(testServer as any, "getStorageService").mockReturnValue({
+			vi.spyOn(server as any, "getStorageService").mockReturnValue({
 				getNewMessages: vi.fn().mockResolvedValue({
 					messages: [textUpdate, answerUpdate],
 					isDone: true,
 				}),
 			});
-			await testServer.init();
+			await server.init();
 
-			const { callTool } = connect(testServer);
+			const { callTool } = connect(server);
 			const result = await callTool("get_session_updates", {
 				analytical_session_id: "session-abc-123",
 			});
@@ -1407,16 +1386,12 @@ describe("MCP Server", () => {
 				.fn()
 				.mockResolvedValue({ messages: [], isDone: false });
 
-			const testServer = new MCPServer(
-				{ props: mockProps },
-				new StreamingMessagesStorageWithTtl(null as any, vi.fn(), vi.fn()),
-			);
-			vi.spyOn(testServer as any, "getStorageService").mockReturnValue({
+			vi.spyOn(server as any, "getStorageService").mockReturnValue({
 				getNewMessages: mockGetNewMessages,
 			});
-			await testServer.init();
+			await server.init();
 
-			const resultPromise = testServer.callGetSessionUpdates({
+			const resultPromise = server.callGetSessionUpdates({
 				method: "tools/call",
 				params: {
 					name: "get_session_updates",
@@ -1446,16 +1421,12 @@ describe("MCP Server", () => {
 				.fn()
 				.mockResolvedValue({ messages: [msg], isDone: false });
 
-			const testServer = new MCPServer(
-				{ props: mockProps },
-				new StreamingMessagesStorageWithTtl(null as any, vi.fn(), vi.fn()),
-			);
-			vi.spyOn(testServer as any, "getStorageService").mockReturnValue({
+			vi.spyOn(server as any, "getStorageService").mockReturnValue({
 				getNewMessages: mockGetNewMessages,
 			});
-			await testServer.init();
+			await server.init();
 
-			const resultPromise = testServer.callGetSessionUpdates({
+			const resultPromise = server.callGetSessionUpdates({
 				method: "tools/call",
 				params: {
 					name: "get_session_updates",
@@ -1495,16 +1466,12 @@ describe("MCP Server", () => {
 				.mockResolvedValueOnce({ messages: [msg2], isDone: false })
 				.mockResolvedValue({ messages: [], isDone: true });
 
-			const testServer = new MCPServer(
-				{ props: mockProps },
-				new StreamingMessagesStorageWithTtl(null as any, vi.fn(), vi.fn()),
-			);
-			vi.spyOn(testServer as any, "getStorageService").mockReturnValue({
+			vi.spyOn(server as any, "getStorageService").mockReturnValue({
 				getNewMessages: mockGetNewMessages,
 			});
-			await testServer.init();
+			await server.init();
 
-			const resultPromise = testServer.callGetSessionUpdates({
+			const resultPromise = server.callGetSessionUpdates({
 				method: "tools/call",
 				params: {
 					name: "get_session_updates",
@@ -1534,16 +1501,12 @@ describe("MCP Server", () => {
 				.fn()
 				.mockResolvedValue({ messages: [msg], isDone: false });
 
-			const testServer = new MCPServer(
-				{ props: mockProps },
-				new StreamingMessagesStorageWithTtl(null as any, vi.fn(), vi.fn()),
-			);
-			vi.spyOn(testServer as any, "getStorageService").mockReturnValue({
+			vi.spyOn(server as any, "getStorageService").mockReturnValue({
 				getNewMessages: mockGetNewMessages,
 			});
-			await testServer.init();
+			await server.init();
 
-			const resultPromise = testServer.callGetSessionUpdates({
+			const resultPromise = server.callGetSessionUpdates({
 				method: "tools/call",
 				params: {
 					name: "get_session_updates",
@@ -1565,19 +1528,15 @@ describe("MCP Server", () => {
 
 	describe("Create Dashboard Tool", () => {
 		it("should create dashboard and return a URL link on success", async () => {
-			const testServer = new MCPServer(
-				{ props: mockProps },
-				new StreamingMessagesStorageWithTtl(null as any, vi.fn(), vi.fn()),
-			);
-			await testServer.init();
-			vi.spyOn(testServer as any, "getThoughtSpotService").mockReturnValue({
+			await server.init();
+			vi.spyOn(server as any, "getThoughtSpotService").mockReturnValue({
 				fetchTMLAndCreateLiveboard: vi.fn().mockResolvedValue({
 					url: "https://test.thoughtspot.cloud/#/pinboard/dashboard-guid-123",
 					error: null,
 				}),
 			});
 
-			const { callTool } = connect(testServer);
+			const { callTool } = connect(server);
 			const result = await callTool("create_dashboard", {
 				title: "Q1 Revenue Dashboard",
 				note_tile: "<p>Q1 Revenue Analysis. Generated on 2026-05-05</p>",
@@ -1613,18 +1572,14 @@ describe("MCP Server", () => {
 		});
 
 		it("should return error when answers list is empty", async () => {
-			const testServer = new MCPServer(
-				{ props: mockProps },
-				new StreamingMessagesStorageWithTtl(null as any, vi.fn(), vi.fn()),
-			);
-			await testServer.init();
-			vi.spyOn(testServer as any, "getThoughtSpotService").mockReturnValue({
+			await server.init();
+			vi.spyOn(server as any, "getThoughtSpotService").mockReturnValue({
 				fetchTMLAndCreateLiveboard: vi.fn().mockResolvedValue({
 					error: new Error("No visualizations to import"),
 				}),
 			});
 
-			const { callTool } = connect(testServer);
+			const { callTool } = connect(server);
 			const result = await callTool("create_dashboard", {
 				title: "Empty Dashboard",
 				note_tile: "<p>Summary</p>",
@@ -1661,16 +1616,12 @@ describe("MCP Server", () => {
 				error: null,
 			});
 
-			const testServer = new MCPServer(
-				{ props: mockProps },
-				new StreamingMessagesStorageWithTtl(null as any, vi.fn(), vi.fn()),
-			);
-			await testServer.init();
-			vi.spyOn(testServer as any, "getThoughtSpotService").mockReturnValue({
+			await server.init();
+			vi.spyOn(server as any, "getThoughtSpotService").mockReturnValue({
 				fetchTMLAndCreateLiveboard: mockFetchTML,
 			});
 
-			const { callTool } = connect(testServer);
+			const { callTool } = connect(server);
 			const result = await callTool("create_dashboard", {
 				title: "My Dashboard",
 				note_tile: "<p>Analysis summary</p>",
@@ -1734,17 +1685,11 @@ describe("MCP Server", () => {
 				}),
 			};
 
-			const testServer = new MCPServer(
-				{ props: mockProps },
-				new StreamingMessagesStorageWithTtl(null as any, vi.fn(), vi.fn()),
-			);
-			vi.spyOn(testServer as any, "getStorageService").mockReturnValue(
-				mockStorage,
-			);
-			await testServer.init();
+			vi.spyOn(server as any, "getStorageService").mockReturnValue(mockStorage);
+			await server.init();
 
 			// Spy on service after init() so init() uses the default mock for getSessionInfo
-			vi.spyOn(testServer as any, "getThoughtSpotService").mockReturnValue({
+			vi.spyOn(server as any, "getThoughtSpotService").mockReturnValue({
 				sendAgentConversationMessageStreaming: vi
 					.fn()
 					.mockImplementation(
@@ -1760,7 +1705,7 @@ describe("MCP Server", () => {
 				params: { name, arguments: args },
 			});
 
-			const sendResult = await testServer.callSendSessionMessage(
+			const sendResult = await server.callSendSessionMessage(
 				makeRequest("send_session_message", {
 					analytical_session_id: "session-e2e-123",
 					message: "What is the total revenue?",
@@ -1769,7 +1714,7 @@ describe("MCP Server", () => {
 			expect(sendResult.isError).toBeUndefined();
 			expect((sendResult.structuredContent as any).success).toBe(true);
 
-			const updatesResult = await testServer.callGetSessionUpdates(
+			const updatesResult = await server.callGetSessionUpdates(
 				makeRequest("get_session_updates", {
 					analytical_session_id: "session-e2e-123",
 				}),
@@ -1791,16 +1736,12 @@ describe("MCP Server", () => {
 					},
 				);
 
-			const testServer = new MCPServer(
-				{ props: mockProps },
-				new StreamingMessagesStorageWithTtl(null as any, vi.fn(), vi.fn()),
-			);
-			vi.spyOn(testServer as any, "getStorageService").mockReturnValue({
+			vi.spyOn(server as any, "getStorageService").mockReturnValue({
 				initializeConversation: vi.fn().mockResolvedValue(undefined),
 				appendMessages: vi.fn().mockResolvedValue(undefined),
 			});
-			await testServer.init();
-			vi.spyOn(testServer as any, "getThoughtSpotService").mockReturnValue({
+			await server.init();
+			vi.spyOn(server as any, "getThoughtSpotService").mockReturnValue({
 				sendAgentConversationMessageStreaming: mockSendStreaming,
 			});
 
@@ -1809,13 +1750,13 @@ describe("MCP Server", () => {
 				params: { name: "send_session_message", arguments: args },
 			});
 
-			await testServer.callSendSessionMessage(
+			await server.callSendSessionMessage(
 				makeRequest({
 					analytical_session_id: "shared-session-123",
 					message: "What is total revenue?",
 				}),
 			);
-			await testServer.callSendSessionMessage(
+			await server.callSendSessionMessage(
 				makeRequest({
 					analytical_session_id: "shared-session-123",
 					message: "Break it down by region",
@@ -1836,16 +1777,12 @@ describe("MCP Server", () => {
 					},
 				);
 
-			const testServer = new MCPServer(
-				{ props: mockProps },
-				new StreamingMessagesStorageWithTtl(null as any, vi.fn(), vi.fn()),
-			);
-			vi.spyOn(testServer as any, "getStorageService").mockReturnValue({
+			vi.spyOn(server as any, "getStorageService").mockReturnValue({
 				initializeConversation: vi.fn().mockResolvedValue(undefined),
 				appendMessages: vi.fn().mockResolvedValue(undefined),
 			});
-			await testServer.init();
-			vi.spyOn(testServer as any, "getThoughtSpotService").mockReturnValue({
+			await server.init();
+			vi.spyOn(server as any, "getThoughtSpotService").mockReturnValue({
 				sendAgentConversationMessageStreaming: mockSendStreaming,
 			});
 
@@ -1854,13 +1791,13 @@ describe("MCP Server", () => {
 				params: { name: "send_session_message", arguments: args },
 			});
 
-			await testServer.callSendSessionMessage(
+			await server.callSendSessionMessage(
 				makeRequest({
 					analytical_session_id: "session-no-ctx",
 					message: "What is total revenue?",
 				}),
 			);
-			await testServer.callSendSessionMessage(
+			await server.callSendSessionMessage(
 				makeRequest({
 					analytical_session_id: "session-with-ctx",
 					message: "What is total revenue?",
