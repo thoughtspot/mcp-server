@@ -1,7 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { MixpanelTracker } from "../../src/metrics/mixpanel/mixpanel";
 import { MCPServer } from "../../src/servers/mcp-server";
 import * as thoughtspotClient from "../../src/thoughtspot/thoughtspot-client";
-import { MixpanelTracker } from "../../src/metrics/mixpanel/mixpanel";
 
 // Mock the MixpanelTracker
 vi.mock("../../src/metrics/mixpanel/mixpanel", () => ({
@@ -244,6 +244,17 @@ describe("MCP Server Base", () => {
 			await testServer.init();
 			const result = testServer.testIsDatasourceDiscoveryAvailable();
 			expect(result).toBe(false);
+		});
+
+		it("should return false and warn when sessionInfo has not been initialized", () => {
+			// server was never init()-ed, so sessionInfo is null
+			const uninitServer = new TestMCPServer({ props: mockProps });
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+			expect(uninitServer.testIsDatasourceDiscoveryAvailable()).toBe(false);
+			expect(warnSpy).toHaveBeenCalledWith(
+				expect.stringContaining("sessionInfo is not initialized"),
+			);
+			warnSpy.mockRestore();
 		});
 
 		it("should return false when enableSpotterDataSourceDiscovery is undefined", async () => {

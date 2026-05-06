@@ -1,13 +1,13 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-	getRelevantQuestions,
-	getAnswerForQuestion,
-	fetchTMLAndCreateLiveboard,
-	createLiveboard,
-	getDataSources,
-	getSessionInfo,
-	getDataSourceSuggestions,
 	ThoughtSpotService,
+	createLiveboard,
+	fetchTMLAndCreateLiveboard,
+	getAnswerForQuestion,
+	getDataSourceSuggestions,
+	getDataSources,
+	getRelevantQuestions,
+	getSessionInfo,
 } from "../../src/thoughtspot/thoughtspot-service";
 
 // Mock the ThoughtSpot REST API client
@@ -1200,6 +1200,22 @@ describe("thoughtspot-service", () => {
 			expect(result?.[0].llmReasoning).toEqual(
 				mockResponse.data_sources[0].reasoning,
 			);
+		});
+	});
+
+	describe("validateConnection", () => {
+		it("should return true when getSessionInfo succeeds", async () => {
+			mockClient.getSessionInfo = vi.fn().mockResolvedValue({ userGUID: "u1" });
+			const service = new ThoughtSpotService(mockClient);
+			expect(await service.validateConnection()).toBe(true);
+		});
+
+		it("should return false when getSessionInfo throws", async () => {
+			mockClient.getSessionInfo = vi
+				.fn()
+				.mockRejectedValue(new Error("Network error"));
+			const service = new ThoughtSpotService(mockClient);
+			expect(await service.validateConnection()).toBe(false);
 		});
 	});
 

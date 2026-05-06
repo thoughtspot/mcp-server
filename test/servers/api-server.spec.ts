@@ -1,7 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { apiServer } from "../../src/servers/api-server";
-import { ThoughtSpotService } from "../../src/thoughtspot/thoughtspot-service";
 import * as thoughtspotClient from "../../src/thoughtspot/thoughtspot-client";
+import { ThoughtSpotService } from "../../src/thoughtspot/thoughtspot-service";
 
 // Mock the ThoughtSpot service and client
 vi.mock("../../src/thoughtspot/thoughtspot-service");
@@ -281,6 +281,36 @@ describe("API Server", () => {
 
 			// The endpoint should return a 500 error when the service throws
 			expect(response.status).toBe(400);
+		});
+	});
+
+	describe("GET /api/tools/ping", () => {
+		it("should return Pong when authenticated", async () => {
+			const request = new Request("http://localhost/api/tools/ping");
+			const response = await apiServer.fetch(
+				request,
+				{ props: mockProps },
+				createMockExecutionContext(mockProps),
+			);
+			expect(response.status).toBe(200);
+			const data = await response.json();
+			expect(data).toEqual({ content: [{ type: "text", text: "Pong" }] });
+		});
+
+		it("should return error when props are missing authentication", async () => {
+			const unauthProps = { instanceUrl: "", accessToken: "" };
+			const request = new Request("http://localhost/api/tools/ping");
+			const response = await apiServer.fetch(
+				request,
+				{ props: unauthProps },
+				createMockExecutionContext(unauthProps),
+			);
+			expect(response.status).toBe(200);
+			const data = await response.json();
+			expect(data).toEqual({
+				isError: true,
+				content: [{ type: "text", text: "ERROR: Not authenticated" }],
+			});
 		});
 	});
 
