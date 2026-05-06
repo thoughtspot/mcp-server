@@ -89,16 +89,18 @@ export function getMetricOutcomeForStatus(status: number): MetricOutcome {
 }
 
 function getCanonicalResolvedApiVersion(apiVersion: string): string {
-	if (apiVersion === "backwards-compatibility-default") {
-		return "default";
-	}
-
 	const versionConfig = resolveApiVersion(apiVersion);
 	if (versionConfig.version.includes("beta")) {
 		return "beta";
 	}
+	if (versionConfig.version.includes("backwards-compatibility-default")) {
+		return "default";
+	}
+	if (versionConfig.version.includes("latest")) {
+		return "latest";
+	}
 
-	return versionConfig.version[versionConfig.version.length - 1] ?? "unknown";
+	return "unknown";
 }
 
 export function resolveCanonicalApiVersionLabel(

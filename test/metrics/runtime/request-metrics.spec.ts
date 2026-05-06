@@ -422,6 +422,24 @@ describe("withRequestMetrics", () => {
 		expect(resolveCanonicalApiVersionLabel(request, ctx)).toBe("default");
 	});
 
+	it("maps stable date-based versions onto the latest label", () => {
+		const ctx = {} as ExecutionContext;
+		const request = new Request(
+			"https://example.com/token/mcp?api-version=2026-05-01",
+		);
+
+		expect(resolveCanonicalApiVersionLabel(request, ctx)).toBe("latest");
+	});
+
+	it("maps older date-based versions onto the default label", () => {
+		const ctx = {} as ExecutionContext;
+		const request = new Request(
+			"https://example.com/token/mcp?api-version=2025-12-01",
+		);
+
+		expect(resolveCanonicalApiVersionLabel(request, ctx)).toBe("default");
+	});
+
 	it("labels unresolved api-version values as unknown", () => {
 		const ctx = {
 			props: {

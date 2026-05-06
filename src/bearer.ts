@@ -37,8 +37,9 @@ async function handleTokenAuth(
 	authRouteFamily: AuthRouteFamily = "token",
 ): Promise<Response> {
 	const recorder = getMetricsRecorderFromExecutionContext(ctx);
+	const url = new URL(req.url);
 	const authMetricRouteGroup = getAuthMetricRouteGroup(
-		new URL(req.url).pathname,
+		url.pathname,
 		authRouteFamily,
 	);
 
@@ -82,8 +83,6 @@ async function handleTokenAuth(
 
 		const clientName =
 			req.headers.get("x-ts-client-name") || "Bearer Token client";
-
-		const url = new URL(req.url);
 
 		// Build props object
 		const props: any = {
