@@ -26,7 +26,7 @@ export const UPSTREAM_OPERATION_NAMES = {
 export type UpstreamOperation =
 	(typeof UPSTREAM_OPERATION_NAMES)[keyof typeof UPSTREAM_OPERATION_NAMES];
 
-export type ToolMetricApiSurface = "mcp" | "openai_mcp";
+export type ToolMetricApiSurface = "mcp";
 export type UpstreamStreamMessageType =
 	| "text"
 	| "text_chunk"
