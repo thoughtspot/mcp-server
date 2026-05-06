@@ -183,6 +183,7 @@ describe("Bearer Handler", () => {
 				instanceUrl: "https://my-instance.thoughtspot.cloud",
 				clientName: "Custom Test Client",
 				apiVersion: "backwards-compatibility-default",
+				apiVersionMode: "implicit_legacy",
 			});
 
 			// Verify the response
@@ -208,6 +209,7 @@ describe("Bearer Handler", () => {
 				instanceUrl: "https://my-instance.thoughtspot.cloud",
 				clientName: "Bearer Token client",
 				apiVersion: "backwards-compatibility-default",
+				apiVersionMode: "implicit_legacy",
 			});
 
 			// Verify the response
@@ -531,8 +533,10 @@ describe("Bearer Handler", () => {
 			expect(mockCtx.props).toMatchObject({
 				accessToken: "test-token",
 				instanceUrl: "https://test.thoughtspot.cloud",
+				apiRequestedVersion: "beta",
 			});
 			expect(mockCtx.props.apiVersion).toBe("backwards-compatibility-default");
+			expect(mockCtx.props.apiVersionMode).toBe("implicit_legacy");
 		});
 
 		it("should use backwards-compatibility-default apiVersion and ignore query param on /bearer/sse", async () => {
@@ -553,8 +557,10 @@ describe("Bearer Handler", () => {
 			expect(mockCtx.props).toMatchObject({
 				accessToken: "test-token",
 				instanceUrl: "https://test.thoughtspot.cloud",
+				apiRequestedVersion: "beta",
 			});
 			expect(mockCtx.props.apiVersion).toBe("backwards-compatibility-default");
+			expect(mockCtx.props.apiVersionMode).toBe("implicit_legacy");
 		});
 	});
 
@@ -577,7 +583,9 @@ describe("Bearer Handler", () => {
 			expect(mockCtx.props).toMatchObject({
 				accessToken: "test-token",
 				instanceUrl: "https://test.thoughtspot.cloud",
+				apiRequestedVersion: "beta",
 				apiVersion: "beta",
+				apiVersionMode: "beta",
 			});
 		});
 
@@ -599,7 +607,9 @@ describe("Bearer Handler", () => {
 			expect(mockCtx.props).toMatchObject({
 				accessToken: "test-token",
 				instanceUrl: "https://test.thoughtspot.cloud",
+				apiRequestedVersion: "beta",
 				apiVersion: "beta",
+				apiVersionMode: "beta",
 			});
 		});
 
@@ -619,6 +629,7 @@ describe("Bearer Handler", () => {
 				accessToken: "test-token",
 				instanceUrl: "https://test.thoughtspot.cloud",
 				apiVersion: "latest",
+				apiVersionMode: "implicit_latest",
 			});
 		});
 
@@ -640,7 +651,9 @@ describe("Bearer Handler", () => {
 			expect(mockCtx.props).toMatchObject({
 				accessToken: "test-token",
 				instanceUrl: "https://test.thoughtspot.cloud",
+				apiRequestedVersion: "2025-03-01",
 				apiVersion: "2025-03-01",
+				apiVersionMode: "pinned",
 			});
 		});
 
@@ -662,7 +675,9 @@ describe("Bearer Handler", () => {
 			expect(mockCtx.props).toMatchObject({
 				accessToken: "test-token",
 				instanceUrl: "https://test.thoughtspot.cloud",
+				apiRequestedVersion: "2024-12-01",
 				apiVersion: "2024-12-01",
+				apiVersionMode: "pinned",
 			});
 		});
 
@@ -685,7 +700,9 @@ describe("Bearer Handler", () => {
 			expect(mockCtx.props).toMatchObject({
 				accessToken: "test-token",
 				instanceUrl: "https://test.thoughtspot.cloud",
+				apiRequestedVersion: "beta",
 				apiVersion: "beta",
+				apiVersionMode: "beta",
 			});
 		});
 
@@ -740,6 +757,7 @@ describe("Bearer Handler", () => {
 
 			expect(result.status).toBe(200);
 			expect(mockCtx.props.apiVersion).toBe("latest");
+			expect(mockCtx.props.apiVersionMode).toBe("implicit_latest");
 		});
 
 		it("should require bearer token on /token/mcp", async () => {

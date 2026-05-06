@@ -7,7 +7,6 @@ import type { z } from "zod";
 import { TrackEvent } from "../metrics";
 import type { ApiVersionMode } from "../metrics/runtime/metric-types";
 import type { MetricsRecorder } from "../metrics/runtime/metrics-recorder";
-import { getCanonicalResolvedApiVersion } from "../metrics/runtime/request-metrics";
 import type { ToolMetricApiSurface } from "../metrics/runtime/tool-metrics";
 import { WithSpan } from "../metrics/tracing/tracing-utils";
 import type { StreamingMessagesStorageWithTtl } from "../streaming-message-storage-with-ttl/streaming-message-storage-with-ttl";
@@ -26,7 +25,11 @@ import {
 	SendSessionMessageInputSchema,
 	ToolName,
 } from "./tool-definitions";
-import { type VersionConfig, resolveApiVersion } from "./version-registry";
+import {
+	type VersionConfig,
+	resolveApiVersion,
+	resolveApiVersionMetrics,
+} from "./version-registry";
 
 export class MCPServer extends BaseMCPServer {
 	constructor(
@@ -43,40 +46,55 @@ export class MCPServer extends BaseMCPServer {
 	protected getToolMetricApiVersionLabel(): string | undefined {
 		const apiVersion = this.ctx.props.apiVersion;
 		if (typeof apiVersion !== "string" || apiVersion.length === 0) {
-			return "default";
+			return "backwards-compatibility-default";
 		}
 
 		try {
-			return getCanonicalResolvedApiVersion(apiVersion);
+			return resolveApiVersionMetrics(apiVersion).apiVersion;
 		} catch {
 			return "unknown";
 		}
 	}
 
 	protected getToolMetricApiVersionModeLabel(): ApiVersionMode | undefined {
+		const apiVersionMode = this.ctx.props.apiVersionMode;
+		if (typeof apiVersionMode === "string" && apiVersionMode.length > 0) {
+			return apiVersionMode;
+		}
+
+		const apiVersion = this.ctx.props.apiVersion;
+		if (typeof apiVersion === "string" && apiVersion.length > 0) {
+			try {
+				const resolved = resolveApiVersionMetrics(apiVersion);
+				if (resolved.apiVersion === "backwards-compatibility-default") {
+					return "implicit_legacy";
+				}
+				if (resolved.apiVersion === "latest") {
+					return "implicit_latest";
+				}
+				if (resolved.apiVersion === "beta") {
+					return "beta";
+				}
+			} catch {
+				return "unknown";
+			}
+		}
+
+		return "implicit_legacy";
+	}
+
+	protected getToolMetricApiReleaseDateLabel(): string | undefined {
 		const apiVersion = this.ctx.props.apiVersion;
 		if (typeof apiVersion !== "string" || apiVersion.length === 0) {
-			return "implicit_default";
+			return resolveApiVersionMetrics("backwards-compatibility-default")
+				.apiReleaseDate;
 		}
 
-		// Tool calls inherit the session-level version selection from the transport props.
-		// Together with `api_version`, this lets us answer:
-		// - "who is still on legacy/v1?" via `api_version=default`
-		// - "who is pinned vs following latest?" via `api_version_mode`
-		if (apiVersion === "beta") {
-			return "beta";
+		try {
+			return resolveApiVersionMetrics(apiVersion).apiReleaseDate;
+		} catch {
+			return undefined;
 		}
-		if (apiVersion === "latest") {
-			return "latest";
-		}
-		if (apiVersion === "backwards-compatibility-default") {
-			return "implicit_default";
-		}
-		if (/^\d{4}-\d{2}-\d{2}$/.test(apiVersion)) {
-			return "pinned";
-		}
-
-		return "unknown";
 	}
 
 	@WithSpan("call-list-tools")
@@ -92,7 +110,10 @@ export class MCPServer extends BaseMCPServer {
 		try {
 			versionConfig = resolveApiVersion(this.ctx.props.apiVersion);
 		} catch (error) {
-			console.error("Error resolving API version, using default:", error);
+			console.error(
+				"Error resolving API version, using latest fallback:",
+				error,
+			);
 			span?.recordException(error as Error);
 			versionConfig = resolveApiVersion();
 		}

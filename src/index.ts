@@ -9,8 +9,11 @@ import { trace } from "@opentelemetry/api";
 import { withBearerHandler } from "./bearer";
 import { instrumentedMCPServer } from "./cloudflare-utils";
 import handler from "./handlers";
+import type { ApiVersionMode } from "./metrics/runtime/metric-types";
 import {
+	normalizeRequestedApiVersionForAnalytics,
 	recordHttpRequestMetrics,
+	resolveRequestedApiVersionMode,
 	withRequestMetrics,
 } from "./metrics/runtime/request-metrics";
 import { PUBLIC_ROUTES } from "./routes";
@@ -47,12 +50,17 @@ function createMCPRouter(
 			ctx: ExecutionContext,
 		): Promise<Response> {
 			const url = new URL(request.url);
-			let apiVersion = url.searchParams.get("api-version");
+			const requestedApiVersion = url.searchParams.get("api-version");
+			let apiVersion = requestedApiVersion;
+			let apiVersionMode: ApiVersionMode;
 
 			// TODO(Rifdhan): this is a temporary backwards compatibility measure. In the future
 			// we will use latest by default.
 			if (!apiVersion) {
 				apiVersion = "backwards-compatibility-default";
+				apiVersionMode = "implicit_legacy";
+			} else {
+				apiVersionMode = resolveRequestedApiVersionMode(apiVersion);
 			}
 
 			// Inject apiVersion into props
@@ -60,6 +68,10 @@ function createMCPRouter(
 			(ctx as any).props = {
 				...originalProps,
 				apiVersion,
+				apiRequestedVersion: requestedApiVersion
+					? normalizeRequestedApiVersionForAnalytics(requestedApiVersion)
+					: undefined,
+				apiVersionMode,
 			};
 
 			// Route to the appropriate serve method

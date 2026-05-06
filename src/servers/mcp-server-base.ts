@@ -16,7 +16,10 @@ import {
 	type MetricsRecorder,
 	scheduleMetricsFlush,
 } from "../metrics/runtime/metrics-recorder";
-import type { MetricEventIdentity } from "../metrics/runtime/metrics-sink";
+import type {
+	MetricAnalyticsContext,
+	MetricEventIdentity,
+} from "../metrics/runtime/metrics-sink";
 import { createRequestMetricsRecorder } from "../metrics/runtime/request-metrics";
 import {
 	type ToolMetricApiSurface,
@@ -205,6 +208,7 @@ export abstract class BaseMCPServer extends Server {
 				recorder,
 				metricsEnv: this.ctx.env as unknown as Record<string, unknown>,
 				waitUntil: this.getMetricsWaitUntil(),
+				analyticsContext: this.getMetricAnalyticsContext(),
 				eventIdentity: this.getMetricEventIdentity(),
 			},
 		);
@@ -218,6 +222,24 @@ export abstract class BaseMCPServer extends Server {
 
 	protected getToolMetricApiVersionModeLabel(): ApiVersionMode | undefined {
 		return undefined;
+	}
+
+	protected getToolMetricApiReleaseDateLabel(): string | undefined {
+		return undefined;
+	}
+
+	protected getMetricAnalyticsContext(): MetricAnalyticsContext | undefined {
+		const apiRequestedVersion = this.ctx.props.apiRequestedVersion;
+		if (
+			typeof apiRequestedVersion !== "string" ||
+			apiRequestedVersion.length === 0
+		) {
+			return undefined;
+		}
+
+		return {
+			apiRequestedVersion,
+		};
 	}
 
 	protected getMetricEventIdentity(): MetricEventIdentity | undefined {
@@ -249,6 +271,7 @@ export abstract class BaseMCPServer extends Server {
 		const recorder = createRequestMetricsRecorder(
 			this.ctx.env as unknown as Record<string, unknown>,
 		);
+		recorder.setAnalyticsContext(this.getMetricAnalyticsContext());
 		recorder.setEventIdentity(this.getMetricEventIdentity());
 		return recorder;
 	}
@@ -268,6 +291,7 @@ export abstract class BaseMCPServer extends Server {
 				durationMs,
 				this.getToolMetricApiVersionLabel(),
 				this.getToolMetricApiVersionModeLabel(),
+				this.getToolMetricApiReleaseDateLabel(),
 			);
 		} catch (error) {
 			console.error(

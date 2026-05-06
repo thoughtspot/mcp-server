@@ -7,7 +7,10 @@ import {
 	type MetricsRecorder,
 	scheduleMetricsFlush,
 } from "../metrics/runtime/metrics-recorder";
-import type { MetricEventIdentity } from "../metrics/runtime/metrics-sink";
+import type {
+	MetricAnalyticsContext,
+	MetricEventIdentity,
+} from "../metrics/runtime/metrics-sink";
 import { createRequestMetricsRecorder } from "../metrics/runtime/request-metrics";
 import type { MetricsEnvLike } from "../metrics/runtime/runtime-config";
 import {
@@ -30,6 +33,7 @@ type ThoughtSpotServiceMetricsOptions = {
 	recorder?: MetricsRecorder;
 	metricsEnv?: MetricsEnvLike;
 	waitUntil?: (promise: Promise<any>) => void;
+	analyticsContext?: MetricAnalyticsContext;
 	eventIdentity?: MetricEventIdentity;
 };
 
@@ -66,6 +70,7 @@ export class ThoughtSpotService {
 
 	private createStreamMetricsRecorder(): MetricsRecorder {
 		const recorder = createRequestMetricsRecorder(this.metrics.metricsEnv);
+		recorder.setAnalyticsContext(this.metrics.analyticsContext);
 		recorder.setEventIdentity(this.metrics.eventIdentity);
 		return recorder;
 	}
@@ -418,6 +423,8 @@ export class ThoughtSpotService {
 					);
 				}
 			} else {
+				// Tests and non-Worker runtimes may not expose waitUntil. Keep the
+				// best-effort stream processing running without blocking the caller.
 				void processStreamPromise;
 			}
 

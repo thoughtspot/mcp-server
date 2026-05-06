@@ -247,6 +247,9 @@ describe("thoughtspot-service", () => {
 				METRICS_SINK_MODE: "analytics_engine",
 				ANALYTICS: analyticsDataset,
 			});
+			recorder.setAnalyticsContext({
+				apiRequestedVersion: "latest",
+			});
 			recorder.setEventIdentity({
 				tenantId: "org-123",
 				userId: "user-123",
@@ -282,6 +285,9 @@ describe("thoughtspot-service", () => {
 				waitUntil(promise: Promise<void>) {
 					waitUntilPromises.push(promise);
 				},
+				analyticsContext: {
+					apiRequestedVersion: "latest",
+				},
 				eventIdentity: {
 					tenantId: "org-123",
 					userId: "user-123",
@@ -311,6 +317,7 @@ describe("thoughtspot-service", () => {
 						dataPoint.blobs?.includes(
 							"send_agent_conversation_message_streaming",
 						) &&
+						dataPoint.blobs?.includes("latest") &&
 						dataPoint.indexes?.[3] === "org-123" &&
 						dataPoint.indexes?.[4] === "user-123",
 				),

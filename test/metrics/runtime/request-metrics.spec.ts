@@ -416,21 +416,25 @@ describe("withRequestMetrics", () => {
 		const ctx = {
 			props: {
 				apiVersion: "backwards-compatibility-default",
+				apiVersionMode: "implicit_legacy",
 			},
 		} as unknown as ExecutionContext;
 		const request = new Request(
 			"https://example.com/bearer/mcp?api-version=beta",
 		);
 
-		expect(resolveCanonicalApiVersionLabel(request, ctx)).toBe("default");
+		expect(resolveCanonicalApiVersionLabel(request, ctx)).toBe(
+			"backwards-compatibility-default",
+		);
 	});
 
-	it("labels legacy OAuth routes as implicit default when no selector is provided", () => {
+	it("labels legacy OAuth routes as implicit legacy when no selector is provided", () => {
 		const request = new Request("https://example.com/mcp");
 
 		expect(resolveApiVersionLabels(request, {} as ExecutionContext)).toEqual({
-			apiVersion: "default",
-			apiVersionMode: "implicit_default",
+			apiReleaseDate: "2025-01-01",
+			apiVersion: "backwards-compatibility-default",
+			apiVersionMode: "implicit_legacy",
 		});
 	});
 
@@ -438,8 +442,9 @@ describe("withRequestMetrics", () => {
 		const request = new Request("https://example.com/token/mcp");
 
 		expect(resolveApiVersionLabels(request, {} as ExecutionContext)).toEqual({
+			apiReleaseDate: "2026-05-01",
 			apiVersion: "latest",
-			apiVersionMode: "latest",
+			apiVersionMode: "implicit_latest",
 		});
 	});
 
@@ -449,8 +454,23 @@ describe("withRequestMetrics", () => {
 		);
 
 		expect(resolveApiVersionLabels(request, {} as ExecutionContext)).toEqual({
+			apiRequestedVersion: "2026-05-01",
+			apiReleaseDate: "2026-05-01",
 			apiVersion: "latest",
 			apiVersionMode: "pinned",
+		});
+	});
+
+	it("labels explicit latest selectors separately from implicit latest", () => {
+		const request = new Request(
+			"https://example.com/token/mcp?api-version=latest",
+		);
+
+		expect(resolveApiVersionLabels(request, {} as ExecutionContext)).toEqual({
+			apiRequestedVersion: "latest",
+			apiReleaseDate: "2026-05-01",
+			apiVersion: "latest",
+			apiVersionMode: "explicit_latest",
 		});
 	});
 
@@ -469,13 +489,16 @@ describe("withRequestMetrics", () => {
 			"https://example.com/token/mcp?api-version=2025-12-01",
 		);
 
-		expect(resolveCanonicalApiVersionLabel(request, ctx)).toBe("default");
+		expect(resolveCanonicalApiVersionLabel(request, ctx)).toBe(
+			"backwards-compatibility-default",
+		);
 	});
 
 	it("labels unresolved api-version values as unknown", () => {
 		const ctx = {
 			props: {
 				apiVersion: "garbage",
+				apiRequestedVersion: "invalid",
 			},
 		} as unknown as ExecutionContext;
 		const request = new Request(
@@ -483,6 +506,26 @@ describe("withRequestMetrics", () => {
 		);
 
 		expect(resolveCanonicalApiVersionLabel(request, ctx)).toBe("unknown");
+	});
+
+	it("keeps the normalized requested selector even when the served release resolves differently", () => {
+		const request = new Request(
+			"https://example.com/bearer/mcp?api-version=beta",
+		);
+		const ctx = {
+			props: {
+				apiVersion: "backwards-compatibility-default",
+				apiRequestedVersion: "beta",
+				apiVersionMode: "implicit_legacy",
+			},
+		} as unknown as ExecutionContext;
+
+		expect(resolveApiVersionLabels(request, ctx)).toEqual({
+			apiRequestedVersion: "beta",
+			apiReleaseDate: "2025-01-01",
+			apiVersion: "backwards-compatibility-default",
+			apiVersionMode: "implicit_legacy",
+		});
 	});
 
 	it("records auth outcome counters from response status", () => {
@@ -520,5 +563,27 @@ describe("withRequestMetrics", () => {
 				},
 			}),
 		]);
+	});
+
+	it("preserves the requested selector for bearer auth traffic in analytics context", async () => {
+		const analyticsEngineSink = { flush: vi.fn().mockResolvedValue(undefined) };
+		const recorder = createRequestMetricsRecorder(
+			{ METRICS_SINK_MODE: "analytics_engine" },
+			{ analyticsEngineSink },
+		);
+		const request = new Request(
+			"https://example.com/bearer/mcp?api-version=beta",
+		);
+
+		recordBearerAuthRequestMetric(recorder, request, 401);
+		await recorder.flush();
+
+		expect(analyticsEngineSink.flush).toHaveBeenCalledWith(
+			expect.objectContaining({
+				analyticsContext: {
+					apiRequestedVersion: "beta",
+				},
+			}),
+		);
 	});
 });

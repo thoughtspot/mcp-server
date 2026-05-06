@@ -57,6 +57,7 @@ describe("RequestMetricsRecorder", () => {
 		expect(flushSpy).toHaveBeenCalledWith({
 			observations: recorder.snapshot(),
 			resourceAttributes: { "service.name": "thoughtspot-mcp-server" },
+			analyticsContext: undefined,
 			eventIdentity: undefined,
 		});
 	});
@@ -151,6 +152,7 @@ describe("RequestMetricsRecorder", () => {
 				}),
 			],
 			resourceAttributes: {},
+			analyticsContext: undefined,
 			eventIdentity: undefined,
 		});
 	});
@@ -225,6 +227,27 @@ describe("RequestMetricsRecorder", () => {
 			expect.objectContaining({
 				eventIdentity: {
 					tenantId: "tenant-123",
+				},
+			}),
+		);
+	});
+
+	it("includes analytics context in the flush payload when present", async () => {
+		const flushSpy = vi.fn().mockResolvedValue(undefined);
+		const recorder = new RequestMetricsRecorder({
+			sink: { flush: flushSpy },
+		});
+
+		recorder.setAnalyticsContext({
+			apiRequestedVersion: "2026-10-01",
+		});
+		recorder.count(METRIC_NAMES.httpRequestsTotal);
+		await recorder.flush();
+
+		expect(flushSpy).toHaveBeenCalledWith(
+			expect.objectContaining({
+				analyticsContext: {
+					apiRequestedVersion: "2026-10-01",
 				},
 			}),
 		);

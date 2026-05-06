@@ -39,6 +39,7 @@ function buildToolMetricLabels(
 	outcome: MetricOutcome,
 	apiVersion?: string,
 	apiVersionMode?: ApiVersionMode,
+	apiReleaseDate?: string,
 ): MetricLabelInput {
 	const labels: MetricLabelInput = {
 		tool_name: toolName,
@@ -51,6 +52,9 @@ function buildToolMetricLabels(
 	}
 	if (apiVersionMode) {
 		labels.api_version_mode = apiVersionMode;
+	}
+	if (apiReleaseDate) {
+		labels.api_release_date = apiReleaseDate;
 	}
 
 	return labels;
@@ -92,6 +96,7 @@ export function recordToolInvocationMetrics(
 	durationMs: number,
 	apiVersion?: string,
 	apiVersionMode?: ApiVersionMode,
+	apiReleaseDate?: string,
 ): void {
 	const labels = buildToolMetricLabels(
 		toolName,
@@ -99,6 +104,7 @@ export function recordToolInvocationMetrics(
 		outcome,
 		apiVersion,
 		apiVersionMode,
+		apiReleaseDate,
 	);
 
 	recorder.count(METRIC_NAMES.toolCallsTotal, 1, labels);

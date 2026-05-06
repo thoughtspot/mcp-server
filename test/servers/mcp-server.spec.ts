@@ -309,7 +309,12 @@ describe("MCP Server", () => {
 			const waitUntilPromises: Promise<void>[] = [];
 			const metricsServer = new MCPServer(
 				{
-					props: mockProps,
+					props: {
+						...mockProps,
+						apiVersion: "2025-03-01",
+						apiRequestedVersion: "2025-03-01",
+						apiVersionMode: "pinned",
+					},
 					env: {
 						METRICS_SINK_MODE: "analytics_engine",
 						ANALYTICS: analyticsDataset,
@@ -351,7 +356,15 @@ describe("MCP Server", () => {
 						"test-org",
 						"test-user-123",
 					],
-					blobs: expect.arrayContaining(["ping", "success", "mcp"]),
+					blobs: expect.arrayContaining([
+						"ping",
+						"success",
+						"mcp",
+						"backwards-compatibility-default",
+						"pinned",
+						"2025-01-01",
+						"2025-03-01",
+					]),
 				}),
 			);
 			expect(toolDuration).toEqual(

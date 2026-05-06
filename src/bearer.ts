@@ -2,7 +2,9 @@ import type { ThoughtSpotMCP } from ".";
 import type honoApp from "./handlers";
 import {
 	getMetricsRecorderFromExecutionContext,
+	normalizeRequestedApiVersionForAnalytics,
 	recordBearerAuthRequestMetric,
+	resolveRequestedApiVersionMode,
 } from "./metrics/runtime/request-metrics";
 import { validateAndSanitizeUrl } from "./oauth-manager/oauth-utils";
 import { PUBLIC_ROUTES, PUBLIC_ROUTE_PREFIXES } from "./routes";
@@ -90,17 +92,35 @@ async function handleTokenAuth(
 			instanceUrl: validateAndSanitizeUrl(tsHost),
 			clientName,
 		};
+		const requestedApiVersion = url.searchParams.get("api-version");
 
 		// Stamp the effective served surface into props so downstream request/tool metrics
 		// can distinguish:
-		// - `api_version=default` => tenants still on the legacy/v1 surface
-		// - `api_version_mode=pinned|latest` => pinned callers vs callers following latest
+		// - `api_version=backwards-compatibility-default` => tenants still on the legacy/v1 surface
+		// - `api_version_mode` => implicit route defaults vs explicit/latest/pinned selectors
+		// - `api_requested_version` (stored only in Analytics Engine) => the exact selector
+		//   the client sent, which helps debug version-resolution confusion and future-dated pins
+		// - `api_release_date` (derived later from the registry) => which exact dated release is served
 		const apiVersion =
 			apiVersionOverride ??
-			url.searchParams.get("api-version") ??
+			requestedApiVersion ??
 			(authRouteFamily === "token" ? "latest" : undefined);
+		const apiVersionMode = apiVersionOverride
+			? "implicit_legacy"
+			: requestedApiVersion
+				? resolveRequestedApiVersionMode(requestedApiVersion)
+				: authRouteFamily === "token"
+					? "implicit_latest"
+					: undefined;
+		if (requestedApiVersion) {
+			props.apiRequestedVersion =
+				normalizeRequestedApiVersionForAnalytics(requestedApiVersion);
+		}
 		if (apiVersion) {
 			props.apiVersion = apiVersion;
+		}
+		if (apiVersionMode) {
+			props.apiVersionMode = apiVersionMode;
 		}
 
 		(ctx as any).props = props;

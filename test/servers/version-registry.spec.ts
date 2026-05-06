@@ -1,7 +1,10 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
-	resolveApiVersion,
 	VERSION_REGISTRY,
+	YYYY_MM_DD_DATE_REGEX,
+	getReleaseDateIdentifier,
+	resolveApiVersion,
+	resolveApiVersionMetrics,
 } from "../../src/servers/version-registry";
 
 // Helper: Validates if a given API version string is valid
@@ -113,6 +116,35 @@ describe("Version Registry", () => {
 			expect(versions).toContain("latest");
 			expect(versions).toContain("2025-01-01");
 			expect(versions.length).toBeGreaterThan(0);
+		});
+	});
+
+	describe("metrics helpers", () => {
+		it("exposes the shared YYYY-MM-DD regex", () => {
+			expect(YYYY_MM_DD_DATE_REGEX.test("2026-05-01")).toBe(true);
+			expect(YYYY_MM_DD_DATE_REGEX.test("2026-5-1")).toBe(false);
+		});
+
+		it("returns the resolved release date identifier when present", () => {
+			expect(getReleaseDateIdentifier(["latest", "2026-05-01"])).toBe(
+				"2026-05-01",
+			);
+			expect(getReleaseDateIdentifier(["beta"])).toBeUndefined();
+		});
+
+		it("maps requested selectors onto canonical metrics labels and release dates", () => {
+			expect(resolveApiVersionMetrics("latest")).toEqual({
+				apiVersion: "latest",
+				apiReleaseDate: "2026-05-01",
+			});
+			expect(resolveApiVersionMetrics("2025-03-15")).toEqual({
+				apiVersion: "backwards-compatibility-default",
+				apiReleaseDate: "2025-01-01",
+			});
+			expect(resolveApiVersionMetrics("beta")).toEqual({
+				apiVersion: "beta",
+				apiReleaseDate: undefined,
+			});
 		});
 	});
 
