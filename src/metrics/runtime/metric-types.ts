@@ -151,11 +151,7 @@ export type RouteGroup =
 	| "register"
 	| "mcp"
 	| "sse"
-	| "openai_mcp"
-	| "openai_sse"
 	| "openai_apps_challenge"
-	| "openapi_spec"
-	| "api"
 	| "bearer_mcp"
 	| "bearer_sse"
 	| "token_mcp"
@@ -164,13 +160,7 @@ export type RouteGroup =
 
 export type Transport = "mcp" | "sse" | "http" | "unknown";
 export type AuthMode = "oauth" | "bearer" | "token" | "none" | "unknown";
-export type ApiSurface =
-	| "mcp"
-	| "openai_mcp"
-	| "api"
-	| "oauth"
-	| "static"
-	| "unknown";
+export type ApiSurface = "mcp" | "oauth" | "static" | "unknown";
 export type StatusClass = "1xx" | "2xx" | "3xx" | "4xx" | "5xx" | "unknown";
 
 function warnOnInvalidMetricLabel(key: string, reason: string) {
