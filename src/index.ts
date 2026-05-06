@@ -13,11 +13,9 @@ import {
 	recordHttpRequestMetrics,
 	withRequestMetrics,
 } from "./metrics/runtime/request-metrics";
-import { PUBLIC_ROUTES, PUBLIC_ROUTE_PREFIXES } from "./routes";
-import { apiServer } from "./servers/api-server";
+import { PUBLIC_ROUTES } from "./routes";
 import { ConversationStorageServer } from "./servers/conversation-storage-server";
 import { MCPServer } from "./servers/mcp-server";
-import { OpenAIDeepResearchMCPServer } from "./servers/openai-mcp-server";
 
 export { ConversationStorageServer };
 
@@ -34,11 +32,6 @@ const config: ResolveConfigFn = (env: Env, _trigger) => {
 
 // Create the instrumented ThoughtSpotMCP for the main export
 export const ThoughtSpotMCP = instrumentedMCPServer(MCPServer, config);
-
-export const ThoughtSpotOpenAIDeepResearchMCP = instrumentedMCPServer(
-	OpenAIDeepResearchMCPServer,
-	config,
-);
 
 // Router function to handle query params and inject apiVersion into props
 function createMCPRouter(
@@ -88,19 +81,6 @@ const oauthProvider = new OAuthProvider({
 			ThoughtSpotMCP,
 			"serveSSE",
 		) as any,
-		[PUBLIC_ROUTES.openaiMcp]: ThoughtSpotOpenAIDeepResearchMCP.serve(
-			PUBLIC_ROUTES.openaiMcp,
-			{
-				binding: "OPENAI_DEEP_RESEARCH_MCP_OBJECT",
-			},
-		) as any, // TODO: Remove 'any'
-		[PUBLIC_ROUTES.openaiSse]: ThoughtSpotOpenAIDeepResearchMCP.serveSSE(
-			PUBLIC_ROUTES.openaiSse,
-			{
-				binding: "OPENAI_DEEP_RESEARCH_MCP_OBJECT",
-			},
-		) as any, // TODO: Remove 'any'
-		[PUBLIC_ROUTE_PREFIXES.api]: apiServer as any, // TODO: Remove 'any'
 	},
 	defaultHandler: withBearerHandler(handler, ThoughtSpotMCP) as any, // TODO: Remove 'any'
 	authorizeEndpoint: PUBLIC_ROUTES.authorize,
