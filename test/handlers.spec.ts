@@ -1,18 +1,23 @@
 import {
+	createExecutionContext,
 	env,
 	runInDurableObject,
-	createExecutionContext,
 	waitOnExecutionContext,
 } from "cloudflare:test";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import worker, { ThoughtSpotMCP } from "../src";
 import app from "../src/handlers";
+import { METRIC_NAMES } from "../src/metrics/runtime/metric-types";
+import {
+	createRequestMetricsRecorder,
+	setMetricsRecorderOnExecutionContext,
+} from "../src/metrics/runtime/request-metrics";
 
 // Type assertion for worker to have fetch method
 const typedWorker = worker as {
 	fetch: (request: Request, env: any, ctx: any) => Promise<Response>;
 };
-import { encodeBase64Url, decodeBase64Url } from "hono/utils/encode";
+import { decodeBase64Url, encodeBase64Url } from "hono/utils/encode";
 
 // For correctly-typed Request
 const IncomingRequest = Request<unknown, IncomingRequestCfProperties>;
@@ -137,6 +142,40 @@ describe("Handlers", () => {
 	});
 
 	describe("POST /authorize", () => {
+		it("records authorize submit metrics for client errors", async () => {
+			const recorder = createRequestMetricsRecorder();
+			setMetricsRecorderOnExecutionContext(
+				mockCtx as ExecutionContext,
+				recorder,
+			);
+			const formData = new FormData();
+			formData.append(
+				"state",
+				btoa(JSON.stringify({ oauthReqInfo: { clientId: "test" } })),
+			);
+
+			const result = await app.fetch(
+				new Request("https://example.com/authorize", {
+					method: "POST",
+					body: formData,
+				}),
+				mockEnv,
+				mockCtx,
+			);
+
+			expect(result.status).toBe(400);
+			expect(recorder.snapshot()).toContainEqual(
+				expect.objectContaining({
+					kind: "counter",
+					name: METRIC_NAMES.oauthAuthorizeSubmitTotal,
+					value: 1,
+					labels: {
+						outcome: "client_error",
+					},
+				}),
+			);
+		});
+
 		it("should return 400 for missing instance URL", async () => {
 			const id = env.MCP_OBJECT.idFromName("test");
 			const object = env.MCP_OBJECT.get(id);

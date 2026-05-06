@@ -153,15 +153,19 @@ function toOtlpValue(value: MetricLabelValue): OtlpAttributeValue {
 function toOtlpAttributes(
 	attributes: Record<string, MetricLabelValue | undefined>,
 ): OtlpAttribute[] {
-	return Object.keys(attributes)
-		.sort()
-		.flatMap((key) => {
-			const value = attributes[key];
-			if (value === undefined || value === "") {
-				return [];
-			}
-			return [{ key, value: toOtlpValue(value) }];
-		});
+	return (
+		Object.keys(attributes)
+			// Keep attribute ordering deterministic so identical metric series
+			// aggregate the same way regardless of insertion order upstream.
+			.sort()
+			.flatMap((key) => {
+				const value = attributes[key];
+				if (value === undefined || value === "") {
+					return [];
+				}
+				return [{ key, value: toOtlpValue(value) }];
+			})
+	);
 }
 
 function toTimeUnixNano(timestampMs: number): string {

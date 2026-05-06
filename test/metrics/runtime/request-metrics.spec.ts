@@ -4,6 +4,10 @@ import {
 	clearMetricsRecorderFromExecutionContext,
 	createRequestMetricsRecorder,
 	getMetricsRecorderFromExecutionContext,
+	recordBearerAuthRequestMetric,
+	recordHttpRequestMetrics,
+	recordStatusMetric,
+	resolveCanonicalApiVersionLabel,
 	setMetricsRecorderOnExecutionContext,
 	withRequestMetrics,
 } from "../../../src/metrics/runtime/request-metrics";
@@ -353,5 +357,136 @@ describe("withRequestMetrics", () => {
 		clearMetricsRecorderFromExecutionContext(ctx);
 
 		expect(getMetricsRecorderFromExecutionContext(ctx)).toBeUndefined();
+	});
+
+	it("records HTTP request metrics with canonical route and version labels", () => {
+		const recorder = createRequestMetricsRecorder();
+		const ctx = {
+			props: {
+				apiVersion: "beta",
+			},
+		} as unknown as ExecutionContext;
+		const request = new Request("https://example.com/mcp?api-version=beta");
+		const response = new Response("ok", { status: 200 });
+
+		recordHttpRequestMetrics(recorder, request, response, ctx, 123);
+
+		expect(recorder.snapshot()).toEqual([
+			expect.objectContaining({
+				kind: "counter",
+				name: METRIC_NAMES.httpRequestsTotal,
+				value: 1,
+				labels: {
+					api_surface: "mcp",
+					api_version: "beta",
+					auth_mode: "oauth",
+					outcome: "success",
+					route_group: "mcp",
+					status_class: "2xx",
+					transport: "mcp",
+				},
+			}),
+			expect.objectContaining({
+				kind: "histogram",
+				name: METRIC_NAMES.httpRequestDurationMs,
+				value: 123,
+				labels: {
+					api_surface: "mcp",
+					api_version: "beta",
+					auth_mode: "oauth",
+					outcome: "success",
+					route_group: "mcp",
+					transport: "mcp",
+				},
+			}),
+		]);
+	});
+
+	it("labels versioned MCP routes as default when no explicit API version is requested", () => {
+		const ctx = {} as ExecutionContext;
+		const request = new Request("https://example.com/token/mcp");
+
+		expect(resolveCanonicalApiVersionLabel(request, ctx)).toBe("default");
+	});
+
+	it("uses the effective default surface when bearer routes ignore an api-version query", () => {
+		const ctx = {
+			props: {
+				apiVersion: "backwards-compatibility-default",
+			},
+		} as unknown as ExecutionContext;
+		const request = new Request(
+			"https://example.com/bearer/mcp?api-version=beta",
+		);
+
+		expect(resolveCanonicalApiVersionLabel(request, ctx)).toBe("default");
+	});
+
+	it("maps stable date-based versions onto the latest label", () => {
+		const ctx = {} as ExecutionContext;
+		const request = new Request(
+			"https://example.com/token/mcp?api-version=2026-05-01",
+		);
+
+		expect(resolveCanonicalApiVersionLabel(request, ctx)).toBe("latest");
+	});
+
+	it("maps older date-based versions onto the default label", () => {
+		const ctx = {} as ExecutionContext;
+		const request = new Request(
+			"https://example.com/token/mcp?api-version=2025-12-01",
+		);
+
+		expect(resolveCanonicalApiVersionLabel(request, ctx)).toBe("default");
+	});
+
+	it("labels unresolved api-version values as unknown", () => {
+		const ctx = {
+			props: {
+				apiVersion: "garbage",
+			},
+		} as unknown as ExecutionContext;
+		const request = new Request(
+			"https://example.com/token/mcp?api-version=garbage",
+		);
+
+		expect(resolveCanonicalApiVersionLabel(request, ctx)).toBe("unknown");
+	});
+
+	it("records auth outcome counters from response status", () => {
+		const recorder = createRequestMetricsRecorder();
+
+		recordStatusMetric(recorder, METRIC_NAMES.oauthAuthorizeSubmitTotal, 302);
+
+		expect(recorder.snapshot()).toEqual([
+			expect.objectContaining({
+				kind: "counter",
+				name: METRIC_NAMES.oauthAuthorizeSubmitTotal,
+				value: 1,
+				labels: {
+					outcome: "success",
+				},
+			}),
+		]);
+	});
+
+	it("records bearer auth traffic with route and transport labels", () => {
+		const recorder = createRequestMetricsRecorder();
+		const request = new Request("https://example.com/token/sse");
+
+		recordBearerAuthRequestMetric(recorder, request, 401);
+
+		expect(recorder.snapshot()).toEqual([
+			expect.objectContaining({
+				kind: "counter",
+				name: METRIC_NAMES.bearerAuthRequestsTotal,
+				value: 1,
+				labels: {
+					outcome: "client_error",
+					route_group: "token_sse",
+					transport: "sse",
+				},
+			}),
+		]);
 	});
 });

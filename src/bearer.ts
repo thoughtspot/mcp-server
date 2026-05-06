@@ -1,7 +1,24 @@
 import type { ThoughtSpotMCP } from ".";
 import type honoApp from "./handlers";
+import {
+	getMetricsRecorderFromExecutionContext,
+	recordBearerAuthRequestMetric,
+} from "./metrics/runtime/request-metrics";
 import { validateAndSanitizeUrl } from "./oauth-manager/oauth-utils";
 import { PUBLIC_ROUTES, PUBLIC_ROUTE_PREFIXES } from "./routes";
+
+type AuthRouteFamily = "bearer" | "token";
+
+function getAuthMetricRouteGroup(
+	pathname: string,
+	authRouteFamily: AuthRouteFamily,
+): "bearer_mcp" | "bearer_sse" | "token_mcp" | "token_sse" {
+	if (pathname.endsWith(PUBLIC_ROUTES.sse)) {
+		return authRouteFamily === "bearer" ? "bearer_sse" : "token_sse";
+	}
+
+	return authRouteFamily === "bearer" ? "bearer_mcp" : "token_mcp";
+}
 
 /**
  * Handler function for bearer/token authentication endpoints
@@ -11,65 +28,103 @@ import { PUBLIC_ROUTES, PUBLIC_ROUTE_PREFIXES } from "./routes";
  * @param MCPServer - MCP server instance
  * @param apiVersionOverride - Optional API version override (ignore value in request)
  */
-function handleTokenAuth(
+async function handleTokenAuth(
 	req: Request,
 	env: Env,
 	ctx: ExecutionContext,
 	MCPServer: typeof ThoughtSpotMCP,
 	apiVersionOverride?: string,
-): Response | Promise<Response> {
-	const authHeader = req.headers.get("authorization");
-	if (!authHeader) {
-		return new Response("Bearer token is required", { status: 400 });
-	}
-
-	let accessToken = authHeader.split(" ")[1];
-	let tsHost: string | null;
-
-	if (accessToken.includes("@")) {
-		[accessToken, tsHost] = accessToken.split("@");
-	} else {
-		tsHost = req.headers.get("x-ts-host");
-	}
-
-	if (!tsHost) {
-		return new Response(
-			"TS Host is required, either in the authorization header as 'token@ts-host' or as a separate 'x-ts-host' header",
-			{ status: 400 },
-		);
-	}
-
-	const clientName =
-		req.headers.get("x-ts-client-name") || "Bearer Token client";
-
+	authRouteFamily: AuthRouteFamily = "token",
+): Promise<Response> {
+	const recorder = getMetricsRecorderFromExecutionContext(ctx);
 	const url = new URL(req.url);
+	const authMetricRouteGroup = getAuthMetricRouteGroup(
+		url.pathname,
+		authRouteFamily,
+	);
 
-	// Build props object
-	const props: any = {
-		accessToken: accessToken,
-		instanceUrl: validateAndSanitizeUrl(tsHost),
-		clientName,
-	};
+	try {
+		const authHeader = req.headers.get("authorization");
+		if (!authHeader) {
+			const response = new Response("Bearer token is required", {
+				status: 400,
+			});
+			recordBearerAuthRequestMetric(
+				recorder,
+				req,
+				response.status,
+				authMetricRouteGroup,
+			);
+			return response;
+		}
 
-	// Resolve API version to use
-	const apiVersion = apiVersionOverride ?? url.searchParams.get("api-version");
-	if (apiVersion) {
-		props.apiVersion = apiVersion;
+		let accessToken = authHeader.split(" ")[1];
+		let tsHost: string | null;
+
+		if (accessToken.includes("@")) {
+			[accessToken, tsHost] = accessToken.split("@");
+		} else {
+			tsHost = req.headers.get("x-ts-host");
+		}
+
+		if (!tsHost) {
+			const response = new Response(
+				"TS Host is required, either in the authorization header as 'token@ts-host' or as a separate 'x-ts-host' header",
+				{ status: 400 },
+			);
+			recordBearerAuthRequestMetric(
+				recorder,
+				req,
+				response.status,
+				authMetricRouteGroup,
+			);
+			return response;
+		}
+
+		const clientName =
+			req.headers.get("x-ts-client-name") || "Bearer Token client";
+
+		// Build props object
+		const props: any = {
+			accessToken: accessToken,
+			instanceUrl: validateAndSanitizeUrl(tsHost),
+			clientName,
+		};
+
+		// Resolve API version to use
+		const apiVersion =
+			apiVersionOverride ?? url.searchParams.get("api-version");
+		if (apiVersion) {
+			props.apiVersion = apiVersion;
+		}
+
+		(ctx as any).props = props;
+
+		let response: Response;
+		const pathname = url.pathname;
+		if (pathname.endsWith(PUBLIC_ROUTES.mcp)) {
+			response = await MCPServer.serve(PUBLIC_ROUTES.mcp).fetch(req, env, ctx);
+		} else if (pathname.endsWith(PUBLIC_ROUTES.sse)) {
+			response = await MCPServer.serveSSE(PUBLIC_ROUTES.sse).fetch(
+				req,
+				env,
+				ctx,
+			);
+		} else {
+			response = new Response("Not found", { status: 404 });
+		}
+
+		recordBearerAuthRequestMetric(
+			recorder,
+			req,
+			response.status,
+			authMetricRouteGroup,
+		);
+		return response;
+	} catch (error) {
+		recordBearerAuthRequestMetric(recorder, req, 500, authMetricRouteGroup);
+		throw error;
 	}
-
-	(ctx as any).props = props;
-
-	// Route to appropriate handler
-	const pathname = url.pathname;
-	if (pathname.endsWith(PUBLIC_ROUTES.mcp)) {
-		return MCPServer.serve(PUBLIC_ROUTES.mcp).fetch(req, env, ctx);
-	}
-
-	if (pathname.endsWith(PUBLIC_ROUTES.sse)) {
-		return MCPServer.serveSSE(PUBLIC_ROUTES.sse).fetch(req, env, ctx);
-	}
-
-	return new Response("Not found", { status: 404 });
 }
 
 export function withBearerHandler(
@@ -85,13 +140,14 @@ export function withBearerHandler(
 			ctx,
 			MCPServer,
 			"backwards-compatibility-default",
+			"bearer",
 		);
 	});
 
 	// NEW: /token endpoints - supports api-version query params
 	// Recommended for all new implementations
 	app.mount(PUBLIC_ROUTE_PREFIXES.token, (req, env, ctx) => {
-		return handleTokenAuth(req, env, ctx, MCPServer);
+		return handleTokenAuth(req, env, ctx, MCPServer, undefined, "token");
 	});
 
 	return app;

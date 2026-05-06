@@ -7,6 +7,11 @@ import { Hono } from "hono";
 import { decodeBase64Url, encodeBase64Url } from "hono/utils/encode";
 import { any } from "zod";
 import { openApiSpecHandler } from "./api-schemas/open-api-spec";
+import { METRIC_NAMES } from "./metrics/runtime/metric-types";
+import {
+	getMetricsRecorderFromExecutionContext,
+	recordStatusMetric,
+} from "./metrics/runtime/request-metrics";
 import { WithSpan, getActiveSpan } from "./metrics/tracing/tracing-utils";
 import {
 	buildSamlRedirectUrl,
@@ -19,6 +24,37 @@ import type { Props } from "./utils";
 import { McpServerError } from "./utils";
 
 const app = new Hono<{ Bindings: Env & { OAUTH_PROVIDER: OAuthHelpers } }>();
+
+function getExecutionContextOrUndefined(context: {
+	executionCtx: ExecutionContext;
+}): ExecutionContext | undefined {
+	try {
+		return context.executionCtx;
+	} catch {
+		return undefined;
+	}
+}
+
+function recordAuthFlowMetric(
+	context: { executionCtx: ExecutionContext },
+	name:
+		| typeof METRIC_NAMES.oauthAuthorizeRequestsTotal
+		| typeof METRIC_NAMES.oauthAuthorizeSubmitTotal
+		| typeof METRIC_NAMES.oauthCallbackTotal
+		| typeof METRIC_NAMES.oauthStoreTokenTotal,
+	status: number,
+): void {
+	const executionContext = getExecutionContextOrUndefined(context);
+	if (!executionContext) {
+		return;
+	}
+
+	recordStatusMetric(
+		getMetricsRecorderFromExecutionContext(executionContext),
+		name,
+		status,
+	);
+}
 
 class Handler {
 	@WithSpan("serve-index")
@@ -252,24 +288,55 @@ app.get(PUBLIC_ROUTES.authorize, async (c) => {
 			c.req.raw,
 			c.env.OAUTH_PROVIDER,
 		);
+		recordAuthFlowMetric(
+			c,
+			METRIC_NAMES.oauthAuthorizeRequestsTotal,
+			response.status,
+		);
 		return response;
 	} catch (error) {
-		return c.text(`Internal Server Error ${error}`, 500);
+		const response = c.text(`Internal Server Error ${error}`, 500);
+		recordAuthFlowMetric(
+			c,
+			METRIC_NAMES.oauthAuthorizeRequestsTotal,
+			response.status,
+		);
+		return response;
 	}
 });
 
 app.post(PUBLIC_ROUTES.authorize, async (c) => {
 	try {
 		const redirectUrl = await handler.postAuthorize(c.req.raw, c.req.url);
-		return Response.redirect(redirectUrl);
+		const response = Response.redirect(redirectUrl);
+		recordAuthFlowMetric(
+			c,
+			METRIC_NAMES.oauthAuthorizeSubmitTotal,
+			response.status,
+		);
+		return response;
 	} catch (error) {
 		if (
 			error instanceof Error &&
 			error.message.includes("Missing instance URL")
 		) {
-			return new Response("Missing instance URL", { status: 400 });
+			const response = new Response("Missing instance URL", { status: 400 });
+			recordAuthFlowMetric(
+				c,
+				METRIC_NAMES.oauthAuthorizeSubmitTotal,
+				response.status,
+			);
+			return response;
 		}
-		return new Response(`Internal Server Error ${error}`, { status: 500 });
+		const response = new Response(`Internal Server Error ${error}`, {
+			status: 500,
+		});
+		recordAuthFlowMetric(
+			c,
+			METRIC_NAMES.oauthAuthorizeSubmitTotal,
+			response.status,
+		);
+		return response;
 	}
 });
 
@@ -280,53 +347,94 @@ app.get(PUBLIC_ROUTES.callback, async (c) => {
 			c.env.ASSETS,
 			c.req.url,
 		);
-		return new Response(htmlContent, {
+		const response = new Response(htmlContent, {
 			headers: {
 				"Content-Type": "text/html",
 			},
 		});
+		recordAuthFlowMetric(c, METRIC_NAMES.oauthCallbackTotal, response.status);
+		return response;
 	} catch (error) {
 		if (error instanceof Error) {
 			if (error.message.includes("Missing instance URL")) {
-				return c.text(`Missing instance URL ${error}`, 400);
+				const response = c.text(`Missing instance URL ${error}`, 400);
+				recordAuthFlowMetric(
+					c,
+					METRIC_NAMES.oauthCallbackTotal,
+					response.status,
+				);
+				return response;
 			}
 			if (error.message.includes("Missing OAuth request info")) {
-				return c.text(`Missing OAuth request info ${error}`, 400);
+				const response = c.text(`Missing OAuth request info ${error}`, 400);
+				recordAuthFlowMetric(
+					c,
+					METRIC_NAMES.oauthCallbackTotal,
+					response.status,
+				);
+				return response;
 			}
 			if (error.message.includes("Invalid OAuth request info format")) {
-				return c.text(`Invalid OAuth request info format ${error}`, 400);
+				const response = c.text(
+					`Invalid OAuth request info format ${error}`,
+					400,
+				);
+				recordAuthFlowMetric(
+					c,
+					METRIC_NAMES.oauthCallbackTotal,
+					response.status,
+				);
+				return response;
 			}
 		}
-		return c.text(`Internal server error ${error}`, 500);
+		const response = c.text(`Internal server error ${error}`, 500);
+		recordAuthFlowMetric(c, METRIC_NAMES.oauthCallbackTotal, response.status);
+		return response;
 	}
 });
 
 app.post(PUBLIC_ROUTES.storeToken, async (c) => {
 	try {
 		const result = await handler.storeToken(c.req.raw, c.env.OAUTH_PROVIDER);
-		return new Response(JSON.stringify(result), {
+		const response = new Response(JSON.stringify(result), {
 			status: 200,
 			headers: {
 				"Content-Type": "application/json",
 			},
 		});
+		recordAuthFlowMetric(c, METRIC_NAMES.oauthStoreTokenTotal, response.status);
+		return response;
 	} catch (error) {
 		if (error instanceof Error) {
 			if (error.message.includes("Invalid JSON format")) {
-				return c.text(`Invalid JSON format ${error}`, 400);
+				const response = c.text(`Invalid JSON format ${error}`, 400);
+				recordAuthFlowMetric(
+					c,
+					METRIC_NAMES.oauthStoreTokenTotal,
+					response.status,
+				);
+				return response;
 			}
 			if (
 				error.message.includes(
 					"Missing token or OAuth request info or instanceUrl",
 				)
 			) {
-				return c.text(
+				const response = c.text(
 					`Missing token or OAuth request info or instanceUrl ${error}`,
 					400,
 				);
+				recordAuthFlowMetric(
+					c,
+					METRIC_NAMES.oauthStoreTokenTotal,
+					response.status,
+				);
+				return response;
 			}
 		}
-		return c.text(`Internal server error ${error}`, 500);
+		const response = c.text(`Internal server error ${error}`, 500);
+		recordAuthFlowMetric(c, METRIC_NAMES.oauthStoreTokenTotal, response.status);
+		return response;
 	}
 });
 
