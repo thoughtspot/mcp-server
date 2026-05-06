@@ -271,7 +271,7 @@ describe("withRequestMetrics", () => {
 
 		expect(result).toBe("handler-result");
 		expect(errorSpy).toHaveBeenCalledWith(
-			"[metrics] Failed to schedule request metrics flush",
+			"[metrics] Failed to schedule metrics flush",
 			expect.any(Error),
 		);
 	});

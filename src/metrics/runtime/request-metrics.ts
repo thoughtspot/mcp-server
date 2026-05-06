@@ -12,6 +12,7 @@ import {
 	type MetricsRecorder,
 	NOOP_METRICS_RECORDER,
 	RequestMetricsRecorder,
+	scheduleMetricsFlush,
 } from "./metrics-recorder";
 import type { MetricsSink } from "./metrics-sink";
 import {
@@ -88,7 +89,7 @@ export function getMetricOutcomeForStatus(status: number): MetricOutcome {
 	return "success";
 }
 
-function getCanonicalResolvedApiVersion(apiVersion: string): string {
+export function getCanonicalResolvedApiVersion(apiVersion: string): string {
 	const versionConfig = resolveApiVersion(apiVersion);
 	if (versionConfig.version.includes("beta")) {
 		return "beta";
@@ -258,21 +259,7 @@ function scheduleRequestMetricsFlush(
 	recorder: MetricsRecorder,
 	ctx: ExecutionContext,
 ): void {
-	let flushPromise: Promise<void>;
-	try {
-		flushPromise = recorder.flush().catch((error) => {
-			console.error("[metrics] Failed to execute request metrics flush", error);
-		});
-	} catch (error) {
-		console.error("[metrics] Failed to execute request metrics flush", error);
-		return;
-	}
-
-	try {
-		ctx.waitUntil(flushPromise);
-	} catch (error) {
-		console.error("[metrics] Failed to schedule request metrics flush", error);
-	}
+	scheduleMetricsFlush(recorder, ctx.waitUntil.bind(ctx));
 }
 
 export async function withRequestMetrics<T>(

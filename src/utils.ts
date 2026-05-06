@@ -9,7 +9,7 @@ export type Props = {
 		clientName: string;
 		registrationDate: number;
 	};
-	apiVersion?: "beta";
+	apiVersion?: string;
 };
 
 export class McpServerError extends Error {

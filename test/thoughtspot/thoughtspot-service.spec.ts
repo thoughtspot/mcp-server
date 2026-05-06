@@ -1,13 +1,15 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { METRIC_NAMES } from "../../src/metrics/runtime/metric-types";
+import { createRequestMetricsRecorder } from "../../src/metrics/runtime/request-metrics";
 import {
-	getRelevantQuestions,
-	getAnswerForQuestion,
-	fetchTMLAndCreateLiveboard,
-	createLiveboard,
-	getDataSources,
-	getSessionInfo,
-	getDataSourceSuggestions,
 	ThoughtSpotService,
+	createLiveboard,
+	fetchTMLAndCreateLiveboard,
+	getAnswerForQuestion,
+	getDataSourceSuggestions,
+	getDataSources,
+	getRelevantQuestions,
+	getSessionInfo,
 } from "../../src/thoughtspot/thoughtspot-service";
 
 // Mock the ThoughtSpot REST API client
@@ -234,6 +236,108 @@ describe("thoughtspot-service", () => {
 	});
 
 	describe("sendAgentConversationMessageStreaming", () => {
+		it("records upstream streaming metrics and flushes stream message metrics in the background", async () => {
+			vi.useFakeTimers();
+
+			const analyticsDataset = {
+				writeDataPoint: vi.fn(),
+			};
+			const waitUntilPromises: Promise<void>[] = [];
+			const recorder = createRequestMetricsRecorder({
+				METRICS_SINK_MODE: "analytics_engine",
+				ANALYTICS: analyticsDataset,
+			});
+			recorder.setEventIdentity({
+				tenantId: "org-123",
+				userId: "user-123",
+			});
+
+			const encoder = new TextEncoder();
+			const reader = {
+				read: vi
+					.fn()
+					.mockResolvedValueOnce({
+						done: false,
+						value: encoder.encode(
+							'data: [{"type":"text","content":"Hello","metadata":{}}]\n',
+						),
+					})
+					.mockResolvedValueOnce({ done: true, value: undefined }),
+			};
+
+			mockClient.sendAgentConversationMessageStreaming = vi
+				.fn()
+				.mockResolvedValue({
+					body: { getReader: vi.fn().mockReturnValue(reader) },
+				});
+
+			const appendMessages = vi.fn().mockResolvedValue(undefined);
+
+			const service = new ThoughtSpotService(mockClient, {
+				recorder,
+				metricsEnv: {
+					METRICS_SINK_MODE: "analytics_engine",
+					ANALYTICS: analyticsDataset,
+				},
+				waitUntil(promise: Promise<void>) {
+					waitUntilPromises.push(promise);
+				},
+				eventIdentity: {
+					tenantId: "org-123",
+					userId: "user-123",
+				},
+			});
+
+			await service.sendAgentConversationMessageStreaming(
+				"conv-123",
+				"Show me revenue",
+				appendMessages,
+			);
+			await recorder.flush();
+			await vi.runAllTimersAsync();
+
+			for (let index = 0; index < waitUntilPromises.length; index++) {
+				await waitUntilPromises[index];
+			}
+
+			const dataPoints = analyticsDataset.writeDataPoint.mock.calls.map(
+				([dataPoint]) => dataPoint,
+			);
+
+			expect(
+				dataPoints.some(
+					(dataPoint) =>
+						dataPoint.indexes?.[2] === METRIC_NAMES.upstreamCallsTotal &&
+						dataPoint.blobs?.includes(
+							"send_agent_conversation_message_streaming",
+						) &&
+						dataPoint.indexes?.[3] === "org-123" &&
+						dataPoint.indexes?.[4] === "user-123",
+				),
+			).toBe(true);
+			expect(
+				dataPoints.some(
+					(dataPoint) =>
+						dataPoint.indexes?.[2] ===
+							METRIC_NAMES.upstreamStreamsStartedTotal &&
+						dataPoint.blobs?.includes(
+							"send_agent_conversation_message_streaming",
+						),
+				),
+			).toBe(true);
+			expect(
+				dataPoints.some(
+					(dataPoint) =>
+						dataPoint.indexes?.[2] ===
+							METRIC_NAMES.upstreamStreamMessagesTotal &&
+						dataPoint.blobs?.includes("text") &&
+						dataPoint.blobs?.includes("false"),
+				),
+			).toBe(true);
+
+			vi.useRealTimers();
+		});
+
 		it("should throw when the response body reader is unavailable", async () => {
 			mockClient.sendAgentConversationMessageStreaming = vi
 				.fn()

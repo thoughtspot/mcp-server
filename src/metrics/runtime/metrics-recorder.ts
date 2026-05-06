@@ -6,6 +6,7 @@ import {
 	normalizeMetricLabels,
 } from "./metric-types";
 import type {
+	MetricEventIdentity,
 	MetricObservation,
 	MetricResourceAttributes,
 	MetricsSink,
@@ -21,6 +22,7 @@ export interface MetricsRecorder {
 	count(name: MetricName, value?: number, labels?: MetricLabelInput): void;
 	histogram(name: MetricName, value: number, labels?: MetricLabelInput): void;
 	gauge(name: MetricName, value: number, labels?: MetricLabelInput): void;
+	setEventIdentity(identity?: MetricEventIdentity): void;
 	flush(): Promise<void>;
 	snapshot(): readonly MetricObservation[];
 }
@@ -32,6 +34,7 @@ export const NOOP_METRICS_RECORDER: MetricsRecorder = {
 	count(_name, _value, _labels): void {},
 	histogram(_name, _value, _labels): void {},
 	gauge(_name, _value, _labels): void {},
+	setEventIdentity(_identity): void {},
 	flush(): Promise<void> {
 		return NOOP_FLUSH_PROMISE;
 	},
@@ -42,6 +45,7 @@ export const NOOP_METRICS_RECORDER: MetricsRecorder = {
 
 export class RequestMetricsRecorder implements MetricsRecorder {
 	private readonly observations: MetricObservation[] = [];
+	private eventIdentity?: MetricEventIdentity;
 	private flushPromise?: Promise<void>;
 	private flushed = false;
 
@@ -57,6 +61,23 @@ export class RequestMetricsRecorder implements MetricsRecorder {
 
 	gauge(name: MetricName, value: number, labels?: MetricLabelInput): void {
 		this.record("gauge", name, value, labels);
+	}
+
+	setEventIdentity(identity?: MetricEventIdentity): void {
+		if (!identity) {
+			return;
+		}
+
+		const nextIdentity: MetricEventIdentity = {
+			...this.eventIdentity,
+		};
+		if (identity.tenantId) {
+			nextIdentity.tenantId = identity.tenantId;
+		}
+		if (identity.userId) {
+			nextIdentity.userId = identity.userId;
+		}
+		this.eventIdentity = nextIdentity;
 	}
 
 	snapshot(): readonly MetricObservation[] {
@@ -115,9 +136,40 @@ export class RequestMetricsRecorder implements MetricsRecorder {
 			await this.options.sink.flush({
 				observations,
 				resourceAttributes: { ...this.options.resourceAttributes },
+				eventIdentity: this.eventIdentity
+					? { ...this.eventIdentity }
+					: undefined,
 			});
 		} catch (error) {
 			console.error("[metrics] Flush failed", error);
 		}
+	}
+}
+
+export type MetricsWaitUntil = (promise: Promise<any>) => void;
+
+export function scheduleMetricsFlush(
+	recorder: MetricsRecorder,
+	waitUntil?: MetricsWaitUntil,
+): void {
+	let flushPromise: Promise<void>;
+	try {
+		flushPromise = recorder.flush().catch((error) => {
+			console.error("[metrics] Failed to execute metrics flush", error);
+		});
+	} catch (error) {
+		console.error("[metrics] Failed to execute metrics flush", error);
+		return;
+	}
+
+	if (!waitUntil) {
+		void flushPromise;
+		return;
+	}
+
+	try {
+		waitUntil(flushPromise);
+	} catch (error) {
+		console.error("[metrics] Failed to schedule metrics flush", error);
 	}
 }
