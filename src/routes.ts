@@ -8,20 +8,15 @@ export const PUBLIC_ROUTES = {
 	register: "/register",
 	mcp: "/mcp",
 	sse: "/sse",
-	openaiMcp: "/openai/mcp",
-	openaiSse: "/openai/sse",
 	bearerMcp: "/bearer/mcp",
 	bearerSse: "/bearer/sse",
 	tokenMcp: "/token/mcp",
 	tokenSse: "/token/sse",
 	openaiAppsChallenge: "/.well-known/openai-apps-challenge",
-	openapiSpec: "/openapi-spec",
 } as const;
 
 export const PUBLIC_ROUTE_PREFIXES = {
-	api: "/api",
 	bearer: "/bearer",
-	openapiSpec: PUBLIC_ROUTES.openapiSpec,
 	token: "/token",
 } as const;
 
@@ -35,12 +30,9 @@ export const EXACT_PUBLIC_ROUTES_REQUIRING_METRICS = [
 	PUBLIC_ROUTES.register,
 	PUBLIC_ROUTES.mcp,
 	PUBLIC_ROUTES.sse,
-	PUBLIC_ROUTES.openaiMcp,
-	PUBLIC_ROUTES.openaiSse,
 	PUBLIC_ROUTES.bearerMcp,
 	PUBLIC_ROUTES.bearerSse,
 	PUBLIC_ROUTES.tokenMcp,
 	PUBLIC_ROUTES.tokenSse,
 	PUBLIC_ROUTES.openaiAppsChallenge,
-	PUBLIC_ROUTES.openapiSpec,
 ] as const;

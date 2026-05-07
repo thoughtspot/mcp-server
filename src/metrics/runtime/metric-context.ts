@@ -72,18 +72,6 @@ export const EXPLICIT_ROUTE_CONTEXTS = {
 		apiSurface: "mcp",
 		authMode: "oauth",
 	},
-	[PUBLIC_ROUTES.openaiMcp]: {
-		routeGroup: "openai_mcp",
-		transport: "mcp",
-		apiSurface: "openai_mcp",
-		authMode: "oauth",
-	},
-	[PUBLIC_ROUTES.openaiSse]: {
-		routeGroup: "openai_sse",
-		transport: "sse",
-		apiSurface: "openai_mcp",
-		authMode: "oauth",
-	},
 	[PUBLIC_ROUTES.bearerMcp]: {
 		routeGroup: "bearer_mcp",
 		transport: "mcp",
@@ -114,27 +102,7 @@ export const EXPLICIT_ROUTE_CONTEXTS = {
 		apiSurface: "static",
 		authMode: "none",
 	},
-	[PUBLIC_ROUTES.openapiSpec]: {
-		routeGroup: "openapi_spec",
-		transport: "http",
-		apiSurface: "static",
-		authMode: "none",
-	},
 } as const satisfies Record<string, RequestMetricContext>;
-
-const API_ROUTE_CONTEXT: RequestMetricContext = {
-	routeGroup: "api",
-	transport: "http",
-	apiSurface: "api",
-	authMode: "oauth",
-};
-
-const OPENAPI_SPEC_ROUTE_CONTEXT: RequestMetricContext = {
-	routeGroup: "openapi_spec",
-	transport: "http",
-	apiSurface: "static",
-	authMode: "none",
-};
 
 const UNKNOWN_ROUTE_CONTEXT: RequestMetricContext = {
 	routeGroup: "unknown",
@@ -166,12 +134,6 @@ function inferTransport(pathname: string): Transport {
 }
 
 function inferApiSurface(pathname: string): ApiSurface {
-	if (matchesRoutePrefix(pathname, PUBLIC_ROUTE_PREFIXES.api)) {
-		return "api";
-	}
-	if (pathname.startsWith("/openai/")) {
-		return "openai_mcp";
-	}
 	if (
 		pathname === PUBLIC_ROUTES.mcp ||
 		pathname === PUBLIC_ROUTES.sse ||
@@ -183,8 +145,7 @@ function inferApiSurface(pathname: string): ApiSurface {
 	if (
 		pathname === PUBLIC_ROUTES.root ||
 		pathname === PUBLIC_ROUTES.hello ||
-		pathname === PUBLIC_ROUTES.openaiAppsChallenge ||
-		matchesRoutePrefix(pathname, PUBLIC_ROUTE_PREFIXES.openapiSpec)
+		pathname === PUBLIC_ROUTES.openaiAppsChallenge
 	) {
 		return "static";
 	}
@@ -207,12 +168,7 @@ function inferAuthMode(pathname: string): AuthMode {
 	if (matchesRoutePrefix(pathname, PUBLIC_ROUTE_PREFIXES.token)) {
 		return "token";
 	}
-	if (
-		pathname === PUBLIC_ROUTES.mcp ||
-		pathname === PUBLIC_ROUTES.sse ||
-		pathname.startsWith("/openai/") ||
-		matchesRoutePrefix(pathname, PUBLIC_ROUTE_PREFIXES.api)
-	) {
+	if (pathname === PUBLIC_ROUTES.mcp || pathname === PUBLIC_ROUTES.sse) {
 		return "oauth";
 	}
 	if (
@@ -223,8 +179,7 @@ function inferAuthMode(pathname: string): AuthMode {
 		pathname === PUBLIC_ROUTES.storeToken ||
 		pathname === PUBLIC_ROUTES.oauthToken ||
 		pathname === PUBLIC_ROUTES.register ||
-		pathname === PUBLIC_ROUTES.openaiAppsChallenge ||
-		matchesRoutePrefix(pathname, PUBLIC_ROUTE_PREFIXES.openapiSpec)
+		pathname === PUBLIC_ROUTES.openaiAppsChallenge
 	) {
 		return "none";
 	}
@@ -237,14 +192,6 @@ export function resolvePathMetricContext(
 	const explicitContext = getExplicitRouteContext(pathname);
 	if (explicitContext) {
 		return explicitContext;
-	}
-
-	if (matchesRoutePrefix(pathname, PUBLIC_ROUTE_PREFIXES.api)) {
-		return API_ROUTE_CONTEXT;
-	}
-
-	if (matchesRoutePrefix(pathname, PUBLIC_ROUTE_PREFIXES.openapiSpec)) {
-		return OPENAPI_SPEC_ROUTE_CONTEXT;
 	}
 
 	return {

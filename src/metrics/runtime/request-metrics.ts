@@ -1,8 +1,12 @@
-import { resolveApiVersion } from "../../servers/version-registry";
+import {
+	YYYY_MM_DD_DATE_REGEX,
+	resolveApiVersionMetrics,
+} from "../../servers/version-registry";
 import { createAnalyticsEngineMetricsSink } from "./analytics-engine-sink";
 import { createGrafanaOtlpMetricsSink } from "./grafana-otlp-sink";
 import { getStatusClass, resolveRequestMetricContext } from "./metric-context";
 import {
+	type ApiVersionMode,
 	METRIC_NAMES,
 	type MetricLabelInput,
 	type MetricName,
@@ -12,6 +16,7 @@ import {
 	type MetricsRecorder,
 	NOOP_METRICS_RECORDER,
 	RequestMetricsRecorder,
+	scheduleMetricsFlush,
 } from "./metrics-recorder";
 import type { MetricsSink } from "./metrics-sink";
 import {
@@ -43,6 +48,8 @@ type MetricsExecutionContext = ExecutionContext & {
 	[METRICS_RECORDER_SYMBOL]?: MetricsRecorder;
 	props?: {
 		apiVersion?: unknown;
+		apiRequestedVersion?: unknown;
+		apiVersionMode?: unknown;
 	};
 };
 
@@ -88,28 +95,77 @@ export function getMetricOutcomeForStatus(status: number): MetricOutcome {
 	return "success";
 }
 
-function getCanonicalResolvedApiVersion(apiVersion: string): string {
-	const versionConfig = resolveApiVersion(apiVersion);
-	if (versionConfig.version.includes("beta")) {
-		return "beta";
-	}
-	if (versionConfig.version.includes("backwards-compatibility-default")) {
-		return "default";
-	}
-	if (versionConfig.version.includes("latest")) {
-		return "latest";
+type ApiVersionLabels = {
+	apiRequestedVersion?: string;
+	apiReleaseDate?: string;
+	apiVersion?: string;
+	apiVersionMode?: ApiVersionMode;
+};
+
+export function normalizeRequestedApiVersionForAnalytics(
+	requestedApiVersion: string,
+): string {
+	if (
+		requestedApiVersion === "beta" ||
+		requestedApiVersion === "backwards-compatibility-default" ||
+		requestedApiVersion === "latest" ||
+		YYYY_MM_DD_DATE_REGEX.test(requestedApiVersion)
+	) {
+		return requestedApiVersion;
 	}
 
+	return "invalid";
+}
+
+export function resolveRequestedApiVersionMode(
+	requestedApiVersion: string,
+): ApiVersionMode {
+	if (requestedApiVersion === "beta") {
+		return "beta";
+	}
+	if (requestedApiVersion === "backwards-compatibility-default") {
+		return "explicit_legacy";
+	}
+	if (requestedApiVersion === "latest") {
+		return "explicit_latest";
+	}
+	if (YYYY_MM_DD_DATE_REGEX.test(requestedApiVersion)) {
+		return "pinned";
+	}
 	return "unknown";
 }
 
-export function resolveCanonicalApiVersionLabel(
+function getImplicitApiVersionMode(apiVersion?: string): ApiVersionMode {
+	if (apiVersion === "backwards-compatibility-default") {
+		return "implicit_legacy";
+	}
+	if (apiVersion === "latest") {
+		return "implicit_latest";
+	}
+	if (apiVersion === "beta") {
+		return "beta";
+	}
+	return "unknown";
+}
+
+/**
+ * We intentionally split version labeling into two dimensions:
+ * - `api_version`: the effective served surface (`backwards-compatibility-default`
+ *   vs `latest`), which answers "which tenants are still on the legacy/v1 surface?"
+ * - `api_version_mode`: how the caller selected that surface, which answers
+ *   "which tenants are pinned vs implicitly following a route default?"
+ * - `api_requested_version`: Analytics Engine-only context with the normalized selector
+ *   the caller actually sent (`latest`, `beta`, a date, or `invalid`)
+ * - `api_release_date`: the resolved dated release behind that surface, which answers
+ *   "what exact release date would be affected by a deprecation?"
+ */
+export function resolveApiVersionLabels(
 	request: Request,
 	ctx: ExecutionContext,
-): string | undefined {
+): ApiVersionLabels {
 	const requestContext = resolveRequestMetricContext(request);
 	if (!VERSIONED_REQUEST_ROUTE_GROUPS.has(requestContext.routeGroup)) {
-		return undefined;
+		return {};
 	}
 
 	const requestedApiVersion = new URL(request.url).searchParams.get(
@@ -117,26 +173,89 @@ export function resolveCanonicalApiVersionLabel(
 	);
 	const effectiveApiVersion = (ctx as MetricsExecutionContext).props
 		?.apiVersion;
+	const effectiveRequestedApiVersion = (ctx as MetricsExecutionContext).props
+		?.apiRequestedVersion;
+	const effectiveApiVersionMode = (ctx as MetricsExecutionContext).props
+		?.apiVersionMode;
+	if (requestedApiVersion) {
+		const apiVersionSource =
+			typeof effectiveApiVersion === "string" && effectiveApiVersion.length > 0
+				? effectiveApiVersion
+				: requestedApiVersion;
+		try {
+			return {
+				apiRequestedVersion:
+					typeof effectiveRequestedApiVersion === "string" &&
+					effectiveRequestedApiVersion.length > 0
+						? effectiveRequestedApiVersion
+						: normalizeRequestedApiVersionForAnalytics(requestedApiVersion),
+				...resolveApiVersionMetrics(apiVersionSource),
+				apiVersionMode:
+					typeof effectiveApiVersionMode === "string" &&
+					effectiveApiVersionMode.length > 0
+						? effectiveApiVersionMode
+						: resolveRequestedApiVersionMode(requestedApiVersion),
+			};
+		} catch {
+			return {
+				apiRequestedVersion:
+					typeof effectiveRequestedApiVersion === "string" &&
+					effectiveRequestedApiVersion.length > 0
+						? effectiveRequestedApiVersion
+						: normalizeRequestedApiVersionForAnalytics(requestedApiVersion),
+				apiReleaseDate: undefined,
+				apiVersion: "unknown",
+				apiVersionMode: "unknown",
+			};
+		}
+	}
+
 	if (
 		typeof effectiveApiVersion === "string" &&
 		effectiveApiVersion.length > 0
 	) {
 		try {
-			return getCanonicalResolvedApiVersion(effectiveApiVersion);
+			const resolved = resolveApiVersionMetrics(effectiveApiVersion);
+			return {
+				...resolved,
+				apiVersionMode:
+					typeof effectiveApiVersionMode === "string" &&
+					effectiveApiVersionMode.length > 0
+						? effectiveApiVersionMode
+						: getImplicitApiVersionMode(resolved.apiVersion),
+			};
 		} catch {
-			return "unknown";
+			return {
+				apiReleaseDate: undefined,
+				apiVersion: "unknown",
+				apiVersionMode: "unknown",
+			};
 		}
 	}
 
-	if (!requestedApiVersion) {
-		return "default";
+	if (
+		requestContext.routeGroup === "token_mcp" ||
+		requestContext.routeGroup === "token_sse"
+	) {
+		const resolved = resolveApiVersionMetrics("latest");
+		return {
+			...resolved,
+			apiVersionMode: "implicit_latest",
+		};
 	}
 
-	try {
-		return getCanonicalResolvedApiVersion(requestedApiVersion);
-	} catch {
-		return "unknown";
-	}
+	const resolved = resolveApiVersionMetrics("backwards-compatibility-default");
+	return {
+		...resolved,
+		apiVersionMode: "implicit_legacy",
+	};
+}
+
+export function resolveCanonicalApiVersionLabel(
+	request: Request,
+	ctx: ExecutionContext,
+): string | undefined {
+	return resolveApiVersionLabels(request, ctx).apiVersion;
 }
 
 export function recordStatusMetric(
@@ -166,6 +285,15 @@ export function recordBearerAuthRequestMetric(
 	}
 
 	const requestContext = resolveRequestMetricContext(request);
+	const requestedApiVersion = new URL(request.url).searchParams.get(
+		"api-version",
+	);
+	if (requestedApiVersion) {
+		recorder.setAnalyticsContext({
+			apiRequestedVersion:
+				normalizeRequestedApiVersionForAnalytics(requestedApiVersion),
+		});
+	}
 	recordStatusMetric(recorder, METRIC_NAMES.bearerAuthRequestsTotal, status, {
 		route_group: routeGroupOverride ?? requestContext.routeGroup,
 		transport: routeGroupOverride?.endsWith("_sse")
@@ -185,7 +313,13 @@ export function recordHttpRequestMetrics(
 ): void {
 	const requestContext = resolveRequestMetricContext(request);
 	const outcome = getMetricOutcomeForStatus(response.status);
-	const apiVersion = resolveCanonicalApiVersionLabel(request, ctx);
+	const { apiRequestedVersion, apiReleaseDate, apiVersion, apiVersionMode } =
+		resolveApiVersionLabels(request, ctx);
+	if (apiRequestedVersion) {
+		recorder.setAnalyticsContext({
+			apiRequestedVersion,
+		});
+	}
 	const baseLabels: MetricLabelInput = {
 		route_group: requestContext.routeGroup,
 		transport: requestContext.transport,
@@ -196,6 +330,12 @@ export function recordHttpRequestMetrics(
 
 	if (apiVersion) {
 		baseLabels.api_version = apiVersion;
+	}
+	if (apiVersionMode) {
+		baseLabels.api_version_mode = apiVersionMode;
+	}
+	if (apiReleaseDate) {
+		baseLabels.api_release_date = apiReleaseDate;
 	}
 
 	recorder.count(METRIC_NAMES.httpRequestsTotal, 1, {
@@ -258,21 +398,7 @@ function scheduleRequestMetricsFlush(
 	recorder: MetricsRecorder,
 	ctx: ExecutionContext,
 ): void {
-	let flushPromise: Promise<void>;
-	try {
-		flushPromise = recorder.flush().catch((error) => {
-			console.error("[metrics] Failed to execute request metrics flush", error);
-		});
-	} catch (error) {
-		console.error("[metrics] Failed to execute request metrics flush", error);
-		return;
-	}
-
-	try {
-		ctx.waitUntil(flushPromise);
-	} catch (error) {
-		console.error("[metrics] Failed to schedule request metrics flush", error);
-	}
+	scheduleMetricsFlush(recorder, ctx.waitUntil.bind(ctx));
 }
 
 export async function withRequestMetrics<T>(

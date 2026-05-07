@@ -373,7 +373,6 @@ When adding new MCP tools to the server:
 **OAuth-based endpoints:**
 - `/mcp`: MCP HTTP Streaming endpoint (supports `?api-version`)
 - `/sse`: Server-sent events for MCP (supports `?api-version`)
-- `/api`: MCP tools exposed as HTTP endpoints
 - `/authorize`, `/token`, `/register`: OAuth endpoints
 
 **Token-based endpoints (Recommended for APIs):**

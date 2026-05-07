@@ -1,6 +1,17 @@
 import { toolDefinitionsV1, toolDefinitionsV2 } from "./tool-definitions";
 
-const YYYY_MM_DD_DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
+export const YYYY_MM_DD_DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
+
+export type CanonicalApiVersionLabel =
+	| "backwards-compatibility-default"
+	| "latest"
+	| "beta"
+	| "unknown";
+
+export type ResolvedApiVersionMetrics = {
+	apiReleaseDate?: string;
+	apiVersion: CanonicalApiVersionLabel;
+};
 
 /**
  * Version configuration interface
@@ -25,6 +36,15 @@ function getReleaseDateFromVersion(versions: string[]): Date | null {
 		return null;
 	}
 	return new Date(possibleDateVersion);
+}
+
+export function getReleaseDateIdentifier(
+	versions: string[],
+): string | undefined {
+	const possibleDateVersion = versions[versions.length - 1];
+	return YYYY_MM_DD_DATE_REGEX.test(possibleDateVersion)
+		? possibleDateVersion
+		: undefined;
 }
 
 /**
@@ -95,4 +115,33 @@ export function resolveApiVersion(apiVersion = "latest"): VersionConfig {
 		apiVersion,
 	);
 	return VERSION_REGISTRY[VERSION_REGISTRY.length - 1];
+}
+
+export function resolveApiVersionMetrics(
+	apiVersion: string,
+): ResolvedApiVersionMetrics {
+	const versionConfig = resolveApiVersion(apiVersion);
+	if (versionConfig.version.includes("beta")) {
+		return {
+			apiVersion: "beta",
+			apiReleaseDate: getReleaseDateIdentifier(versionConfig.version),
+		};
+	}
+	if (versionConfig.version.includes("backwards-compatibility-default")) {
+		return {
+			apiVersion: "backwards-compatibility-default",
+			apiReleaseDate: getReleaseDateIdentifier(versionConfig.version),
+		};
+	}
+	if (versionConfig.version.includes("latest")) {
+		return {
+			apiVersion: "latest",
+			apiReleaseDate: getReleaseDateIdentifier(versionConfig.version),
+		};
+	}
+
+	return {
+		apiVersion: "unknown",
+		apiReleaseDate: getReleaseDateIdentifier(versionConfig.version),
+	};
 }

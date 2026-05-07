@@ -1,23 +1,83 @@
+import { SpanStatusCode, context, trace } from "@opentelemetry/api";
 import type {
 	AgentConversation,
 	ThoughtSpotRestApi,
 } from "@thoughtspot/rest-api-sdk";
-import { SpanStatusCode, trace, context } from "@opentelemetry/api";
-import { getActiveSpan, WithSpan } from "../metrics/tracing/tracing-utils";
+import {
+	type MetricsRecorder,
+	scheduleMetricsFlush,
+} from "../metrics/runtime/metrics-recorder";
 import type {
+	MetricAnalyticsContext,
+	MetricEventIdentity,
+} from "../metrics/runtime/metrics-sink";
+import { createRequestMetricsRecorder } from "../metrics/runtime/request-metrics";
+import type { MetricsEnvLike } from "../metrics/runtime/runtime-config";
+import {
+	UPSTREAM_OPERATION_NAMES,
+	type UpstreamOperation,
+	recordUpstreamCallMetrics,
+	recordUpstreamStreamStartedMetric,
+} from "../metrics/runtime/tool-metrics";
+import { WithSpan, getActiveSpan } from "../metrics/tracing/tracing-utils";
+import { processSendAgentConversationMessageStreamingResponse } from "../streaming-utils";
+import type {
+	Answer,
 	DataSource,
-	SessionInfo,
 	DataSourceSuggestion,
 	Message,
-	Answer,
+	SessionInfo,
 } from "./types";
-import { processSendAgentConversationMessageStreamingResponse } from "../streaming-utils";
+
+type ThoughtSpotServiceMetricsOptions = {
+	recorder?: MetricsRecorder;
+	metricsEnv?: MetricsEnvLike;
+	waitUntil?: (promise: Promise<any>) => void;
+	analyticsContext?: MetricAnalyticsContext;
+	eventIdentity?: MetricEventIdentity;
+};
 
 /**
  * Main ThoughtSpot service class using decorator pattern for tracing
  */
 export class ThoughtSpotService {
-	constructor(private client: ThoughtSpotRestApi) {}
+	constructor(
+		private client: ThoughtSpotRestApi,
+		private readonly metrics: ThoughtSpotServiceMetricsOptions = {},
+	) {}
+
+	private async observeUpstreamCall<T>(
+		operation: UpstreamOperation,
+		call: () => Promise<T>,
+	): Promise<T> {
+		const startedAt = Date.now();
+		let outcome: "success" | "upstream_error" = "success";
+
+		try {
+			return await call();
+		} catch (error) {
+			outcome = "upstream_error";
+			throw error;
+		} finally {
+			recordUpstreamCallMetrics(
+				this.metrics.recorder,
+				operation,
+				outcome,
+				Date.now() - startedAt,
+			);
+		}
+	}
+
+	private createStreamMetricsRecorder(): MetricsRecorder {
+		const recorder = createRequestMetricsRecorder(this.metrics.metricsEnv);
+		recorder.setAnalyticsContext(this.metrics.analyticsContext);
+		recorder.setEventIdentity(this.metrics.eventIdentity);
+		return recorder;
+	}
+
+	private scheduleBackgroundMetricsFlush(recorder: MetricsRecorder): void {
+		scheduleMetricsFlush(recorder, this.metrics.waitUntil);
+	}
 
 	@WithSpan("discover-data-sources")
 	async discoverDataSources(
@@ -49,9 +109,13 @@ export class ThoughtSpotService {
 			span?.setAttribute("query", query);
 			span?.addEvent("query-get-data-source-suggestions");
 
-			const response = await this.client.getDataSourceSuggestions({
-				query,
-			});
+			const response = await this.observeUpstreamCall(
+				UPSTREAM_OPERATION_NAMES.getDataSourceSuggestions,
+				() =>
+					this.client.getDataSourceSuggestions({
+						query,
+					}),
+			);
 
 			span?.setStatus({
 				code: SpanStatusCode.OK,
@@ -112,14 +176,18 @@ export class ThoughtSpotService {
 			);
 			span?.addEvent("get-decomposed-query");
 
-			const resp = await this.client.queryGetDecomposedQuery({
-				nlsRequest: {
-					query: query,
-				},
-				content: [additionalContext],
-				worksheetIds: sourceIds,
-				maxDecomposedQueries: 5,
-			});
+			const resp = await this.observeUpstreamCall(
+				UPSTREAM_OPERATION_NAMES.queryGetDecomposedQuery,
+				() =>
+					this.client.queryGetDecomposedQuery({
+						nlsRequest: {
+							query: query,
+						},
+						content: [additionalContext],
+						worksheetIds: sourceIds,
+						maxDecomposedQueries: 5,
+					}),
+			);
 
 			const questions =
 				resp.decomposedQueryResponse?.decomposedQueries?.map((q) => ({
@@ -183,11 +251,15 @@ export class ThoughtSpotService {
 				"instanceUrl: ",
 				(this.client as any).instanceUrl,
 			);
-			const data = await this.client.exportAnswerReport({
-				session_identifier,
-				generation_number,
-				file_format: "CSV",
-			});
+			const data = await this.observeUpstreamCall(
+				UPSTREAM_OPERATION_NAMES.exportAnswerReport,
+				() =>
+					this.client.exportAnswerReport({
+						session_identifier,
+						generation_number,
+						file_format: "CSV",
+					}),
+			);
 
 			let csvData = await data.text();
 			// get only the first 100 lines of the csv data
@@ -223,10 +295,14 @@ export class ThoughtSpotService {
 		try {
 			span?.setAttribute("session_identifier", session_identifier);
 			console.log("[DEBUG] Getting TML for answer: ", title);
-			const tml = await (this.client as any).exportUnsavedAnswerTML({
-				session_identifier,
-				generation_number,
-			});
+			const tml = await this.observeUpstreamCall(
+				UPSTREAM_OPERATION_NAMES.exportUnsavedAnswerTml,
+				() =>
+					(this.client as any).exportUnsavedAnswerTML({
+						session_identifier,
+						generation_number,
+					}),
+			);
 			return tml;
 		} catch (error) {
 			span?.setStatus({
@@ -250,11 +326,13 @@ export class ThoughtSpotService {
 
 		try {
 			// Use auto mode by default, but support passing an explicit data source context
-			const response = await (
-				this.client as any
-			).createAgentConversationWithAutoMode({
-				dataSourceId,
-			});
+			const response = await this.observeUpstreamCall(
+				UPSTREAM_OPERATION_NAMES.createAgentConversation,
+				() =>
+					(this.client as any).createAgentConversationWithAutoMode({
+						dataSourceId,
+					}),
+			);
 
 			span?.setStatus({
 				code: SpanStatusCode.OK,
@@ -298,29 +376,57 @@ export class ThoughtSpotService {
 				? `${message}\n\nAdditional Context:\n${additionalContext}`
 				: message;
 
-			const response = await (
-				this.client as any
-			).sendAgentConversationMessageStreaming({
-				conversation_identifier: conversationId,
-				message: finalMessage,
-			});
-
-			const reader = response.body?.getReader();
-			if (!reader) {
-				span?.setStatus({
-					code: SpanStatusCode.ERROR,
-					message: "Failed to get reader from response body",
-				});
-				throw new Error("Failed to get reader from response body");
-			}
-
-			// We don't await because we want to process the streaming response asynchronously
-			processSendAgentConversationMessageStreamingResponse(
-				conversationId,
-				reader,
-				appendStoredMessages,
-				(this.client as any).instanceUrl,
+			// Validate the response body inside the observed call so an unusable streaming
+			// response is counted as `upstream_error` instead of a false success.
+			const reader = await this.observeUpstreamCall(
+				UPSTREAM_OPERATION_NAMES.sendAgentConversationMessageStreaming,
+				async () => {
+					const response = await (
+						this.client as any
+					).sendAgentConversationMessageStreaming({
+						conversation_identifier: conversationId,
+						message: finalMessage,
+					});
+					const reader = response.body?.getReader();
+					if (!reader) {
+						throw new Error("Failed to get reader from response body");
+					}
+					return reader;
+				},
 			);
+
+			const streamRecorder = this.createStreamMetricsRecorder();
+			recordUpstreamStreamStartedMetric(
+				streamRecorder,
+				UPSTREAM_OPERATION_NAMES.sendAgentConversationMessageStreaming,
+				"success",
+			);
+
+			const processStreamPromise =
+				processSendAgentConversationMessageStreamingResponse(
+					conversationId,
+					reader,
+					appendStoredMessages,
+					(this.client as any).instanceUrl,
+					streamRecorder,
+				).finally(() => {
+					this.scheduleBackgroundMetricsFlush(streamRecorder);
+				});
+
+			if (this.metrics.waitUntil) {
+				try {
+					this.metrics.waitUntil(processStreamPromise);
+				} catch (error) {
+					console.error(
+						"[metrics] Failed to schedule upstream stream processing",
+						error,
+					);
+				}
+			} else {
+				// Tests and non-Worker runtimes may not expose waitUntil. Keep the
+				// best-effort stream processing running without blocking the caller.
+				void processStreamPromise;
+			}
 
 			span?.setStatus({
 				code: SpanStatusCode.OK,
@@ -363,10 +469,14 @@ export class ThoughtSpotService {
 		);
 
 		try {
-			const answer = await this.client.singleAnswer({
-				query: question,
-				metadata_identifier: sourceId,
-			});
+			const answer = await this.observeUpstreamCall(
+				UPSTREAM_OPERATION_NAMES.singleAnswer,
+				() =>
+					this.client.singleAnswer({
+						query: question,
+						metadata_identifier: sourceId,
+					}),
+			);
 
 			const { session_identifier, generation_number } = answer as any;
 			span?.setAttributes({
@@ -376,10 +486,14 @@ export class ThoughtSpotService {
 
 			const [data, session, tml] = await Promise.all([
 				this.getAnswerData(question, session_identifier, generation_number),
-				(this.client as any).getAnswerSession({
-					session_identifier,
-					generation_number,
-				}),
+				this.observeUpstreamCall(
+					UPSTREAM_OPERATION_NAMES.getAnswerSession,
+					() =>
+						(this.client as any).getAnswerSession({
+							session_identifier,
+							generation_number,
+						}),
+				),
 				shouldGetTML
 					? this.getAnswerTML(question, session_identifier, generation_number)
 					: Promise.resolve(null),
@@ -522,10 +636,14 @@ export class ThoughtSpotService {
 			},
 		};
 
-		const resp = await this.client.importMetadataTML({
-			metadata_tmls: [JSON.stringify(tml)],
-			import_policy: "ALL_OR_NONE",
-		});
+		const resp = await this.observeUpstreamCall(
+			UPSTREAM_OPERATION_NAMES.importMetadataTml,
+			() =>
+				this.client.importMetadataTML({
+					metadata_tmls: [JSON.stringify(tml)],
+					import_policy: "ALL_OR_NONE",
+				}),
+		);
 
 		const liveboardUrl = `${(this.client as any).instanceUrl}/#/pinboard/${resp[0].response.header.id_guid}`;
 		span?.setStatus({
@@ -544,18 +662,22 @@ export class ThoughtSpotService {
 
 		span?.addEvent("get-data-sources");
 
-		const resp = await this.client.searchMetadata({
-			metadata: [
-				{
-					type: "LOGICAL_TABLE",
-				},
-			],
-			record_size: 2000,
-			sort_options: {
-				field_name: "LAST_ACCESSED",
-				order: "DESC",
-			},
-		});
+		const resp = await this.observeUpstreamCall(
+			UPSTREAM_OPERATION_NAMES.searchMetadata,
+			() =>
+				this.client.searchMetadata({
+					metadata: [
+						{
+							type: "LOGICAL_TABLE",
+						},
+					],
+					record_size: 2000,
+					sort_options: {
+						field_name: "LAST_ACCESSED",
+						order: "DESC",
+					},
+				}),
+		);
 
 		const results = resp
 			// Tables can also be used for spotter now
@@ -577,7 +699,10 @@ export class ThoughtSpotService {
 	async getSessionInfo(): Promise<SessionInfo> {
 		const span = getActiveSpan();
 
-		const info = await (this.client as any).getSessionInfo();
+		const info = await this.observeUpstreamCall(
+			UPSTREAM_OPERATION_NAMES.getSessionInfo,
+			() => (this.client as any).getSessionInfo(),
+		);
 		const devMixpanelToken = info.configInfo.mixpanelConfig.devSdkKey;
 		const prodMixpanelToken = info.configInfo.mixpanelConfig.prodSdkKey;
 		const mixpanelToken = info.configInfo.mixpanelConfig.production
@@ -610,18 +735,22 @@ export class ThoughtSpotService {
 	async searchWorksheets(searchTerm: string): Promise<DataSource[]> {
 		const span = getActiveSpan();
 
-		const resp = await this.client.searchMetadata({
-			metadata: [
-				{
-					type: "LOGICAL_TABLE",
-				},
-			],
-			record_size: 100,
-			sort_options: {
-				field_name: "NAME",
-				order: "ASC",
-			},
-		});
+		const resp = await this.observeUpstreamCall(
+			UPSTREAM_OPERATION_NAMES.searchMetadata,
+			() =>
+				this.client.searchMetadata({
+					metadata: [
+						{
+							type: "LOGICAL_TABLE",
+						},
+					],
+					record_size: 100,
+					sort_options: {
+						field_name: "NAME",
+						order: "ASC",
+					},
+				}),
+		);
 
 		const results = resp
 			.filter((d) => d.metadata_header.type === "WORKSHEET")
@@ -645,7 +774,10 @@ export class ThoughtSpotService {
 	@WithSpan("validate-connection")
 	async validateConnection(): Promise<boolean> {
 		try {
-			await (this.client as any).getSessionInfo();
+			await this.observeUpstreamCall(
+				UPSTREAM_OPERATION_NAMES.getSessionInfo,
+				() => (this.client as any).getSessionInfo(),
+			);
 			return true;
 		} catch (error) {
 			// The decorator will automatically record the exception

@@ -1,21 +1,37 @@
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import {
 	CallToolRequestSchema,
-	ListToolsRequestSchema,
-	ToolSchema,
 	ListResourcesRequestSchema,
-	ReadResourceRequestSchema,
+	ListToolsRequestSchema,
 	type ListToolsResult,
+	ReadResourceRequestSchema,
+	ToolSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import type { z } from "zod";
 import { type Span, SpanStatusCode } from "@opentelemetry/api";
-import { getActiveSpan, withSpan } from "../metrics/tracing/tracing-utils";
-import { Trackers, type Tracker, TrackEvent } from "../metrics";
-import type { Props } from "../utils";
+import type { z } from "zod";
+import { TrackEvent, type Tracker, Trackers } from "../metrics";
 import { MixpanelTracker } from "../metrics/mixpanel/mixpanel";
+import type { ApiVersionMode } from "../metrics/runtime/metric-types";
+import {
+	type MetricsRecorder,
+	scheduleMetricsFlush,
+} from "../metrics/runtime/metrics-recorder";
+import type {
+	MetricAnalyticsContext,
+	MetricEventIdentity,
+} from "../metrics/runtime/metrics-sink";
+import { createRequestMetricsRecorder } from "../metrics/runtime/request-metrics";
+import {
+	type ToolMetricApiSurface,
+	getToolMetricOutcomeFromError,
+	getToolMetricOutcomeFromResult,
+	recordToolInvocationMetrics,
+} from "../metrics/runtime/tool-metrics";
+import { getActiveSpan, withSpan } from "../metrics/tracing/tracing-utils";
+import { StorageServiceClient } from "../storage-service/storage-service";
 import { getThoughtSpotClient } from "../thoughtspot/thoughtspot-client";
 import { ThoughtSpotService } from "../thoughtspot/thoughtspot-service";
-import { StorageServiceClient } from "../storage-service/storage-service";
+import type { Props } from "../utils";
 
 const ToolInputSchema = ToolSchema.shape.inputSchema;
 type ToolInput = z.infer<typeof ToolInputSchema>;
@@ -41,6 +57,7 @@ export type ToolResponse = SuccessResponse | ErrorResponse;
 export interface Context {
 	props: Props;
 	env: Env;
+	ctx?: DurableObjectState;
 }
 
 export abstract class BaseMCPServer extends Server {
@@ -181,13 +198,135 @@ export abstract class BaseMCPServer extends Server {
 		);
 	}
 
-	protected getThoughtSpotService() {
+	protected getThoughtSpotService(recorder?: MetricsRecorder) {
 		return new ThoughtSpotService(
 			getThoughtSpotClient(
 				this.ctx.props.instanceUrl,
 				this.ctx.props.accessToken,
 			),
+			{
+				recorder,
+				metricsEnv: this.ctx.env as unknown as Record<string, unknown>,
+				waitUntil: this.getMetricsWaitUntil(),
+				analyticsContext: this.getMetricAnalyticsContext(),
+				eventIdentity: this.getMetricEventIdentity(),
+			},
 		);
+	}
+
+	protected abstract getToolMetricApiSurface(): ToolMetricApiSurface;
+
+	protected getToolMetricApiVersionLabel(): string | undefined {
+		return undefined;
+	}
+
+	protected getToolMetricApiVersionModeLabel(): ApiVersionMode | undefined {
+		return undefined;
+	}
+
+	protected getToolMetricApiReleaseDateLabel(): string | undefined {
+		return undefined;
+	}
+
+	protected getMetricAnalyticsContext(): MetricAnalyticsContext | undefined {
+		const apiRequestedVersion = this.ctx.props.apiRequestedVersion;
+		if (
+			typeof apiRequestedVersion !== "string" ||
+			apiRequestedVersion.length === 0
+		) {
+			return undefined;
+		}
+
+		return {
+			apiRequestedVersion,
+		};
+	}
+
+	protected getMetricEventIdentity(): MetricEventIdentity | undefined {
+		if (!this.sessionInfo) {
+			return undefined;
+		}
+
+		const tenantId = this.sessionInfo.currentOrgId
+			? String(this.sessionInfo.currentOrgId)
+			: undefined;
+		const userId = this.sessionInfo.userGUID
+			? String(this.sessionInfo.userGUID)
+			: undefined;
+		if (!tenantId && !userId) {
+			return undefined;
+		}
+
+		return {
+			tenantId,
+			userId,
+		};
+	}
+
+	private getMetricsWaitUntil() {
+		return this.ctx.ctx?.waitUntil?.bind(this.ctx.ctx);
+	}
+
+	private createToolMetricsRecorder(): MetricsRecorder {
+		const recorder = createRequestMetricsRecorder(
+			this.ctx.env as unknown as Record<string, unknown>,
+		);
+		recorder.setAnalyticsContext(this.getMetricAnalyticsContext());
+		recorder.setEventIdentity(this.getMetricEventIdentity());
+		return recorder;
+	}
+
+	private recordToolMetricsSafe(
+		recorder: MetricsRecorder,
+		toolName: string,
+		outcome: ReturnType<typeof getToolMetricOutcomeFromError>,
+		durationMs: number,
+	): void {
+		try {
+			recordToolInvocationMetrics(
+				recorder,
+				toolName,
+				this.getToolMetricApiSurface(),
+				outcome,
+				durationMs,
+				this.getToolMetricApiVersionLabel(),
+				this.getToolMetricApiVersionModeLabel(),
+				this.getToolMetricApiReleaseDateLabel(),
+			);
+		} catch (error) {
+			console.error(
+				`[metrics] Failed to record tool metrics for ${toolName}`,
+				error,
+			);
+		}
+	}
+
+	private async withToolMetrics<T>(
+		request: z.infer<typeof CallToolRequestSchema>,
+		handler: (recorder: MetricsRecorder) => Promise<T>,
+	): Promise<T> {
+		const recorder = this.createToolMetricsRecorder();
+		const startedAt = Date.now();
+		let outcome: ReturnType<typeof getToolMetricOutcomeFromError> | undefined;
+
+		try {
+			const result = await handler(recorder);
+			outcome = getToolMetricOutcomeFromResult(result);
+			return result;
+		} catch (error) {
+			outcome = getToolMetricOutcomeFromError(error);
+			throw error;
+		} finally {
+			if (outcome) {
+				this.recordToolMetricsSafe(
+					recorder,
+					request.params.name,
+					outcome,
+					Date.now() - startedAt,
+				);
+			}
+			scheduleMetricsFlush(recorder, this.getMetricsWaitUntil());
+		}
 	}
 
 	protected async initializeService(): Promise<void> {
@@ -225,6 +364,7 @@ export abstract class BaseMCPServer extends Server {
 	 */
 	protected abstract callTool(
 		request: z.infer<typeof CallToolRequestSchema>,
+		recorder: MetricsRecorder,
 	): Promise<any>;
 
 	async init() {
@@ -265,7 +405,9 @@ export abstract class BaseMCPServer extends Server {
 			async (request: z.infer<typeof CallToolRequestSchema>) => {
 				return withSpan("call-tool", async () => {
 					this.initSpanWithCommonAttributes();
-					return this.callTool(request);
+					return this.withToolMetrics(request, (recorder) =>
+						this.callTool(request, recorder),
+					);
 				});
 			},
 		);

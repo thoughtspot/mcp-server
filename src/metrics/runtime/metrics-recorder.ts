@@ -6,6 +6,8 @@ import {
 	normalizeMetricLabels,
 } from "./metric-types";
 import type {
+	MetricAnalyticsContext,
+	MetricEventIdentity,
 	MetricObservation,
 	MetricResourceAttributes,
 	MetricsSink,
@@ -21,6 +23,8 @@ export interface MetricsRecorder {
 	count(name: MetricName, value?: number, labels?: MetricLabelInput): void;
 	histogram(name: MetricName, value: number, labels?: MetricLabelInput): void;
 	gauge(name: MetricName, value: number, labels?: MetricLabelInput): void;
+	setAnalyticsContext(context?: MetricAnalyticsContext): void;
+	setEventIdentity(identity?: MetricEventIdentity): void;
 	flush(): Promise<void>;
 	snapshot(): readonly MetricObservation[];
 }
@@ -32,6 +36,8 @@ export const NOOP_METRICS_RECORDER: MetricsRecorder = {
 	count(_name, _value, _labels): void {},
 	histogram(_name, _value, _labels): void {},
 	gauge(_name, _value, _labels): void {},
+	setAnalyticsContext(_context): void {},
+	setEventIdentity(_identity): void {},
 	flush(): Promise<void> {
 		return NOOP_FLUSH_PROMISE;
 	},
@@ -42,6 +48,8 @@ export const NOOP_METRICS_RECORDER: MetricsRecorder = {
 
 export class RequestMetricsRecorder implements MetricsRecorder {
 	private readonly observations: MetricObservation[] = [];
+	private analyticsContext?: MetricAnalyticsContext;
+	private eventIdentity?: MetricEventIdentity;
 	private flushPromise?: Promise<void>;
 	private flushed = false;
 
@@ -57,6 +65,37 @@ export class RequestMetricsRecorder implements MetricsRecorder {
 
 	gauge(name: MetricName, value: number, labels?: MetricLabelInput): void {
 		this.record("gauge", name, value, labels);
+	}
+
+	setAnalyticsContext(context?: MetricAnalyticsContext): void {
+		if (!context) {
+			return;
+		}
+
+		const nextContext: MetricAnalyticsContext = {
+			...this.analyticsContext,
+		};
+		if (context.apiRequestedVersion) {
+			nextContext.apiRequestedVersion = context.apiRequestedVersion;
+		}
+		this.analyticsContext = nextContext;
+	}
+
+	setEventIdentity(identity?: MetricEventIdentity): void {
+		if (!identity) {
+			return;
+		}
+
+		const nextIdentity: MetricEventIdentity = {
+			...this.eventIdentity,
+		};
+		if (identity.tenantId) {
+			nextIdentity.tenantId = identity.tenantId;
+		}
+		if (identity.userId) {
+			nextIdentity.userId = identity.userId;
+		}
+		this.eventIdentity = nextIdentity;
 	}
 
 	snapshot(): readonly MetricObservation[] {
@@ -115,9 +154,39 @@ export class RequestMetricsRecorder implements MetricsRecorder {
 			await this.options.sink.flush({
 				observations,
 				resourceAttributes: { ...this.options.resourceAttributes },
+				analyticsContext: this.analyticsContext
+					? { ...this.analyticsContext }
+					: undefined,
+				eventIdentity: this.eventIdentity
+					? { ...this.eventIdentity }
+					: undefined,
 			});
 		} catch (error) {
 			console.error("[metrics] Flush failed", error);
 		}
+	}
+}
+
+export type MetricsWaitUntil = (promise: Promise<any>) => void;
+
+export function scheduleMetricsFlush(
+	recorder: MetricsRecorder,
+	waitUntil?: MetricsWaitUntil,
+): void {
+	const flushPromise = recorder.flush().catch((error) => {
+		console.error("[metrics] Failed to execute metrics flush", error);
+	});
+
+	if (!waitUntil) {
+		// Non-Worker runtimes and tests may not provide waitUntil. Start the guarded
+		// flush anyway and intentionally detach from it.
+		void flushPromise;
+		return;
+	}
+
+	try {
+		waitUntil(flushPromise);
+	} catch (error) {
+		console.error("[metrics] Failed to schedule metrics flush", error);
 	}
 }

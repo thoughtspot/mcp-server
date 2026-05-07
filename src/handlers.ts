@@ -6,7 +6,6 @@ import { type Span, SpanStatusCode, context, trace } from "@opentelemetry/api";
 import { Hono } from "hono";
 import { decodeBase64Url, encodeBase64Url } from "hono/utils/encode";
 import { any } from "zod";
-import { openApiSpecHandler } from "./api-schemas/open-api-spec";
 import { METRIC_NAMES } from "./metrics/runtime/metric-types";
 import {
 	getMetricsRecorderFromExecutionContext,
@@ -441,7 +440,5 @@ app.post(PUBLIC_ROUTES.storeToken, async (c) => {
 app.get(PUBLIC_ROUTES.openaiAppsChallenge, (c) => {
 	return c.text(process.env.OPEN_AI_TOKEN);
 });
-
-app.route(PUBLIC_ROUTES.openapiSpec, openApiSpecHandler);
 
 export default app;

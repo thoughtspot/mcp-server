@@ -18,10 +18,6 @@
 				"name": "MCP_OBJECT"
 			},
 			{
-				"class_name": "ThoughtSpotOpenAIDeepResearchMCP",
-				"name": "OPENAI_DEEP_RESEARCH_MCP_OBJECT"
-			},
-			{
 				"class_name": "ConversationStorageServer",
 				"name": "CONVERSATION_STORAGE_OBJECT"
 			}
@@ -44,6 +40,12 @@
 			"tag": "v4",
 			"new_classes": [
 				"ConversationStorageServer"
+			]
+		},
+		{
+			"tag": "v5",
+			"deleted_classes": [
+				"ThoughtSpotOpenAIDeepResearchMCP"
 			]
 		}
 	],
