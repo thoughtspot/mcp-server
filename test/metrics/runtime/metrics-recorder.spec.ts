@@ -240,6 +240,7 @@ describe("RequestMetricsRecorder", () => {
 
 		recorder.setAnalyticsContext({
 			apiRequestedVersion: "2026-10-01",
+			analyticalSessionId: "conv-123",
 		});
 		recorder.count(METRIC_NAMES.httpRequestsTotal);
 		await recorder.flush();
@@ -248,6 +249,7 @@ describe("RequestMetricsRecorder", () => {
 			expect.objectContaining({
 				analyticsContext: {
 					apiRequestedVersion: "2026-10-01",
+					analyticalSessionId: "conv-123",
 				},
 			}),
 		);

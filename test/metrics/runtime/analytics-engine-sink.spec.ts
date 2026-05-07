@@ -3,6 +3,7 @@ import {
 	ANALYTICS_ENGINE_BLOB_FIELDS,
 	ANALYTICS_ENGINE_CONTEXT_FIELDS,
 	ANALYTICS_ENGINE_DOUBLE_FIELDS,
+	ANALYTICS_ENGINE_IDENTITY_BLOB_FIELDS,
 	ANALYTICS_ENGINE_INDEX_FIELDS,
 	ANALYTICS_ENGINE_LABEL_FIELDS,
 	ANALYTICS_ENGINE_RESOURCE_ATTRIBUTE_FIELDS,
@@ -12,10 +13,7 @@ import {
 	getAnalyticsEngineMetricFamily,
 	toAnalyticsEngineDataPoint,
 } from "../../../src/metrics/runtime/analytics-engine-sink";
-import {
-	APPROVED_METRIC_LABEL_KEYS,
-	METRIC_NAMES,
-} from "../../../src/metrics/runtime/metric-types";
+import { METRIC_NAMES } from "../../../src/metrics/runtime/metric-types";
 import type { MetricObservation } from "../../../src/metrics/runtime/metrics-sink";
 
 describe("AnalyticsEngineMetricsSink", () => {
@@ -46,19 +44,16 @@ describe("AnalyticsEngineMetricsSink", () => {
 			"service.version": "0.5.0",
 		});
 
-		expect(dataPoint.indexes).toEqual([
+		expect(dataPoint.indexes).toEqual(["shared"]);
+		expect(dataPoint.blobs).toEqual([
 			ANALYTICS_ENGINE_SCHEMA_VERSION,
 			"tool",
 			METRIC_NAMES.toolCallsTotal,
-			null,
-			null,
-		]);
-		expect(dataPoint.blobs).toEqual([
 			"counter",
-			"mcp",
+			null,
+			null,
 			"mcp",
 			"oauth",
-			"mcp",
 			null,
 			null,
 			null,
@@ -70,10 +65,6 @@ describe("AnalyticsEngineMetricsSink", () => {
 			null,
 			null,
 			null,
-			null,
-			"production",
-			"thoughtspot-mcp-server",
-			"thoughtspot",
 			"0.5.0",
 		]);
 		expect(dataPoint.doubles).toEqual([2, 1_714_000_000_000]);
@@ -99,37 +90,49 @@ describe("AnalyticsEngineMetricsSink", () => {
 		).toBe("auth");
 	});
 
-	it("keeps the Analytics Engine schema aligned with approved labels and resource attributes", () => {
-		expect(ANALYTICS_ENGINE_LABEL_FIELDS).toEqual(APPROVED_METRIC_LABEL_KEYS);
+	it("keeps the Analytics Engine schema aligned with the compact single-index layout", () => {
+		expect(ANALYTICS_ENGINE_INDEX_FIELDS).toEqual(["tenant_id"]);
+		expect(ANALYTICS_ENGINE_IDENTITY_BLOB_FIELDS).toEqual([
+			["tenant_id", "tenantId"],
+			["user_id", "userId"],
+		]);
+		expect(ANALYTICS_ENGINE_LABEL_FIELDS).toEqual([
+			"route_group",
+			"auth_mode",
+			"api_version",
+			"api_version_mode",
+			"api_release_date",
+			"outcome",
+			"status_class",
+			"tool_name",
+			"upstream_operation",
+			"message_type",
+			"is_done",
+		]);
 		expect(ANALYTICS_ENGINE_CONTEXT_FIELDS).toEqual([
 			["api_requested_version", "apiRequestedVersion"],
+			["analytical_session_id", "analyticalSessionId"],
 		]);
 		expect(ANALYTICS_ENGINE_RESOURCE_ATTRIBUTE_FIELDS).toEqual([
-			["deployment_environment", "deployment.environment"],
-			["service_name", "service.name"],
-			["service_namespace", "service.namespace"],
 			["service_version", "service.version"],
 		]);
-		expect(ANALYTICS_ENGINE_INDEX_FIELDS).toEqual([
+		expect(ANALYTICS_ENGINE_BLOB_FIELDS).toEqual([
 			"schema_version",
 			"event_family",
 			"metric_name",
+			"metric_kind",
 			"tenant_id",
 			"user_id",
-		]);
-		expect(ANALYTICS_ENGINE_BLOB_FIELDS).toEqual([
-			"metric_kind",
-			...APPROVED_METRIC_LABEL_KEYS,
+			...ANALYTICS_ENGINE_LABEL_FIELDS,
 			"api_requested_version",
-			"deployment_environment",
-			"service_name",
-			"service_namespace",
+			"analytical_session_id",
 			"service_version",
 		]);
 		expect(ANALYTICS_ENGINE_DOUBLE_FIELDS).toEqual([
 			"metric_value",
 			"timestamp_ms",
 		]);
+		expect(ANALYTICS_ENGINE_BLOB_FIELDS).toHaveLength(20);
 	});
 
 	it("writes one data point per observation", async () => {
@@ -146,19 +149,13 @@ describe("AnalyticsEngineMetricsSink", () => {
 		expect(dataset.writeDataPoint).toHaveBeenCalledTimes(1);
 		expect(dataset.writeDataPoint).toHaveBeenCalledWith(
 			expect.objectContaining({
-				indexes: [
-					ANALYTICS_ENGINE_SCHEMA_VERSION,
-					"tool",
-					METRIC_NAMES.toolCallsTotal,
-					null,
-					null,
-				],
+				indexes: ["shared"],
 				doubles: [2, 1_714_000_000_000],
 			}),
 		);
 	});
 
-	it("maps request-scoped event identity into Analytics Engine indexes", async () => {
+	it("maps request-scoped event identity into the Analytics Engine index and blobs", async () => {
 		const dataset = { writeDataPoint: vi.fn() };
 		const sink = new AnalyticsEngineMetricsSink(dataset);
 
@@ -173,13 +170,8 @@ describe("AnalyticsEngineMetricsSink", () => {
 
 		expect(dataset.writeDataPoint).toHaveBeenCalledWith(
 			expect.objectContaining({
-				indexes: [
-					ANALYTICS_ENGINE_SCHEMA_VERSION,
-					"tool",
-					METRIC_NAMES.toolCallsTotal,
-					"tenant-123",
-					"user-456",
-				],
+				indexes: ["tenant-123"],
+				blobs: expect.arrayContaining(["tenant-123", "user-456"]),
 			}),
 		);
 	});
@@ -193,12 +185,13 @@ describe("AnalyticsEngineMetricsSink", () => {
 			resourceAttributes: {},
 			analyticsContext: {
 				apiRequestedVersion: "2026-10-01",
+				analyticalSessionId: "conv-123",
 			},
 		});
 
 		expect(dataset.writeDataPoint).toHaveBeenCalledWith(
 			expect.objectContaining({
-				blobs: expect.arrayContaining(["2026-10-01"]),
+				blobs: expect.arrayContaining(["2026-10-01", "conv-123"]),
 			}),
 		);
 	});
@@ -211,7 +204,7 @@ describe("AnalyticsEngineMetricsSink", () => {
 		} satisfies MetricObservation;
 		const dataset = {
 			writeDataPoint: vi.fn((dataPoint) => {
-				if (dataPoint?.indexes?.[2] === METRIC_NAMES.toolCallsTotal) {
+				if (dataPoint?.blobs?.[2] === METRIC_NAMES.toolCallsTotal) {
 					throw new Error("write failed");
 				}
 			}),

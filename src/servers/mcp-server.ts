@@ -386,6 +386,9 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			await this.getThoughtSpotService(recorder).createAgentConversation(
 				data_source_id,
 			);
+		recorder.setAnalyticsContext({
+			analyticalSessionId: response.conversation_id,
+		});
 		span?.setAttribute("analytical_session_id", response.conversation_id);
 
 		// Conversation is initialized in streamingMessageStorage from callSendSessionMessage,
@@ -405,6 +408,9 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		const span = trace.getSpan(context.active());
 		const { analytical_session_id, message, additional_context } =
 			SendSessionMessageInputSchema.parse(request.params.arguments);
+		recorder.setAnalyticsContext({
+			analyticalSessionId: analytical_session_id,
+		});
 		span?.setAttributes({
 			analytical_session_id,
 			has_additional_context: !!additional_context,
@@ -424,9 +430,9 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			);
 		}
 
-		await this.getThoughtSpotService(
-			recorder,
-		).sendAgentConversationMessageStreaming(
+		await this.getThoughtSpotService(recorder, {
+			analyticalSessionId: analytical_session_id,
+		}).sendAgentConversationMessageStreaming(
 			analytical_session_id,
 			message,
 			storageService.appendMessages.bind(storageService),

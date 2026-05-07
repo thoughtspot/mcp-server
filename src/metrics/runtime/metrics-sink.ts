@@ -28,10 +28,11 @@ export type MetricEventIdentity = {
 // Sink-specific context for dimensions that should not become generic metric labels.
 // `api_version`, `api_version_mode`, and `api_release_date` stay in `MetricObservation.labels`
 // because both Grafana and Analytics Engine should receive them as low-cardinality dimensions.
-// `apiRequestedVersion` lives here instead because we only want it in Analytics Engine as
-// request-debug context, not as an extra Grafana label.
+// `apiRequestedVersion` and `analyticalSessionId` live here instead because they are
+// Analytics-Engine-only debug/context fields and should not widen Grafana label cardinality.
 export type MetricAnalyticsContext = {
 	apiRequestedVersion?: string;
+	analyticalSessionId?: string;
 };
 
 export type MetricsFlushPayload = {

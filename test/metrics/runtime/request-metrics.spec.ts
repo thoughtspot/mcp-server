@@ -242,7 +242,8 @@ describe("withRequestMetrics", () => {
 		expect(analyticsDataset.writeDataPoint).toHaveBeenCalledTimes(1);
 		expect(analyticsDataset.writeDataPoint).toHaveBeenCalledWith(
 			expect.objectContaining({
-				indexes: expect.arrayContaining([METRIC_NAMES.httpRequestsTotal]),
+				indexes: ["shared"],
+				blobs: expect.arrayContaining([METRIC_NAMES.httpRequestsTotal]),
 			}),
 		);
 	});
