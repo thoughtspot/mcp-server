@@ -21,7 +21,7 @@ const READ_BOOKMARK_KEY = "read-bookmark";
  *   POST  /storage/<conversation-id>/append     —> appendMessagesAndRestartTtl
  *   GET   /storage/<conversation-id>/messages   —> getNewMessagesAndUpdateBookmark
  */
-export class ConversationStorageServer {
+export class ConversationStorageServerSQLite {
 	private conversationId = "";
 
 	constructor(

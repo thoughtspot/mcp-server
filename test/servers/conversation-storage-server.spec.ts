@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { ConversationStorageServer } from "../../src/servers/conversation-storage-server";
+import { ConversationStorageServerSQLite } from "../../src/servers/conversation-storage-server";
 import type {
 	Message,
 	StreamingMessagesState,
@@ -69,7 +69,7 @@ function createMockStorage() {
 
 function createServer(mock: ReturnType<typeof createMockStorage>) {
 	const state = { storage: mock.storage } as unknown as DurableObjectState;
-	return new ConversationStorageServer(state, {} as Env);
+	return new ConversationStorageServerSQLite(state, {} as Env);
 }
 
 function makeRequest(
@@ -121,9 +121,9 @@ const STORAGE_BATCH_SIZE = 127;
 // Tests
 // ---------------------------------------------------------------------------
 
-describe("ConversationStorageServer", () => {
+describe("ConversationStorageServerSQLite", () => {
 	let mock: ReturnType<typeof createMockStorage>;
-	let server: ConversationStorageServer;
+	let server: ConversationStorageServerSQLite;
 
 	beforeEach(() => {
 		mock = createMockStorage();

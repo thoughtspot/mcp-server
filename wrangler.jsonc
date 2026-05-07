@@ -18,7 +18,7 @@
 				"name": "MCP_OBJECT"
 			},
 			{
-				"class_name": "ConversationStorageServer",
+				"class_name": "ConversationStorageServerSQLite",
 				"name": "CONVERSATION_STORAGE_OBJECT"
 			}
 		]
@@ -52,12 +52,9 @@
 			"tag": "v6",
 			"deleted_classes": [
 				"ConversationStorageServer"
-			]
-		},
-		{
-			"tag": "v7",
+			],
 			"new_sqlite_classes": [
-				"ConversationStorageServer"
+				"ConversationStorageServerSQLite"
 			]
 		}
 	],
