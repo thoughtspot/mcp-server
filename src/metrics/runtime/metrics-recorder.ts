@@ -78,6 +78,9 @@ export class RequestMetricsRecorder implements MetricsRecorder {
 		if (context.apiRequestedVersion) {
 			nextContext.apiRequestedVersion = context.apiRequestedVersion;
 		}
+		if (context.analyticalSessionId) {
+			nextContext.analyticalSessionId = context.analyticalSessionId;
+		}
 		this.analyticsContext = nextContext;
 	}
 

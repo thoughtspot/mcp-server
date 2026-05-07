@@ -198,7 +198,10 @@ export abstract class BaseMCPServer extends Server {
 		);
 	}
 
-	protected getThoughtSpotService(recorder?: MetricsRecorder) {
+	protected getThoughtSpotService(
+		recorder?: MetricsRecorder,
+		analyticsContextOverride?: MetricAnalyticsContext,
+	) {
 		return new ThoughtSpotService(
 			getThoughtSpotClient(
 				this.ctx.props.instanceUrl,
@@ -208,7 +211,9 @@ export abstract class BaseMCPServer extends Server {
 				recorder,
 				metricsEnv: this.ctx.env as unknown as Record<string, unknown>,
 				waitUntil: this.getMetricsWaitUntil(),
-				analyticsContext: this.getMetricAnalyticsContext(),
+				analyticsContext: this.mergeMetricAnalyticsContext(
+					analyticsContextOverride,
+				),
 				eventIdentity: this.getMetricEventIdentity(),
 			},
 		);
@@ -239,6 +244,20 @@ export abstract class BaseMCPServer extends Server {
 
 		return {
 			apiRequestedVersion,
+		};
+	}
+
+	protected mergeMetricAnalyticsContext(
+		override?: MetricAnalyticsContext,
+	): MetricAnalyticsContext | undefined {
+		const baseContext = this.getMetricAnalyticsContext();
+		if (!baseContext && !override) {
+			return undefined;
+		}
+
+		return {
+			...baseContext,
+			...override,
 		};
 	}
 

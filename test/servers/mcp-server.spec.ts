@@ -341,25 +341,23 @@ describe("MCP Server", () => {
 				([dataPoint]) => dataPoint,
 			);
 			const toolCallCounter = dataPoints.find(
-				(dataPoint) => dataPoint.indexes?.[2] === METRIC_NAMES.toolCallsTotal,
+				(dataPoint) => dataPoint.blobs?.[2] === METRIC_NAMES.toolCallsTotal,
 			);
 			const toolDuration = dataPoints.find(
-				(dataPoint) => dataPoint.indexes?.[2] === METRIC_NAMES.toolDurationMs,
+				(dataPoint) => dataPoint.blobs?.[2] === METRIC_NAMES.toolDurationMs,
 			);
 
 			expect(toolCallCounter).toEqual(
 				expect.objectContaining({
-					indexes: [
+					indexes: ["test-org"],
+					blobs: expect.arrayContaining([
 						ANALYTICS_ENGINE_SCHEMA_VERSION,
 						"tool",
 						METRIC_NAMES.toolCallsTotal,
 						"test-org",
 						"test-user-123",
-					],
-					blobs: expect.arrayContaining([
 						"ping",
 						"success",
-						"mcp",
 						"backwards-compatibility-default",
 						"pinned",
 						"2025-01-01",
@@ -369,13 +367,14 @@ describe("MCP Server", () => {
 			);
 			expect(toolDuration).toEqual(
 				expect.objectContaining({
-					indexes: [
+					indexes: ["test-org"],
+					blobs: expect.arrayContaining([
 						ANALYTICS_ENGINE_SCHEMA_VERSION,
 						"tool",
 						METRIC_NAMES.toolDurationMs,
 						"test-org",
 						"test-user-123",
-					],
+					]),
 				}),
 			);
 		});

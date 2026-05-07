@@ -249,6 +249,7 @@ describe("thoughtspot-service", () => {
 			});
 			recorder.setAnalyticsContext({
 				apiRequestedVersion: "latest",
+				analyticalSessionId: "conv-123",
 			});
 			recorder.setEventIdentity({
 				tenantId: "org-123",
@@ -287,6 +288,7 @@ describe("thoughtspot-service", () => {
 				},
 				analyticsContext: {
 					apiRequestedVersion: "latest",
+					analyticalSessionId: "conv-123",
 				},
 				eventIdentity: {
 					tenantId: "org-123",
@@ -313,20 +315,20 @@ describe("thoughtspot-service", () => {
 			expect(
 				dataPoints.some(
 					(dataPoint) =>
-						dataPoint.indexes?.[2] === METRIC_NAMES.upstreamCallsTotal &&
+						dataPoint.blobs?.[2] === METRIC_NAMES.upstreamCallsTotal &&
 						dataPoint.blobs?.includes(
 							"send_agent_conversation_message_streaming",
 						) &&
 						dataPoint.blobs?.includes("latest") &&
-						dataPoint.indexes?.[3] === "org-123" &&
-						dataPoint.indexes?.[4] === "user-123",
+						dataPoint.blobs?.includes("conv-123") &&
+						dataPoint.indexes?.[0] === "org-123" &&
+						dataPoint.blobs?.includes("user-123"),
 				),
 			).toBe(true);
 			expect(
 				dataPoints.some(
 					(dataPoint) =>
-						dataPoint.indexes?.[2] ===
-							METRIC_NAMES.upstreamStreamsStartedTotal &&
+						dataPoint.blobs?.[2] === METRIC_NAMES.upstreamStreamsStartedTotal &&
 						dataPoint.blobs?.includes(
 							"send_agent_conversation_message_streaming",
 						),
@@ -335,13 +337,12 @@ describe("thoughtspot-service", () => {
 			expect(
 				dataPoints.some(
 					(dataPoint) =>
-						dataPoint.indexes?.[2] ===
-							METRIC_NAMES.upstreamStreamMessagesTotal &&
+						dataPoint.blobs?.[2] === METRIC_NAMES.upstreamStreamMessagesTotal &&
 						dataPoint.blobs?.includes(
 							"send_agent_conversation_message_streaming",
 						) &&
 						dataPoint.blobs?.includes("text") &&
-						dataPoint.blobs?.includes("false"),
+						dataPoint.blobs?.includes("conv-123"),
 				),
 			).toBe(true);
 
@@ -388,7 +389,7 @@ describe("thoughtspot-service", () => {
 			expect(
 				dataPoints.some(
 					(dataPoint) =>
-						dataPoint.indexes?.[2] === METRIC_NAMES.upstreamCallsTotal &&
+						dataPoint.blobs?.[2] === METRIC_NAMES.upstreamCallsTotal &&
 						dataPoint.blobs?.includes(
 							"send_agent_conversation_message_streaming",
 						) &&
@@ -398,7 +399,7 @@ describe("thoughtspot-service", () => {
 			expect(
 				dataPoints.some(
 					(dataPoint) =>
-						dataPoint.indexes?.[2] === METRIC_NAMES.upstreamStreamsStartedTotal,
+						dataPoint.blobs?.[2] === METRIC_NAMES.upstreamStreamsStartedTotal,
 				),
 			).toBe(false);
 		});

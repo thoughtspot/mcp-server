@@ -1,11 +1,11 @@
 import {
-	APPROVED_METRIC_LABEL_KEYS,
 	METRIC_NAMES,
 	type MetricLabels,
 	type MetricName,
 } from "./metric-types";
 import type {
 	MetricAnalyticsContext,
+	MetricEventIdentity,
 	MetricObservation,
 	MetricResourceAttributes,
 	MetricsFlushPayload,
@@ -23,28 +23,42 @@ export type AnalyticsEngineDatasetLike = {
 };
 
 export const ANALYTICS_ENGINE_SCHEMA_VERSION = "mcp_metrics_v2";
+const ANALYTICS_ENGINE_FALLBACK_INDEX = "shared";
 
-export const ANALYTICS_ENGINE_INDEX_FIELDS = [
-	"schema_version",
-	"event_family",
-	"metric_name",
-	"tenant_id",
-	"user_id",
+// Cloudflare Analytics Engine allows one sampling index and up to 20 blobs. This
+// schema is intentionally AE-specific instead of mirroring every approved metric
+// label, so we can keep tenant/user + version + tool/upstream context together
+// without exceeding those limits.
+export const ANALYTICS_ENGINE_INDEX_FIELDS = ["tenant_id"] as const;
+
+export const ANALYTICS_ENGINE_IDENTITY_BLOB_FIELDS = [
+	["tenant_id", "tenantId"],
+	["user_id", "userId"],
+] as const satisfies readonly (readonly [string, keyof MetricEventIdentity])[];
+
+export const ANALYTICS_ENGINE_LABEL_FIELDS = [
+	"route_group",
+	"auth_mode",
+	"api_version",
+	"api_version_mode",
+	"api_release_date",
+	"outcome",
+	"status_class",
+	"tool_name",
+	"upstream_operation",
+	"message_type",
+	"is_done",
 ] as const;
-
-export const ANALYTICS_ENGINE_LABEL_FIELDS = APPROVED_METRIC_LABEL_KEYS;
 
 export const ANALYTICS_ENGINE_CONTEXT_FIELDS = [
 	["api_requested_version", "apiRequestedVersion"],
+	["analytical_session_id", "analyticalSessionId"],
 ] as const satisfies readonly (readonly [
 	string,
 	keyof MetricAnalyticsContext,
 ])[];
 
 export const ANALYTICS_ENGINE_RESOURCE_ATTRIBUTE_FIELDS = [
-	["deployment_environment", "deployment.environment"],
-	["service_name", "service.name"],
-	["service_namespace", "service.namespace"],
 	["service_version", "service.version"],
 ] as const satisfies readonly (readonly [
 	string,
@@ -52,7 +66,11 @@ export const ANALYTICS_ENGINE_RESOURCE_ATTRIBUTE_FIELDS = [
 ])[];
 
 export const ANALYTICS_ENGINE_BLOB_FIELDS = [
+	"schema_version",
+	"event_family",
+	"metric_name",
 	"metric_kind",
+	...ANALYTICS_ENGINE_IDENTITY_BLOB_FIELDS.map(([field]) => field),
 	...ANALYTICS_ENGINE_LABEL_FIELDS,
 	...ANALYTICS_ENGINE_CONTEXT_FIELDS.map(([field]) => field),
 	...ANALYTICS_ENGINE_RESOURCE_ATTRIBUTE_FIELDS.map(([field]) => field),
@@ -62,11 +80,6 @@ export const ANALYTICS_ENGINE_DOUBLE_FIELDS = [
 	"metric_value",
 	"timestamp_ms",
 ] as const;
-
-type AnalyticsEngineIdentity = {
-	tenantId?: string;
-	userId?: string;
-};
 
 type AnalyticsEngineMetricFamily =
 	| "analysis"
@@ -94,6 +107,13 @@ function getResourceAttribute(
 	key: keyof MetricResourceAttributes,
 ): string | null {
 	return nullableString(resourceAttributes[key]);
+}
+
+function getEventIdentityField(
+	identity: MetricEventIdentity,
+	key: keyof MetricEventIdentity,
+): string | null {
+	return nullableString(identity[key]);
 }
 
 function getAnalyticsContextField(
@@ -155,18 +175,20 @@ export function toAnalyticsEngineDataPoint(
 	observation: MetricObservation,
 	resourceAttributes: MetricResourceAttributes,
 	analyticsContext: MetricAnalyticsContext = {},
-	identity: AnalyticsEngineIdentity = {},
+	identity: MetricEventIdentity = {},
 ): AnalyticsEngineDataPointLike {
 	return {
 		indexes: [
+			nullableString(identity.tenantId) ?? ANALYTICS_ENGINE_FALLBACK_INDEX,
+		],
+		blobs: [
 			ANALYTICS_ENGINE_SCHEMA_VERSION,
 			getAnalyticsEngineMetricFamily(observation.name),
 			observation.name,
-			nullableString(identity.tenantId),
-			nullableString(identity.userId),
-		],
-		blobs: [
 			observation.kind,
+			...ANALYTICS_ENGINE_IDENTITY_BLOB_FIELDS.map(([, key]) =>
+				getEventIdentityField(identity, key),
+			),
 			...ANALYTICS_ENGINE_LABEL_FIELDS.map((key) =>
 				getLabel(observation.labels, key),
 			),
