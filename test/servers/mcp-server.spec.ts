@@ -1,10 +1,12 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
 import { connect } from "mcp-testing-kit";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { MixpanelTracker } from "../../src/metrics/mixpanel/mixpanel";
+import { ANALYTICS_ENGINE_SCHEMA_VERSION } from "../../src/metrics/runtime/analytics-engine-sink";
+import { METRIC_NAMES } from "../../src/metrics/runtime/metric-types";
 import { MCPServer } from "../../src/servers/mcp-server";
+import { StreamingMessagesStorageWithTtl } from "../../src/streaming-message-storage-with-ttl/streaming-message-storage-with-ttl";
 import * as thoughtspotClient from "../../src/thoughtspot/thoughtspot-client";
 import { ThoughtSpotService } from "../../src/thoughtspot/thoughtspot-service";
-import { MixpanelTracker } from "../../src/metrics/mixpanel/mixpanel";
-import { StreamingMessagesStorageWithTtl } from "../../src/streaming-message-storage-with-ttl/streaming-message-storage-with-ttl";
 
 // Mock the MixpanelTracker
 vi.mock("../../src/metrics/mixpanel/mixpanel", () => ({
@@ -298,6 +300,84 @@ describe("MCP Server", () => {
 
 			expect(result.isError).toBeUndefined();
 			expect((result.content as any[])[0].text).toBe("Pong");
+		});
+
+		it("writes tenant-scoped tool metrics without blocking the tool response", async () => {
+			const analyticsDataset = {
+				writeDataPoint: vi.fn(),
+			};
+			const waitUntilPromises: Promise<void>[] = [];
+			const metricsServer = new MCPServer(
+				{
+					props: {
+						...mockProps,
+						apiVersion: "2025-03-01",
+						apiRequestedVersion: "2025-03-01",
+						apiVersionMode: "pinned",
+					},
+					env: {
+						METRICS_SINK_MODE: "analytics_engine",
+						ANALYTICS: analyticsDataset,
+					} as any,
+					ctx: {
+						waitUntil(promise: Promise<void>) {
+							waitUntilPromises.push(promise);
+						},
+					} as any,
+				},
+				new StreamingMessagesStorageWithTtl(null as any, vi.fn(), vi.fn()),
+			);
+			await metricsServer.init();
+
+			const { callTool } = connect(metricsServer);
+			const result = await callTool("ping", {});
+
+			expect(result.isError).toBeUndefined();
+			expect(waitUntilPromises).toHaveLength(1);
+
+			await Promise.all(waitUntilPromises);
+
+			const dataPoints = analyticsDataset.writeDataPoint.mock.calls.map(
+				([dataPoint]) => dataPoint,
+			);
+			const toolCallCounter = dataPoints.find(
+				(dataPoint) => dataPoint.indexes?.[2] === METRIC_NAMES.toolCallsTotal,
+			);
+			const toolDuration = dataPoints.find(
+				(dataPoint) => dataPoint.indexes?.[2] === METRIC_NAMES.toolDurationMs,
+			);
+
+			expect(toolCallCounter).toEqual(
+				expect.objectContaining({
+					indexes: [
+						ANALYTICS_ENGINE_SCHEMA_VERSION,
+						"tool",
+						METRIC_NAMES.toolCallsTotal,
+						"test-org",
+						"test-user-123",
+					],
+					blobs: expect.arrayContaining([
+						"ping",
+						"success",
+						"mcp",
+						"backwards-compatibility-default",
+						"pinned",
+						"2025-01-01",
+						"2025-03-01",
+					]),
+				}),
+			);
+			expect(toolDuration).toEqual(
+				expect.objectContaining({
+					indexes: [
+						ANALYTICS_ENGINE_SCHEMA_VERSION,
+						"tool",
+						METRIC_NAMES.toolDurationMs,
+						"test-org",
+						"test-user-123",
+					],
+				}),
+			);
 		});
 	});
 

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	ANALYTICS_ENGINE_BLOB_FIELDS,
+	ANALYTICS_ENGINE_CONTEXT_FIELDS,
 	ANALYTICS_ENGINE_DOUBLE_FIELDS,
 	ANALYTICS_ENGINE_INDEX_FIELDS,
 	ANALYTICS_ENGINE_LABEL_FIELDS,
@@ -59,9 +60,12 @@ describe("AnalyticsEngineMetricsSink", () => {
 			"oauth",
 			"mcp",
 			null,
+			null,
+			null,
 			"success",
 			null,
 			"create_liveboard",
+			null,
 			null,
 			null,
 			null,
@@ -97,6 +101,9 @@ describe("AnalyticsEngineMetricsSink", () => {
 
 	it("keeps the Analytics Engine schema aligned with approved labels and resource attributes", () => {
 		expect(ANALYTICS_ENGINE_LABEL_FIELDS).toEqual(APPROVED_METRIC_LABEL_KEYS);
+		expect(ANALYTICS_ENGINE_CONTEXT_FIELDS).toEqual([
+			["api_requested_version", "apiRequestedVersion"],
+		]);
 		expect(ANALYTICS_ENGINE_RESOURCE_ATTRIBUTE_FIELDS).toEqual([
 			["deployment_environment", "deployment.environment"],
 			["service_name", "service.name"],
@@ -113,6 +120,7 @@ describe("AnalyticsEngineMetricsSink", () => {
 		expect(ANALYTICS_ENGINE_BLOB_FIELDS).toEqual([
 			"metric_kind",
 			...APPROVED_METRIC_LABEL_KEYS,
+			"api_requested_version",
 			"deployment_environment",
 			"service_name",
 			"service_namespace",
@@ -172,6 +180,25 @@ describe("AnalyticsEngineMetricsSink", () => {
 					"tenant-123",
 					"user-456",
 				],
+			}),
+		);
+	});
+
+	it("maps analytics context into Analytics Engine blobs", async () => {
+		const dataset = { writeDataPoint: vi.fn() };
+		const sink = new AnalyticsEngineMetricsSink(dataset);
+
+		await sink.flush({
+			observations: [observation],
+			resourceAttributes: {},
+			analyticsContext: {
+				apiRequestedVersion: "2026-10-01",
+			},
+		});
+
+		expect(dataset.writeDataPoint).toHaveBeenCalledWith(
+			expect.objectContaining({
+				blobs: expect.arrayContaining(["2026-10-01"]),
 			}),
 		);
 	});

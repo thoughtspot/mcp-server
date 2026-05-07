@@ -1,4 +1,31 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+const tracingState = vi.hoisted(() => ({
+	span: undefined as
+		| {
+				setAttribute: ReturnType<typeof vi.fn>;
+				setAttributes: ReturnType<typeof vi.fn>;
+				setStatus: ReturnType<typeof vi.fn>;
+		  }
+		| undefined,
+}));
+
+vi.mock("../src/metrics/tracing/tracing-utils", () => ({
+	withSpan: async (_name: string, fn: (span: any) => Promise<unknown>) => {
+		const span = {
+			setAttribute: vi.fn(),
+			setAttributes: vi.fn(),
+			setStatus: vi.fn(),
+		};
+		tracingState.span = span;
+		return fn(span);
+	},
+}));
+
+import { METRIC_NAMES } from "../src/metrics/runtime/metric-types";
+import {
+	type MetricsRecorder,
+	NOOP_METRICS_RECORDER,
+} from "../src/metrics/runtime/metrics-recorder";
 import { processSendAgentConversationMessageStreamingResponse } from "../src/streaming-utils";
 
 // Helper to build a ReadableStreamDefaultReader from an array of string chunks
@@ -35,6 +62,7 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 
 	beforeEach(() => {
 		vi.clearAllMocks();
+		tracingState.span = undefined;
 		consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 		consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 	});
@@ -82,6 +110,34 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 			CONV_ID,
 			[],
 			true,
+		);
+	});
+
+	it("records upstream operation on stream message metrics", async () => {
+		const storage = makeMockStorage();
+		const recorder: MetricsRecorder = {
+			...NOOP_METRICS_RECORDER,
+			count: vi.fn(),
+		};
+		const line = `data: ${JSON.stringify([{ type: "text", content: "Hello world", metadata: {} }])}\n`;
+		const reader = makeReader([line]);
+
+		await processSendAgentConversationMessageStreamingResponse(
+			CONV_ID,
+			reader,
+			storage.appendMessages,
+			INSTANCE_URL,
+			recorder,
+		);
+
+		expect(recorder.count).toHaveBeenCalledWith(
+			METRIC_NAMES.upstreamStreamMessagesTotal,
+			1,
+			expect.objectContaining({
+				upstream_operation: "send_agent_conversation_message_streaming",
+				message_type: "text",
+				is_thinking: false,
+			}),
 		);
 	});
 
@@ -235,6 +291,26 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		expect(storage.appendMessagesAndRestartTtl).toHaveBeenCalledWith(CONV_ID, [
 			{ is_thinking: false, type: "text", text: "Something went wrong" },
 		]);
+	});
+
+	it("does not count error events as parsed text messages", async () => {
+		const storage = makeMockStorage();
+		const line = `data: ${JSON.stringify([{ type: "error", display_message: "Something went wrong" }])}\n`;
+		const reader = makeReader([line]);
+
+		await processSendAgentConversationMessageStreamingResponse(
+			CONV_ID,
+			reader,
+			storage.appendMessages,
+			INSTANCE_URL,
+		);
+
+		expect(tracingState.span?.setAttributes).toHaveBeenCalledWith({
+			total_messages_parsed: 0,
+			total_text_messages_parsed: 0,
+			total_answer_messages_parsed: 0,
+			total_messages_ignored: 0,
+		});
 	});
 
 	it("ignores ack, notification, search_datasets, file, and conv_title events", async () => {

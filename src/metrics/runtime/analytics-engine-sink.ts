@@ -5,6 +5,7 @@ import {
 	type MetricName,
 } from "./metric-types";
 import type {
+	MetricAnalyticsContext,
 	MetricObservation,
 	MetricResourceAttributes,
 	MetricsFlushPayload,
@@ -21,7 +22,7 @@ export type AnalyticsEngineDatasetLike = {
 	writeDataPoint(event?: AnalyticsEngineDataPointLike): void;
 };
 
-export const ANALYTICS_ENGINE_SCHEMA_VERSION = "mcp_metrics_v1";
+export const ANALYTICS_ENGINE_SCHEMA_VERSION = "mcp_metrics_v2";
 
 export const ANALYTICS_ENGINE_INDEX_FIELDS = [
 	"schema_version",
@@ -32,6 +33,13 @@ export const ANALYTICS_ENGINE_INDEX_FIELDS = [
 ] as const;
 
 export const ANALYTICS_ENGINE_LABEL_FIELDS = APPROVED_METRIC_LABEL_KEYS;
+
+export const ANALYTICS_ENGINE_CONTEXT_FIELDS = [
+	["api_requested_version", "apiRequestedVersion"],
+] as const satisfies readonly (readonly [
+	string,
+	keyof MetricAnalyticsContext,
+])[];
 
 export const ANALYTICS_ENGINE_RESOURCE_ATTRIBUTE_FIELDS = [
 	["deployment_environment", "deployment.environment"],
@@ -46,6 +54,7 @@ export const ANALYTICS_ENGINE_RESOURCE_ATTRIBUTE_FIELDS = [
 export const ANALYTICS_ENGINE_BLOB_FIELDS = [
 	"metric_kind",
 	...ANALYTICS_ENGINE_LABEL_FIELDS,
+	...ANALYTICS_ENGINE_CONTEXT_FIELDS.map(([field]) => field),
 	...ANALYTICS_ENGINE_RESOURCE_ATTRIBUTE_FIELDS.map(([field]) => field),
 ] as const;
 
@@ -85,6 +94,13 @@ function getResourceAttribute(
 	key: keyof MetricResourceAttributes,
 ): string | null {
 	return nullableString(resourceAttributes[key]);
+}
+
+function getAnalyticsContextField(
+	analyticsContext: MetricAnalyticsContext,
+	key: keyof MetricAnalyticsContext,
+): string | null {
+	return nullableString(analyticsContext[key]);
 }
 
 export function getAnalyticsEngineMetricFamily(
@@ -138,6 +154,7 @@ export function getAnalyticsEngineMetricFamily(
 export function toAnalyticsEngineDataPoint(
 	observation: MetricObservation,
 	resourceAttributes: MetricResourceAttributes,
+	analyticsContext: MetricAnalyticsContext = {},
 	identity: AnalyticsEngineIdentity = {},
 ): AnalyticsEngineDataPointLike {
 	return {
@@ -152,6 +169,9 @@ export function toAnalyticsEngineDataPoint(
 			observation.kind,
 			...ANALYTICS_ENGINE_LABEL_FIELDS.map((key) =>
 				getLabel(observation.labels, key),
+			),
+			...ANALYTICS_ENGINE_CONTEXT_FIELDS.map(([, key]) =>
+				getAnalyticsContextField(analyticsContext, key),
 			),
 			...ANALYTICS_ENGINE_RESOURCE_ATTRIBUTE_FIELDS.map(([, key]) =>
 				getResourceAttribute(resourceAttributes, key),
@@ -171,6 +191,7 @@ export class AnalyticsEngineMetricsSink implements MetricsSink {
 					toAnalyticsEngineDataPoint(
 						observation,
 						payload.resourceAttributes,
+						payload.analyticsContext,
 						payload.eventIdentity,
 					),
 				);

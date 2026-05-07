@@ -2,27 +2,34 @@ import type {
 	CallToolRequestSchema,
 	ReadResourceRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
+import { SpanStatusCode, context, trace } from "@opentelemetry/api";
 import type { z } from "zod";
-import { McpServerError } from "../utils";
-import type { DataSource } from "../thoughtspot/thoughtspot-service";
 import { TrackEvent } from "../metrics";
+import type { ApiVersionMode } from "../metrics/runtime/metric-types";
+import type { MetricsRecorder } from "../metrics/runtime/metrics-recorder";
+import type { ToolMetricApiSurface } from "../metrics/runtime/tool-metrics";
 import { WithSpan } from "../metrics/tracing/tracing-utils";
-import { context, SpanStatusCode, trace } from "@opentelemetry/api";
-import { BaseMCPServer, type Context } from "./mcp-server-base";
-import { resolveApiVersion, type VersionConfig } from "./version-registry";
-import {
-	GetRelevantQuestionsSchema,
-	GetAnswerSchema,
-	CreateLiveboardSchema,
-	GetDataSourceSuggestionsSchema,
-	ToolName,
-	CreateAnalysisSessionInputSchema,
-	SendSessionMessageInputSchema,
-	GetSessionUpdatesInputSchema,
-	CreateDashboardInputSchema,
-} from "./tool-definitions";
 import type { StreamingMessagesStorageWithTtl } from "../streaming-message-storage-with-ttl/streaming-message-storage-with-ttl";
+import type { DataSource } from "../thoughtspot/thoughtspot-service";
 import type { Answer, StreamingMessagesState } from "../thoughtspot/types";
+import { McpServerError } from "../utils";
+import { BaseMCPServer, type Context } from "./mcp-server-base";
+import {
+	CreateAnalysisSessionInputSchema,
+	CreateDashboardInputSchema,
+	CreateLiveboardSchema,
+	GetAnswerSchema,
+	GetDataSourceSuggestionsSchema,
+	GetRelevantQuestionsSchema,
+	GetSessionUpdatesInputSchema,
+	SendSessionMessageInputSchema,
+	ToolName,
+} from "./tool-definitions";
+import {
+	type VersionConfig,
+	resolveApiVersion,
+	resolveApiVersionMetrics,
+} from "./version-registry";
 
 export class MCPServer extends BaseMCPServer {
 	constructor(
@@ -30,6 +37,64 @@ export class MCPServer extends BaseMCPServer {
 		private streamingMessageStorage: StreamingMessagesStorageWithTtl,
 	) {
 		super(ctx, "ThoughtSpot", "2.0.0");
+	}
+
+	protected getToolMetricApiSurface(): ToolMetricApiSurface {
+		return "mcp";
+	}
+
+	protected getToolMetricApiVersionLabel(): string | undefined {
+		const apiVersion = this.ctx.props.apiVersion;
+		if (typeof apiVersion !== "string" || apiVersion.length === 0) {
+			return "backwards-compatibility-default";
+		}
+
+		try {
+			return resolveApiVersionMetrics(apiVersion).apiVersion;
+		} catch {
+			return "unknown";
+		}
+	}
+
+	protected getToolMetricApiVersionModeLabel(): ApiVersionMode | undefined {
+		const apiVersionMode = this.ctx.props.apiVersionMode;
+		if (typeof apiVersionMode === "string" && apiVersionMode.length > 0) {
+			return apiVersionMode;
+		}
+
+		const apiVersion = this.ctx.props.apiVersion;
+		if (typeof apiVersion === "string" && apiVersion.length > 0) {
+			try {
+				const resolved = resolveApiVersionMetrics(apiVersion);
+				if (resolved.apiVersion === "backwards-compatibility-default") {
+					return "implicit_legacy";
+				}
+				if (resolved.apiVersion === "latest") {
+					return "implicit_latest";
+				}
+				if (resolved.apiVersion === "beta") {
+					return "beta";
+				}
+			} catch {
+				return "unknown";
+			}
+		}
+
+		return "implicit_legacy";
+	}
+
+	protected getToolMetricApiReleaseDateLabel(): string | undefined {
+		const apiVersion = this.ctx.props.apiVersion;
+		if (typeof apiVersion !== "string" || apiVersion.length === 0) {
+			return resolveApiVersionMetrics("backwards-compatibility-default")
+				.apiReleaseDate;
+		}
+
+		try {
+			return resolveApiVersionMetrics(apiVersion).apiReleaseDate;
+		} catch {
+			return undefined;
+		}
 	}
 
 	@WithSpan("call-list-tools")
@@ -45,7 +110,10 @@ export class MCPServer extends BaseMCPServer {
 		try {
 			versionConfig = resolveApiVersion(this.ctx.props.apiVersion);
 		} catch (error) {
-			console.error("Error resolving API version, using default:", error);
+			console.error(
+				"Error resolving API version, using latest fallback:",
+				error,
+			);
 			span?.recordException(error as Error);
 			versionConfig = resolveApiVersion();
 		}
@@ -114,7 +182,10 @@ export class MCPServer extends BaseMCPServer {
 		};
 	}
 
-	protected async callTool(request: z.infer<typeof CallToolRequestSchema>) {
+	protected async callTool(
+		request: z.infer<typeof CallToolRequestSchema>,
+		recorder: MetricsRecorder,
+	) {
 		const { name } = request.params;
 		this.trackers.track(TrackEvent.CallTool, { toolName: name });
 
@@ -127,19 +198,19 @@ export class MCPServer extends BaseMCPServer {
 			}
 
 			case ToolName.GetRelevantQuestions: {
-				return this.callGetRelevantQuestions(request);
+				return this.callGetRelevantQuestions(request, recorder);
 			}
 
 			case ToolName.GetAnswer: {
-				return this.callGetAnswer(request);
+				return this.callGetAnswer(request, recorder);
 			}
 
 			case ToolName.CreateLiveboard: {
-				return this.callCreateLiveboard(request);
+				return this.callCreateLiveboard(request, recorder);
 			}
 
 			case ToolName.GetDataSourceSuggestions: {
-				return this.callGetDataSourceSuggestions(request);
+				return this.callGetDataSourceSuggestions(request, recorder);
 			}
 
 			case ToolName.CheckConnectivity: {
@@ -156,19 +227,19 @@ export class MCPServer extends BaseMCPServer {
 			}
 
 			case ToolName.CreateAnalysisSession: {
-				return this.callCreateAnalysisSession(request);
+				return this.callCreateAnalysisSession(request, recorder);
 			}
 
 			case ToolName.SendSessionMessage: {
-				return this.callSendSessionMessage(request);
+				return this.callSendSessionMessage(request, recorder);
 			}
 
 			case ToolName.GetSessionUpdates: {
-				return this.callGetSessionUpdates(request);
+				return this.callGetSessionUpdates(request, recorder);
 			}
 
 			case ToolName.CreateDashboard: {
-				return this.callCreateDashboard(request);
+				return this.callCreateDashboard(request, recorder);
 			}
 
 			default:
@@ -179,6 +250,7 @@ export class MCPServer extends BaseMCPServer {
 	@WithSpan("call-get-relevant-questions")
 	async callGetRelevantQuestions(
 		request: z.infer<typeof CallToolRequestSchema>,
+		recorder: MetricsRecorder,
 	) {
 		const {
 			query,
@@ -190,12 +262,9 @@ export class MCPServer extends BaseMCPServer {
 			sourceIds,
 		);
 
-		const relevantQuestions =
-			await this.getThoughtSpotService().getRelevantQuestions(
-				query,
-				sourceIds!,
-				additionalContext ?? "",
-			);
+		const relevantQuestions = await this.getThoughtSpotService(
+			recorder,
+		).getRelevantQuestions(query, sourceIds!, additionalContext ?? "");
 
 		if (relevantQuestions.error) {
 			console.error(
@@ -235,16 +304,17 @@ export class MCPServer extends BaseMCPServer {
 	}
 
 	@WithSpan("call-get-answer")
-	async callGetAnswer(request: z.infer<typeof CallToolRequestSchema>) {
+	async callGetAnswer(
+		request: z.infer<typeof CallToolRequestSchema>,
+		recorder: MetricsRecorder,
+	) {
 		const { question, datasourceId: sourceId } = GetAnswerSchema.parse(
 			request.params.arguments,
 		);
 
-		const answer = await this.getThoughtSpotService().getAnswerForQuestion(
-			question,
-			sourceId,
-			false,
-		);
+		const answer = await this.getThoughtSpotService(
+			recorder,
+		).getAnswerForQuestion(question, sourceId, false);
 
 		if (answer.error) {
 			return this.createErrorResponse(
@@ -268,7 +338,10 @@ export class MCPServer extends BaseMCPServer {
 	}
 
 	@WithSpan("call-create-liveboard")
-	async callCreateLiveboard(request: z.infer<typeof CallToolRequestSchema>) {
+	async callCreateLiveboard(
+		request: z.infer<typeof CallToolRequestSchema>,
+		recorder: MetricsRecorder,
+	) {
 		const { name, answers, noteTile } = CreateLiveboardSchema.parse(
 			request.params.arguments,
 		);
@@ -277,12 +350,9 @@ export class MCPServer extends BaseMCPServer {
 			session_identifier: answer.session_identifier,
 			generation_number: answer.generation_number,
 		}));
-		const liveboard =
-			await this.getThoughtSpotService().fetchTMLAndCreateLiveboard(
-				name,
-				transformedAnswers,
-				noteTile,
-			);
+		const liveboard = await this.getThoughtSpotService(
+			recorder,
+		).fetchTMLAndCreateLiveboard(name, transformedAnswers, noteTile);
 
 		if (liveboard.error) {
 			return this.createErrorResponse(
@@ -304,6 +374,7 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 	@WithSpan("call-create-analysis-session")
 	async callCreateAnalysisSession(
 		request: z.infer<typeof CallToolRequestSchema>,
+		recorder: MetricsRecorder,
 	) {
 		const span = trace.getSpan(context.active());
 		const { data_source_id } = CreateAnalysisSessionInputSchema.parse(
@@ -312,7 +383,7 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		span?.setAttribute("data_source_id", data_source_id ?? "(none)");
 
 		const response =
-			await this.getThoughtSpotService().createAgentConversation(
+			await this.getThoughtSpotService(recorder).createAgentConversation(
 				data_source_id,
 			);
 		span?.setAttribute("analytical_session_id", response.conversation_id);
@@ -327,7 +398,10 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 	}
 
 	@WithSpan("call-send-session-message")
-	async callSendSessionMessage(request: z.infer<typeof CallToolRequestSchema>) {
+	async callSendSessionMessage(
+		request: z.infer<typeof CallToolRequestSchema>,
+		recorder: MetricsRecorder,
+	) {
 		const span = trace.getSpan(context.active());
 		const { analytical_session_id, message, additional_context } =
 			SendSessionMessageInputSchema.parse(request.params.arguments);
@@ -350,7 +424,9 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			);
 		}
 
-		await this.getThoughtSpotService().sendAgentConversationMessageStreaming(
+		await this.getThoughtSpotService(
+			recorder,
+		).sendAgentConversationMessageStreaming(
 			analytical_session_id,
 			message,
 			storageService.appendMessages.bind(storageService),
@@ -364,7 +440,10 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 	}
 
 	@WithSpan("call-get-session-updates")
-	async callGetSessionUpdates(request: z.infer<typeof CallToolRequestSchema>) {
+	async callGetSessionUpdates(
+		request: z.infer<typeof CallToolRequestSchema>,
+		_recorder: MetricsRecorder,
+	) {
 		const span = trace.getSpan(context.active());
 		const { analytical_session_id } = GetSessionUpdatesInputSchema.parse(
 			request.params.arguments,
@@ -421,7 +500,10 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 	}
 
 	@WithSpan("call-create-dashboard")
-	async callCreateDashboard(request: z.infer<typeof CallToolRequestSchema>) {
+	async callCreateDashboard(
+		request: z.infer<typeof CallToolRequestSchema>,
+		recorder: MetricsRecorder,
+	) {
 		const span = trace.getSpan(context.active());
 		const { title, answers, note_tile } = CreateDashboardInputSchema.parse(
 			request.params.arguments,
@@ -448,12 +530,9 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			);
 		}
 
-		const liveboard =
-			await this.getThoughtSpotService().fetchTMLAndCreateLiveboard(
-				title,
-				transformedAnswers,
-				note_tile,
-			);
+		const liveboard = await this.getThoughtSpotService(
+			recorder,
+		).fetchTMLAndCreateLiveboard(title, transformedAnswers, note_tile);
 
 		if (liveboard.error) {
 			return this.createErrorResponse(
@@ -473,12 +552,15 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 	@WithSpan("call-get-data-source-suggestions")
 	async callGetDataSourceSuggestions(
 		request: z.infer<typeof CallToolRequestSchema>,
+		recorder: MetricsRecorder,
 	) {
 		const { query } = GetDataSourceSuggestionsSchema.parse(
 			request.params.arguments,
 		);
 		const dataSources =
-			await this.getThoughtSpotService().getDataSourceSuggestions(query);
+			await this.getThoughtSpotService(recorder).getDataSourceSuggestions(
+				query,
+			);
 
 		if (!dataSources || dataSources.length === 0) {
 			return this.createErrorResponse(
@@ -506,12 +588,12 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 	} | null = null;
 
 	@WithSpan("get-datasources")
-	async getDatasources() {
+	async getDatasources(recorder?: MetricsRecorder) {
 		if (this._sources) {
 			return this._sources;
 		}
 
-		const sources = await this.getThoughtSpotService().getDataSources();
+		const sources = await this.getThoughtSpotService(recorder).getDataSources();
 		this._sources = {
 			list: sources,
 			map: new Map(sources.map((s) => [s.id, s])),

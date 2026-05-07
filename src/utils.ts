@@ -1,4 +1,5 @@
 import { type Span, SpanStatusCode } from "@opentelemetry/api";
+import type { ApiVersionMode } from "./metrics/runtime/metric-types";
 import { getActiveSpan } from "./metrics/tracing/tracing-utils";
 
 export type Props = {
@@ -9,7 +10,9 @@ export type Props = {
 		clientName: string;
 		registrationDate: number;
 	};
-	apiVersion?: "beta";
+	apiVersion?: string;
+	apiVersionMode?: ApiVersionMode;
+	apiRequestedVersion?: string;
 };
 
 export class McpServerError extends Error {

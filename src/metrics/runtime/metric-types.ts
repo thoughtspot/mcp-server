@@ -92,6 +92,8 @@ export const APPROVED_METRIC_LABEL_KEYS = [
 	"auth_mode",
 	"api_surface",
 	"api_version",
+	"api_version_mode",
+	"api_release_date",
 	"outcome",
 	"status_class",
 	"tool_name",
@@ -161,6 +163,14 @@ export type RouteGroup =
 export type Transport = "mcp" | "sse" | "http" | "unknown";
 export type AuthMode = "oauth" | "bearer" | "token" | "none" | "unknown";
 export type ApiSurface = "mcp" | "oauth" | "static" | "unknown";
+export type ApiVersionMode =
+	| "implicit_legacy"
+	| "implicit_latest"
+	| "explicit_legacy"
+	| "explicit_latest"
+	| "pinned"
+	| "beta"
+	| "unknown";
 export type StatusClass = "1xx" | "2xx" | "3xx" | "4xx" | "5xx" | "unknown";
 
 function warnOnInvalidMetricLabel(key: string, reason: string) {
