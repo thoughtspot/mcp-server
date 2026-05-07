@@ -1,5 +1,5 @@
 import { connect } from "mcp-testing-kit";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MixpanelTracker } from "../../src/metrics/mixpanel/mixpanel";
 import { ANALYTICS_ENGINE_SCHEMA_VERSION } from "../../src/metrics/runtime/analytics-engine-sink";
 import { METRIC_NAMES } from "../../src/metrics/runtime/metric-types";
@@ -1321,6 +1321,385 @@ describe("MCP Server", () => {
 			// Second call should use cached data
 			await listResources();
 			expect(mockClientInstance.searchMetadata).toHaveBeenCalledTimes(1);
+		});
+	});
+
+	describe("Send Session Message Tool", () => {
+		let mockStorageService: {
+			initializeConversation: ReturnType<typeof vi.fn>;
+			appendMessages: ReturnType<typeof vi.fn>;
+			getNewMessages: ReturnType<typeof vi.fn>;
+		};
+		let mockSendAgentConversationMessageStreaming: ReturnType<typeof vi.fn>;
+
+		beforeEach(() => {
+			mockStorageService = {
+				initializeConversation: vi.fn().mockResolvedValue(undefined),
+				appendMessages: vi.fn().mockResolvedValue(undefined),
+				getNewMessages: vi
+					.fn()
+					.mockResolvedValue({ messages: [], isDone: true }),
+			};
+			vi.spyOn(server as any, "getStorageService").mockReturnValue(
+				mockStorageService,
+			);
+
+			mockSendAgentConversationMessageStreaming = vi
+				.spyOn(
+					ThoughtSpotService.prototype,
+					"sendAgentConversationMessageStreaming",
+				)
+				.mockResolvedValue(undefined) as unknown as ReturnType<typeof vi.fn>;
+		});
+
+		it("should send a message and return success", async () => {
+			await server.init();
+			const { callTool } = connect(server);
+
+			const result = await callTool("send_session_message", {
+				analytical_session_id: "conv-abc-123",
+				message: "What is the total revenue?",
+			});
+
+			expect(result.isError).toBeUndefined();
+			expect((result.structuredContent as any).success).toBe(true);
+			expect(mockStorageService.initializeConversation).toHaveBeenCalledWith(
+				"conv-abc-123",
+			);
+			expect(mockSendAgentConversationMessageStreaming).toHaveBeenCalledWith(
+				"conv-abc-123",
+				"What is the total revenue?",
+				expect.any(Function),
+				undefined,
+			);
+		});
+
+		it("should pass additional_context to the service", async () => {
+			await server.init();
+			const { callTool } = connect(server);
+
+			await callTool("send_session_message", {
+				analytical_session_id: "conv-abc-123",
+				message: "Compare revenue by region",
+				additional_context: "The user is focused on North America",
+			});
+
+			expect(mockSendAgentConversationMessageStreaming).toHaveBeenCalledWith(
+				"conv-abc-123",
+				"Compare revenue by region",
+				expect.any(Function),
+				"The user is focused on North America",
+			);
+		});
+
+		it("should return error when conversation is already in progress", async () => {
+			mockStorageService.initializeConversation.mockRejectedValue(
+				new Error("Conversation already exists and is not marked done"),
+			);
+
+			await server.init();
+			const { callTool } = connect(server);
+
+			const result = await callTool("send_session_message", {
+				analytical_session_id: "conv-abc-123",
+				message: "Follow-up question",
+			});
+
+			expect(result.isError).toBe(true);
+			expect((result.content as any[])[0].text).toContain(
+				"ERROR: The analytical session has an ongoing response",
+			);
+		});
+	});
+
+	describe("Get Session Updates Tool", () => {
+		let mockStorageService: {
+			initializeConversation: ReturnType<typeof vi.fn>;
+			appendMessages: ReturnType<typeof vi.fn>;
+			getNewMessages: ReturnType<typeof vi.fn>;
+		};
+
+		beforeEach(() => {
+			vi.useFakeTimers();
+			mockStorageService = {
+				initializeConversation: vi.fn().mockResolvedValue(undefined),
+				appendMessages: vi.fn().mockResolvedValue(undefined),
+				getNewMessages: vi
+					.fn()
+					.mockResolvedValue({ messages: [], isDone: true }),
+			};
+			vi.spyOn(server as any, "getStorageService").mockReturnValue(
+				mockStorageService,
+			);
+		});
+
+		afterEach(() => {
+			vi.useRealTimers();
+		});
+
+		it("should return session updates when done", async () => {
+			const messages = [
+				{
+					type: "text" as const,
+					is_thinking: false,
+					text: "The total revenue is $1,000,000",
+				},
+			];
+			mockStorageService.getNewMessages.mockResolvedValue({
+				messages,
+				isDone: true,
+			});
+
+			await server.init();
+			const { callTool } = connect(server);
+
+			const result = await callTool("get_session_updates", {
+				analytical_session_id: "conv-abc-123",
+			});
+
+			expect(result.isError).toBeUndefined();
+			expect((result.structuredContent as any).is_done).toBe(true);
+			expect((result.structuredContent as any).session_updates).toEqual(
+				messages,
+			);
+		});
+
+		it("should return empty updates when not done and no messages", async () => {
+			mockStorageService.getNewMessages.mockResolvedValue({
+				messages: [],
+				isDone: false,
+			});
+
+			await server.init();
+			const { callTool } = connect(server);
+
+			const resultPromise = callTool("get_session_updates", {
+				analytical_session_id: "conv-abc-123",
+			});
+			await vi.runAllTimersAsync();
+			const result = await resultPromise;
+
+			expect(result.isError).toBeUndefined();
+			expect((result.structuredContent as any).is_done).toBe(false);
+			expect((result.structuredContent as any).session_updates).toEqual([]);
+		});
+
+		it("should accumulate messages across multiple polls", async () => {
+			const firstMessages = [
+				{ type: "text" as const, is_thinking: true, text: "Thinking..." },
+			];
+			const secondMessages = [
+				{
+					type: "text" as const,
+					is_thinking: false,
+					text: "Here is the answer",
+				},
+			];
+
+			mockStorageService.getNewMessages
+				.mockResolvedValueOnce({ messages: firstMessages, isDone: false })
+				.mockResolvedValue({ messages: secondMessages, isDone: true });
+
+			await server.init();
+			const { callTool } = connect(server);
+
+			const resultPromise = callTool("get_session_updates", {
+				analytical_session_id: "conv-abc-123",
+			});
+			await vi.runAllTimersAsync();
+			const result = await resultPromise;
+
+			expect(result.isError).toBeUndefined();
+			expect((result.structuredContent as any).is_done).toBe(true);
+			expect((result.structuredContent as any).session_updates).toEqual([
+				...firstMessages,
+				...secondMessages,
+			]);
+		});
+
+		it("should return answer type updates", async () => {
+			const answerMessage = {
+				type: "answer" as const,
+				is_thinking: false,
+				answer_id: '{"session_id":"sess-123","gen_no":1}',
+				answer_title: "Revenue by Region",
+				answer_query: "revenue by region",
+				iframe_url:
+					"https://test.thoughtspot.cloud/#/embed/answer?sessionId=sess-123",
+			};
+			mockStorageService.getNewMessages.mockResolvedValue({
+				messages: [answerMessage],
+				isDone: true,
+			});
+
+			await server.init();
+			const { callTool } = connect(server);
+
+			const result = await callTool("get_session_updates", {
+				analytical_session_id: "conv-abc-123",
+			});
+
+			expect(result.isError).toBeUndefined();
+			expect((result.structuredContent as any).is_done).toBe(true);
+			expect(
+				(result.structuredContent as any).session_updates[0],
+			).toMatchObject(answerMessage);
+		});
+	});
+
+	describe("Create Dashboard Tool", () => {
+		it("should create dashboard successfully with valid answer_ids", async () => {
+			const mockFetchTMLAndCreateLiveboard = vi
+				.spyOn(ThoughtSpotService.prototype, "fetchTMLAndCreateLiveboard")
+				.mockResolvedValue({
+					url: "https://test.thoughtspot.cloud/#/pinboard/dashboard-456",
+					error: null,
+				});
+
+			await server.init();
+			const { callTool } = connect(server);
+
+			const result = await callTool("create_dashboard", {
+				title: "Revenue Dashboard",
+				note_tile: "<h2>Revenue Analysis</h2><p>Generated on May 5, 2026</p>",
+				answers: [
+					{
+						answer_id: JSON.stringify({ session_id: "sess-123", gen_no: 1 }),
+						title: "Total Revenue",
+					},
+					{
+						answer_id: JSON.stringify({ session_id: "sess-456", gen_no: 2 }),
+						title: "Revenue by Region",
+					},
+				],
+			});
+
+			expect(result.isError).toBeUndefined();
+			expect((result.structuredContent as any).link).toBe(
+				"https://test.thoughtspot.cloud/#/pinboard/dashboard-456",
+			);
+			expect(mockFetchTMLAndCreateLiveboard).toHaveBeenCalledWith(
+				"Revenue Dashboard",
+				[
+					{
+						title: "Total Revenue",
+						session_identifier: "sess-123",
+						generation_number: 1,
+					},
+					{
+						title: "Revenue by Region",
+						session_identifier: "sess-456",
+						generation_number: 2,
+					},
+				],
+				"<h2>Revenue Analysis</h2><p>Generated on May 5, 2026</p>",
+			);
+		});
+
+		it("should return error when answer_id format is invalid", async () => {
+			await server.init();
+			const { callTool } = connect(server);
+
+			const result = await callTool("create_dashboard", {
+				title: "Revenue Dashboard",
+				note_tile: "<p>Summary</p>",
+				answers: [
+					{
+						answer_id: "not-valid-json",
+						title: "Total Revenue",
+					},
+				],
+			});
+
+			expect(result.isError).toBe(true);
+			expect((result.content as any[])[0].text).toContain(
+				"ERROR: Invalid answer_id format",
+			);
+		});
+
+		it("should return error when answer_id is missing session_id or gen_no", async () => {
+			await server.init();
+			const { callTool } = connect(server);
+
+			const result = await callTool("create_dashboard", {
+				title: "Revenue Dashboard",
+				note_tile: "<p>Summary</p>",
+				answers: [
+					{
+						answer_id: JSON.stringify({ foo: "bar" }),
+						title: "Total Revenue",
+					},
+				],
+			});
+
+			expect(result.isError).toBe(true);
+			expect((result.content as any[])[0].text).toContain(
+				"ERROR: Invalid answer_id format",
+			);
+		});
+
+		it("should return error when liveboard creation fails", async () => {
+			vi.spyOn(
+				ThoughtSpotService.prototype,
+				"fetchTMLAndCreateLiveboard",
+			).mockResolvedValue({
+				url: undefined,
+				error: new Error("Failed to import TML"),
+			});
+
+			await server.init();
+			const { callTool } = connect(server);
+
+			const result = await callTool("create_dashboard", {
+				title: "Revenue Dashboard",
+				note_tile: "<p>Summary</p>",
+				answers: [
+					{
+						answer_id: JSON.stringify({ session_id: "sess-123", gen_no: 1 }),
+						title: "Total Revenue",
+					},
+				],
+			});
+
+			expect(result.isError).toBe(true);
+			expect((result.content as any[])[0].text).toContain(
+				"ERROR: Encountered an error while creating the dashboard",
+			);
+		});
+
+		it("should handle a single answer correctly", async () => {
+			const mockFetchTMLAndCreateLiveboard = vi
+				.spyOn(ThoughtSpotService.prototype, "fetchTMLAndCreateLiveboard")
+				.mockResolvedValue({
+					url: "https://test.thoughtspot.cloud/#/pinboard/dashboard-789",
+					error: null,
+				});
+
+			await server.init();
+			const { callTool } = connect(server);
+
+			await callTool("create_dashboard", {
+				title: "Single Answer Dashboard",
+				note_tile: "<p>One answer</p>",
+				answers: [
+					{
+						answer_id: JSON.stringify({ session_id: "sess-999", gen_no: 3 }),
+						title: "Key Metric",
+					},
+				],
+			});
+
+			expect(mockFetchTMLAndCreateLiveboard).toHaveBeenCalledWith(
+				"Single Answer Dashboard",
+				[
+					{
+						title: "Key Metric",
+						session_identifier: "sess-999",
+						generation_number: 3,
+					},
+				],
+				"<p>One answer</p>",
+			);
 		});
 	});
 });
