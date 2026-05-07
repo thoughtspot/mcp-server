@@ -17,10 +17,10 @@ import {
 	withRequestMetrics,
 } from "./metrics/runtime/request-metrics";
 import { PUBLIC_ROUTES } from "./routes";
-import { ConversationStorageServer } from "./servers/conversation-storage-server";
+import { ConversationStorageServerSQLite } from "./servers/conversation-storage-server";
 import { MCPServer } from "./servers/mcp-server";
 
-export { ConversationStorageServer };
+export { ConversationStorageServerSQLite };
 
 // OTEL configuration function
 const config: ResolveConfigFn = (env: Env, _trigger) => {
