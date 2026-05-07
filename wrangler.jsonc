@@ -47,6 +47,18 @@
 			"deleted_classes": [
 				"ThoughtSpotOpenAIDeepResearchMCP"
 			]
+		},
+		{
+			"tag": "v6",
+			"deleted_classes": [
+				"ConversationStorageServer"
+			]
+		},
+		{
+			"tag": "v7",
+			"new_sqlite_classes": [
+				"ConversationStorageServer"
+			]
 		}
 	],
 	"kv_namespaces": [{
