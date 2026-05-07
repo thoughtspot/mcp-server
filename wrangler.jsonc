@@ -52,7 +52,10 @@
 			"tag": "v6",
 			"deleted_classes": [
 				"ConversationStorageServer"
-			],
+			]
+		},
+		{
+			"tag": "v7",
 			"new_sqlite_classes": [
 				"ConversationStorageServerSQLite"
 			]
