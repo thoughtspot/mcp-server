@@ -70,6 +70,10 @@ class TestMCPServer extends MCPServer {
 	public testGetMetricEventIdentity() {
 		return this.getMetricEventIdentity();
 	}
+
+	public async testGetStorageService() {
+		return this.getStorageService();
+	}
 }
 
 describe("MCP Server Base", () => {
@@ -411,11 +415,118 @@ describe("MCP Server Base", () => {
 	});
 
 	describe("getStorageService", () => {
-		it("should throw when env.CONVERSATION_STORAGE_OBJECT is not set", () => {
-			// env is an empty object — accessing CONVERSATION_STORAGE_OBJECT is undefined,
-			// and StorageServiceClient construction should fail or return an unusable instance.
-			// We just assert it doesn't throw at construction time (the error surfaces on use).
-			expect(() => (server as any).getStorageService()).not.toThrow();
+		// Pre-computed SHA-256 base64url values for known inputs (full 32-byte digest):
+		//   "test-token"  -> SHA-256 -> base64url
+		//   "other-token" -> SHA-256 -> base64url
+		// These can be verified independently with:
+		//   node -e "crypto.subtle.digest('SHA-256', new TextEncoder().encode('test-token'))
+		//     .then(b => console.log(Buffer.from(b).toString('base64url')))"
+
+		async function computeExpectedHash(token: string): Promise<string> {
+			const buf = await crypto.subtle.digest(
+				"SHA-256",
+				new TextEncoder().encode(token),
+			);
+			return Buffer.from(buf).toString("base64url");
+		}
+
+		it("returns a StorageServiceClient without throwing", async () => {
+			await expect(server.testGetStorageService()).resolves.toBeDefined();
+		});
+
+		it("throws an error when access token is missing", async () => {
+			const serverWithNoToken = new TestMCPServer(
+				{ props: { ...mockProps, accessToken: "" }, env: mockEnv },
+				mockStreamingStorage,
+			);
+			await expect(serverWithNoToken.testGetStorageService()).rejects.toThrow(
+				"Access token is required to use Storage Service",
+			);
+		});
+
+		it("throws an error when access token is undefined", async () => {
+			const serverWithNoToken = new TestMCPServer(
+				{ props: { ...mockProps, accessToken: undefined }, env: mockEnv },
+				mockStreamingStorage,
+			);
+			await expect(serverWithNoToken.testGetStorageService()).rejects.toThrow(
+				"Access token is required to use Storage Service",
+			);
+		});
+
+		it("uses the full SHA-256 base64url hash of the access token", async () => {
+			const storageService = await server.testGetStorageService();
+			const expectedHash = await computeExpectedHash(mockProps.accessToken);
+
+			// The hash is used as the DO name prefix — verify via idFromName spy
+			const namespaceMock: DurableObjectNamespace = {
+				idFromName: vi.fn(
+					() => ({ toString: () => "stub-id" }) as DurableObjectId,
+				),
+				get: vi.fn(
+					() =>
+						({
+							fetch: vi
+								.fn()
+								.mockResolvedValue(new Response(JSON.stringify({ ok: true }))),
+						}) as unknown as DurableObjectStub,
+				),
+			} as unknown as DurableObjectNamespace;
+
+			// Rebuild with a traceable namespace
+			(storageService as any).namespace = namespaceMock;
+			await storageService.initializeConversation("conv-123");
+
+			expect(namespaceMock.idFromName).toHaveBeenCalledWith(
+				`${expectedHash}:conv-123`,
+			);
+		});
+
+		it("produces a valid base64url string (no +, /, or = characters)", async () => {
+			const storageService = await server.testGetStorageService();
+			const hash: string = (storageService as any).accessTokenHashUrlSafe;
+
+			expect(hash).toMatch(/^[A-Za-z0-9\-_]+$/);
+		});
+
+		it("produces a 43-character hash (32 bytes base64url-encoded without padding)", async () => {
+			const storageService = await server.testGetStorageService();
+			const hash: string = (storageService as any).accessTokenHashUrlSafe;
+
+			// SHA-256 produces 32 bytes; base64url without padding is ceil(32 * 4/3) = 43 chars
+			expect(hash).toHaveLength(43);
+		});
+
+		it("produces different hashes for different access tokens", async () => {
+			const serverA = new TestMCPServer(
+				{ props: { ...mockProps, accessToken: "token-alice" }, env: mockEnv },
+				mockStreamingStorage,
+			);
+			const serverB = new TestMCPServer(
+				{ props: { ...mockProps, accessToken: "token-bob" }, env: mockEnv },
+				mockStreamingStorage,
+			);
+
+			const [serviceA, serviceB] = await Promise.all([
+				serverA.testGetStorageService(),
+				serverB.testGetStorageService(),
+			]);
+
+			const hashA: string = (serviceA as any).accessTokenHashUrlSafe;
+			const hashB: string = (serviceB as any).accessTokenHashUrlSafe;
+
+			expect(hashA).not.toBe(hashB);
+		});
+
+		it("produces the same hash for the same access token across calls", async () => {
+			const [service1, service2] = await Promise.all([
+				server.testGetStorageService(),
+				server.testGetStorageService(),
+			]);
+
+			expect((service1 as any).accessTokenHashUrlSafe).toBe(
+				(service2 as any).accessTokenHashUrlSafe,
+			);
 		});
 	});
 
