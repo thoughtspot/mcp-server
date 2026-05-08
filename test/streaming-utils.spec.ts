@@ -27,22 +27,7 @@ import {
 	NOOP_METRICS_RECORDER,
 } from "../src/metrics/runtime/metrics-recorder";
 import { processSendAgentConversationMessageStreamingResponse } from "../src/streaming-utils";
-
-// Helper to build a ReadableStreamDefaultReader from an array of string chunks
-function makeReader(chunks: string[]): ReadableStreamDefaultReader {
-	let index = 0;
-	return {
-		read: vi.fn(async () => {
-			if (index < chunks.length) {
-				const value = new TextEncoder().encode(chunks[index++]);
-				return { done: false, value };
-			}
-			return { done: true, value: undefined };
-		}),
-		cancel: vi.fn(),
-		releaseLock: vi.fn(),
-	} as unknown as ReadableStreamDefaultReader;
-}
+import { makeReader } from "./servers/helpers";
 
 // Mock storage
 function makeMockStorage() {
