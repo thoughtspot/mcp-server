@@ -169,9 +169,14 @@ describe("Handlers", () => {
 					kind: "counter",
 					name: METRIC_NAMES.oauthAuthorizeSubmitTotal,
 					value: 1,
-					labels: {
+					labels: expect.objectContaining({
+						api_surface: "oauth",
+						auth_mode: "none",
 						outcome: "client_error",
-					},
+						route_group: "authorize",
+						status_class: "4xx",
+						transport: "http",
+					}),
 				}),
 			);
 		});
@@ -704,6 +709,37 @@ describe("Handlers", () => {
 	});
 
 	describe("GET /callback", () => {
+		it("records callback metrics with request context labels", async () => {
+			const recorder = createRequestMetricsRecorder();
+			setMetricsRecorderOnExecutionContext(
+				mockCtx as ExecutionContext,
+				recorder,
+			);
+
+			const result = await app.fetch(
+				new Request("https://example.com/callback"),
+				mockEnv,
+				mockCtx,
+			);
+
+			expect(result.status).toBe(400);
+			expect(recorder.snapshot()).toContainEqual(
+				expect.objectContaining({
+					kind: "counter",
+					name: METRIC_NAMES.oauthCallbackTotal,
+					value: 1,
+					labels: expect.objectContaining({
+						api_surface: "oauth",
+						auth_mode: "none",
+						outcome: "client_error",
+						route_group: "callback",
+						status_class: "4xx",
+						transport: "http",
+					}),
+				}),
+			);
+		});
+
 		it("should return 400 for missing instance URL", async () => {
 			const id = env.MCP_OBJECT.idFromName("test");
 			const object = env.MCP_OBJECT.get(id);
@@ -792,6 +828,44 @@ describe("Handlers", () => {
 	});
 
 	describe("POST /store-token", () => {
+		it("records store-token metrics with request context labels", async () => {
+			const recorder = createRequestMetricsRecorder();
+			setMetricsRecorderOnExecutionContext(
+				mockCtx as ExecutionContext,
+				recorder,
+			);
+
+			const result = await app.fetch(
+				new Request("https://example.com/store-token", {
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({
+						oauthReqInfo: { clientId: "test" },
+						instanceUrl: "https://test.thoughtspot.cloud",
+					}),
+				}),
+				mockEnv,
+				mockCtx,
+			);
+
+			expect(result.status).toBe(400);
+			expect(recorder.snapshot()).toContainEqual(
+				expect.objectContaining({
+					kind: "counter",
+					name: METRIC_NAMES.oauthStoreTokenTotal,
+					value: 1,
+					labels: expect.objectContaining({
+						api_surface: "oauth",
+						auth_mode: "none",
+						outcome: "client_error",
+						route_group: "store_token",
+						status_class: "4xx",
+						transport: "http",
+					}),
+				}),
+			);
+		});
+
 		it("should return 400 for missing token", async () => {
 			const id = env.MCP_OBJECT.idFromName("test");
 			const object = env.MCP_OBJECT.get(id);

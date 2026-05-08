@@ -6,6 +6,10 @@ import { type Span, SpanStatusCode, context, trace } from "@opentelemetry/api";
 import { Hono } from "hono";
 import { decodeBase64Url, encodeBase64Url } from "hono/utils/encode";
 import { any } from "zod";
+import {
+	getStatusClass,
+	resolveRequestMetricContext,
+} from "./metrics/runtime/metric-context";
 import { METRIC_NAMES } from "./metrics/runtime/metric-types";
 import {
 	getMetricsRecorderFromExecutionContext,
@@ -35,7 +39,7 @@ function getExecutionContextOrUndefined(context: {
 }
 
 function recordAuthFlowMetric(
-	context: { executionCtx: ExecutionContext },
+	context: { executionCtx: ExecutionContext; req: { raw: Request } },
 	name:
 		| typeof METRIC_NAMES.oauthAuthorizeRequestsTotal
 		| typeof METRIC_NAMES.oauthAuthorizeSubmitTotal
@@ -48,10 +52,18 @@ function recordAuthFlowMetric(
 		return;
 	}
 
+	const requestContext = resolveRequestMetricContext(context.req.raw);
 	recordStatusMetric(
 		getMetricsRecorderFromExecutionContext(executionContext),
 		name,
 		status,
+		{
+			route_group: requestContext.routeGroup,
+			transport: requestContext.transport,
+			auth_mode: requestContext.authMode,
+			api_surface: requestContext.apiSurface,
+			status_class: getStatusClass(status),
+		},
 	);
 }
 

@@ -349,12 +349,12 @@ describe("MCP Server", () => {
 
 			expect(toolCallCounter).toEqual(
 				expect.objectContaining({
-					indexes: ["test-org"],
+					indexes: ["test-cluster-123"],
 					blobs: expect.arrayContaining([
 						ANALYTICS_ENGINE_SCHEMA_VERSION,
 						"tool",
 						METRIC_NAMES.toolCallsTotal,
-						"test-org",
+						"test-cluster-123",
 						"test-user-123",
 						"ping",
 						"success",
@@ -367,12 +367,12 @@ describe("MCP Server", () => {
 			);
 			expect(toolDuration).toEqual(
 				expect.objectContaining({
-					indexes: ["test-org"],
+					indexes: ["test-cluster-123"],
 					blobs: expect.arrayContaining([
 						ANALYTICS_ENGINE_SCHEMA_VERSION,
 						"tool",
 						METRIC_NAMES.toolDurationMs,
-						"test-org",
+						"test-cluster-123",
 						"test-user-123",
 					]),
 				}),

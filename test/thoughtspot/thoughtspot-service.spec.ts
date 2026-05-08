@@ -252,7 +252,7 @@ describe("thoughtspot-service", () => {
 				analyticalSessionId: "conv-123",
 			});
 			recorder.setEventIdentity({
-				tenantId: "org-123",
+				tenantId: "tenant-123",
 				userId: "user-123",
 			});
 
@@ -291,7 +291,7 @@ describe("thoughtspot-service", () => {
 					analyticalSessionId: "conv-123",
 				},
 				eventIdentity: {
-					tenantId: "org-123",
+					tenantId: "tenant-123",
 					userId: "user-123",
 				},
 			});
@@ -321,7 +321,7 @@ describe("thoughtspot-service", () => {
 						) &&
 						dataPoint.blobs?.includes("latest") &&
 						dataPoint.blobs?.includes("conv-123") &&
-						dataPoint.indexes?.[0] === "org-123" &&
+						dataPoint.indexes?.[0] === "tenant-123" &&
 						dataPoint.blobs?.includes("user-123"),
 				),
 			).toBe(true);

@@ -1,9 +1,9 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { MCPServer } from "../../src/servers/mcp-server";
-import * as thoughtspotClient from "../../src/thoughtspot/thoughtspot-client";
-import { MixpanelTracker } from "../../src/metrics/mixpanel/mixpanel";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { TrackEvent, type Tracker } from "../../src/metrics";
+import { MixpanelTracker } from "../../src/metrics/mixpanel/mixpanel";
+import { MCPServer } from "../../src/servers/mcp-server";
 import { StreamingMessagesStorageWithTtl } from "../../src/streaming-message-storage-with-ttl/streaming-message-storage-with-ttl";
+import * as thoughtspotClient from "../../src/thoughtspot/thoughtspot-client";
 
 // Mock the MixpanelTracker
 vi.mock("../../src/metrics/mixpanel/mixpanel", () => ({
@@ -65,6 +65,10 @@ class TestMCPServer extends MCPServer {
 
 	public getSessionInfo() {
 		return this.sessionInfo;
+	}
+
+	public testGetMetricEventIdentity() {
+		return this.getMetricEventIdentity();
 	}
 }
 
@@ -260,13 +264,11 @@ describe("MCP Server Base", () => {
 
 		it("should return false when enableSpotterDataSourceDiscovery is disabled", async () => {
 			vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
-				getSessionInfo: vi
-					.fn()
-					.mockResolvedValue(
-						makeSessionInfo({
-							configInfo: { enableSpotterDataSourceDiscovery: false },
-						}),
-					),
+				getSessionInfo: vi.fn().mockResolvedValue(
+					makeSessionInfo({
+						configInfo: { enableSpotterDataSourceDiscovery: false },
+					}),
+				),
 				searchMetadata: vi.fn().mockResolvedValue([]),
 				instanceUrl: "https://test.thoughtspot.cloud",
 			} as any);
@@ -281,13 +283,11 @@ describe("MCP Server Base", () => {
 
 		it("should return false when enableSpotterDataSourceDiscovery is undefined", async () => {
 			vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
-				getSessionInfo: vi
-					.fn()
-					.mockResolvedValue(
-						makeSessionInfo({
-							configInfo: { enableSpotterDataSourceDiscovery: undefined },
-						}),
-					),
+				getSessionInfo: vi.fn().mockResolvedValue(
+					makeSessionInfo({
+						configInfo: { enableSpotterDataSourceDiscovery: undefined },
+					}),
+				),
 				searchMetadata: vi.fn().mockResolvedValue([]),
 				instanceUrl: "https://test.thoughtspot.cloud",
 			} as any);
@@ -298,6 +298,17 @@ describe("MCP Server Base", () => {
 			);
 			await testServer.init();
 			expect(testServer.testIsDatasourceDiscoveryAvailable()).toBe(false);
+		});
+	});
+
+	describe("Metric Identity", () => {
+		it("uses clusterId rather than currentOrgId for metrics identity", async () => {
+			await server.init();
+
+			expect(server.testGetMetricEventIdentity()).toEqual({
+				tenantId: "test-cluster-123",
+				userId: "test-user-123",
+			});
 		});
 	});
 
