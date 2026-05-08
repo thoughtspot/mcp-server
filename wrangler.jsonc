@@ -70,7 +70,7 @@
 		"head_sampling_rate": 1
 	},
 	"analytics_engine_datasets": [
-        { "binding": "ANALYTICS", "dataset": "mcp_events" }
+        { "binding": "ANALYTICS", "dataset": "mcp_events_v2" }
     ],
 	"assets": { "directory": "./static/", "binding": "ASSETS" },
 }

@@ -266,8 +266,8 @@ export abstract class BaseMCPServer extends Server {
 			return undefined;
 		}
 
-		const tenantId = this.sessionInfo.currentOrgId
-			? String(this.sessionInfo.currentOrgId)
+		const tenantId = this.sessionInfo.clusterId
+			? String(this.sessionInfo.clusterId)
 			: undefined;
 		const userId = this.sessionInfo.userGUID
 			? String(this.sessionInfo.userGUID)
