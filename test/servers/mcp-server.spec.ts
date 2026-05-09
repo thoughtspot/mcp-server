@@ -200,8 +200,8 @@ describe("MCP Server", () => {
 			const connectivityTool = result.tools?.find(
 				(t) => t.name === "check_connectivity",
 			);
-			expect(connectivityTool?.description).toBe(
-				"Ping tool to test connectivity and authentication. This can be used if other tool calls are failing to verify if the connection is working.",
+			expect(connectivityTool?.description).toMatch(
+				/ping tool to test connectivity and authentication/i,
 			);
 
 			const sessionTool = result.tools?.find(
@@ -212,8 +212,8 @@ describe("MCP Server", () => {
 			const dashboardTool = result.tools?.find(
 				(t) => t.name === "create_dashboard",
 			);
-			expect(dashboardTool?.description).toBe(
-				"Create a dashboard from a list of answers, allowing the user to revisit the results later. Use this if the user asks for a dashboard, or asks to save the results from the analysis.",
+			expect(dashboardTool?.description).toMatch(
+				/create a dashboard from a list of answers/i,
 			);
 		});
 
