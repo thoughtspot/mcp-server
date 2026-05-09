@@ -33,9 +33,6 @@ import { getThoughtSpotClient } from "../thoughtspot/thoughtspot-client";
 import { ThoughtSpotService } from "../thoughtspot/thoughtspot-service";
 import type { Props } from "../utils";
 
-const ToolInputSchema = ToolSchema.shape.inputSchema;
-type ToolInput = z.infer<typeof ToolInputSchema>;
-
 // Response utility types
 export type ContentItem = {
 	type: "text";
@@ -191,10 +188,23 @@ export abstract class BaseMCPServer extends Server {
 		};
 	}
 
-	protected getStorageService(): StorageServiceClient {
+	protected async getStorageService(): Promise<StorageServiceClient> {
+		const accessToken = this.ctx.props.accessToken;
+		if (!accessToken || accessToken.length === 0) {
+			throw new Error("Access token is required to use Storage Service");
+		}
+		const encodedAccessToken = new TextEncoder().encode(accessToken);
+		const hashBuffer = await crypto.subtle.digest(
+			"SHA-256",
+			encodedAccessToken,
+		);
+		const hashUrlSafe = Buffer.from(new Uint8Array(hashBuffer)).toString(
+			"base64url",
+		);
 		return new StorageServiceClient(
 			this.ctx.env
 				.CONVERSATION_STORAGE_OBJECT as unknown as DurableObjectNamespace,
+			hashUrlSafe,
 		);
 	}
 

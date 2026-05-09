@@ -10,15 +10,25 @@ import type {
 // ---------------------------------------------------------------------------
 
 const CONVERSATION_ID = "conv-abc123";
+const TOKEN_HASH = "abc12345";
 
-const textMessage: Message = { type: "text", text: "Hello" };
-const chunkMessage: Message = { type: "text_chunk", text: " world" };
+const textMessage: Message = {
+	type: "text",
+	text: "Hello",
+	is_thinking: false,
+};
+const chunkMessage: Message = {
+	type: "text_chunk",
+	text: " world",
+	is_thinking: false,
+};
 const answerMessage: Message = {
 	type: "answer",
 	answer_id: "ans-1",
 	answer_title: "My Answer",
 	answer_query: "SELECT 1",
 	iframe_url: "https://example.com/answer/1",
+	is_thinking: false,
 };
 
 // Captured request from the stub's last fetch call
@@ -65,7 +75,7 @@ describe("StorageServiceClient", () => {
 	beforeEach(() => {
 		vi.restoreAllMocks();
 		namespaceMock = makeNamespaceMock();
-		client = new StorageServiceClient(namespaceMock);
+		client = new StorageServiceClient(namespaceMock, TOKEN_HASH);
 	});
 
 	// -------------------------------------------------------------------------
@@ -100,7 +110,7 @@ describe("StorageServiceClient", () => {
 
 		it("throws when the server returns a non-ok status", async () => {
 			namespaceMock = makeNamespaceMock("Something went wrong", 500);
-			client = new StorageServiceClient(namespaceMock);
+			client = new StorageServiceClient(namespaceMock, TOKEN_HASH);
 
 			await expect(
 				client.initializeConversation(CONVERSATION_ID),
@@ -112,7 +122,7 @@ describe("StorageServiceClient", () => {
 				"Conversation already exists and is not marked done",
 				400,
 			);
-			client = new StorageServiceClient(namespaceMock);
+			client = new StorageServiceClient(namespaceMock, TOKEN_HASH);
 
 			await expect(
 				client.initializeConversation(CONVERSATION_ID),
@@ -166,7 +176,7 @@ describe("StorageServiceClient", () => {
 
 		it("throws when the server returns a non-ok status", async () => {
 			namespaceMock = makeNamespaceMock("Conversation not found", 500);
-			client = new StorageServiceClient(namespaceMock);
+			client = new StorageServiceClient(namespaceMock, TOKEN_HASH);
 
 			await expect(
 				client.appendMessages(CONVERSATION_ID, [textMessage]),
@@ -178,7 +188,7 @@ describe("StorageServiceClient", () => {
 				"Cannot append messages to a conversation marked done",
 				400,
 			);
-			client = new StorageServiceClient(namespaceMock);
+			client = new StorageServiceClient(namespaceMock, TOKEN_HASH);
 
 			await expect(
 				client.appendMessages(CONVERSATION_ID, [textMessage]),
@@ -192,8 +202,11 @@ describe("StorageServiceClient", () => {
 
 	describe("getNewMessages", () => {
 		it("sends GET to /storage/<id>/messages", async () => {
-			namespaceMock = makeNamespaceMock({ messages: [textMessage], isDone: false });
-			client = new StorageServiceClient(namespaceMock);
+			namespaceMock = makeNamespaceMock({
+				messages: [textMessage],
+				isDone: false,
+			});
+			client = new StorageServiceClient(namespaceMock, TOKEN_HASH);
 
 			await client.getNewMessages(CONVERSATION_ID);
 
@@ -210,7 +223,7 @@ describe("StorageServiceClient", () => {
 				isDone: true,
 			};
 			namespaceMock = makeNamespaceMock(state);
-			client = new StorageServiceClient(namespaceMock);
+			client = new StorageServiceClient(namespaceMock, TOKEN_HASH);
 
 			const result = await client.getNewMessages(CONVERSATION_ID);
 
@@ -219,7 +232,7 @@ describe("StorageServiceClient", () => {
 
 		it("returns an empty messages array when there are no new messages", async () => {
 			namespaceMock = makeNamespaceMock({ messages: [], isDone: false });
-			client = new StorageServiceClient(namespaceMock);
+			client = new StorageServiceClient(namespaceMock, TOKEN_HASH);
 
 			const result = await client.getNewMessages(CONVERSATION_ID);
 
@@ -229,7 +242,7 @@ describe("StorageServiceClient", () => {
 
 		it("throws when the server returns a non-ok status", async () => {
 			namespaceMock = makeNamespaceMock("Conversation not found", 404);
-			client = new StorageServiceClient(namespaceMock);
+			client = new StorageServiceClient(namespaceMock, TOKEN_HASH);
 
 			await expect(client.getNewMessages(CONVERSATION_ID)).rejects.toThrow(
 				"Failed to get messages (404)",
@@ -238,10 +251,60 @@ describe("StorageServiceClient", () => {
 
 		it("includes the error body in the thrown error message", async () => {
 			namespaceMock = makeNamespaceMock("Internal error", 500);
-			client = new StorageServiceClient(namespaceMock);
+			client = new StorageServiceClient(namespaceMock, TOKEN_HASH);
 
 			await expect(client.getNewMessages(CONVERSATION_ID)).rejects.toThrow(
 				"Internal error",
+			);
+		});
+	});
+
+	// -------------------------------------------------------------------------
+	// DO instance keying — accessTokenHashUrlSafe isolation
+	// -------------------------------------------------------------------------
+
+	describe("DO instance keying", () => {
+		it("keys the DO on <tokenHash>:<conversationId>", async () => {
+			await client.initializeConversation(CONVERSATION_ID);
+
+			expect(namespaceMock.idFromName).toHaveBeenCalledWith(
+				`${TOKEN_HASH}:${CONVERSATION_ID}`,
+			);
+		});
+
+		it("two clients with different token hashes produce different DO keys for the same conversationId", async () => {
+			const namespaceA = makeNamespaceMock();
+			const namespaceB = makeNamespaceMock();
+			const clientA = new StorageServiceClient(namespaceA, "hash-user-a");
+			const clientB = new StorageServiceClient(namespaceB, "hash-user-b");
+
+			await clientA.initializeConversation(CONVERSATION_ID);
+			await clientB.initializeConversation(CONVERSATION_ID);
+
+			expect(namespaceA.idFromName).toHaveBeenCalledWith(
+				`hash-user-a:${CONVERSATION_ID}`,
+			);
+			expect(namespaceB.idFromName).toHaveBeenCalledWith(
+				`hash-user-b:${CONVERSATION_ID}`,
+			);
+			// The two resulting keys must differ
+			const keyA = (namespaceA.idFromName as ReturnType<typeof vi.fn>).mock
+				.calls[0][0] as string;
+			const keyB = (namespaceB.idFromName as ReturnType<typeof vi.fn>).mock
+				.calls[0][0] as string;
+			expect(keyA).not.toBe(keyB);
+		});
+
+		it("uses the same DO key across all operations for a given client", async () => {
+			await client.initializeConversation(CONVERSATION_ID);
+			await client.appendMessages(CONVERSATION_ID, [textMessage]);
+
+			namespaceMock = makeNamespaceMock({ messages: [], isDone: false });
+			client = new StorageServiceClient(namespaceMock, TOKEN_HASH);
+			await client.getNewMessages(CONVERSATION_ID);
+
+			expect(namespaceMock.idFromName).toHaveBeenCalledWith(
+				`${TOKEN_HASH}:${CONVERSATION_ID}`,
 			);
 		});
 	});

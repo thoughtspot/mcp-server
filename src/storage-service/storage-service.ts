@@ -5,12 +5,18 @@ import type { Message, StreamingMessagesState } from "../thoughtspot/types";
  *
  * Communicates directly with the DO via its stub (bypassing the OAuth layer), mapping to the
  * following HTTP endpoints exposed by the server:
- *   POST  /storage/<conversationId>/initialize —> initializeConversation
- *   POST  /storage/<conversationId>/append     —> appendMessagesAndRestartTtl
- *   GET   /storage/<conversationId>/messages   —> getNewMessagesAndUpdateBookmark
+ *   POST  /storage/<storageId>/initialize —> initializeConversation
+ *   POST  /storage/<storageId>/append     —> appendMessagesAndRestartTtl
+ *   GET   /storage/<storageId>/messages   —> getNewMessagesAndUpdateBookmark
+ *
+ * The storageId is derived by taking a hash of the user's access token and combining it with the
+ * conversationId, to ensure no users can access each other's conversations.
  */
 export class StorageServiceClient {
-	constructor(private readonly namespace: DurableObjectNamespace) {}
+	constructor(
+		private readonly namespace: DurableObjectNamespace,
+		private readonly accessTokenHashUrlSafe: string,
+	) {}
 
 	private headers(): HeadersInit {
 		return {
@@ -20,7 +26,9 @@ export class StorageServiceClient {
 	}
 
 	private stubFor(conversationId: string): DurableObjectStub {
-		const id = this.namespace.idFromName(conversationId);
+		const id = this.namespace.idFromName(
+			`${this.accessTokenHashUrlSafe}:${conversationId}`,
+		);
 		return this.namespace.get(id);
 	}
 

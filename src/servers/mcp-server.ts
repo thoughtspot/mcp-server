@@ -416,7 +416,7 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			has_additional_context: !!additional_context,
 		});
 
-		const storageService = this.getStorageService();
+		const storageService = await this.getStorageService();
 		try {
 			await storageService.initializeConversation(analytical_session_id);
 		} catch (error) {
@@ -463,7 +463,7 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		//    returning too quickly, which leads to too many get updates tool calls.
 		// 4. If there are no updates after waiting for 10 seconds, return an empty response. We
 		//    want to avoid waiting indefinitely in case of errors or unexpected problems.
-		const storageService = this.getStorageService();
+		const storageService = await this.getStorageService();
 		const messagesState: StreamingMessagesState = {
 			messages: [],
 			isDone: false,

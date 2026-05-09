@@ -408,6 +408,7 @@ export const toolDefinitionsV2 = [
 			title: "Create Dashboard",
 			readOnlyHint: false,
 			destructiveHint: false,
+			openWorldHint: false,
 		},
 	},
 ];

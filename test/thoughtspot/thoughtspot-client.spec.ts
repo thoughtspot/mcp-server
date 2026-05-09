@@ -33,6 +33,11 @@ describe("ThoughtSpot Client", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
 
+		// Re-assign fetch as a fresh vi.fn() so mockResolvedValue/mockRejectedValue
+		// are always available (vi.restoreAllMocks in afterEach would otherwise strip
+		// the mock methods from the plain vi.fn() assigned at module load time).
+		global.fetch = vi.fn();
+
 		// Setup mock config
 		mockConfig = {
 			middleware: [],
