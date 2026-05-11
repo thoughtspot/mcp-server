@@ -1,4 +1,4 @@
-import { isBoolean, isNumber } from "lodash";
+import { isBoolean } from "lodash";
 import type { Message, StreamingMessagesState } from "../thoughtspot/types";
 
 const DEFAULT_TTL_MS = 30 * 60 * 1000; // 30 minutes
@@ -65,7 +65,7 @@ export class ConversationStorageServerSQLite {
 				`Error handling conversation storage request for conversation ${this.conversationId}:`,
 				message,
 			);
-			return Response.json({ error: "Something went wrong" }, { status: 500 });
+			return Response.json({ error: message }, { status: 500 });
 		}
 	}
 

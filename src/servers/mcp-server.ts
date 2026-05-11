@@ -9,7 +9,6 @@ import type { ApiVersionMode } from "../metrics/runtime/metric-types";
 import type { MetricsRecorder } from "../metrics/runtime/metrics-recorder";
 import type { ToolMetricApiSurface } from "../metrics/runtime/tool-metrics";
 import { WithSpan } from "../metrics/tracing/tracing-utils";
-import type { StreamingMessagesStorageWithTtl } from "../streaming-message-storage-with-ttl/streaming-message-storage-with-ttl";
 import type { DataSource } from "../thoughtspot/thoughtspot-service";
 import type { Answer, StreamingMessagesState } from "../thoughtspot/types";
 import { McpServerError } from "../utils";
@@ -32,10 +31,7 @@ import {
 } from "./version-registry";
 
 export class MCPServer extends BaseMCPServer {
-	constructor(
-		ctx: Context,
-		private streamingMessageStorage: StreamingMessagesStorageWithTtl,
-	) {
+	constructor(ctx: Context) {
 		super(ctx, "ThoughtSpot", "2.0.0");
 	}
 
@@ -391,8 +387,8 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		});
 		span?.setAttribute("analytical_session_id", response.conversation_id);
 
-		// Conversation is initialized in streamingMessageStorage from callSendSessionMessage,
-		// since that is the common entrypoint for both initial messages and followup messages.
+		// Conversation is initialized in Storage Server from callSendSessionMessage, since that is
+		// the common entrypoint for both initial messages and followup messages.
 
 		return this.createStructuredContentSuccessResponse(
 			{ analytical_session_id: response.conversation_id },

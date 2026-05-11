@@ -4,7 +4,6 @@ import { MixpanelTracker } from "../../src/metrics/mixpanel/mixpanel";
 import { ANALYTICS_ENGINE_SCHEMA_VERSION } from "../../src/metrics/runtime/analytics-engine-sink";
 import { METRIC_NAMES } from "../../src/metrics/runtime/metric-types";
 import { MCPServer } from "../../src/servers/mcp-server";
-import { StreamingMessagesStorageWithTtl } from "../../src/streaming-message-storage-with-ttl/streaming-message-storage-with-ttl";
 import * as thoughtspotClient from "../../src/thoughtspot/thoughtspot-client";
 import { ThoughtSpotService } from "../../src/thoughtspot/thoughtspot-service";
 
@@ -14,20 +13,6 @@ vi.mock("../../src/metrics/mixpanel/mixpanel", () => ({
 		track: vi.fn(),
 	})),
 }));
-
-// Mock StreamingMessagesStorageWithTtl to avoid DurableObjectStorage dependency
-vi.mock(
-	"../../src/streaming-message-storage-with-ttl/streaming-message-storage-with-ttl",
-	() => ({
-		StreamingMessagesStorageWithTtl: vi.fn().mockImplementation(() => ({
-			initializeConversation: vi.fn().mockResolvedValue(undefined),
-			appendMessagesAndRestartTtl: vi.fn().mockResolvedValue(undefined),
-			getNewMessagesAndUpdateBookmark: vi
-				.fn()
-				.mockResolvedValue({ messages: [], isDone: true }),
-		})),
-	}),
-);
 
 describe("MCP Server", () => {
 	let server: MCPServer;
@@ -137,12 +122,10 @@ describe("MCP Server", () => {
 			},
 		};
 
-		server = new MCPServer(
-			{
-				props: mockProps,
-			},
-			new StreamingMessagesStorageWithTtl(null as any, vi.fn(), vi.fn()),
-		);
+		server = new MCPServer({
+			props: mockProps,
+			env: {} as any,
+		});
 	});
 
 	describe("Initialization", () => {
@@ -244,10 +227,7 @@ describe("MCP Server", () => {
 			} as any);
 
 			// Create a new server instance to pick up the new mock
-			const testServer = new MCPServer(
-				{ props: mockProps },
-				new StreamingMessagesStorageWithTtl(null as any, vi.fn(), vi.fn()),
-			);
+			const testServer = new MCPServer({ props: mockProps, env: {} as any });
 			await testServer.init();
 			const { listTools } = connect(testServer);
 
@@ -267,20 +247,18 @@ describe("MCP Server", () => {
 
 	describe("Ping Tool", () => {
 		it("should return error when not authenticated", async () => {
-			const unauthenticatedServer = new MCPServer(
-				{
-					props: {
-						instanceUrl: "",
-						accessToken: "",
-						clientName: {
-							clientId: "test-client-id",
-							clientName: "test-client",
-							registrationDate: Date.now(),
-						},
+			const unauthenticatedServer = new MCPServer({
+				props: {
+					instanceUrl: "",
+					accessToken: "",
+					clientName: {
+						clientId: "test-client-id",
+						clientName: "test-client",
+						registrationDate: Date.now(),
 					},
 				},
-				new StreamingMessagesStorageWithTtl(null as any, vi.fn(), vi.fn()),
-			);
+				env: {} as any,
+			});
 			await unauthenticatedServer.init();
 
 			const { callTool } = connect(unauthenticatedServer);
@@ -307,28 +285,24 @@ describe("MCP Server", () => {
 				writeDataPoint: vi.fn(),
 			};
 			const waitUntilPromises: Promise<void>[] = [];
-			const metricsServer = new MCPServer(
-				{
-					props: {
-						...mockProps,
-						apiVersion: "2025-03-01",
-						apiRequestedVersion: "2025-03-01",
-						apiVersionMode: "pinned",
-					},
-					env: {
-						METRICS_SINK_MODE: "analytics_engine",
-						ANALYTICS: analyticsDataset,
-					} as any,
-					ctx: {
-						waitUntil(promise: Promise<void>) {
-							waitUntilPromises.push(promise);
-						},
-					} as any,
+			const metricsServer = new MCPServer({
+				props: {
+					...mockProps,
+					apiVersion: "2025-03-01",
+					apiRequestedVersion: "2025-03-01",
+					apiVersionMode: "pinned",
 				},
-				new StreamingMessagesStorageWithTtl(null as any, vi.fn(), vi.fn()),
-			);
+				env: {
+					METRICS_SINK_MODE: "analytics_engine",
+					ANALYTICS: analyticsDataset,
+				} as any,
+				ctx: {
+					waitUntil(promise: Promise<void>) {
+						waitUntilPromises.push(promise);
+					},
+				} as any,
+			});
 			await metricsServer.init();
-
 			const { callTool } = connect(metricsServer);
 			const result = await callTool("ping", {});
 
@@ -382,20 +356,18 @@ describe("MCP Server", () => {
 
 	describe("Check Connectivity Tool", () => {
 		it("should return error when not authenticated", async () => {
-			const unauthenticatedServer = new MCPServer(
-				{
-					props: {
-						instanceUrl: "",
-						accessToken: "",
-						clientName: {
-							clientId: "test-client-id",
-							clientName: "test-client",
-							registrationDate: Date.now(),
-						},
+			const unauthenticatedServer = new MCPServer({
+				props: {
+					instanceUrl: "",
+					accessToken: "",
+					clientName: {
+						clientId: "test-client-id",
+						clientName: "test-client",
+						registrationDate: Date.now(),
 					},
 				},
-				new StreamingMessagesStorageWithTtl(null as any, vi.fn(), vi.fn()),
-			);
+				env: {} as any,
+			});
 			await unauthenticatedServer.init();
 
 			const { callTool } = connect(unauthenticatedServer);
