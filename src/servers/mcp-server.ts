@@ -6,7 +6,10 @@ import { SpanStatusCode, context, trace } from "@opentelemetry/api";
 import type { z } from "zod";
 import { TrackEvent } from "../metrics";
 import type { ApiVersionMode } from "../metrics/runtime/metric-types";
-import type { MetricsRecorder } from "../metrics/runtime/metrics-recorder";
+import {
+	type MetricsRecorder,
+	NOOP_METRICS_RECORDER,
+} from "../metrics/runtime/metrics-recorder";
 import type { ToolMetricApiSurface } from "../metrics/runtime/tool-metrics";
 import { WithSpan } from "../metrics/tracing/tracing-utils";
 import type { DataSource } from "../thoughtspot/thoughtspot-service";
@@ -399,7 +402,7 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 	@WithSpan("call-send-session-message")
 	async callSendSessionMessage(
 		request: z.infer<typeof CallToolRequestSchema>,
-		recorder: MetricsRecorder,
+		recorder: MetricsRecorder = NOOP_METRICS_RECORDER,
 	) {
 		const span = trace.getSpan(context.active());
 		const { analytical_session_id, message, additional_context } =
@@ -444,7 +447,7 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 	@WithSpan("call-get-session-updates")
 	async callGetSessionUpdates(
 		request: z.infer<typeof CallToolRequestSchema>,
-		_recorder: MetricsRecorder,
+		_recorder: MetricsRecorder = NOOP_METRICS_RECORDER,
 	) {
 		const span = trace.getSpan(context.active());
 		const { analytical_session_id } = GetSessionUpdatesInputSchema.parse(

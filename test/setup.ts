@@ -1,5 +1,14 @@
 import { vi } from "vitest";
 
+// Suppress console output from error-path source code during tests
+vi.stubGlobal("console", {
+	...console,
+	error: vi.fn(),
+	log: vi.fn(),
+	warn: vi.fn(),
+	debug: vi.fn(),
+});
+
 // Mock process.env to prevent Node.js module imports
 vi.stubGlobal("process", {
 	env: {

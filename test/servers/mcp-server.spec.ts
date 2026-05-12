@@ -6,6 +6,7 @@ import { METRIC_NAMES } from "../../src/metrics/runtime/metric-types";
 import { MCPServer } from "../../src/servers/mcp-server";
 import * as thoughtspotClient from "../../src/thoughtspot/thoughtspot-client";
 import { ThoughtSpotService } from "../../src/thoughtspot/thoughtspot-service";
+import { makeRequest } from "./helpers";
 
 // Mock the MixpanelTracker
 vi.mock("../../src/metrics/mixpanel/mixpanel", () => ({
@@ -1671,6 +1672,156 @@ describe("MCP Server", () => {
 					},
 				],
 				"<p>One answer</p>",
+			);
+		});
+	});
+
+	describe("testing mcp-server v2", () => {
+		it("should execute session message and update flow returning responses in order", async () => {
+			const expectedMessages = [
+				{ type: "text" as const, text: "Thinking...", is_thinking: true },
+				{
+					type: "text" as const,
+					text: "Total revenue is $5M.",
+					is_thinking: false,
+				},
+			];
+
+			const storage = new Map<string, any>();
+			const mockStorage = {
+				initializeConversation: vi
+					.fn()
+					.mockImplementation(async (id: string) => {
+						storage.set(id, { messages: [], isDone: false, bookmark: 0 });
+					}),
+				appendMessages: vi
+					.fn()
+					.mockImplementation(
+						async (id: string, msgs: any[], isDone = false) => {
+							const state = storage.get(id);
+							state.messages.push(...msgs);
+							state.isDone = isDone;
+						},
+					),
+				getNewMessages: vi.fn().mockImplementation(async (id: string) => {
+					const state = storage.get(id);
+					if (!state) return { messages: [], isDone: false };
+					const newMsgs = state.messages.slice(state.bookmark);
+					state.bookmark = state.messages.length;
+					return { messages: newMsgs, isDone: state.isDone };
+				}),
+			};
+
+			vi.spyOn(server as any, "getStorageService").mockReturnValue(mockStorage);
+			await server.init();
+
+			// Spy on service after init() so init() uses the default mock for getSessionInfo
+			vi.spyOn(server as any, "getThoughtSpotService").mockReturnValue({
+				sendAgentConversationMessageStreaming: vi
+					.fn()
+					.mockImplementation(
+						async (convId: string, _msg: string, appendFn: any) => {
+							await appendFn(convId, [expectedMessages[0]]);
+							await appendFn(convId, [expectedMessages[1]], true);
+						},
+					),
+			});
+
+			const sendResult = await server.callSendSessionMessage(
+				makeRequest("send_session_message", {
+					analytical_session_id: "session-e2e-123",
+					message: "What is the total revenue?",
+				}),
+			);
+			expect(sendResult.isError).toBeUndefined();
+			expect((sendResult.structuredContent as any).success).toBe(true);
+
+			const updatesResult = await server.callGetSessionUpdates(
+				makeRequest("get_session_updates", {
+					analytical_session_id: "session-e2e-123",
+				}),
+			);
+			expect(updatesResult.isError).toBeUndefined();
+			const content = updatesResult.structuredContent as any;
+			expect(content.is_done).toBe(true);
+			expect(content.session_updates).toHaveLength(2);
+			expect(content.session_updates[0]).toEqual(expectedMessages[0]);
+			expect(content.session_updates[1]).toEqual(expectedMessages[1]);
+		});
+
+		it("should use the same conversation id for multiple messages in a session", async () => {
+			const mockSendStreaming = vi
+				.fn()
+				.mockImplementation(
+					async (convId: string, _msg: string, appendFn: any) => {
+						await appendFn(convId, [], true);
+					},
+				);
+
+			vi.spyOn(server as any, "getStorageService").mockReturnValue({
+				initializeConversation: vi.fn().mockResolvedValue(undefined),
+				appendMessages: vi.fn().mockResolvedValue(undefined),
+			});
+			await server.init();
+			vi.spyOn(server as any, "getThoughtSpotService").mockReturnValue({
+				sendAgentConversationMessageStreaming: mockSendStreaming,
+			});
+
+			await server.callSendSessionMessage(
+				makeRequest("send_session_message", {
+					analytical_session_id: "shared-session-123",
+					message: "What is total revenue?",
+				}),
+			);
+			await server.callSendSessionMessage(
+				makeRequest("send_session_message", {
+					analytical_session_id: "shared-session-123",
+					message: "Break it down by region",
+				}),
+			);
+
+			expect(mockSendStreaming).toHaveBeenCalledTimes(2);
+			expect(mockSendStreaming.mock.calls[0][0]).toBe("shared-session-123");
+			expect(mockSendStreaming.mock.calls[1][0]).toBe("shared-session-123");
+		});
+
+		it("should pass additional context to the agent only when provided", async () => {
+			const mockSendStreaming = vi
+				.fn()
+				.mockImplementation(
+					async (convId: string, _msg: string, appendFn: any) => {
+						await appendFn(convId, [], true);
+					},
+				);
+
+			vi.spyOn(server as any, "getStorageService").mockReturnValue({
+				initializeConversation: vi.fn().mockResolvedValue(undefined),
+				appendMessages: vi.fn().mockResolvedValue(undefined),
+			});
+			await server.init();
+			vi.spyOn(server as any, "getThoughtSpotService").mockReturnValue({
+				sendAgentConversationMessageStreaming: mockSendStreaming,
+			});
+
+			await server.callSendSessionMessage(
+				makeRequest("send_session_message", {
+					analytical_session_id: "session-no-ctx",
+					message: "What is total revenue?",
+				}),
+			);
+			await server.callSendSessionMessage(
+				makeRequest("send_session_message", {
+					analytical_session_id: "session-with-ctx",
+					message: "What is total revenue?",
+					additional_context: "Fiscal year starts in April",
+				}),
+			);
+
+			// Without context: additional_context arg is undefined
+			expect(mockSendStreaming.mock.calls[0][3]).toBeUndefined();
+			// With context: additional_context is forwarded to the service
+			expect(mockSendStreaming.mock.calls[1][3]).toBe(
+				"Fiscal year starts in April",
 			);
 		});
 	});
