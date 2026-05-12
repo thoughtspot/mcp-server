@@ -6,11 +6,9 @@ WORKDIR /app
 
 # Copy package files
 COPY package*.json ./
-COPY tsconfig.json ./
-COPY scripts/install-git-hooks.mjs ./scripts/install-git-hooks.mjs
 
 # Install dependencies
-RUN npm ci
+RUN mkdir -p scripts && touch scripts/install-git-hooks.mjs && npm ci
 
 COPY . .
 
