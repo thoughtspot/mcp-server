@@ -1,16 +1,16 @@
 import {
-	createBearerAuthenticationConfig,
 	ThoughtSpotRestApi,
+	createBearerAuthenticationConfig,
 } from "@thoughtspot/rest-api-sdk";
 import type {
 	AgentConversation,
 	RequestContext,
 	ResponseContext,
 } from "@thoughtspot/rest-api-sdk";
-import YAML from "yaml";
-import { of } from "rxjs";
-import type { SessionInfo } from "./types";
 import { customAlphabet } from "nanoid";
+import { of } from "rxjs";
+import YAML from "yaml";
+import type { SessionInfo } from "./types";
 
 /*
  * Inject custom handlers into the ThoughtSpot client
@@ -42,6 +42,7 @@ export const getThoughtSpotClient = (
 	addGetAnswerSession(client, instanceUrl, bearerToken);
 	addCreateAgentConversationWithAutoMode(client, instanceUrl, bearerToken);
 	addSendAgentConversationMessageStreaming(client, instanceUrl, bearerToken);
+	addGetAuditLogs(client, instanceUrl, bearerToken);
 	return client;
 };
 
@@ -258,6 +259,123 @@ function addCreateAgentConversationWithAutoMode(
 
 		const data = (await response.json()) as AgentConversation;
 		return data;
+	};
+}
+
+export interface AuditLogEntry {
+	timestamp: string;
+	event_type: string;
+	description?: string;
+	user_guid?: string;
+	user_name?: string;
+	ip_address?: string;
+	org_id?: number;
+	details?: Record<string, unknown>;
+}
+
+export interface GetAuditLogsParams {
+	startEpochMs: number;
+	endEpochMs: number;
+	getAllLogs?: boolean;
+}
+
+export interface GetAuditLogsResponse {
+	logs: AuditLogEntry[];
+	total_count: number;
+}
+
+/*
+ * Using a custom handler because the SDK does not yet expose the security audit logs endpoint.
+ * Calls POST /api/rest/2.0/logs/fetch with bearer auth. Caller must have ADMINISTRATION
+ * privilege on the instance; the server returns 403 otherwise.
+ */
+function addGetAuditLogs(client: any, instanceUrl: string, token: string) {
+	(client as any).getAuditLogs = async (
+		params: GetAuditLogsParams,
+	): Promise<GetAuditLogsResponse> => {
+		const endpoint = "/api/rest/2.0/logs/fetch";
+		const body: Record<string, unknown> = {
+			log_type: "SECURITY_AUDIT",
+			start_epoch_time_in_millis: params.startEpochMs,
+			end_epoch_time_in_millis: params.endEpochMs,
+			get_all_logs: params.getAllLogs ?? true,
+		};
+
+		const response = await fetch(`${instanceUrl}${endpoint}`, {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json",
+				Accept: "application/json",
+				"user-agent": "ThoughtSpot-ts-client",
+				Authorization: `Bearer ${token}`,
+			},
+			body: JSON.stringify(body),
+		});
+
+		if (!response.ok) {
+			const errorText = await response.text();
+			throw new Error(
+				`getAuditLogs failed with status ${response.status}: ${errorText}`,
+			);
+		}
+
+		const data = (await response.json()) as any;
+		// The ThoughtSpot 2.0 logs endpoint returns an array of records of the form
+		//   { date: "<ingest-time ISO>", log: "<JSON-encoded event payload>" }
+		// The actual event fields (type, desc, userGUID, userName, cIP, ts, orgId, data) live
+		// inside the stringified `log`. Parse it before mapping so the tool layer sees a flat shape.
+		const rawLogs: any[] = Array.isArray(data)
+			? data
+			: Array.isArray(data?.logs)
+				? data.logs
+				: [];
+
+		const logs: AuditLogEntry[] = rawLogs.map((entry) => {
+			let payload: any = {};
+			if (typeof entry.log === "string") {
+				try {
+					payload = JSON.parse(entry.log);
+				} catch {
+					// Leave payload empty; we'll fall back to outer fields only.
+				}
+			} else if (entry.log && typeof entry.log === "object") {
+				payload = entry.log;
+			}
+
+			const normalized: AuditLogEntry = {
+				// Prefer the event's own timestamp (`ts`) over the outer ingestion `date`.
+				timestamp:
+					payload.ts ??
+					entry.date ??
+					entry.timestamp ??
+					new Date(entry.epoch_time ?? Date.now()).toISOString(),
+				event_type: payload.type ?? "UNKNOWN",
+			};
+			if (payload.desc) normalized.description = payload.desc;
+			if (payload.userGUID) normalized.user_guid = payload.userGUID;
+			if (payload.userName) normalized.user_name = payload.userName;
+			if (payload.cIP) normalized.ip_address = payload.cIP;
+			if (payload.orgId !== undefined && payload.orgId !== null) {
+				normalized.org_id = payload.orgId;
+			}
+
+			// Only carry forward identity/version metadata in `details`; we deliberately do not
+			// spread `payload.data` (event-specific inner blob) since callers asked us to return
+			// only outer event fields.
+			const extraDetails: Record<string, unknown> = {};
+			if (payload.id !== undefined) extraDetails.id = payload.id;
+			if (payload.version !== undefined) extraDetails.version = payload.version;
+			if (Object.keys(extraDetails).length > 0) {
+				normalized.details = extraDetails;
+			}
+
+			return normalized;
+		});
+
+		return {
+			logs,
+			total_count: logs.length,
+		};
 	};
 }
 

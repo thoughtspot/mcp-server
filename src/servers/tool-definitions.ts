@@ -266,6 +266,69 @@ export const CreateDashboardOutputSchema = z.object({
 		),
 });
 
+export const GetAuditLogsInputSchema = z.object({
+	start_epoch_ms: z
+		.number()
+		.int()
+		.describe(
+			"Start of the time window for log entries, in milliseconds since the Unix epoch.",
+		),
+	end_epoch_ms: z
+		.number()
+		.int()
+		.describe(
+			"End of the time window for log entries, in milliseconds since the Unix epoch. Must be greater than `start_epoch_ms`.",
+		),
+	get_all_logs: z
+		.boolean()
+		.optional()
+		.describe(
+			"Optional filter to get logs for all orgs or for the current org. Default is set to true which means fetch for all orgs.",
+		),
+});
+
+export const AuditLogEntrySchema = z.object({
+	timestamp: z
+		.string()
+		.describe("ISO-8601 timestamp of when the audit event occurred."),
+	event_type: z.string().describe("Type of audit event."),
+	description: z
+		.string()
+		.optional()
+		.describe("Human-readable description of the event, when available."),
+	user_guid: z
+		.string()
+		.optional()
+		.describe("GUID of the user who triggered the event, when available."),
+	user_name: z
+		.string()
+		.optional()
+		.describe("Display name of the user who triggered the event."),
+	ip_address: z
+		.string()
+		.optional()
+		.describe("Source IP address of the request, when available."),
+	org_id: z
+		.number()
+		.optional()
+		.describe(
+			"Org ID the event was recorded against. Present when the cluster has orgs enabled and the upstream log included an `orgId`.",
+		),
+	details: z
+		.record(z.any())
+		.optional()
+		.describe(
+			"Identity metadata for the log entry (currently `id` and `version` when present). Event-specific inner payloads are intentionally omitted.",
+		),
+});
+
+export const GetAuditLogsOutputSchema = z.object({
+	logs: z
+		.array(AuditLogEntrySchema)
+		.describe("Audit log entries matching the requested filters."),
+	total_count: z.number().describe("Number of records returned in this page."),
+});
+
 export enum ToolName {
 	// V1
 	Ping = "ping",
@@ -279,6 +342,8 @@ export enum ToolName {
 	SendSessionMessage = "send_session_message",
 	GetSessionUpdates = "get_session_updates",
 	CreateDashboard = "create_dashboard",
+	// Admin
+	GetAuditLogs = "get_audit_logs",
 }
 
 export const toolDefinitionsV1 = [
@@ -407,6 +472,19 @@ export const toolDefinitionsV2 = [
 		annotations: {
 			title: "Create Dashboard",
 			readOnlyHint: false,
+			destructiveHint: false,
+			openWorldHint: false,
+		},
+	},
+	{
+		name: ToolName.GetAuditLogs,
+		description:
+			"Admin-only: fetch ThoughtSpot security/audit log entries for a given time window. The caller must have ADMINISTRATION privilege on the instance; non-admin callers will receive an authorization error. Use this to investigate security events, user activity, or object lifecycle actions. By default, the API retrieves logs for the last 24 hours. You can set a custom duration in EPOCH time. Make sure the log duration specified in your API request doesn’t exceed 24 hours. If you must fetch logs for a longer time range, modify the duration and make multiple sequential API requests. By default `get_all_logs` is true and returns entries across all orgs on the cluster; set `get_all_logs` to false when the user asks for logs scoped to only their current org.",
+		inputSchema: zodToJsonSchema(GetAuditLogsInputSchema) as ToolInput,
+		outputSchema: zodToJsonSchema(GetAuditLogsOutputSchema) as ToolOutput,
+		annotations: {
+			title: "Get Audit Logs",
+			readOnlyHint: true,
 			destructiveHint: false,
 			openWorldHint: false,
 		},

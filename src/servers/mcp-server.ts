@@ -21,6 +21,7 @@ import {
 	CreateDashboardInputSchema,
 	CreateLiveboardSchema,
 	GetAnswerSchema,
+	GetAuditLogsInputSchema,
 	GetDataSourceSuggestionsSchema,
 	GetRelevantQuestionsSchema,
 	GetSessionUpdatesInputSchema,
@@ -239,6 +240,10 @@ export class MCPServer extends BaseMCPServer {
 
 			case ToolName.CreateDashboard: {
 				return this.callCreateDashboard(request, recorder);
+			}
+
+			case ToolName.GetAuditLogs: {
+				return this.callGetAuditLogs(request, recorder);
 			}
 
 			default:
@@ -552,6 +557,59 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			},
 			"Dashboard created successfully",
 		);
+	}
+
+	@WithSpan("call-get-audit-logs")
+	async callGetAuditLogs(
+		request: z.infer<typeof CallToolRequestSchema>,
+		recorder: MetricsRecorder,
+	) {
+		const span = this.initSpanWithCommonAttributes();
+
+		const privileges: string[] = Array.isArray(this.sessionInfo?.privileges)
+			? this.sessionInfo.privileges
+			: [];
+		const isAdmin = privileges.includes("ADMINISTRATION");
+		span?.setAttribute("is_admin", isAdmin);
+
+		if (!isAdmin) {
+			return this.createErrorResponse(
+				"This tool requires ADMINISTRATION privilege on the ThoughtSpot instance. Ask an administrator to run it on your behalf, or use an account with the required role.",
+				"Audit log fetch denied: caller is not an admin",
+			);
+		}
+
+		const args = GetAuditLogsInputSchema.parse(request.params.arguments);
+
+		if (args.end_epoch_ms <= args.start_epoch_ms) {
+			return this.createErrorResponse(
+				"`end_epoch_ms` must be greater than `start_epoch_ms`. Please widen the time window and retry.",
+				"Audit log fetch invalid window",
+			);
+		}
+
+		try {
+			const result = await this.getThoughtSpotService(recorder).getAuditLogs({
+				startEpochMs: args.start_epoch_ms,
+				endEpochMs: args.end_epoch_ms,
+				getAllLogs: args.get_all_logs ?? true,
+			});
+
+			span?.setAttribute("logs_returned", result.logs.length);
+
+			return this.createStructuredContentSuccessResponse(
+				{
+					logs: result.logs,
+					total_count: result.total_count,
+				},
+				"Audit logs fetched successfully",
+			);
+		} catch (error) {
+			return this.createErrorResponse(
+				"Failed to fetch audit logs. Verify the time window and that the calling account has ADMINISTRATION privilege.",
+				`Audit log fetch error: ${(error as Error).message}`,
+			);
+		}
 	}
 
 	@WithSpan("call-get-data-source-suggestions")
