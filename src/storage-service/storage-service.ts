@@ -1,16 +1,22 @@
-import type { Message, StreamingMessagesState } from "../thoughtspot/types";
+import type {
+	Message,
+	StreamingConversationMetricsContext,
+	StreamingConversationTimingState,
+	StreamingMessagesState,
+} from "../thoughtspot/types";
 
 /**
  * Client for the ConversationStorageServer Durable Object.
  *
  * Communicates directly with the DO via its stub (bypassing the OAuth layer), mapping to the
  * following HTTP endpoints exposed by the server:
- *   POST  /storage/<storageId>/initialize —> initializeConversation
- *   POST  /storage/<storageId>/append     —> appendMessagesAndRestartTtl
- *   GET   /storage/<storageId>/messages   —> getNewMessagesAndUpdateBookmark
+ *   POST  /storage/<conversationId>/initialize —> initializeConversation
+ *   POST  /storage/<conversationId>/append     —> appendMessagesAndRestartTtl
+ *   GET   /storage/<conversationId>/messages   —> getNewMessagesAndUpdateBookmark
  *
- * The storageId is derived by taking a hash of the user's access token and combining it with the
- * conversationId, to ensure no users can access each other's conversations.
+ * The route path uses the conversation id. Isolation between users happens at the
+ * Durable Object id level by hashing the access token and combining it with the
+ * conversation id when constructing the stub name.
  */
 export class StorageServiceClient {
 	constructor(
@@ -42,10 +48,18 @@ export class StorageServiceClient {
 	 * Can also be called on an existing conversation that is already marked done,
 	 * to prime it for a follow-up message.
 	 */
-	async initializeConversation(conversationId: string): Promise<void> {
+	async initializeConversation(
+		conversationId: string,
+		metricsContext?: StreamingConversationMetricsContext &
+			Required<Pick<StreamingConversationTimingState, "responseStartedAtMs">>,
+	): Promise<void> {
 		const response = await this.stubFor(conversationId).fetch(
 			this.url(conversationId, "initialize"),
-			{ method: "POST", headers: this.headers() },
+			{
+				method: "POST",
+				headers: this.headers(),
+				body: JSON.stringify(metricsContext ?? {}),
+			},
 		);
 
 		if (!response.ok) {

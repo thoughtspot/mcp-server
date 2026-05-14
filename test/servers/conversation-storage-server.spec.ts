@@ -1,4 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { METRIC_NAMES } from "../../src/metrics/runtime/metric-types";
 import { ConversationStorageServerSQLite } from "../../src/servers/conversation-storage-server";
 import type {
 	Message,
@@ -67,9 +68,12 @@ function createMockStorage() {
 	};
 }
 
-function createServer(mock: ReturnType<typeof createMockStorage>) {
+function createServer(
+	mock: ReturnType<typeof createMockStorage>,
+	env: Partial<Env> = {},
+) {
 	const state = { storage: mock.storage } as unknown as DurableObjectState;
-	return new ConversationStorageServerSQLite(state, {} as Env);
+	return new ConversationStorageServerSQLite(state, env as Env);
 }
 
 function makeRequest(
@@ -83,6 +87,20 @@ function makeRequest(
 		headers: body ? { "Content-Type": "application/json" } : {},
 		body: body ? JSON.stringify(body) : undefined,
 	});
+}
+
+function dataPointsFor(
+	analyticsDataset: { writeDataPoint: ReturnType<typeof vi.fn> },
+	metricName: string,
+) {
+	return analyticsDataset.writeDataPoint.mock.calls
+		.map(([dataPoint]) => dataPoint)
+		.filter((dataPoint) => dataPoint.blobs?.[2] === metricName);
+}
+
+async function flushScheduledMetrics() {
+	await Promise.resolve();
+	await Promise.resolve();
 }
 
 // Sample messages
@@ -143,6 +161,12 @@ describe("ConversationStorageServerSQLite", () => {
 		it("returns 404 for a valid operation with the wrong HTTP method", async () => {
 			const res = await server.fetch(makeRequest("GET", "initialize"));
 			expect(res.status).toBe(404);
+		});
+
+		it("maps unmapped operation names to unknown storage metrics", () => {
+			expect((server as any).toStorageOperation("future-operation")).toBe(
+				"unknown",
+			);
 		});
 	});
 
@@ -294,11 +318,12 @@ describe("ConversationStorageServerSQLite", () => {
 		// -------------------------------------------------------------------
 
 		it("stores exactly STORAGE_BATCH_SIZE messages in a single put call", async () => {
-			// STORAGE_BATCH_SIZE - 1 messages + write-bookmark = STORAGE_BATCH_SIZE entries → 1 batch
+			// STORAGE_BATCH_SIZE - 1 messages + write-bookmark + metrics-state = STORAGE_BATCH_SIZE + 1
+			// entries → 2 batches on the first append.
 			const messages = generateMessages(STORAGE_BATCH_SIZE - 1);
 			await server.fetch(makeRequest("POST", "append", { messages }));
 
-			expect(mock.storage.put).toHaveBeenCalledOnce();
+			expect(mock.storage.put).toHaveBeenCalledTimes(2);
 			expect(mock.store.get("write-bookmark")).toBe(STORAGE_BATCH_SIZE - 1);
 			expect(mock.store.get("message-0")).toEqual(messages[0]);
 			expect(mock.store.get(`message-${STORAGE_BATCH_SIZE - 2}`)).toEqual(
@@ -357,7 +382,10 @@ describe("ConversationStorageServerSQLite", () => {
 		it("returns empty messages and isDone=false on a fresh conversation", async () => {
 			const res = await server.fetch(makeRequest("GET", "messages"));
 			expect(res.status).toBe(200);
-			expect(await res.json()).toEqual({ messages: [], isDone: false });
+			expect(await res.json()).toMatchObject({
+				messages: [],
+				isDone: false,
+			});
 		});
 
 		it("returns all messages appended since the last call", async () => {
@@ -433,7 +461,7 @@ describe("ConversationStorageServerSQLite", () => {
 			const res = await server.fetch(makeRequest("GET", "messages"));
 			const body = (await res.json()) as StreamingMessagesState;
 
-			// 1 get for getIsDoneAndReadWriteBookmarks + 1 get for the STORAGE_BATCH_SIZE message keys
+			// 1 get for getConversationStateSnapshot + 1 get for the STORAGE_BATCH_SIZE message keys
 			expect(mock.storage.get).toHaveBeenCalledTimes(2);
 			expect(body.messages).toHaveLength(STORAGE_BATCH_SIZE);
 			expect(body.messages).toEqual(messages);
@@ -448,7 +476,7 @@ describe("ConversationStorageServerSQLite", () => {
 			const res = await server.fetch(makeRequest("GET", "messages"));
 			const body = (await res.json()) as StreamingMessagesState;
 
-			// 1 get for getIsDoneAndReadWriteBookmarks + 2 get batches for the message keys
+			// 1 get for getConversationStateSnapshot + 2 get batches for the message keys
 			expect(mock.storage.get).toHaveBeenCalledTimes(3);
 			expect(body.messages).toHaveLength(count);
 			expect(body.messages).toEqual(messages);
@@ -532,5 +560,138 @@ describe("ConversationStorageServerSQLite", () => {
 			const res = await server.fetch(makeRequest("POST", "initialize"));
 			expect(res.status).toBe(200);
 		});
+	});
+});
+
+describe("ConversationStorageServerSQLite metrics", () => {
+	let analyticsDataset: { writeDataPoint: ReturnType<typeof vi.fn> };
+	let mock: ReturnType<typeof createMockStorage>;
+	let server: ConversationStorageServerSQLite;
+
+	beforeEach(() => {
+		vi.useFakeTimers();
+		analyticsDataset = {
+			writeDataPoint: vi.fn(),
+		};
+		mock = createMockStorage();
+		server = createServer(mock, {
+			METRICS_SINK_MODE: "analytics_engine",
+			ANALYTICS: analyticsDataset,
+		});
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
+		vi.restoreAllMocks();
+	});
+
+	it("records first-buffered, first-poll, and first-non-empty-response metrics once", async () => {
+		vi.setSystemTime(1_000);
+		await server.fetch(
+			makeRequest("POST", "initialize", {
+				responseStartedAtMs: 1_000,
+				apiRequestedVersion: "latest",
+				analyticalSessionId: "conv-1",
+				tenantId: "org-123",
+				userId: "user-123",
+			}),
+		);
+
+		vi.setSystemTime(1_500);
+		await server.fetch(
+			makeRequest("POST", "append", {
+				messages: [{ type: "text", text: "hello", is_thinking: false }],
+				isDone: false,
+			}),
+		);
+
+		await flushScheduledMetrics();
+		expect(
+			dataPointsFor(
+				analyticsDataset,
+				METRIC_NAMES.analysisFirstBufferedUpdateMs,
+			),
+		).toHaveLength(1);
+
+		vi.setSystemTime(2_000);
+		const firstPollResponse = await server.fetch(
+			makeRequest("GET", "messages"),
+		);
+		expect(firstPollResponse.status).toBe(200);
+		expect(await firstPollResponse.json()).toMatchObject({
+			messages: [{ type: "text", text: "hello", is_thinking: false }],
+			isDone: false,
+		});
+
+		await flushScheduledMetrics();
+		expect(
+			dataPointsFor(analyticsDataset, METRIC_NAMES.analysisFirstPollDelayMs),
+		).toHaveLength(1);
+		expect(
+			dataPointsFor(
+				analyticsDataset,
+				METRIC_NAMES.analysisFirstNonEmptyResponseMs,
+			),
+		).toHaveLength(1);
+
+		vi.setSystemTime(5_000);
+		await server.fetch(
+			makeRequest("POST", "append", {
+				messages: [{ type: "text", text: "again", is_thinking: false }],
+				isDone: false,
+			}),
+		);
+		await server.fetch(makeRequest("GET", "messages"));
+
+		expect(
+			dataPointsFor(
+				analyticsDataset,
+				METRIC_NAMES.analysisFirstBufferedUpdateMs,
+			),
+		).toHaveLength(1);
+		expect(
+			dataPointsFor(analyticsDataset, METRIC_NAMES.analysisFirstPollDelayMs),
+		).toHaveLength(1);
+		expect(
+			dataPointsFor(
+				analyticsDataset,
+				METRIC_NAMES.analysisFirstNonEmptyResponseMs,
+			),
+		).toHaveLength(1);
+	});
+
+	it("records never-polled sessions during cleanup", async () => {
+		vi.setSystemTime(1_000);
+		await server.fetch(
+			makeRequest("POST", "initialize", {
+				responseStartedAtMs: 1_000,
+				tenantId: "org-123",
+			}),
+		);
+
+		await server.alarm();
+
+		await flushScheduledMetrics();
+		expect(
+			dataPointsFor(
+				analyticsDataset,
+				METRIC_NAMES.analysisSessionsNeverPolledTotal,
+			),
+		).toHaveLength(1);
+	});
+
+	it("records storage error metrics when an operation fails", async () => {
+		const response = await server.fetch(
+			makeRequest("POST", "append", {
+				messages: [{ type: "text", text: "hello", is_thinking: false }],
+				isDone: false,
+			}),
+		);
+
+		expect(response.status).toBe(500);
+		await flushScheduledMetrics();
+		expect(
+			dataPointsFor(analyticsDataset, METRIC_NAMES.streamStorageErrorsTotal),
+		).toHaveLength(1);
 	});
 });

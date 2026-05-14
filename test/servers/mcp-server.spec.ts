@@ -1338,6 +1338,13 @@ describe("MCP Server", () => {
 			expect((result.structuredContent as any).success).toBe(true);
 			expect(mockStorageService.initializeConversation).toHaveBeenCalledWith(
 				"conv-abc-123",
+				expect.objectContaining({
+					analyticalSessionId: "conv-abc-123",
+					apiRequestedVersion: undefined,
+					responseStartedAtMs: expect.any(Number),
+					tenantId: "test-cluster-123",
+					userId: "test-user-123",
+				}),
 			);
 			expect(mockSendAgentConversationMessageStreaming).toHaveBeenCalledWith(
 				"conv-abc-123",

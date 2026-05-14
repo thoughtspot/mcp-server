@@ -5,12 +5,22 @@ import type {
 import { SpanStatusCode, context, trace } from "@opentelemetry/api";
 import type { z } from "zod";
 import { TrackEvent } from "../metrics";
+import {
+	recordAnalysisMessageSentMetric,
+	recordAnalysisPollWaitMetric,
+	recordAnalysisSessionCreatedMetric,
+	recordAnalysisUpdatesPolledMetric,
+} from "../metrics/runtime/analysis-metrics";
 import type { ApiVersionMode } from "../metrics/runtime/metric-types";
 import {
 	type MetricsRecorder,
 	NOOP_METRICS_RECORDER,
 } from "../metrics/runtime/metrics-recorder";
-import type { ToolMetricApiSurface } from "../metrics/runtime/tool-metrics";
+import {
+	type ToolMetricApiSurface,
+	getToolMetricOutcomeFromError,
+	getToolMetricOutcomeFromResult,
+} from "../metrics/runtime/tool-metrics";
 import { WithSpan } from "../metrics/tracing/tracing-utils";
 import type { DataSource } from "../thoughtspot/thoughtspot-service";
 import type { Answer, StreamingMessagesState } from "../thoughtspot/types";
@@ -93,6 +103,29 @@ export class MCPServer extends BaseMCPServer {
 			return resolveApiVersionMetrics(apiVersion).apiReleaseDate;
 		} catch {
 			return undefined;
+		}
+	}
+
+	private async withAnalysisOutcomeMetric<T>(
+		recorder: MetricsRecorder,
+		recordOutcome: (
+			outcome: ReturnType<typeof getToolMetricOutcomeFromError>,
+		) => void,
+		handler: () => Promise<T>,
+	): Promise<T> {
+		let outcome: ReturnType<typeof getToolMetricOutcomeFromError> | undefined;
+
+		try {
+			const result = await handler();
+			outcome = getToolMetricOutcomeFromResult(result);
+			return result;
+		} catch (error) {
+			outcome = getToolMetricOutcomeFromError(error);
+			throw error;
+		} finally {
+			if (outcome) {
+				recordOutcome(outcome);
+			}
 		}
 	}
 
@@ -375,27 +408,35 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		request: z.infer<typeof CallToolRequestSchema>,
 		recorder: MetricsRecorder,
 	) {
-		const span = trace.getSpan(context.active());
-		const { data_source_id } = CreateAnalysisSessionInputSchema.parse(
-			request.params.arguments,
-		);
-		span?.setAttribute("data_source_id", data_source_id ?? "(none)");
+		return this.withAnalysisOutcomeMetric(
+			recorder,
+			(outcome) => {
+				recordAnalysisSessionCreatedMetric(recorder, outcome);
+			},
+			async () => {
+				const span = trace.getSpan(context.active());
+				const { data_source_id } = CreateAnalysisSessionInputSchema.parse(
+					request.params.arguments,
+				);
+				span?.setAttribute("data_source_id", data_source_id ?? "(none)");
 
-		const response =
-			await this.getThoughtSpotService(recorder).createAgentConversation(
-				data_source_id,
-			);
-		recorder.setAnalyticsContext({
-			analyticalSessionId: response.conversation_id,
-		});
-		span?.setAttribute("analytical_session_id", response.conversation_id);
+				const response =
+					await this.getThoughtSpotService(recorder).createAgentConversation(
+						data_source_id,
+					);
+				recorder.setAnalyticsContext({
+					analyticalSessionId: response.conversation_id,
+				});
+				span?.setAttribute("analytical_session_id", response.conversation_id);
 
-		// Conversation is initialized in Storage Server from callSendSessionMessage, since that is
-		// the common entrypoint for both initial messages and followup messages.
+				// Conversation is initialized in streamingMessageStorage from callSendSessionMessage,
+				// since that is the common entrypoint for both initial messages and followup messages.
 
-		return this.createStructuredContentSuccessResponse(
-			{ analytical_session_id: response.conversation_id },
-			"Conversation created successfully",
+				return this.createStructuredContentSuccessResponse(
+					{ analytical_session_id: response.conversation_id },
+					"Conversation created successfully",
+				);
+			},
 		);
 	}
 
@@ -404,55 +445,80 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		request: z.infer<typeof CallToolRequestSchema>,
 		recorder: MetricsRecorder = NOOP_METRICS_RECORDER,
 	) {
-		const span = trace.getSpan(context.active());
-		const { analytical_session_id, message, additional_context } =
-			SendSessionMessageInputSchema.parse(request.params.arguments);
-		recorder.setAnalyticsContext({
-			analyticalSessionId: analytical_session_id,
-		});
-		span?.setAttributes({
-			analytical_session_id,
-			has_additional_context: !!additional_context,
-		});
+		return this.withAnalysisOutcomeMetric(
+			recorder,
+			(outcome) => {
+				recordAnalysisMessageSentMetric(recorder, outcome);
+			},
+			async () => {
+				const span = trace.getSpan(context.active());
+				const { analytical_session_id, message, additional_context } =
+					SendSessionMessageInputSchema.parse(request.params.arguments);
+				const responseStartedAtMs = Date.now();
+				const analyticsContext = this.mergeMetricAnalyticsContext({
+					analyticalSessionId: analytical_session_id,
+				});
+				const eventIdentity = this.getMetricEventIdentity();
+				recorder.setAnalyticsContext({
+					analyticalSessionId: analytical_session_id,
+				});
+				span?.setAttributes({
+					analytical_session_id,
+					has_additional_context: !!additional_context,
+				});
 
-		const storageService = await this.getStorageService();
-		try {
-			await storageService.initializeConversation(analytical_session_id);
-		} catch (error) {
-			console.error(
-				"Error initializing conversation in storage service:",
-				error,
-			);
-			return this.createErrorResponse(
-				"The analytical session has an ongoing response to the previous message. Please continue to call `get_session_updates` until `is_done` is true before sending a followup message.",
-				`Error sending message to conversation ${analytical_session_id}: ${error}`,
-			);
-		}
+				const storageService = await this.getStorageService();
+				try {
+					await storageService.initializeConversation(analytical_session_id, {
+						responseStartedAtMs,
+						apiRequestedVersion: analyticsContext?.apiRequestedVersion,
+						analyticalSessionId: analytical_session_id,
+						tenantId: eventIdentity?.tenantId,
+						userId: eventIdentity?.userId,
+					});
+				} catch (error) {
+					console.error(
+						"Error initializing conversation in storage service:",
+						error,
+					);
+					return this.createErrorResponse(
+						"The analytical session has an ongoing response to the previous message. Please continue to call `get_session_updates` until `is_done` is true before sending a followup message.",
+						`Error sending message to conversation ${analytical_session_id}: ${error}`,
+					);
+				}
 
-		await this.getThoughtSpotService(recorder, {
-			analyticalSessionId: analytical_session_id,
-		}).sendAgentConversationMessageStreaming(
-			analytical_session_id,
-			message,
-			storageService.appendMessages.bind(storageService),
-			additional_context,
-		);
+				await this.getThoughtSpotService(recorder, {
+					analyticalSessionId: analytical_session_id,
+				}).sendAgentConversationMessageStreaming(
+					analytical_session_id,
+					message,
+					storageService.appendMessages.bind(storageService),
+					additional_context,
+				);
 
-		return this.createStructuredContentSuccessResponse(
-			{ success: true },
-			"Conversation message sent successfully",
+				return this.createStructuredContentSuccessResponse(
+					{ success: true },
+					"Conversation message sent successfully",
+				);
+			},
 		);
 	}
 
 	@WithSpan("call-get-session-updates")
 	async callGetSessionUpdates(
 		request: z.infer<typeof CallToolRequestSchema>,
-		_recorder: MetricsRecorder = NOOP_METRICS_RECORDER,
+		recorder: MetricsRecorder = NOOP_METRICS_RECORDER,
 	) {
 		const span = trace.getSpan(context.active());
+		const pollStartedAt = Date.now();
+		let outcome: ReturnType<typeof getToolMetricOutcomeFromError> | undefined;
+		let isDone = false;
 		const { analytical_session_id } = GetSessionUpdatesInputSchema.parse(
 			request.params.arguments,
 		);
+		recorder.setAnalyticsContext({
+			analyticalSessionId: analytical_session_id,
+		});
 		span?.setAttribute("analytical_session_id", analytical_session_id);
 
 		// Rules when fetching conversation updates:
@@ -462,46 +528,64 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		//    returning too quickly, which leads to too many get updates tool calls.
 		// 4. If there are no updates after waiting for 10 seconds, return an empty response. We
 		//    want to avoid waiting indefinitely in case of errors or unexpected problems.
-		const storageService = await this.getStorageService();
-		const messagesState: StreamingMessagesState = {
-			messages: [],
-			isDone: false,
-		};
-		let i = 0;
-		for (; i < 20; i++) {
-			// Get latest updates
-			const newMessagesState = await storageService.getNewMessages(
-				analytical_session_id,
-			);
-			messagesState.messages.push(...newMessagesState.messages);
-			messagesState.isDone = newMessagesState.isDone;
+		try {
+			const storageService = await this.getStorageService();
+			const messagesState: StreamingMessagesState = {
+				messages: [],
+				isDone: false,
+			};
+			let i = 0;
+			for (; i < 20; i++) {
+				// Get latest updates
+				const newMessagesState = await storageService.getNewMessages(
+					analytical_session_id,
+				);
+				messagesState.messages.push(...newMessagesState.messages);
+				messagesState.isDone = newMessagesState.isDone;
 
-			// If conversation is marked done, return immediately
-			if (messagesState.isDone) {
-				break;
+				// If conversation is marked done, return immediately
+				if (messagesState.isDone) {
+					break;
+				}
+
+				// If we have new messages and waited for at least 3 seconds, return the updates
+				if (messagesState.messages.length > 0 && i >= 6) {
+					break;
+				}
+
+				// Wait 500 ms before polling for updates again
+				await new Promise((resolve) => setTimeout(resolve, 500));
 			}
 
-			// If we have new messages and waited for at least 3 seconds, return the updates
-			if (messagesState.messages.length > 0 && i >= 6) {
-				break;
-			}
-
-			// Wait 500 ms before polling for updates again
-			await new Promise((resolve) => setTimeout(resolve, 500));
-		}
-		span?.setAttributes({
-			total_wait_time_ms: i * 500,
-			total_session_updates: messagesState.messages.length,
-			is_done: messagesState.isDone,
-		});
-
-		return this.createStructuredContentSuccessResponse(
-			{
-				session_updates: messagesState.messages,
+			isDone = messagesState.isDone;
+			outcome = "success";
+			span?.setAttributes({
+				total_wait_time_ms: i * 500,
+				total_session_updates: messagesState.messages.length,
 				is_done: messagesState.isDone,
-			},
-			"Conversation updates retrieved successfully",
-		);
+			});
+
+			return this.createStructuredContentSuccessResponse(
+				{
+					session_updates: messagesState.messages,
+					is_done: messagesState.isDone,
+				},
+				"Conversation updates retrieved successfully",
+			);
+		} catch (error) {
+			outcome = getToolMetricOutcomeFromError(error);
+			throw error;
+		} finally {
+			if (outcome) {
+				recordAnalysisUpdatesPolledMetric(recorder, outcome);
+				recordAnalysisPollWaitMetric(
+					recorder,
+					Date.now() - pollStartedAt,
+					outcome,
+					isDone,
+				);
+			}
+		}
 	}
 
 	@WithSpan("call-create-dashboard")

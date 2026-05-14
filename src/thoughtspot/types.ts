@@ -49,6 +49,20 @@ export interface AnswerMessage extends BaseMessage {
 
 export type Message = TextMessage | AnswerMessage;
 
+export interface StreamingConversationTimingState {
+	responseStartedAtMs?: number;
+	firstBufferedUpdateAtMs?: number;
+	firstPollAtMs?: number;
+	firstNonEmptyResponseAtMs?: number;
+}
+
+export interface StreamingConversationMetricsContext {
+	apiRequestedVersion?: string;
+	analyticalSessionId?: string;
+	tenantId?: string;
+	userId?: string;
+}
+
 export interface StreamingMessagesState {
 	messages: Message[];
 	isDone: boolean;

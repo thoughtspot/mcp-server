@@ -1,5 +1,29 @@
 import { isBoolean } from "lodash";
-import type { Message, StreamingMessagesState } from "../thoughtspot/types";
+import {
+	STREAM_STORAGE_OPERATIONS,
+	type StreamStorageOperation,
+	recordAnalysisFirstBufferedUpdateMetric,
+	recordAnalysisFirstNonEmptyResponseMetric,
+	recordAnalysisFirstPollDelayMetric,
+	recordAnalysisSessionNeverPolledMetric,
+	recordStreamStorageErrorMetric,
+} from "../metrics/runtime/analysis-metrics";
+import {
+	type MetricsRecorder,
+	scheduleMetricsFlush,
+} from "../metrics/runtime/metrics-recorder";
+import type {
+	MetricAnalyticsContext,
+	MetricEventIdentity,
+} from "../metrics/runtime/metrics-sink";
+import { createRequestMetricsRecorder } from "../metrics/runtime/request-metrics";
+import type { MetricsEnvLike } from "../metrics/runtime/runtime-config";
+import type {
+	Message,
+	StreamingConversationMetricsContext,
+	StreamingConversationTimingState,
+	StreamingMessagesState,
+} from "../thoughtspot/types";
 
 const DEFAULT_TTL_MS = 30 * 60 * 1000; // 30 minutes
 const STORAGE_BATCH_SIZE = 127; // Cloudflare DO bulk get/put limit is 128, we use 127 to be safe
@@ -8,6 +32,10 @@ const MESSAGE_KEY_PREFIX = "message-";
 const IS_DONE_KEY = "is-done";
 const WRITE_BOOKMARK_KEY = "write-bookmark";
 const READ_BOOKMARK_KEY = "read-bookmark";
+const METRICS_STATE_KEY = "metrics-state";
+
+type ConversationMetricsState = StreamingConversationTimingState &
+	StreamingConversationMetricsContext;
 
 /**
  * A Durable Object that stores streaming conversation messages and exposes them over HTTP.
@@ -41,7 +69,11 @@ export class ConversationStorageServerSQLite {
 		try {
 			switch (`${request.method} /${operation}`) {
 				case "POST /initialize": {
-					await this.initializeConversation();
+					const body =
+						((await request
+							.json()
+							.catch(() => ({}))) as Partial<ConversationMetricsState>) ?? {};
+					await this.initializeConversation(body);
 					return Response.json({ ok: true });
 				}
 
@@ -60,6 +92,7 @@ export class ConversationStorageServerSQLite {
 					return new Response("Not Found", { status: 404 });
 			}
 		} catch (err) {
+			await this.recordStorageErrorMetric(this.toStorageOperation(operation));
 			const message = err instanceof Error ? err.message : String(err);
 			console.error(
 				`Error handling conversation storage request for conversation ${this.conversationId}:`,
@@ -74,7 +107,9 @@ export class ConversationStorageServerSQLite {
 	 * existing conversation which is already marked done for a followup message. We never delete
 	 * messages in the conversation, instead the next messages begin at the existing bookmark.
 	 */
-	private async initializeConversation(): Promise<void> {
+	private async initializeConversation(
+		metricsContext: Partial<ConversationMetricsState>,
+	): Promise<void> {
 		const existingIsDone = await this.state.storage.get<boolean>(IS_DONE_KEY);
 		if (isBoolean(existingIsDone) && !existingIsDone) {
 			throw new Error(
@@ -82,7 +117,19 @@ export class ConversationStorageServerSQLite {
 			);
 		}
 
-		await this.state.storage.put<boolean>(IS_DONE_KEY, false);
+		const metricsState: ConversationMetricsState = {
+			responseStartedAtMs: metricsContext.responseStartedAtMs,
+			apiRequestedVersion: metricsContext.apiRequestedVersion,
+			analyticalSessionId:
+				metricsContext.analyticalSessionId ?? this.conversationId,
+			tenantId: metricsContext.tenantId,
+			userId: metricsContext.userId,
+		};
+
+		await this.state.storage.put({
+			[IS_DONE_KEY]: false,
+			[METRICS_STATE_KEY]: metricsState,
+		});
 		await this.restartTtl();
 	}
 
@@ -96,7 +143,10 @@ export class ConversationStorageServerSQLite {
 		newMessages: Message[],
 		isDone = false,
 	): Promise<void> {
-		const existingIsDone = await this.state.storage.get<boolean>(IS_DONE_KEY);
+		const [existingIsDone, metricsState] = await Promise.all([
+			this.state.storage.get<boolean>(IS_DONE_KEY),
+			this.getConversationMetricsState(),
+		]);
 		if (!isBoolean(existingIsDone)) {
 			throw new Error(`Conversation ${this.conversationId} not found`);
 		}
@@ -107,7 +157,7 @@ export class ConversationStorageServerSQLite {
 		}
 
 		let idx = (await this.state.storage.get<number>(WRITE_BOOKMARK_KEY)) ?? 0;
-		const entriesToStore = {} as Record<string, Message | number | boolean>;
+		const entriesToStore = {} as Record<string, unknown>;
 		for (const message of newMessages) {
 			entriesToStore[`${MESSAGE_KEY_PREFIX}${idx}`] = message;
 			idx++;
@@ -117,10 +167,31 @@ export class ConversationStorageServerSQLite {
 		if (isDone) {
 			entriesToStore[IS_DONE_KEY] = true;
 		}
+		const shouldRecordFirstBufferedUpdate =
+			newMessages.length > 0 && !metricsState?.firstBufferedUpdateAtMs;
+		if (metricsState && shouldRecordFirstBufferedUpdate) {
+			metricsState.firstBufferedUpdateAtMs = Date.now();
+			entriesToStore[METRICS_STATE_KEY] = metricsState;
+		}
 
 		// Perform all writes in batches, then restart TTL
 		await this.putInBatches(entriesToStore);
 		await this.restartTtl();
+
+		if (
+			shouldRecordFirstBufferedUpdate &&
+			metricsState?.responseStartedAtMs !== undefined &&
+			metricsState.firstBufferedUpdateAtMs !== undefined
+		) {
+			this.recordMetricsSafe(metricsState, (recorder) => {
+				recordAnalysisFirstBufferedUpdateMetric(
+					recorder,
+					metricsState.firstBufferedUpdateAtMs! -
+						metricsState.responseStartedAtMs!,
+					"success",
+				);
+			});
+		}
 	}
 
 	/*
@@ -129,29 +200,49 @@ export class ConversationStorageServerSQLite {
 	 * use WRITE_BOOKMARK to know up to which index new messages have been written.
 	 */
 	private async getNewMessagesAndUpdateBookmark(): Promise<StreamingMessagesState> {
-		const [isDone, readBookmark, writeBookmark] =
-			await this.getIsDoneAndReadWriteBookmarks();
+		const [isDone, readBookmark, writeBookmark, metricsState] =
+			await this.getConversationStateSnapshot();
 		if (!isBoolean(isDone)) {
 			throw new Error(`Conversation ${this.conversationId} not found`);
 		}
-
-		const keys = [];
-		for (let i = readBookmark; i < writeBookmark; i++) {
-			keys.push(MESSAGE_KEY_PREFIX + i);
+		const shouldRecordFirstPoll = !metricsState?.firstPollAtMs;
+		if (metricsState && shouldRecordFirstPoll) {
+			metricsState.firstPollAtMs = Date.now();
+			await this.state.storage.put(METRICS_STATE_KEY, metricsState);
+			if (metricsState.responseStartedAtMs !== undefined) {
+				this.recordMetricsSafe(metricsState, (recorder) => {
+					recordAnalysisFirstPollDelayMetric(
+						recorder,
+						metricsState.firstPollAtMs! - metricsState.responseStartedAtMs!,
+						"success",
+					);
+				});
+			}
 		}
 
-		const newMessages: Message[] = [];
-		const messagesMap = await this.getInBatches<Message>(keys);
-		for (let i = readBookmark; i < writeBookmark; i++) {
-			const message = messagesMap.get(MESSAGE_KEY_PREFIX + i);
-			if (!message) {
-				console.warn(
-					`Expected message at index ${i} for conversation ${this.conversationId} not found`,
-					{ readBookmark, writeBookmark },
-				);
-				continue;
+		const newMessages = await this.getMessagesInRange(
+			readBookmark,
+			writeBookmark,
+			true,
+		);
+
+		const shouldRecordFirstNonEmptyResponse =
+			metricsState &&
+			newMessages.length > 0 &&
+			!metricsState.firstNonEmptyResponseAtMs;
+		if (shouldRecordFirstNonEmptyResponse) {
+			metricsState.firstNonEmptyResponseAtMs = Date.now();
+			await this.state.storage.put(METRICS_STATE_KEY, metricsState);
+			if (metricsState.responseStartedAtMs !== undefined) {
+				this.recordMetricsSafe(metricsState, (recorder) => {
+					recordAnalysisFirstNonEmptyResponseMetric(
+						recorder,
+						metricsState.firstNonEmptyResponseAtMs! -
+							metricsState.responseStartedAtMs!,
+						"success",
+					);
+				});
 			}
-			newMessages.push(message);
 		}
 
 		await this.state.storage.put<number>(READ_BOOKMARK_KEY, writeBookmark);
@@ -199,8 +290,8 @@ export class ConversationStorageServerSQLite {
 
 	async alarm(): Promise<void> {
 		// Check for any abnormalities in the state prior to deleting
-		const [isDone, readBookmark, writeBookmark] =
-			await this.getIsDoneAndReadWriteBookmarks();
+		const [isDone, readBookmark, writeBookmark, metricsState] =
+			await this.getConversationStateSnapshot();
 		if (!isBoolean(isDone) || !isDone) {
 			console.warn(
 				`Conversation ${this.conversationId} expired without being marked done`,
@@ -221,26 +312,142 @@ export class ConversationStorageServerSQLite {
 				},
 			);
 		}
+		if (!metricsState?.firstPollAtMs) {
+			this.recordMetricsSafe(metricsState, (recorder) => {
+				recordAnalysisSessionNeverPolledMetric(recorder);
+			});
+		}
 
 		// Delete everything in storage
 		await this.state.storage.deleteAll();
 	}
 
 	/*
-	 * Retrieve 3 fields from storage in one transaction: isDone, readBookmark, and writeBookmark
+	 * Retrieve the core conversation state and metrics metadata in one transaction.
 	 */
-	async getIsDoneAndReadWriteBookmarks(): Promise<
-		[boolean | undefined, number, number]
+	async getConversationStateSnapshot(): Promise<
+		[boolean | undefined, number, number, ConversationMetricsState | undefined]
 	> {
-		const result = await this.state.storage.get<boolean | number>([
-			IS_DONE_KEY,
-			READ_BOOKMARK_KEY,
-			WRITE_BOOKMARK_KEY,
-		]);
+		const result = await this.state.storage.get<
+			boolean | number | ConversationMetricsState
+		>([IS_DONE_KEY, READ_BOOKMARK_KEY, WRITE_BOOKMARK_KEY, METRICS_STATE_KEY]);
 		return [
 			result.get(IS_DONE_KEY) as boolean,
 			(result.get(READ_BOOKMARK_KEY) as number) ?? 0,
 			(result.get(WRITE_BOOKMARK_KEY) as number) ?? 0,
+			result.get(METRICS_STATE_KEY) as ConversationMetricsState | undefined,
 		];
+	}
+
+	private async getConversationMetricsState(): Promise<
+		ConversationMetricsState | undefined
+	> {
+		return this.state.storage.get<ConversationMetricsState>(METRICS_STATE_KEY);
+	}
+
+	private async getMessagesInRange(
+		readBookmark: number,
+		writeBookmark: number,
+		warnOnMissing = false,
+	): Promise<Message[]> {
+		const keys = [];
+		for (let i = readBookmark; i < writeBookmark; i++) {
+			keys.push(MESSAGE_KEY_PREFIX + i);
+		}
+
+		const messages: Message[] = [];
+		const messagesMap = await this.getInBatches<Message>(keys);
+		for (let i = readBookmark; i < writeBookmark; i++) {
+			const message = messagesMap.get(MESSAGE_KEY_PREFIX + i);
+			if (!message) {
+				if (warnOnMissing) {
+					console.warn(
+						`Expected message at index ${i} for conversation ${this.conversationId} not found`,
+						{ readBookmark, writeBookmark },
+					);
+				}
+				continue;
+			}
+			messages.push(message);
+		}
+
+		return messages;
+	}
+
+	private createMetricsRecorder(
+		metricsState?: ConversationMetricsState,
+	): MetricsRecorder {
+		const recorder = createRequestMetricsRecorder(
+			this.env as unknown as MetricsEnvLike,
+		);
+
+		const analyticsContext: MetricAnalyticsContext = {};
+		if (metricsState?.apiRequestedVersion) {
+			analyticsContext.apiRequestedVersion = metricsState.apiRequestedVersion;
+		}
+		if (metricsState?.analyticalSessionId) {
+			analyticsContext.analyticalSessionId = metricsState.analyticalSessionId;
+		}
+		if (Object.keys(analyticsContext).length > 0) {
+			recorder.setAnalyticsContext(analyticsContext);
+		}
+
+		const eventIdentity: MetricEventIdentity = {};
+		if (metricsState?.tenantId) {
+			eventIdentity.tenantId = metricsState.tenantId;
+		}
+		if (metricsState?.userId) {
+			eventIdentity.userId = metricsState.userId;
+		}
+		if (Object.keys(eventIdentity).length > 0) {
+			recorder.setEventIdentity(eventIdentity);
+		}
+
+		return recorder;
+	}
+
+	private recordMetricsSafe(
+		metricsState: ConversationMetricsState | undefined,
+		record: (recorder: MetricsRecorder) => void,
+	): void {
+		try {
+			const recorder = this.createMetricsRecorder(metricsState);
+			record(recorder);
+			scheduleMetricsFlush(recorder);
+		} catch (error) {
+			console.error(
+				`[metrics] Failed to record conversation storage metrics for ${this.conversationId}`,
+				error,
+			);
+		}
+	}
+
+	private async recordStorageErrorMetric(
+		operation: StreamStorageOperation,
+	): Promise<void> {
+		try {
+			const metricsState = await this.getConversationMetricsState();
+			this.recordMetricsSafe(metricsState, (recorder) => {
+				recordStreamStorageErrorMetric(recorder, operation);
+			});
+		} catch (error) {
+			console.error(
+				`[metrics] Failed to record conversation storage error metric for ${this.conversationId}`,
+				error,
+			);
+		}
+	}
+
+	private toStorageOperation(operation: string): StreamStorageOperation {
+		switch (operation) {
+			case "initialize":
+				return STREAM_STORAGE_OPERATIONS.initialize;
+			case "append":
+				return STREAM_STORAGE_OPERATIONS.append;
+			case "messages":
+				return STREAM_STORAGE_OPERATIONS.messages;
+			default:
+				return STREAM_STORAGE_OPERATIONS.unknown;
+		}
 	}
 }
