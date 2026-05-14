@@ -343,12 +343,9 @@ function addGetAuditLogs(client: any, instanceUrl: string, token: string) {
 			}
 
 			const normalized: AuditLogEntry = {
-				// Prefer the event's own timestamp (`ts`) over the outer ingestion `date`.
-				timestamp:
-					payload.ts ??
-					entry.date ??
-					entry.timestamp ??
-					new Date(entry.epoch_time ?? Date.now()).toISOString(),
+				// Prefer the inner event `ts` (actual event time) over the outer ingestion `date`.
+				// Fall back to "" only if both are missing
+				timestamp: payload.ts ?? entry.date ?? "",
 				event_type: payload.type ?? "UNKNOWN",
 			};
 			if (payload.desc) normalized.description = payload.desc;
