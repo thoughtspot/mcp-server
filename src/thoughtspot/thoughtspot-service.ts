@@ -21,6 +21,7 @@ import {
 } from "../metrics/runtime/tool-metrics";
 import { WithSpan, getActiveSpan } from "../metrics/tracing/tracing-utils";
 import { processSendAgentConversationMessageStreamingResponse } from "../streaming-utils";
+import type { GetAuditLogsResponse } from "./thoughtspot-client";
 import type {
 	Answer,
 	DataSource,
@@ -726,6 +727,33 @@ export class ThoughtSpotService {
 			enableSpotterDataSourceDiscovery:
 				info.configInfo?.enableSpotterDataSourceDiscovery,
 		};
+	}
+
+	/**
+	 * Admin-only: fetch ThoughtSpot security audit log entries.
+	 * Requires ADMINISTRATION privilege on the instance; authorization is enforced upstream.
+	 */
+	@WithSpan("get-audit-logs")
+	async getAuditLogs(params: {
+		startEpochMs: number;
+		endEpochMs: number;
+		getAllLogs?: boolean;
+	}): Promise<GetAuditLogsResponse> {
+		const span = getActiveSpan();
+		span?.setAttributes({
+			start_epoch_ms: params.startEpochMs,
+			end_epoch_ms: params.endEpochMs,
+			get_all_logs: params.getAllLogs ?? true,
+		});
+
+		return this.observeUpstreamCall<GetAuditLogsResponse>(
+			UPSTREAM_OPERATION_NAMES.getAuditLogs,
+			() =>
+				(this.client as any).getAuditLogs({
+					...params,
+					getAllLogs: params.getAllLogs ?? true,
+				}),
+		);
 	}
 
 	/**

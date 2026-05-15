@@ -1,11 +1,11 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { getThoughtSpotClient } from "../../src/thoughtspot/thoughtspot-client";
 import {
-	createBearerAuthenticationConfig,
 	ThoughtSpotRestApi,
+	createBearerAuthenticationConfig,
 } from "@thoughtspot/rest-api-sdk";
 import type { ResponseContext } from "@thoughtspot/rest-api-sdk";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import YAML from "yaml";
+import { getThoughtSpotClient } from "../../src/thoughtspot/thoughtspot-client";
 
 // Mock the ThoughtSpot REST API SDK
 vi.mock("@thoughtspot/rest-api-sdk", () => ({
@@ -854,6 +854,245 @@ mutation GetUnsavedAnswerTML($session: BachSessionIdInput!, $exportDependencies:
 			expect(query).toContain("BachSessionIdInput");
 			expect(query).toContain("UnsavedAnswer_getTML");
 			expect(query).toContain("edoc");
+		});
+	});
+
+	describe("getAuditLogs", () => {
+		let client: any;
+
+		const makeEntry = (logFields: Record<string, unknown>, date?: string) => ({
+			date: date ?? "2026-05-12T07:00:01.668748Z",
+			log: JSON.stringify({
+				version: "1.1",
+				id: "TS-1",
+				ts: "2026-05-12T06:59:09Z",
+				orgId: 0,
+				userGUID: "user-1",
+				userName: "alice",
+				cIP: "10.0.0.1",
+				type: "USER_LOGIN",
+				desc: "User logged in",
+				data: { extra: "ignored" },
+				...logFields,
+			}),
+		});
+
+		const mockFetchOk = (body: unknown) => {
+			(fetch as any).mockResolvedValue({
+				ok: true,
+				json: vi.fn().mockResolvedValue(body),
+			});
+		};
+
+		beforeEach(() => {
+			client = getThoughtSpotClient(mockInstanceUrl, mockBearerToken) as any;
+		});
+
+		it("sends the expected request body and forwards getAllLogs=true by default", async () => {
+			mockFetchOk([]);
+
+			await client.getAuditLogs({
+				startEpochMs: 1_700_000_000_000,
+				endEpochMs: 1_700_086_400_000,
+			});
+
+			expect(fetch).toHaveBeenCalledWith(
+				`${mockInstanceUrl}/api/rest/2.0/logs/fetch`,
+				expect.objectContaining({
+					method: "POST",
+					headers: expect.objectContaining({
+						Authorization: `Bearer ${mockBearerToken}`,
+					}),
+				}),
+			);
+			const sentBody = JSON.parse((fetch as any).mock.calls[0][1].body);
+			expect(sentBody).toEqual({
+				log_type: "SECURITY_AUDIT",
+				start_epoch_time_in_millis: 1_700_000_000_000,
+				end_epoch_time_in_millis: 1_700_086_400_000,
+				get_all_logs: true,
+			});
+		});
+
+		it("forwards getAllLogs=false when explicitly specified", async () => {
+			mockFetchOk([]);
+
+			await client.getAuditLogs({
+				startEpochMs: 1,
+				endEpochMs: 2,
+				getAllLogs: false,
+			});
+
+			const sentBody = JSON.parse((fetch as any).mock.calls[0][1].body);
+			expect(sentBody.get_all_logs).toBe(false);
+		});
+
+		it("parses an array of records with stringified `log` payloads", async () => {
+			mockFetchOk([makeEntry({})]);
+
+			const result = await client.getAuditLogs({
+				startEpochMs: 1,
+				endEpochMs: 2,
+			});
+
+			expect(result.total_count).toBe(1);
+			expect(result.logs[0]).toEqual({
+				timestamp: "2026-05-12T06:59:09Z", // prefers inner ts
+				event_type: "USER_LOGIN",
+				description: "User logged in",
+				user_guid: "user-1",
+				user_name: "alice",
+				ip_address: "10.0.0.1",
+				org_id: 0,
+				details: { id: "TS-1", version: "1.1" },
+			});
+		});
+
+		it("accepts an already-parsed object in the `log` field", async () => {
+			mockFetchOk([
+				{
+					date: "2026-05-12T07:00:01Z",
+					log: {
+						type: "USER_LOGOUT",
+						ts: "2026-05-12T06:59:09Z",
+						userGUID: "user-2",
+					},
+				},
+			]);
+
+			const result = await client.getAuditLogs({
+				startEpochMs: 1,
+				endEpochMs: 2,
+			});
+
+			expect(result.logs[0].event_type).toBe("USER_LOGOUT");
+			expect(result.logs[0].user_guid).toBe("user-2");
+		});
+
+		it("falls back to outer fields when `log` is not valid JSON", async () => {
+			mockFetchOk([
+				{
+					date: "2026-05-12T07:00:01Z",
+					log: "this is not json",
+				},
+			]);
+
+			const result = await client.getAuditLogs({
+				startEpochMs: 1,
+				endEpochMs: 2,
+			});
+
+			// payload stays empty → event_type defaults, timestamp falls back to date
+			expect(result.logs[0]).toEqual({
+				timestamp: "2026-05-12T07:00:01Z",
+				event_type: "UNKNOWN",
+			});
+		});
+
+		it("falls back to outer date when inner ts is missing", async () => {
+			mockFetchOk([
+				{
+					date: "2026-05-12T07:00:01Z",
+					log: JSON.stringify({ type: "X" }), // no ts
+				},
+			]);
+
+			const result = await client.getAuditLogs({
+				startEpochMs: 1,
+				endEpochMs: 2,
+			});
+
+			expect(result.logs[0].timestamp).toBe("2026-05-12T07:00:01Z");
+		});
+
+		it("returns empty timestamp when neither ts nor date is present", async () => {
+			mockFetchOk([{ log: JSON.stringify({ type: "Y" }) }]);
+
+			const result = await client.getAuditLogs({
+				startEpochMs: 1,
+				endEpochMs: 2,
+			});
+
+			expect(result.logs[0].timestamp).toBe("");
+		});
+
+		it("drops cIP when upstream returns null", async () => {
+			mockFetchOk([makeEntry({ cIP: null })]);
+
+			const result = await client.getAuditLogs({
+				startEpochMs: 1,
+				endEpochMs: 2,
+			});
+
+			expect(result.logs[0]).not.toHaveProperty("ip_address");
+		});
+
+		it("omits org_id when payload.orgId is missing", async () => {
+			const entry = makeEntry({});
+			const parsed = JSON.parse(entry.log);
+			parsed.orgId = undefined;
+			entry.log = JSON.stringify(parsed);
+			mockFetchOk([entry]);
+
+			const result = await client.getAuditLogs({
+				startEpochMs: 1,
+				endEpochMs: 2,
+			});
+
+			expect(result.logs[0]).not.toHaveProperty("org_id");
+		});
+
+		it("omits details when no id/version are present in payload", async () => {
+			mockFetchOk([
+				{
+					date: "2026-05-12T07:00:01Z",
+					log: JSON.stringify({
+						type: "Z",
+						ts: "2026-05-12T06:59:09Z",
+					}),
+				},
+			]);
+
+			const result = await client.getAuditLogs({
+				startEpochMs: 1,
+				endEpochMs: 2,
+			});
+
+			expect(result.logs[0]).not.toHaveProperty("details");
+		});
+
+		it("unwraps a `{ logs: [...] }` envelope when upstream returns one", async () => {
+			mockFetchOk({ logs: [makeEntry({})] });
+
+			const result = await client.getAuditLogs({
+				startEpochMs: 1,
+				endEpochMs: 2,
+			});
+
+			expect(result.total_count).toBe(1);
+		});
+
+		it("returns empty result when upstream returns neither array nor envelope", async () => {
+			mockFetchOk({ something: "else" });
+
+			const result = await client.getAuditLogs({
+				startEpochMs: 1,
+				endEpochMs: 2,
+			});
+
+			expect(result).toEqual({ logs: [], total_count: 0 });
+		});
+
+		it("throws with status and body text on non-ok HTTP response", async () => {
+			(fetch as any).mockResolvedValue({
+				ok: false,
+				status: 403,
+				text: vi.fn().mockResolvedValue("forbidden"),
+			});
+
+			await expect(
+				client.getAuditLogs({ startEpochMs: 1, endEpochMs: 2 }),
+			).rejects.toThrow("getAuditLogs failed with status 403: forbidden");
 		});
 	});
 });

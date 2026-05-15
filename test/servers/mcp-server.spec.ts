@@ -164,14 +164,15 @@ describe("MCP Server", () => {
 
 			const result = await listTools();
 
-			// V2 tools (latest version): 5 tools
-			expect(result.tools).toHaveLength(5);
+			// V2 tools (latest version): 6 tools
+			expect(result.tools).toHaveLength(6);
 			expect(result.tools?.map((t) => t.name)).toEqual([
 				"check_connectivity",
 				"create_analysis_session",
 				"send_session_message",
 				"get_session_updates",
 				"create_dashboard",
+				"get_audit_logs",
 			]);
 		});
 
@@ -201,7 +202,7 @@ describe("MCP Server", () => {
 			);
 		});
 
-		it("should return 5 tools regardless of enableSpotterDataSourceDiscovery when using latest (V2)", async () => {
+		it("should return 6 tools regardless of enableSpotterDataSourceDiscovery when using latest (V2)", async () => {
 			// Mock getThoughtSpotClient with enableSpotterDataSourceDiscovery set to false
 			vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
 				getSessionInfo: vi.fn().mockResolvedValue({
@@ -235,13 +236,14 @@ describe("MCP Server", () => {
 			const result = await listTools();
 
 			// V2 tools don't have a datasource discovery tool, so filtering has no effect
-			expect(result.tools).toHaveLength(5);
+			expect(result.tools).toHaveLength(6);
 			expect(result.tools?.map((t) => t.name)).toEqual([
 				"check_connectivity",
 				"create_analysis_session",
 				"send_session_message",
 				"get_session_updates",
 				"create_dashboard",
+				"get_audit_logs",
 			]);
 		});
 	});
@@ -1822,6 +1824,145 @@ describe("MCP Server", () => {
 			// With context: additional_context is forwarded to the service
 			expect(mockSendStreaming.mock.calls[1][3]).toBe(
 				"Fiscal year starts in April",
+			);
+		});
+	});
+
+	describe("Get Audit Logs Tool", () => {
+		function makeAdminServer() {
+			vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
+				getSessionInfo: vi.fn().mockResolvedValue({
+					clusterId: "test-cluster-123",
+					clusterName: "test-cluster",
+					releaseVersion: "10.13.0.cl-110",
+					userGUID: "admin-user-123",
+					configInfo: {
+						mixpanelConfig: {
+							devSdkKey: "test-dev-token",
+							prodSdkKey: "test-prod-token",
+							production: false,
+						},
+						selfClusterName: "test-cluster",
+						selfClusterId: "test-cluster-123",
+						enableSpotterDataSourceDiscovery: true,
+					},
+					userName: "admin-user",
+					currentOrgId: "test-org",
+					privileges: ["ADMINISTRATION"],
+				}),
+				instanceUrl: "https://test.thoughtspot.cloud",
+			} as any);
+
+			return new MCPServer({
+				props: mockProps,
+				env: {} as any,
+			});
+		}
+
+		const validArgs = {
+			start_epoch_ms: 1_700_000_000_000,
+			end_epoch_ms: 1_700_086_400_000,
+		};
+
+		it("should deny non-admin callers", async () => {
+			// Default mock has privileges: []
+			await server.init();
+			const { callTool } = connect(server);
+
+			const result = await callTool("get_audit_logs", validArgs);
+
+			expect(result.isError).toBe(true);
+			expect((result.content as any[])[0].text).toContain(
+				"requires ADMINISTRATION privilege",
+			);
+		});
+
+		it("should fetch logs across all orgs by default for an admin caller", async () => {
+			const mockGetAuditLogs = vi
+				.spyOn(ThoughtSpotService.prototype, "getAuditLogs")
+				.mockResolvedValue({
+					logs: [
+						{
+							timestamp: "2026-05-12T10:00:00Z",
+							event_type: "USER_LOGIN",
+							description: "User logged in",
+							user_guid: "user-1",
+							user_name: "alice",
+							ip_address: "10.0.0.1",
+						},
+					],
+					total_count: 1,
+				});
+
+			const adminServer = makeAdminServer();
+			await adminServer.init();
+			const { callTool } = connect(adminServer);
+
+			const result = await callTool("get_audit_logs", validArgs);
+
+			expect(result.isError).toBeUndefined();
+			expect((result.structuredContent as any).logs).toHaveLength(1);
+			expect((result.structuredContent as any).total_count).toBe(1);
+
+			expect(mockGetAuditLogs).toHaveBeenCalledWith({
+				startEpochMs: validArgs.start_epoch_ms,
+				endEpochMs: validArgs.end_epoch_ms,
+				getAllLogs: true,
+			});
+		});
+
+		it("should scope to current org when get_all_logs is false", async () => {
+			const mockGetAuditLogs = vi
+				.spyOn(ThoughtSpotService.prototype, "getAuditLogs")
+				.mockResolvedValue({ logs: [], total_count: 0 });
+
+			const adminServer = makeAdminServer();
+			await adminServer.init();
+			const { callTool } = connect(adminServer);
+
+			const result = await callTool("get_audit_logs", {
+				...validArgs,
+				get_all_logs: false,
+			});
+
+			expect(result.isError).toBeUndefined();
+			expect(mockGetAuditLogs).toHaveBeenCalledWith({
+				startEpochMs: validArgs.start_epoch_ms,
+				endEpochMs: validArgs.end_epoch_ms,
+				getAllLogs: false,
+			});
+		});
+
+		it("should reject an invalid time window", async () => {
+			const adminServer = makeAdminServer();
+			await adminServer.init();
+			const { callTool } = connect(adminServer);
+
+			const result = await callTool("get_audit_logs", {
+				start_epoch_ms: 1_700_000_000_000,
+				end_epoch_ms: 1_700_000_000_000,
+			});
+
+			expect(result.isError).toBe(true);
+			expect((result.content as any[])[0].text).toContain(
+				"end_epoch_ms` must be greater than `start_epoch_ms",
+			);
+		});
+
+		it("should return error when upstream call fails", async () => {
+			vi.spyOn(ThoughtSpotService.prototype, "getAuditLogs").mockRejectedValue(
+				new Error("getAuditLogs failed with status 500: boom"),
+			);
+
+			const adminServer = makeAdminServer();
+			await adminServer.init();
+			const { callTool } = connect(adminServer);
+
+			const result = await callTool("get_audit_logs", validArgs);
+
+			expect(result.isError).toBe(true);
+			expect((result.content as any[])[0].text).toContain(
+				"Failed to fetch audit logs",
 			);
 		});
 	});
