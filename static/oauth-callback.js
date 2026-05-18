@@ -19,7 +19,6 @@
             base.pathname += '/';
         }
         const tokenUrl = new URL('callosum/v1/v2/auth/token/fetch?validity_time_in_sec=2592000', base.toString());
-        console.log('Fetching token from:', tokenUrl.toString());
         
         document.getElementById('status').textContent = 'Retrieving authentication token...';
         
@@ -89,11 +88,9 @@
                         // If JSON parsing fails, try to extract token from the string
                         const tokenMatch = tokenText.match(/"token"\s*:\s*"([^"]+)"/);
                         if (tokenMatch) {
-                            console.log('Token match:', tokenMatch[1]);
                             tokenData = { data: { token: tokenMatch[1] } };
                         } else if (typeof tokenText === 'string' && tokenText.trim().length > 0) {
                             // Case 4: raw token string
-                            console.log('Token text:', tokenText);
                             tokenData = { data: { token: tokenText.trim() } };
                         } else {
                             document.getElementById('status').textContent = 'Invalid token format. Please paste the correct token.';
@@ -155,7 +152,6 @@
             throw new Error(`Failed to store token (Status: ${storeResponse.status}): ${errorText}`);
         }
 
-        console.log('Redirecting to:', responseData.redirectTo);
         window.location.href = responseData.redirectTo;
         
     } catch (error) {

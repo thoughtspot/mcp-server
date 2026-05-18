@@ -155,9 +155,6 @@ class Handler {
 				state.oauthReqInfo,
 				origin,
 			);
-
-			console.log("redirectUrl", redirectUrl);
-
 			return redirectUrl;
 		} catch (error) {
 			throw new McpServerError(error, 500);

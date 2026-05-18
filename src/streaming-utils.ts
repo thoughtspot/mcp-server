@@ -69,7 +69,6 @@ export const processSendAgentConversationMessageStreamingResponse = async (
 						if (!line.startsWith("data: ")) {
 							console.warn(
 								"Unknown line in event stream, does not start with 'data:'",
-								`"${line}"`,
 							);
 							continue;
 						}
@@ -135,7 +134,10 @@ export const processSendAgentConversationMessageStreamingResponse = async (
 								// We intentionally ignore the above events
 								nMessagesIgnored++;
 							} else if (item.type === "error") {
-								console.error("Error event in event stream: ", item);
+								console.error(
+									"Error event in event stream, error code",
+									item.error_code,
+								);
 								recordUpstreamStreamMessageMetric(
 									recorder,
 									upstreamOperation,
@@ -145,7 +147,7 @@ export const processSendAgentConversationMessageStreamingResponse = async (
 								spanHasError = true;
 								span.setStatus({
 									code: SpanStatusCode.ERROR,
-									message: item,
+									message: `Error event in event stream, error code: ${item.error_code}`,
 								});
 								newMessages.push({
 									is_thinking: false,
@@ -153,7 +155,7 @@ export const processSendAgentConversationMessageStreamingResponse = async (
 									text: item.display_message || "Something went wrong",
 								});
 							} else {
-								console.warn("Unknown event in event stream: ", item);
+								console.warn("Unknown event in event stream:", item.type);
 								nMessagesIgnored++;
 							}
 						}

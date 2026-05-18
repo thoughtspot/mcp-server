@@ -243,14 +243,6 @@ export class ThoughtSpotService {
 				generation_number,
 			});
 
-			console.log(
-				"[DEBUG] Getting Data for session_identifier: ",
-				session_identifier,
-				"generation_number: ",
-				generation_number,
-				"instanceUrl: ",
-				(this.client as any).instanceUrl,
-			);
 			const data = await this.observeUpstreamCall(
 				UPSTREAM_OPERATION_NAMES.exportAnswerReport,
 				() =>
@@ -294,7 +286,6 @@ export class ThoughtSpotService {
 
 		try {
 			span?.setAttribute("session_identifier", session_identifier);
-			console.log("[DEBUG] Getting TML for answer: ", title);
 			const tml = await this.observeUpstreamCall(
 				UPSTREAM_OPERATION_NAMES.exportUnsavedAnswerTml,
 				() =>
@@ -515,9 +506,7 @@ export class ThoughtSpotService {
 				message: `Error getting answer for question ${error}`,
 			});
 			console.error(
-				"Error getting answer for question: ",
-				question,
-				" and sourceId: ",
+				"Error getting answer for sourceId: ",
 				sourceId,
 				" and shouldGetTML: ",
 				shouldGetTML,
