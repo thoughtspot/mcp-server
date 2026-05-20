@@ -5,7 +5,6 @@ import {
 	ListToolsRequestSchema,
 	type ListToolsResult,
 	ReadResourceRequestSchema,
-	ToolSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { type Span, SpanStatusCode } from "@opentelemetry/api";
 import type { z } from "zod";

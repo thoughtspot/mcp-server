@@ -1,11 +1,7 @@
-import type {
-	AuthRequest,
-	OAuthHelpers,
-} from "@cloudflare/workers-oauth-provider";
-import { type Span, SpanStatusCode, context, trace } from "@opentelemetry/api";
+import type { OAuthHelpers } from "@cloudflare/workers-oauth-provider";
+import { SpanStatusCode } from "@opentelemetry/api";
 import { Hono } from "hono";
 import { decodeBase64Url, encodeBase64Url } from "hono/utils/encode";
-import { any } from "zod";
 import {
 	getStatusClass,
 	resolveRequestMetricContext,
@@ -447,7 +443,7 @@ app.post(PUBLIC_ROUTES.storeToken, async (c) => {
 });
 
 app.get(PUBLIC_ROUTES.openaiAppsChallenge, (c) => {
-	return c.text(process.env.OPEN_AI_TOKEN);
+	return c.text(process.env.OPEN_AI_TOKEN as string);
 });
 
 export default app;

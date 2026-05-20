@@ -2,10 +2,9 @@ import {
 	createExecutionContext,
 	env,
 	runInDurableObject,
-	waitOnExecutionContext,
 } from "cloudflare:test";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import worker, { ThoughtSpotMCP } from "../src";
+import worker from "../src";
 import app from "../src/handlers";
 import { METRIC_NAMES } from "../src/metrics/runtime/metric-types";
 import {
