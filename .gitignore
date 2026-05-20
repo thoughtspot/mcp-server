@@ -141,3 +141,6 @@ dist
 .dev.vars
 coverage
 key.pem
+
+# MacOS metadata
+.DS_Store

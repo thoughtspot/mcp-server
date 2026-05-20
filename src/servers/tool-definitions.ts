@@ -1,14 +1,5 @@
-import { ToolSchema } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
-import { zodToJsonSchema } from "zod-to-json-schema";
 
-const ToolInputSchema = ToolSchema.shape.inputSchema;
-type ToolInput = z.infer<typeof ToolInputSchema>;
-
-export const ToolOutputSchema = ToolSchema.shape.outputSchema;
-type ToolOutput = z.infer<typeof ToolOutputSchema>;
-
-// Schemas
 export const PingSchema = z.object({});
 
 export const GetRelevantQuestionsSchema = z.object({
@@ -285,7 +276,7 @@ export const toolDefinitionsV1 = [
 	{
 		name: ToolName.Ping,
 		description: "Simple ping tool to test connectivity and Auth",
-		inputSchema: zodToJsonSchema(PingSchema) as ToolInput,
+		inputSchema: z.toJSONSchema(PingSchema),
 		annotations: {
 			title: "Test Connection",
 			readOnlyHint: true,
@@ -296,7 +287,7 @@ export const toolDefinitionsV1 = [
 	{
 		name: ToolName.CreateLiveboard,
 		description: "Create a liveboard from a list of answers",
-		inputSchema: zodToJsonSchema(CreateLiveboardSchema) as ToolInput,
+		inputSchema: z.toJSONSchema(CreateLiveboardSchema),
 		annotations: {
 			title: "Create Liveboard from Answers",
 			readOnlyHint: false,
@@ -308,7 +299,7 @@ export const toolDefinitionsV1 = [
 		name: ToolName.GetDataSourceSuggestions,
 		description:
 			"Get data source suggestions for a query. Use this tool only if there is not datasource id provided in the context or the users query. If mulitple data sources are returned, and the confidence difference between the top two data sources is less than 0.3, ask the user to select the most relevant data source. Otherwise use the data source with the highest confidence to get the relevant questions and answers for the query.",
-		inputSchema: zodToJsonSchema(GetDataSourceSuggestionsSchema) as ToolInput,
+		inputSchema: z.toJSONSchema(GetDataSourceSuggestionsSchema),
 		annotations: {
 			title: "Get Data Source Suggestions for a Query",
 			readOnlyHint: true,
@@ -319,10 +310,8 @@ export const toolDefinitionsV1 = [
 	{
 		name: ToolName.GetRelevantQuestions,
 		description: "Get relevant data questions from ThoughtSpot database",
-		inputSchema: zodToJsonSchema(GetRelevantQuestionsSchema) as ToolInput,
-		outputSchema: zodToJsonSchema(
-			GetRelevantQuestionsOutputSchema,
-		) as ToolOutput,
+		inputSchema: z.toJSONSchema(GetRelevantQuestionsSchema),
+		outputSchema: z.toJSONSchema(GetRelevantQuestionsOutputSchema),
 		annotations: {
 			title: "Get Relevant Questions for a Query",
 			readOnlyHint: true,
@@ -333,7 +322,7 @@ export const toolDefinitionsV1 = [
 	{
 		name: ToolName.GetAnswer,
 		description: "Get the answer to a question from ThoughtSpot database",
-		inputSchema: zodToJsonSchema(GetAnswerSchema) as ToolInput,
+		inputSchema: z.toJSONSchema(GetAnswerSchema),
 		annotations: {
 			title: "Get Answer for a Question",
 			readOnlyHint: true,
@@ -348,8 +337,8 @@ export const toolDefinitionsV2 = [
 		name: ToolName.CheckConnectivity,
 		description:
 			"Ping tool to test connectivity and authentication. You can use this if other tool calls are failing to verify if the connection is working.",
-		inputSchema: zodToJsonSchema(CheckConnectivityInputSchema) as ToolInput,
-		outputSchema: zodToJsonSchema(CheckConnectivityOutputSchema) as ToolOutput,
+		inputSchema: z.toJSONSchema(CheckConnectivityInputSchema),
+		outputSchema: z.toJSONSchema(CheckConnectivityOutputSchema),
 		annotations: {
 			title: "Check Connectivity",
 			readOnlyHint: true,
@@ -361,10 +350,8 @@ export const toolDefinitionsV2 = [
 		name: ToolName.CreateAnalysisSession,
 		description:
 			"Start an analytical session with the Analytics Agent. This is the first step in a three-step workflow: create a session, send a message, then poll for updates. Once created, you can use the returned `analytical_session_id` to send analytical questions via `send_session_message` and retrieve answers via `get_session_updates`. Sessions are conversational, so you can ask follow-up questions in the same session without creating a new one. Using a single analytical session is preferable, because it reuses the same data source selection.",
-		inputSchema: zodToJsonSchema(CreateAnalysisSessionInputSchema) as ToolInput,
-		outputSchema: zodToJsonSchema(
-			CreateAnalysisSessionOutputSchema,
-		) as ToolOutput,
+		inputSchema: z.toJSONSchema(CreateAnalysisSessionInputSchema),
+		outputSchema: z.toJSONSchema(CreateAnalysisSessionOutputSchema),
 		annotations: {
 			title: "Create Analysis Session",
 			readOnlyHint: false,
@@ -376,8 +363,8 @@ export const toolDefinitionsV2 = [
 		name: ToolName.SendSessionMessage,
 		description:
 			"Send a message to a session with the Analytics Agent. The Agent may take some time to think and generate a response, so the response will not be returned immediately. Instead, you can use the `get_session_updates` tool to query for the latest updates on the session. After the Agent finishes responding (when `get_session_updates` returns `is_done: true`), you can send another message to the same session to ask follow-up questions without creating a new session. Do not send a new message until the Agent has finished responding to the previous message (when `get_session_updates` returns `is_done: true`). If the user wants to create a dashboard, do not send a message with that request; instead use the `create_dashboard` tool.",
-		inputSchema: zodToJsonSchema(SendSessionMessageInputSchema) as ToolInput,
-		outputSchema: zodToJsonSchema(SendSessionMessageOutputSchema) as ToolOutput,
+		inputSchema: z.toJSONSchema(SendSessionMessageInputSchema),
+		outputSchema: z.toJSONSchema(SendSessionMessageOutputSchema),
 		annotations: {
 			title: "Send Analysis Session Message",
 			readOnlyHint: false,
@@ -389,8 +376,8 @@ export const toolDefinitionsV2 = [
 		name: ToolName.GetSessionUpdates,
 		description:
 			"Get the latest updates from the Analytics Agent. You can call this after `send_session_message` to retrieve the Agent's response. If `is_done` is false, you can call this tool again to continue polling, as the Agent is still generating a response. Even if `is_done` is false, you can use the updates to show status updates or progress to the user, so that they are informed about the ongoing process. An empty `session_updates` list while `is_done` is false is normal; it means the Agent is still thinking. When `is_done` is true, the Agent has finished and the results in `session_updates` are complete, so you can present them to the user. You can also send a follow-up message in the same session after `is_done` is true.",
-		inputSchema: zodToJsonSchema(GetSessionUpdatesInputSchema) as ToolInput,
-		outputSchema: zodToJsonSchema(GetSessionUpdatesOutputSchema) as ToolOutput,
+		inputSchema: z.toJSONSchema(GetSessionUpdatesInputSchema),
+		outputSchema: z.toJSONSchema(GetSessionUpdatesOutputSchema),
 		annotations: {
 			title: "Get Analysis Session Updates",
 			readOnlyHint: true,
@@ -402,8 +389,8 @@ export const toolDefinitionsV2 = [
 		name: ToolName.CreateDashboard,
 		description:
 			"Create a dashboard from a list of answers, allowing the user to revisit the results later. You can use this if the user asks for a dashboard or liveboard, or asks to save the results from the analysis. This can be a useful way to save the results to revisit later, or present them to other users.",
-		inputSchema: zodToJsonSchema(CreateDashboardInputSchema) as ToolInput,
-		outputSchema: zodToJsonSchema(CreateDashboardOutputSchema) as ToolOutput,
+		inputSchema: z.toJSONSchema(CreateDashboardInputSchema),
+		outputSchema: z.toJSONSchema(CreateDashboardOutputSchema),
 		annotations: {
 			title: "Create Dashboard",
 			readOnlyHint: false,
