@@ -596,10 +596,6 @@ describe("utils", () => {
 			const testKey = "test-key";
 			const result = await getFromKV(testKey, mockEnv);
 
-			expect(consoleLogSpy).toHaveBeenCalledWith(
-				"[DEBUG] Getting from KV",
-				testKey,
-			);
 			expect(mockGet).toHaveBeenCalledWith(testKey, { type: "json" });
 			expect(result).toEqual(testValue);
 		});
@@ -629,15 +625,6 @@ describe("utils", () => {
 			const result = await getFromKV("test-key", undefined as any);
 
 			expect(result).toBeUndefined();
-		});
-
-		it("should log debug message for all calls", async () => {
-			await getFromKV("test-key", {} as any);
-
-			expect(consoleLogSpy).toHaveBeenCalledWith(
-				"[DEBUG] Getting from KV",
-				"test-key",
-			);
 		});
 	});
 });

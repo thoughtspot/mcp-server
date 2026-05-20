@@ -2,7 +2,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { TrackEvent, type Tracker } from "../../src/metrics";
 import { MixpanelTracker } from "../../src/metrics/mixpanel/mixpanel";
 import { MCPServer } from "../../src/servers/mcp-server";
-import { StreamingMessagesStorageWithTtl } from "../../src/streaming-message-storage-with-ttl/streaming-message-storage-with-ttl";
 import * as thoughtspotClient from "../../src/thoughtspot/thoughtspot-client";
 
 // Mock the MixpanelTracker
@@ -123,16 +122,7 @@ describe("MCP Server Base", () => {
 			},
 		};
 
-		mockStreamingStorage = new StreamingMessagesStorageWithTtl(
-			null as any,
-			vi.fn(),
-			vi.fn(),
-		);
-
-		server = new TestMCPServer(
-			{ props: mockProps, env: mockEnv },
-			mockStreamingStorage,
-		);
+		server = new TestMCPServer({ props: mockProps, env: mockEnv });
 	});
 
 	describe("Response Helper Methods", () => {
@@ -277,10 +267,7 @@ describe("MCP Server Base", () => {
 				instanceUrl: "https://test.thoughtspot.cloud",
 			} as any);
 
-			const testServer = new TestMCPServer(
-				{ props: mockProps, env: mockEnv },
-				mockStreamingStorage,
-			);
+			const testServer = new TestMCPServer({ props: mockProps, env: mockEnv });
 			await testServer.init();
 			expect(testServer.testIsDatasourceDiscoveryAvailable()).toBe(false);
 		});
@@ -296,10 +283,7 @@ describe("MCP Server Base", () => {
 				instanceUrl: "https://test.thoughtspot.cloud",
 			} as any);
 
-			const testServer = new TestMCPServer(
-				{ props: mockProps, env: mockEnv },
-				mockStreamingStorage,
-			);
+			const testServer = new TestMCPServer({ props: mockProps, env: mockEnv });
 			await testServer.init();
 			expect(testServer.testIsDatasourceDiscoveryAvailable()).toBe(false);
 		});
@@ -343,10 +327,7 @@ describe("MCP Server Base", () => {
 				.spyOn(console, "error")
 				.mockImplementation(() => {});
 
-			const testServer = new TestMCPServer(
-				{ props: mockProps, env: mockEnv },
-				mockStreamingStorage,
-			);
+			const testServer = new TestMCPServer({ props: mockProps, env: mockEnv });
 			await expect(testServer.init()).resolves.not.toThrow();
 
 			expect(consoleErrorSpy).toHaveBeenCalledWith(
@@ -380,10 +361,7 @@ describe("MCP Server Base", () => {
 				instanceUrl: "https://test.thoughtspot.cloud",
 			} as any);
 
-			const testServer = new TestMCPServer(
-				{ props: mockProps, env: mockEnv },
-				mockStreamingStorage,
-			);
+			const testServer = new TestMCPServer({ props: mockProps, env: mockEnv });
 			// No tracker was registered, but init should not throw
 			await expect(testServer.init()).resolves.not.toThrow();
 		});
@@ -435,20 +413,20 @@ describe("MCP Server Base", () => {
 		});
 
 		it("throws an error when access token is missing", async () => {
-			const serverWithNoToken = new TestMCPServer(
-				{ props: { ...mockProps, accessToken: "" }, env: mockEnv },
-				mockStreamingStorage,
-			);
+			const serverWithNoToken = new TestMCPServer({
+				props: { ...mockProps, accessToken: "" },
+				env: mockEnv,
+			});
 			await expect(serverWithNoToken.testGetStorageService()).rejects.toThrow(
 				"Access token is required to use Storage Service",
 			);
 		});
 
 		it("throws an error when access token is undefined", async () => {
-			const serverWithNoToken = new TestMCPServer(
-				{ props: { ...mockProps, accessToken: undefined }, env: mockEnv },
-				mockStreamingStorage,
-			);
+			const serverWithNoToken = new TestMCPServer({
+				props: { ...mockProps, accessToken: undefined },
+				env: mockEnv,
+			});
 			await expect(serverWithNoToken.testGetStorageService()).rejects.toThrow(
 				"Access token is required to use Storage Service",
 			);
@@ -498,14 +476,14 @@ describe("MCP Server Base", () => {
 		});
 
 		it("produces different hashes for different access tokens", async () => {
-			const serverA = new TestMCPServer(
-				{ props: { ...mockProps, accessToken: "token-alice" }, env: mockEnv },
-				mockStreamingStorage,
-			);
-			const serverB = new TestMCPServer(
-				{ props: { ...mockProps, accessToken: "token-bob" }, env: mockEnv },
-				mockStreamingStorage,
-			);
+			const serverA = new TestMCPServer({
+				props: { ...mockProps, accessToken: "token-alice" },
+				env: mockEnv,
+			});
+			const serverB = new TestMCPServer({
+				props: { ...mockProps, accessToken: "token-bob" },
+				env: mockEnv,
+			});
 
 			const [serviceA, serviceB] = await Promise.all([
 				serverA.testGetStorageService(),
@@ -536,10 +514,7 @@ describe("MCP Server Base", () => {
 		});
 
 		it("should be defined with a fresh env and props", () => {
-			const freshServer = new TestMCPServer(
-				{ props: mockProps, env: mockEnv },
-				mockStreamingStorage,
-			);
+			const freshServer = new TestMCPServer({ props: mockProps, env: mockEnv });
 			expect(freshServer).toBeDefined();
 		});
 	});

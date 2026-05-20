@@ -118,8 +118,6 @@ export async function putInKV(
  * Retrieve a value from Cloudflare KV
  */
 export async function getFromKV(key: string, env?: any): Promise<any> {
-	console.log("[DEBUG] Getting from KV", key);
-
 	if (!env?.OAUTH_KV) {
 		return undefined;
 	}

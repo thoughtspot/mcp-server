@@ -359,7 +359,6 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 
 		expect(consoleWarnSpy).toHaveBeenCalledWith(
 			"Unknown line in event stream, does not start with 'data:'",
-			'"unexpected line format"',
 		);
 		// Only done call, no messages stored
 		expect(storage.appendMessagesAndRestartTtl).toHaveBeenCalledOnce();
@@ -396,8 +395,8 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		);
 
 		expect(consoleWarnSpy).toHaveBeenCalledWith(
-			"Unknown event in event stream: ",
-			{ type: "mystery_event" },
+			"Unknown event in event stream:",
+			"mystery_event",
 		);
 		expect(storage.appendMessagesAndRestartTtl).toHaveBeenCalledOnce();
 	});
