@@ -1,5 +1,8 @@
 import { z } from "zod";
 
+export const INTERACTIVE_ANSWER_RESOURCE_URI =
+	"ui://thoughtspot-mcp/interactive-answer";
+
 export const PingSchema = z.object({});
 
 export const GetRelevantQuestionsSchema = z.object({
@@ -270,6 +273,7 @@ export enum ToolName {
 	SendSessionMessage = "send_session_message",
 	GetSessionUpdates = "get_session_updates",
 	CreateDashboard = "create_dashboard",
+	GetInteractiveAnswer = "get_interactive_answer",
 }
 
 export const toolDefinitionsV1 = [
@@ -396,6 +400,23 @@ export const toolDefinitionsV2 = [
 			readOnlyHint: false,
 			destructiveHint: false,
 			openWorldHint: false,
+		},
+	},
+	{
+		name: ToolName.GetInteractiveAnswer,
+		description:
+			"Returns an interactive HTML application for exploring and visualising answers. Use this when the user asks for an interactive view, a visual answer, or an embedded app experience.",
+		inputSchema: z.toJSONSchema(z.object({})),
+		annotations: {
+			title: "Get Interactive Answer",
+			readOnlyHint: true,
+			destructiveHint: false,
+			openWorldHint: false,
+		},
+		_meta: {
+			ui: {
+				resourceUri: INTERACTIVE_ANSWER_RESOURCE_URI,
+			},
 		},
 	},
 ];
