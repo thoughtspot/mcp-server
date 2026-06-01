@@ -1,6 +1,6 @@
 import type {
-	ClientInfo,
 	AuthRequest,
+	ClientInfo,
 } from "@cloudflare/workers-oauth-provider";
 import { encodeBase64Url } from "hono/utils/encode";
 
@@ -302,17 +302,16 @@ export function renderApprovalDialog(
               </span>
               <img src="${thoughtspotLogoUrl}" alt="ThoughtSpot Logo" class="approval-logo">
             </div>
-            <div class="approval-title">ThoughtSpot MCP Server wants access<br>to your ThoughtSpot instance</div>
+            <div class="approval-title">ThoughtSpot Spotter wants access<br>to your ThoughtSpot instance</div>
             <form class="approval-form" method="post" action="${new URL(request.url).pathname}" id="approvalForm" autocomplete="off" novalidate>
               <div class="form-group">
-                <label for="instanceUrl" id="instanceUrlLabel">ThoughtSpot Instance URL</label>
+                <label for="instanceUrl" id="instanceUrlLabel">ThoughtSpot instance URL</label>
                 <input type="text" id="instanceUrl" name="instanceUrl" value="${tsInstanceUrl}" placeholder="https://your-instance.thoughtspot.cloud" autocomplete="off">
                 <input type="hidden" name="state" value="${encodedState}">
               </div>
-              <div class="approval-subtitle">ThoughtSpot MCP Server will be able to:</div>
+              <div class="approval-subtitle">ThoughtSpot Spotter will be able to:</div>
               <ul class="approval-permissions">
-                <li>Read all ThoughtSpot data you have access to</li>
-                <li>Read all ThoughtSpot content you have access to</li>
+                <li>Read all ThoughtSpot data and content you have access to</li>
                 <li>Send data to the client you are connecting to</li>
               </ul>
               <div class="terms-checkbox">
@@ -346,7 +345,6 @@ export function renderApprovalDialog(
               input.classList.remove('input-red');
               label.classList.add('label-blue');
               label.classList.remove('label-red');
-              label.textContent = 'ThoughtSpot Instance URL';
               lastError = false;
             }
             function setRed() {
@@ -354,13 +352,11 @@ export function renderApprovalDialog(
               input.classList.remove('input-blue');
               label.classList.add('label-red');
               label.classList.remove('label-blue');
-              label.textContent = 'ThoughtSpot Instance URL';
               lastError = true;
             }
             function clearColors() {
               input.classList.remove('input-blue', 'input-red');
               label.classList.remove('label-blue', 'label-red');
-              label.textContent = 'ThoughtSpot Instance URL';
               lastError = false;
             }
             function updateAllowButton() {
@@ -394,6 +390,10 @@ export function renderApprovalDialog(
 	return new Response(htmlContent, {
 		headers: {
 			"Content-Type": "text/html; charset=utf-8",
+			"X-Content-Type-Options": "nosniff",
+			"Referrer-Policy": "strict-origin-when-cross-origin",
+			"Content-Security-Policy":
+				"default-src 'none'; style-src 'unsafe-inline'; img-src 'self' https://raw.githubusercontent.com https://avatars.githubusercontent.com; script-src 'unsafe-inline'; form-action 'self'",
 		},
 	});
 }
@@ -439,6 +439,12 @@ export function validateAndSanitizeUrl(url: string): string {
 				: `https://${trimmedUrl}`;
 
 		const parsedUrl = new URL(urlWithProtocol);
+
+		if (parsedUrl.protocol !== "https:") {
+			throw new Error(
+				`Only HTTPS URLs are allowed, received: ${parsedUrl.protocol}`,
+			);
+		}
 
 		// Remove trailing slashes and normalize the URL
 		const sanitizedUrl = parsedUrl.origin;

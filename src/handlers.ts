@@ -100,7 +100,7 @@ class Handler {
 		return renderApprovalDialog(request, {
 			client,
 			server: {
-				name: "ThoughtSpot MCP Server",
+				name: "ThoughtSpot Spotter",
 				logo: "https://avatars.githubusercontent.com/u/8906680?s=200&v=4",
 				description: "MCP Server for ThoughtSpot Agent",
 			},
@@ -354,6 +354,8 @@ app.get(PUBLIC_ROUTES.callback, async (c) => {
 		const response = new Response(htmlContent, {
 			headers: {
 				"Content-Type": "text/html",
+				"X-Content-Type-Options": "nosniff",
+				"Referrer-Policy": "strict-origin-when-cross-origin",
 			},
 		});
 		recordAuthFlowMetric(c, METRIC_NAMES.oauthCallbackTotal, response.status);

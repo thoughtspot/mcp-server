@@ -1,12 +1,12 @@
-import { describe, it, expect, vi } from "vitest";
+import { decodeBase64Url } from "hono/utils/encode";
+import { describe, expect, it, vi } from "vitest";
 import {
-	renderApprovalDialog,
-	parseRedirectApproval,
-	validateAndSanitizeUrl,
 	type ApprovalDialogOptions,
 	buildSamlRedirectUrl,
+	parseRedirectApproval,
+	renderApprovalDialog,
+	validateAndSanitizeUrl,
 } from "../../src/oauth-manager/oauth-utils";
-import { decodeBase64Url } from "hono/utils/encode";
 
 describe("OAuth Utils", () => {
 	describe("renderApprovalDialog", () => {
@@ -34,7 +34,7 @@ describe("OAuth Utils", () => {
 
 			return response.text().then((html) => {
 				expect(html).toContain("Test Server");
-				expect(html).toContain("ThoughtSpot MCP Server wants access");
+				expect(html).toContain("ThoughtSpot Spotter wants access");
 				expect(html).toContain("Authorization Request");
 			});
 		});
@@ -80,7 +80,7 @@ describe("OAuth Utils", () => {
 
 			expect(response.status).toBe(200);
 			return response.text().then((html) => {
-				expect(html).toContain("ThoughtSpot MCP Server wants access");
+				expect(html).toContain("ThoughtSpot Spotter wants access");
 			});
 		});
 
@@ -157,6 +157,15 @@ describe("OAuth Utils", () => {
 
 		it("should throw error for empty URL", () => {
 			expect(() => validateAndSanitizeUrl("")).toThrow();
+		});
+
+		it("should throw error for http URLs", () => {
+			expect(() => validateAndSanitizeUrl("http://example.com")).toThrow(
+				"Only HTTPS URLs are allowed",
+			);
+			expect(() =>
+				validateAndSanitizeUrl("http://test.thoughtspot.cloud"),
+			).toThrow("Only HTTPS URLs are allowed");
 		});
 	});
 
