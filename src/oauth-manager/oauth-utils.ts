@@ -390,10 +390,6 @@ export function renderApprovalDialog(
 	return new Response(htmlContent, {
 		headers: {
 			"Content-Type": "text/html; charset=utf-8",
-			"X-Content-Type-Options": "nosniff",
-			"Referrer-Policy": "strict-origin-when-cross-origin",
-			"Content-Security-Policy":
-				"default-src 'none'; style-src 'unsafe-inline'; img-src 'self' https://raw.githubusercontent.com https://avatars.githubusercontent.com; script-src 'unsafe-inline'; form-action 'self'",
 		},
 	});
 }

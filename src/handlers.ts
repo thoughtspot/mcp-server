@@ -354,8 +354,6 @@ app.get(PUBLIC_ROUTES.callback, async (c) => {
 		const response = new Response(htmlContent, {
 			headers: {
 				"Content-Type": "text/html",
-				"X-Content-Type-Options": "nosniff",
-				"Referrer-Policy": "strict-origin-when-cross-origin",
 			},
 		});
 		recordAuthFlowMetric(c, METRIC_NAMES.oauthCallbackTotal, response.status);
