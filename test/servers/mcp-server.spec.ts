@@ -164,14 +164,18 @@ describe("MCP Server", () => {
 
 			const result = await listTools();
 
-			// V2 tools (latest version): 5 tools
-			expect(result.tools).toHaveLength(5);
+			// V2 tools (latest version): 5 Spotter + 4 SpotterViz tools
+			expect(result.tools).toHaveLength(9);
 			expect(result.tools?.map((t) => t.name)).toEqual([
 				"check_connectivity",
 				"create_analysis_session",
 				"send_session_message",
 				"get_session_updates",
 				"create_dashboard",
+				"spotterviz_create_session",
+				"spotterviz_submit_query",
+				"spotterviz_get_updates",
+				"spotterviz_save_liveboard",
 			]);
 		});
 
@@ -201,7 +205,7 @@ describe("MCP Server", () => {
 			);
 		});
 
-		it("should return 5 tools regardless of enableSpotterDataSourceDiscovery when using latest (V2)", async () => {
+		it("should return 9 tools regardless of enableSpotterDataSourceDiscovery when using latest (V2)", async () => {
 			// Mock getThoughtSpotClient with enableSpotterDataSourceDiscovery set to false
 			vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
 				getSessionInfo: vi.fn().mockResolvedValue({
@@ -235,13 +239,17 @@ describe("MCP Server", () => {
 			const result = await listTools();
 
 			// V2 tools don't have a datasource discovery tool, so filtering has no effect
-			expect(result.tools).toHaveLength(5);
+			expect(result.tools).toHaveLength(9);
 			expect(result.tools?.map((t) => t.name)).toEqual([
 				"check_connectivity",
 				"create_analysis_session",
 				"send_session_message",
 				"get_session_updates",
 				"create_dashboard",
+				"spotterviz_create_session",
+				"spotterviz_submit_query",
+				"spotterviz_get_updates",
+				"spotterviz_save_liveboard",
 			]);
 		});
 	});
