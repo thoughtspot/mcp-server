@@ -337,12 +337,12 @@ export const SpotterVizUpdateSchema = z.object({
 	data: z
 		.record(z.string(), z.unknown())
 		.describe("Raw event payload as emitted by Aurora."),
-	message_id: z.string().optional(),
-	idx: z.number().optional(),
-	timestamp: z.string().optional(),
-	tool_id: z.string().optional(),
-	group_id: z.string().optional(),
-	heading: z.string().optional(),
+	message_id: z.string().nullish(),
+	idx: z.number().nullish(),
+	timestamp: z.string().nullish(),
+	tool_id: z.string().nullish(),
+	group_id: z.string().nullish(),
+	heading: z.string().nullish(),
 });
 
 export const SpotterVizGetUpdatesOutputSchema = z.object({

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { SpotterVizGetUpdatesOutputSchema } from "../../src/servers/tool-definitions";
 import type { SpotterVizClient } from "../../src/spotterviz/spotterviz-client";
 import { SpotterVizService } from "../../src/spotterviz/spotterviz-service";
 import * as sseStreamModule from "../../src/spotterviz/spotterviz-sse-stream";
@@ -284,6 +285,40 @@ describe("SpotterVizService.submitQuery", () => {
 				message: "x",
 			}),
 		).rejects.toThrow("aurora 500");
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Output schema null tolerance
+// ---------------------------------------------------------------------------
+
+describe("SpotterVizGetUpdatesOutputSchema", () => {
+	it("accepts events where optional metadata fields are explicit null", () => {
+		// Aurora emits `tool_id: null` (and similar) for events where the field
+		// doesn't apply — the schema must accept null, not just undefined, or the
+		// host will reject the tool response.
+		const sampleResponse = {
+			updates: [
+				{
+					event_type: "meta.progress",
+					data: {
+						stage: "working",
+						message: null,
+						card_type: null,
+					},
+					message_id: "msg-1",
+					idx: 1,
+					timestamp: "2026-06-09T11:12:19Z",
+					tool_id: null,
+					group_id: "grp-1",
+					heading: "Understanding user's prompt",
+				},
+			],
+			is_done: false,
+		};
+
+		const result = SpotterVizGetUpdatesOutputSchema.safeParse(sampleResponse);
+		expect(result.success).toBe(true);
 	});
 });
 

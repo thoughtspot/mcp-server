@@ -48,12 +48,12 @@ export interface CreateSpotterVizSessionResult {
 export interface SpotterVizEvent extends Record<string, unknown> {
 	event_type: string;
 	data: Record<string, unknown>;
-	message_id?: string;
-	idx?: number;
-	timestamp?: string;
-	tool_id?: string;
-	group_id?: string;
-	heading?: string;
+	message_id?: string | null;
+	idx?: number | null;
+	timestamp?: string | null;
+	tool_id?: string | null;
+	group_id?: string | null;
+	heading?: string | null;
 }
 
 export interface SubmitSpotterVizQueryParams {
