@@ -1278,6 +1278,50 @@ describe("MCP Server", () => {
 				}),
 			).rejects.toThrow("Failed to create conversation");
 		});
+
+		it("should return auth-expired error response when service throws 401 error", async () => {
+			vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
+				getSessionInfo: vi.fn().mockResolvedValue({
+					clusterId: "test-cluster-123",
+					clusterName: "test-cluster",
+					releaseVersion: "10.13.0.cl-110",
+					userGUID: "test-user-123",
+					configInfo: {
+						mixpanelConfig: {
+							devSdkKey: "test-dev-token",
+							prodSdkKey: "test-prod-token",
+							production: false,
+						},
+						selfClusterName: "test-cluster",
+						selfClusterId: "test-cluster-123",
+						enableSpotterDataSourceDiscovery: true,
+					},
+					userName: "test-user",
+					currentOrgId: "test-org",
+					privileges: [],
+				}),
+				createAgentConversationWithAutoMode: vi
+					.fn()
+					.mockRejectedValue(
+						new Error(
+							"createAgentConversationWithAutoMode failed with status 401",
+						),
+					),
+				instanceUrl: "https://test.thoughtspot.cloud",
+			} as any);
+
+			await server.init();
+
+			const result = await server.callCreateAnalysisSession({
+				method: "tools/call",
+				params: { name: "create_analysis_session", arguments: {} },
+			});
+
+			expect(result.isError).toBe(true);
+			expect((result.content[0] as any).text).toContain(
+				"Your authentication has expired",
+			);
+		});
 	});
 
 	describe("Caching", () => {
