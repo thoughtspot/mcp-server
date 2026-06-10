@@ -3,6 +3,7 @@ import type {
 	ReadResourceRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { SpanStatusCode, context, trace } from "@opentelemetry/api";
+import type { AgentConversation } from "@thoughtspot/rest-api-sdk";
 import type { z } from "zod";
 import { TrackEvent } from "../metrics";
 import type { ApiVersionMode } from "../metrics/runtime/metric-types";
@@ -381,10 +382,22 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		);
 		span?.setAttribute("data_source_id", data_source_id ?? "(none)");
 
-		const response =
-			await this.getThoughtSpotService(recorder).createAgentConversation(
-				data_source_id,
+		let response: AgentConversation;
+		try {
+			response =
+				await this.getThoughtSpotService(recorder).createAgentConversation(
+					data_source_id,
+				);
+		} catch (error) {
+			if (!(error as any)?.message?.includes("failed with status 401")) {
+				throw error;
+			}
+
+			return this.createErrorResponse(
+				"Your authentication has expired, please reauthenticate and try again. You may need to disconnect and reconnect the MCP Server if you don't have any other way to reauthenticate.",
+				"User authentication has expired, prompting them to reauthenticate",
 			);
+		}
 		recorder.setAnalyticsContext({
 			analyticalSessionId: response.conversation_id,
 		});
