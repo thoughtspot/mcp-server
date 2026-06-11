@@ -192,6 +192,12 @@ export class MCPServer extends BaseMCPServer {
 		switch (name) {
 			case ToolName.Ping: {
 				if (this.ctx.props.accessToken && this.ctx.props.instanceUrl) {
+						if (!this.getThoughtSpotService(recorder).validateConnection()) {
+						return this.createErrorResponse(
+							"Failed to validate connection",
+							"Ping failed",
+						);
+					}
 					return this.createSuccessResponse("Pong", "Ping successful");
 				}
 				return this.createErrorResponse("Not authenticated", "Ping failed");
@@ -217,6 +223,12 @@ export class MCPServer extends BaseMCPServer {
 				if (!this.ctx.props.accessToken || !this.ctx.props.instanceUrl) {
 					return this.createErrorResponse(
 						"Access token or instance URL not valid",
+						"Check connectivity failed",
+					);
+				}
+				if (!this.getThoughtSpotService(recorder).validateConnection()) {
+					return this.createErrorResponse(
+						"Failed to validate connection",
 						"Check connectivity failed",
 					);
 				}
