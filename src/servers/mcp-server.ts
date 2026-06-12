@@ -25,6 +25,7 @@ import {
 	GetDataSourceSuggestionsSchema,
 	GetRelevantQuestionsSchema,
 	GetSessionUpdatesInputSchema,
+	INTERACTIVE_ANSWER_RESOURCE_URI,
 	SendSessionMessageInputSchema,
 	ToolName,
 } from "./tool-definitions";
@@ -33,6 +34,122 @@ import {
 	resolveApiVersion,
 	resolveApiVersionMetrics,
 } from "./version-registry";
+
+const INTERACTIVE_ANSWER_HTML = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Interactive Answer</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      height: 500px;
+      overflow: hidden;
+    }
+    #ts-embed {
+      width: 100%;
+      height: 100%;
+    }
+    #ts-loading {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-size: 1.1em;
+      color: #666;
+    }
+  </style>
+</head>
+<body>
+  <div id="ts-loading">Loading visualization...</div>
+  <div id="ts-embed"></div>
+  <script type="module">
+    import {
+      LiveboardEmbed,
+      AuthType,
+      init,
+      EmbedEvent,
+    } from 'https://cdn.jsdelivr.net/npm/@thoughtspot/visual-embed-sdk/dist/tsembed.es.js';
+
+    const thoughtSpotHost = 'champagne-master-aws.thoughtspotstaging.cloud';
+
+    init({
+      thoughtSpotHost,
+      authType: AuthType.TrustedAuthToken,
+	  getAuthToken: () => Promise.resolve('cmlmZGhhbi5uYXplZXJAdGhvdWdodHNwb3QuY29tOk9EbGlOR05oTkRNdFltWmpNQzAwTmpWakxXRXpaakl0TkRFNU5UazJNMlptT1dOa09qRTNOems1TWpZNU9ERTRNemM2SkhOb2FYSnZNU1JUU0VFdE1qVTJKRFV3TURBd01DUmtVREZzVDFsRU9HcGpaMlZuYTNsc1lrczNSSGhCUFQwa1JXNUhielpoUzFjMWFuQXJiRGhHZFVoaVdXUnFNVVpUYzJGcWIydFVVV3BOV1RGalMzUjFWMHhUVFQw'),
+    });
+
+    const embed = new LiveboardEmbed(document.getElementById('ts-embed'), {
+      frameParams: {
+        width: '100%',
+        height: '100%',
+      },
+      liveboardId: '31cbf421-b859-44ff-ab86-839197bb2bf2',
+      vizId: 'a9ff85e8-c28f-4189-a59a-c9dd2635ab0c',
+    });
+
+    embed.on(EmbedEvent.Init, () => {
+      document.getElementById('ts-loading').style.display = 'none';
+    });
+
+    embed.on(EmbedEvent.Load, () => {
+      document.getElementById('ts-loading').style.display = 'none';
+    });
+
+    embed.render();
+  </script>
+  <script>
+    (function () {
+      var nextId = 1;
+
+      function sendRequest(method, params) {
+        var id = nextId++;
+        return new Promise(function (resolve, reject) {
+          function listener(event) {
+            if (event.data && event.data.id === id) {
+              window.removeEventListener('message', listener);
+              if ('result' in event.data) resolve(event.data.result);
+              else reject(new Error(JSON.stringify(event.data.error)));
+            }
+          }
+          window.addEventListener('message', listener);
+          window.parent.postMessage({ jsonrpc: '2.0', id: id, method: method, params: params }, '*');
+        });
+      }
+
+      function sendNotification(method, params) {
+        window.parent.postMessage({ jsonrpc: '2.0', method: method, params: params || {} }, '*');
+      }
+
+      function reportSize() {
+        var height = document.documentElement.scrollHeight || document.body.offsetHeight;
+        var width = document.documentElement.scrollWidth || document.body.offsetWidth;
+        sendNotification('ui/notifications/size-changed', { height: height, width: width });
+      }
+
+      sendRequest('ui/initialize', {
+        appInfo: { name: 'Interactive Answer', version: '1.0.0' },
+        appCapabilities: {},
+        clientInfo: { name: 'Interactive Answer', version: '1.0.0' },
+        protocolVersion: '2026-01-26',
+      }).then(function () {
+        sendNotification('ui/notifications/initialized');
+        reportSize();
+      }).catch(function (err) {
+        console.error('MCP Apps init failed:', err);
+        // Send initialized anyway so the host makes the view visible
+        sendNotification('ui/notifications/initialized');
+        reportSize();
+      });
+
+      var ro = new ResizeObserver(function () { reportSize(); });
+      ro.observe(document.documentElement);
+    })();
+  </script>
+</body>
+</html>`;
 
 export class MCPServer extends BaseMCPServer {
 	constructor(ctx: Context) {
@@ -142,12 +259,20 @@ export class MCPServer extends BaseMCPServer {
 	protected async listResources() {
 		const sources = await this.getDatasources();
 		return {
-			resources: sources.list.map((s) => ({
-				uri: `datasource:///${s.id}`,
-				name: s.name,
-				description: s.description,
-				mimeType: "text/plain",
-			})),
+			resources: [
+				{
+					uri: INTERACTIVE_ANSWER_RESOURCE_URI,
+					name: "interactive-answer",
+					description: "Interactive Hello World app rendered inline in chat",
+					mimeType: "text/html;profile=mcp-app",
+				},
+				...sources.list.map((s) => ({
+					uri: `datasource:///${s.id}`,
+					name: s.name,
+					description: s.description,
+					mimeType: "text/plain",
+				})),
+			],
 		};
 	}
 
@@ -155,6 +280,36 @@ export class MCPServer extends BaseMCPServer {
 		request: z.infer<typeof ReadResourceRequestSchema>,
 	) {
 		const { uri } = request.params;
+
+		if (uri === INTERACTIVE_ANSWER_RESOURCE_URI) {
+			const cspMeta = {
+				ui: {
+					csp: {
+						// Allow the SDK's API calls to the ThoughtSpot instance
+						connectDomains: [this.ctx.props.instanceUrl, "api-js.mixpanel.com"],
+						// Allow loading the SDK script from the CDN, and allow the
+						// ThoughtSpot SDK to embed the ThoughtSpot host in an iframe (frame-src)
+						resourceDomains: [
+							"https://cdn.jsdelivr.net",
+							this.ctx.props.instanceUrl,
+						],
+						// This is not being used but we need it...
+						frameDomains: [this.ctx.props.instanceUrl],
+					},
+				},
+			};
+			return {
+				contents: [
+					{
+						uri,
+						mimeType: "text/html;profile=mcp-app",
+						text: INTERACTIVE_ANSWER_HTML,
+						_meta: cspMeta,
+					},
+				],
+			};
+		}
+
 		const sourceId = uri.split("///").pop();
 		if (!sourceId) {
 			throw new McpServerError({ message: "Invalid datasource uri" }, 400);
@@ -252,6 +407,10 @@ export class MCPServer extends BaseMCPServer {
 
 			case ToolName.CreateDashboard: {
 				return this.callCreateDashboard(request, recorder);
+			}
+
+			case ToolName.GetInteractiveAnswer: {
+				return this.callGetInteractiveAnswer();
 			}
 
 			default:
@@ -577,6 +736,17 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			},
 			"Dashboard created successfully",
 		);
+	}
+
+	callGetInteractiveAnswer() {
+		return {
+			content: [
+				{
+					type: "text" as const,
+					text: "Interactive answer rendered. The UI is displayed inline in the chat.",
+				},
+			],
+		};
 	}
 
 	@WithSpan("call-get-data-source-suggestions")
