@@ -413,7 +413,7 @@ export async function withRequestMetrics<T>(
 	try {
 		return await handler(recorder);
 	} finally {
-		scheduleRequestMetricsFlush(recorder, ctx);
-		clearMetricsRecorderFromExecutionContext(ctx);
+		// scheduleRequestMetricsFlush(recorder, ctx);
+		// clearMetricsRecorderFromExecutionContext(ctx);
 	}
 }

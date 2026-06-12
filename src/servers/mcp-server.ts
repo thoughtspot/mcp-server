@@ -16,17 +16,26 @@ import { WithSpan } from "../metrics/tracing/tracing-utils";
 import type { DataSource } from "../thoughtspot/thoughtspot-service";
 import type { Answer, StreamingMessagesState } from "../thoughtspot/types";
 import { McpServerError } from "../utils";
+import { GET_IMAGE_CSP_META, GET_IMAGE_HTML } from "./get-image/get-image";
 import { BaseMCPServer, type Context } from "./mcp-server-base";
+import {
+	PERFORM_ANALYSIS_CSP_META,
+	PERFORM_ANALYSIS_HTML,
+} from "./perform-analysis/perform-analysis";
 import {
 	CreateAnalysisSessionInputSchema,
 	CreateDashboardInputSchema,
 	CreateLiveboardSchema,
+	GET_IMAGE_RESOURCE_URI,
 	GetAnswerSchema,
 	GetDataSourceSuggestionsSchema,
+	GetImageSchema,
 	GetRelevantQuestionsSchema,
 	GetSessionUpdatesInputSchema,
+	PERFORM_ANALYSIS_RESOURCE_URI,
 	SendSessionMessageInputSchema,
 	ToolName,
+	resolveImageUrl,
 } from "./tool-definitions";
 import {
 	type VersionConfig,
@@ -142,12 +151,26 @@ export class MCPServer extends BaseMCPServer {
 	protected async listResources() {
 		const sources = await this.getDatasources();
 		return {
-			resources: sources.list.map((s) => ({
-				uri: `datasource:///${s.id}`,
-				name: s.name,
-				description: s.description,
-				mimeType: "text/plain",
-			})),
+			resources: [
+				{
+					uri: GET_IMAGE_RESOURCE_URI,
+					name: "get-image",
+					description: "Embed an image",
+					mimeType: "text/html;profile=mcp-app",
+				},
+				{
+					uri: PERFORM_ANALYSIS_RESOURCE_URI,
+					name: "perform-analysis",
+					description: "Perform analysis",
+					mimeType: "text/html;profile=mcp-app",
+				},
+				...sources.list.map((s) => ({
+					uri: `datasource:///${s.id}`,
+					name: s.name,
+					description: s.description,
+					mimeType: "text/plain",
+				})),
+			],
 		};
 	}
 
@@ -155,6 +178,33 @@ export class MCPServer extends BaseMCPServer {
 		request: z.infer<typeof ReadResourceRequestSchema>,
 	) {
 		const { uri } = request.params;
+
+		if (uri === GET_IMAGE_RESOURCE_URI) {
+			return {
+				contents: [
+					{
+						uri,
+						mimeType: "text/html;profile=mcp-app",
+						text: GET_IMAGE_HTML,
+						_meta: GET_IMAGE_CSP_META,
+					},
+				],
+			};
+		}
+
+		if (uri === PERFORM_ANALYSIS_RESOURCE_URI) {
+			return {
+				contents: [
+					{
+						uri,
+						mimeType: "text/html;profile=mcp-app",
+						text: PERFORM_ANALYSIS_HTML,
+						_meta: PERFORM_ANALYSIS_CSP_META,
+					},
+				],
+			};
+		}
+
 		const sourceId = uri.split("///").pop();
 		if (!sourceId) {
 			throw new McpServerError({ message: "Invalid datasource uri" }, 400);
@@ -192,7 +242,7 @@ export class MCPServer extends BaseMCPServer {
 		switch (name) {
 			case ToolName.Ping: {
 				if (this.ctx.props.accessToken && this.ctx.props.instanceUrl) {
-						if (!this.getThoughtSpotService(recorder).validateConnection()) {
+					if (!this.getThoughtSpotService(recorder).validateConnection()) {
 						return this.createErrorResponse(
 							"Failed to validate connection",
 							"Ping failed",
@@ -252,6 +302,18 @@ export class MCPServer extends BaseMCPServer {
 
 			case ToolName.CreateDashboard: {
 				return this.callCreateDashboard(request, recorder);
+			}
+
+			case ToolName.GetImage: {
+				return this.callGetImage(request);
+			}
+
+			case ToolName.PerformAnalysis: {
+				return this.callPerformAnalysis(request);
+			}
+
+			case ToolName.GetSessionState: {
+				return this.callGetSessionState(request, recorder);
 			}
 
 			default:
@@ -464,7 +526,7 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		);
 
 		return this.createStructuredContentSuccessResponse(
-			{ success: true },
+			{ success: true, analytical_session_id },
 			"Conversation message sent successfully",
 		);
 	}
@@ -520,13 +582,21 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			is_done: messagesState.isDone,
 		});
 
-		return this.createStructuredContentSuccessResponse(
-			{
+		return {
+			content: [
+				{
+					type: "text",
+					text: JSON.stringify({
+						session_updates: messagesState.messages,
+						is_done: messagesState.isDone,
+					}),
+				},
+			],
+			structuredContent: {
 				session_updates: messagesState.messages,
 				is_done: messagesState.isDone,
 			},
-			"Conversation updates retrieved successfully",
-		);
+		};
 	}
 
 	@WithSpan("call-create-dashboard")
@@ -577,6 +647,65 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			},
 			"Dashboard created successfully",
 		);
+	}
+
+	@WithSpan("call-get-image")
+	async callGetImage(request: z.infer<typeof CallToolRequestSchema>) {
+		const imageContent = await this.getThoughtSpotService().getVizImage(
+			request.params.arguments?.sessionId as string,
+			request.params.arguments?.genNo as number,
+		);
+		const arrayBuffer = await imageContent.arrayBuffer();
+		const base64 = Buffer.from(arrayBuffer).toString("base64");
+
+		// The host forwards `structuredContent` to the rendered MCP App via the
+		// `ui/notifications/tool-result` notification, where the UI reads
+		// `imageUrl` to pick which image to display.
+		return {
+			content: [
+				{
+					type: "text",
+					text: "Displayed the image widget",
+				},
+			],
+			structuredContent: {
+				imageContent: `data:image/png;base64,${base64}`,
+			},
+		};
+	}
+
+	@WithSpan("call-perform-analysis")
+	async callPerformAnalysis(request: z.infer<typeof CallToolRequestSchema>) {
+		// The host forwards `structuredContent` to the rendered MCP App via the
+		// `ui/notifications/tool-result` notification, where the UI reads
+		// `imageUrl` to pick which image to display.
+		return {
+			content: [
+				{
+					type: "text",
+					text: "Displayed the image widget",
+				},
+			],
+			structuredContent: {
+				message: request.params.arguments?.message,
+			},
+		};
+	}
+
+	@WithSpan("call-get-session-state")
+	async callGetSessionState(request: z.infer<typeof CallToolRequestSchema>) {
+		const { analytical_session_id } = GetSessionUpdatesInputSchema.parse(
+			request.params.arguments,
+		);
+		const storageService = await this.getStorageService();
+
+		const messagesState = await storageService.getState(analytical_session_id);
+
+		return {
+			structuredContent: {
+				messagesState,
+			},
+		};
 	}
 
 	@WithSpan("call-get-data-source-suggestions")

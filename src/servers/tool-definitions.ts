@@ -2,6 +2,36 @@ import { z } from "zod";
 
 export const PingSchema = z.object({});
 
+// Images that the `get_image` MCP App is allowed to render. Every URL MUST live
+// under a domain declared in the resource's CSP (`resourceDomains`), otherwise
+// the host will block it from loading inside the sandboxed iframe.
+export const DEFAULT_IMAGE_KEY = "default";
+export const IMAGE_LIBRARY: Record<string, string> = {
+	default: "https://agent.thoughtspot.app/ThoughtSpot_appicon.png",
+};
+
+/**
+ * Resolve an image key to a renderable URL. Unknown or missing keys fall back
+ * to the default image so the app always has something to display.
+ */
+export function resolveImageUrl(image?: string): string {
+	if (image && Object.hasOwn(IMAGE_LIBRARY, image)) {
+		return IMAGE_LIBRARY[image];
+	}
+	return IMAGE_LIBRARY[DEFAULT_IMAGE_KEY];
+}
+
+export const GetImageSchema = z.object({
+	image: z
+		.string()
+		.optional()
+		.describe(
+			`Optional identifier of the image to display. Must be one of the keys in the server's image library (currently: ${Object.keys(
+				IMAGE_LIBRARY,
+			).join(", ")}). If omitted or unknown, the default image is shown.`,
+		),
+});
+
 export const GetRelevantQuestionsSchema = z.object({
 	query: z
 		.string()
@@ -276,7 +306,15 @@ export enum ToolName {
 	SendSessionMessage = "send_session_message",
 	GetSessionUpdates = "get_session_updates",
 	CreateDashboard = "create_dashboard",
+	// Testing
+	GetImage = "get_image",
+	PerformAnalysis = "perform_analysis",
+	GetSessionState = "get_session_state",
 }
+
+export const GET_IMAGE_RESOURCE_URI = "ui://thoughtspot-mcp/get-image";
+export const PERFORM_ANALYSIS_RESOURCE_URI =
+	"ui://thoughtspot-mcp/perform-analysis";
 
 export const toolDefinitionsV1 = [
 	{
@@ -370,12 +408,17 @@ export const toolDefinitionsV2 = [
 		description:
 			"Send a message to a session with the Analytics Agent. The Agent may take some time to think and generate a response, so the response will not be returned immediately. Instead, you can use the `get_session_updates` tool to query for the latest updates on the session. After the Agent finishes responding (when `get_session_updates` returns `is_done: true`), you can send another message to the same session to ask follow-up questions without creating a new session. Do not send a new message until the Agent has finished responding to the previous message (when `get_session_updates` returns `is_done: true`). If the user wants to create a dashboard, do not send a message with that request; instead use the `create_dashboard` tool.",
 		inputSchema: z.toJSONSchema(SendSessionMessageInputSchema),
-		outputSchema: z.toJSONSchema(SendSessionMessageOutputSchema),
+		// outputSchema: z.toJSONSchema(SendSessionMessageOutputSchema),
 		annotations: {
 			title: "Send Analysis Session Message",
 			readOnlyHint: false,
 			destructiveHint: false,
 			openWorldHint: false,
+		},
+		_meta: {
+			ui: {
+				resourceUri: PERFORM_ANALYSIS_RESOURCE_URI,
+			},
 		},
 	},
 	{
@@ -400,6 +443,65 @@ export const toolDefinitionsV2 = [
 		annotations: {
 			title: "Create Dashboard",
 			readOnlyHint: false,
+			destructiveHint: false,
+			openWorldHint: false,
+		},
+	},
+	{
+		name: ToolName.GetImage,
+		description:
+			"Internal tool, do not use. The interactive MCP App rendered by `send_session_message` will already display all images, so you don't need to manually do it with this tool.",
+		inputSchema: z.toJSONSchema(
+			z.object({
+				sessionId: z.string().describe("Session identifier for the image"),
+				genNo: z.number().describe("Generation number for the image"),
+			}),
+		),
+		annotations: {
+			title: "Get Image",
+			readOnlyHint: true,
+			destructiveHint: false,
+			openWorldHint: false,
+		},
+		_meta: {
+			ui: {
+				resourceUri: GET_IMAGE_RESOURCE_URI,
+			},
+		},
+	},
+	// {
+	// 	name: ToolName.PerformAnalysis,
+	// 	description:
+	// 		"Perform an analysis for a user's analytical question. The results will be displayed in an interactive MCP App, with textual results returned back to the host agent for context and next steps.",
+	// 	inputSchema: z.toJSONSchema(
+	// 		z.object({
+	// 			message: z
+	// 				.string()
+	// 				.describe(
+	// 					"A natural language analytical question or follow-up to send to the Analytics Agent.",
+	// 				),
+	// 		}),
+	// 	),
+	// 	annotations: {
+	// 		title: "Perform Analysis",
+	// 		readOnlyHint: true,
+	// 		destructiveHint: false,
+	// 		openWorldHint: false,
+	// 	},
+	// 	_meta: {
+	// 		ui: {
+	// 			resourceUri: PERFORM_ANALYSIS_RESOURCE_URI,
+	// 		},
+	// 	},
+	// },
+	{
+		name: ToolName.GetSessionState,
+		description: "Internal tool, do not use.",
+		inputSchema: z.toJSONSchema(GetSessionUpdatesInputSchema),
+		// outputSchema: z.toJSONSchema(GetSessionUpdatesOutputSchema),
+		annotations: {
+			title: "Get Analysis Session State",
+			readOnlyHint: true,
 			destructiveHint: false,
 			openWorldHint: false,
 		},

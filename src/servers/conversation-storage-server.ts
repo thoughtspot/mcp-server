@@ -56,6 +56,11 @@ export class ConversationStorageServerSQLite {
 					return Response.json(state);
 				}
 
+				case "GET /state": {
+					const state = await this.getMessagesState();
+					return Response.json(state);
+				}
+
 				default:
 					return new Response("Not Found", { status: 404 });
 			}
@@ -155,6 +160,38 @@ export class ConversationStorageServerSQLite {
 		}
 
 		await this.state.storage.put<number>(READ_BOOKMARK_KEY, writeBookmark);
+
+		return {
+			messages: newMessages,
+			isDone,
+		};
+	}
+
+	private async getMessagesState(): Promise<StreamingMessagesState> {
+		const [isDone, readBookmark, writeBookmark] =
+			await this.getIsDoneAndReadWriteBookmarks();
+		if (!isBoolean(isDone)) {
+			throw new Error(`Conversation ${this.conversationId} not found`);
+		}
+
+		const keys = [];
+		for (let i = 0; i < writeBookmark; i++) {
+			keys.push(MESSAGE_KEY_PREFIX + i);
+		}
+
+		const newMessages: Message[] = [];
+		const messagesMap = await this.getInBatches<Message>(keys);
+		for (let i = 0; i < writeBookmark; i++) {
+			const message = messagesMap.get(MESSAGE_KEY_PREFIX + i);
+			if (!message) {
+				console.warn(
+					`Expected message at index ${i} for conversation ${this.conversationId} not found`,
+					{ readBookmark, writeBookmark },
+				);
+				continue;
+			}
+			newMessages.push(message);
+		}
 
 		return {
 			messages: newMessages,

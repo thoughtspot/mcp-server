@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Get Image</title>
+  <style>
+    @font-face {
+      font-family: 'Anthropic Serif';
+      src: url('https://assets.claude.ai/Fonts/AnthropicSerif-Text-Regular-Static.otf') format('opentype');
+      font-weight: 400;
+      font-style: normal;
+      font-display: swap;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html {
+      color-scheme: dark;
+      background: transparent;
+    }
+    body {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+      background: transparent;
+      font-family: 'Anthropic Serif', system-ui, serif;
+      -webkit-font-smoothing: antialiased;
+    }
+    img {
+      max-width: 100%;
+      height: auto;
+    }
+    #ts-carousel { position: relative; width: 100%; }
+    #ts-images {
+      display: flex;
+      flex-direction: row;
+      gap: 12px;
+      width: 100%;
+      overflow-x: auto;
+      scroll-snap-type: x mandatory;
+      scroll-behavior: smooth;
+      scrollbar-width: none;
+    }
+    #ts-images::-webkit-scrollbar { display: none; }
+    #ts-images > * {
+      flex: 0 0 100%;
+      scroll-snap-align: center;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .ts-nav-btn {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      border: 1px solid rgba(255, 255, 255, 0.3);
+      background: rgba(0, 0, 0, 0.5);
+      color: white;
+      font-size: 24px;
+      line-height: 1;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding-bottom: 3px;
+    }
+    .ts-nav-btn:hover { background: rgba(0, 0, 0, 0.75); }
+    .ts-nav-btn:disabled { opacity: 0.35; cursor: default; }
+    #ts-footer {
+      width: 100%;
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      color: white;
+      font-family: 'Anthropic Serif', system-ui, serif;
+    }
+    #ts-counter { font-size: 14px; opacity: 0.8; }
+    .ts-footer-controls { display: flex; align-items: center; gap: 12px; }
+    .ts-view-btn {
+      border: 1px solid rgba(255, 255, 255, 0.3);
+      background: rgba(0, 0, 0, 0.5);
+      color: white;
+      border-radius: 999px;
+      padding: 8px 16px;
+      font-size: 14px;
+      line-height: 1;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    .ts-view-btn:hover { background: rgba(0, 0, 0, 0.75); }
+    .ts-view-btn:disabled { opacity: 0.35; cursor: default; }
+    #ts-thinking {
+      width: 100%;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.04);
+    }
+    #ts-thinking > summary {
+      cursor: pointer;
+      padding: 10px 12px;
+      color: white;
+      font-family: 'Anthropic Serif', system-ui, serif;
+      list-style: none;
+      user-select: none;
+    }
+    #ts-thinking > summary::-webkit-details-marker { display: none; }
+    #ts-thinking > summary::before {
+      content: '\25B6';
+      display: inline-block;
+      margin-right: 8px;
+      font-size: 10px;
+      transition: transform 0.15s ease;
+    }
+    #ts-thinking[open] > summary {
+      border-bottom: 1px solid rgba(255, 255, 255, 0.15);
+      margin-bottom: 12px;
+    }
+    #ts-thinking[open] > summary::before { transform: rotate(90deg); }
+    #ts-text { margin: 0 12px 12px; }
+    #ts-text ul, #ts-text ol { padding-left: 24px; margin: 0; }
+  </style>
+</head>
+<body>
+  <div style="max-width: 100%; display: flex; flex-direction: column; align-items: flex-start; gap: 12px;">
+    <details id="ts-thinking" open>
+      <summary>Thinking steps</summary>
+      <p id="ts-text" style="display: flex; flex-direction: column; gap: 12px; font-family: 'Anthropic Serif', system-ui, serif; text-align: left; color: white;">Initializing...</p>
+    </details>
+    <div style="display: none">
+      <svg id="loading-image" xmlns="http://www.w3.org/2000/svg" width="700" height="450" viewBox="-40 -30 360 240">
+        <defs>
+          <clipPath id="circleClip">
+            <circle cx="185" cy="42" r="30"/>
+          </clipPath>
+        </defs>
+
+        <!-- striped circle (right half of magnifying glass area) -->
+        <g clip-path="url(#circleClip)">
+          <rect x="155" y="12" width="60" height="60" fill="#ffffff"/>
+          <g fill="#5b6572">
+            <rect x="155" y="12" width="60" height="4"/>
+            <rect x="155" y="20" width="60" height="4"/>
+            <rect x="155" y="28" width="60" height="4"/>
+            <rect x="155" y="36" width="60" height="4"/>
+            <rect x="155" y="44" width="60" height="4"/>
+            <rect x="155" y="52" width="60" height="4"/>
+            <rect x="155" y="60" width="60" height="4"/>
+            <rect x="155" y="68" width="60" height="4"/>
+          </g>
+        </g>
+
+        <!-- magnifying glass outline -->
+        <circle cx="150" cy="45" r="32" fill="none" stroke="#c3c9cf" stroke-width="7"/>
+        <line x1="127" y1="68" x2="100" y2="95" stroke="#c3c9cf" stroke-width="9" stroke-linecap="round"/>
+
+        <!-- bar chart, bottom left -->
+        <rect x="55" y="75" width="12" height="30" fill="#5b6572"/>
+
+        <!-- dot grid -->
+        <g fill="#8f96a0">
+          <circle cx="80" cy="76" r="2"/>
+          <circle cx="88" cy="76" r="2"/>
+          <circle cx="96" cy="76" r="2"/>
+          <circle cx="80" cy="84" r="2"/>
+          <circle cx="88" cy="84" r="2"/>
+          <circle cx="96" cy="84" r="2"/>
+          <circle cx="80" cy="92" r="2"/>
+          <circle cx="88" cy="92" r="2"/>
+          <circle cx="96" cy="92" r="2"/>
+          <circle cx="80" cy="100" r="2"/>
+          <circle cx="88" cy="100" r="2"/>
+          <circle cx="96" cy="100" r="2"/>
+        </g>
+
+        <!-- loading text -->
+        <text x="140" y="150" font-family="Helvetica, Arial, sans-serif" font-size="10" fill="#5b6572" text-anchor="middle">Loading chart</text>
+      </svg>
+    </div>
+    <div id="ts-carousel">
+      <div id="ts-images"></div>
+    </div>
+    <div id="ts-footer">
+      <div id="ts-counter">Viewing chart 1 of 1</div>
+      <div class="ts-footer-controls">
+        <button id="ts-prev" class="ts-nav-btn" type="button" aria-label="Previous chart">&#8249;</button>
+        <button id="ts-view-ts" class="ts-view-btn" type="button">Open chart in ThoughtSpot</button>
+        <button id="ts-next" class="ts-nav-btn" type="button" aria-label="Next chart">&#8250;</button>
+      </div>
+    </div>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/marked/lib/marked.umd.js"></script>
+  <script>
+    (async function () {
+      var nextId = 1;
+
+      // Carousel navigation + footer state
+      function updateCarouselState() {
+        var imagesEl = document.getElementById('ts-images');
+        var footerEl = document.getElementById('ts-footer');
+        var children = imagesEl.children;
+        var total = children.length;
+        if (total === 0) {
+          footerEl.style.display = 'none';
+          return;
+        }
+        footerEl.style.display = 'flex';
+        var idx = Math.round(imagesEl.scrollLeft / imagesEl.clientWidth);
+        if (idx < 0) idx = 0;
+        if (idx > total - 1) idx = total - 1;
+        document.getElementById('ts-counter').textContent =
+          'Viewing chart ' + (idx + 1) + ' of ' + total;
+        var current = children[idx];
+        var url = current && current.dataset ? current.dataset.iframeUrl : '';
+        var viewBtn = document.getElementById('ts-view-ts');
+        viewBtn.dataset.url = url || '';
+        viewBtn.disabled = !url;
+        document.getElementById('ts-prev').disabled = idx <= 0;
+        document.getElementById('ts-next').disabled = idx >= total - 1;
+      }
+
+      (function () {
+        var imagesEl = document.getElementById('ts-images');
+        document.getElementById('ts-prev').addEventListener('click', function () {
+          imagesEl.scrollBy({ left: -imagesEl.clientWidth, behavior: 'smooth' });
+        });
+        document.getElementById('ts-next').addEventListener('click', function () {
+          imagesEl.scrollBy({ left: imagesEl.clientWidth, behavior: 'smooth' });
+        });
+        document.getElementById('ts-view-ts').addEventListener('click', function () {
+          var url = this.dataset.url;
+          if (url) sendRequest('ui/open-link', { url: url });
+        });
+        imagesEl.addEventListener('scroll', updateCarouselState);
+      })();
+
+      // Re-report size when the thinking-steps accordion is toggled
+      document.getElementById('ts-thinking').addEventListener('toggle', function () {
+        reportSize();
+      });
+
+      function sendRequest(method, params) {
+        var id = nextId++;
+        return new Promise(function (resolve, reject) {
+          function listener(event) {
+            if (event.data && event.data.id === id) {
+              window.removeEventListener('message', listener);
+              if ('result' in event.data) resolve(event.data.result);
+              else reject(new Error(JSON.stringify(event.data.error)));
+            }
+          }
+          window.addEventListener('message', listener);
+          window.parent.postMessage({ jsonrpc: '2.0', id: id, method: method, params: params }, '*');
+        });
+      }
+
+      function sendNotification(method, params) {
+        window.parent.postMessage({ jsonrpc: '2.0', method: method, params: params || {} }, '*');
+      }
+
+      function onNotification(method, handler) {
+        window.addEventListener('message', function (event) {
+          if (event.data && event.data.method === method) {
+            handler(event.data.params || {});
+          }
+        });
+      }
+
+      function setImage(imageContent) {
+        if (typeof imageContent !== 'string' || imageContent.length === 0) return;
+        var imgEl = document.getElementById('ts-image');
+        if (imgEl) imgEl.src = imageContent;
+      }
+
+      // The host forwards the tool's result to the app once execution completes.
+      // We use the server-resolved image content from structuredContent to pick
+      // what gets displayed dynamically.
+      let toolResultPromiseResolve;
+      let toolResultPromise = new Promise((resolve) => {
+        toolResultPromiseResolve = resolve;
+      });
+      onNotification('ui/notifications/tool-result', function (params) {
+        console.log('>>> tool result', params);
+        toolResultPromiseResolve(params);
+        // var sc = params && params.structuredContent;
+        // if (sc && sc.imageContent) setImage(sc.imageContent);
+        // else {
+        //   sendNotification('ui/notifications/size-changed', { height: 0, width: 0 });
+        //   sendNotification('ui/notifications/request-teardown');
+        // }
+      });
+
+      function reportSize() {
+        var height = document.documentElement.scrollHeight || document.body.offsetHeight;
+        var width = document.documentElement.scrollWidth || document.body.offsetWidth;
+        sendNotification('ui/notifications/size-changed', { height: height + 1, width: width });
+      }
+
+      // Initialize MCP App
+      const initResult = await sendRequest('ui/initialize', {
+        appInfo: { name: 'Perform Analysis', version: '1.0.0' },
+        appCapabilities: {},
+        clientInfo: { name: 'Perform Analysis', version: '1.0.0' },
+        protocolVersion: '2026-01-26',
+      });
+      console.log('>>> init result', initResult);
+      sendNotification('ui/notifications/initialized');
+      const toolResult = await toolResultPromise;
+
+      // Sometimes structured content might be missing so we have to parse from content
+      let analyticalSessionId;
+      if (toolResult.structuredContent?.analytical_session_id) {
+        analyticalSessionId = toolResult.structuredContent.analytical_session_id
+      } else if (toolResult.content?.[0]?.text) {
+        const content = JSON.parse(toolResult.content[0].text);
+        analyticalSessionId = content.analytical_session_id;
+      } else {
+        console.error('>>> no analytical session id found in tool result', toolResult);
+        return;
+      }
+
+      // Poll for results
+      let textContent = '';
+      let postedImages = [];
+      while(true) {
+        textContent = '';
+        const sessionUpdates = await sendRequest('tools/call', {
+          name: 'get_session_state',
+          arguments: {
+            analytical_session_id: analyticalSessionId,
+          },
+        });
+        console.log('>>> sessionUpdates', sessionUpdates);
+        sessionUpdates.structuredContent.messagesState.messages.forEach(async (msg) => {
+          // Skip final results - we are only showing thinking updates
+          if (!msg.is_thinking) return;
+
+          if (msg.type === 'text') {
+            // Skip JSON blurbs
+            if (msg.text.startsWith('```') && msg.text.endsWith('```')) return;
+            textContent += '\n' + msg.text;
+          } else if (msg.type === 'text_chunk') {
+            textContent += msg.text;
+          } else if (msg.type === 'answer') {
+            const session = JSON.parse(msg.answer_id);
+            // Skip displayed charts
+            if (postedImages.includes(msg.answer_id)) return;
+
+            // Show loading state
+            const imagesContainer = document.getElementById('ts-images');
+            const loadingImg = document.getElementById('loading-image');
+            const newLoadingImg = loadingImg.cloneNode(true);
+            newLoadingImg.id = null;
+            newLoadingImg.dataset.iframeUrl = msg.iframe_url;
+            imagesContainer.appendChild(newLoadingImg);
+            updateCarouselState();
+
+            // Fetch the image
+            postedImages.push(msg.answer_id);
+            console.log('>>> requesting image', {
+              sessionId: session.session_id,
+              genNo: session.gen_no,
+            });
+
+            sendRequest('tools/call', {
+              name: 'get_image',
+              arguments: {
+                sessionId: session.session_id,
+                genNo: session.gen_no,
+              },
+            })
+            .then((image) => {
+              console.log('>>> got image');
+              const linkEl = document.createElement('a');
+              linkEl.href = msg.iframe_url;
+              linkEl.dataset.iframeUrl = msg.iframe_url;
+              linkEl.rel = 'noopener noreferrer';
+              linkEl.addEventListener('click', function (event) {
+                event.preventDefault();
+                sendRequest('ui/open-link', { url: msg.iframe_url });
+              });
+              const imageEl = document.createElement('img');
+              imageEl.src = image.structuredContent.imageContent;
+              linkEl.appendChild(imageEl);
+              imagesContainer.appendChild(linkEl);
+              imagesContainer.removeChild(newLoadingImg);
+              updateCarouselState();
+            })
+            .catch((err) => {
+              console.error('>>> get image error', err);
+            })
+            .then(() => {
+              reportSize();
+            });
+          }
+          const textEl = document.getElementById('ts-text');
+          textEl.innerHTML = marked.parse(textContent);
+          reportSize();
+        });
+        if (sessionUpdates.structuredContent.messagesState.isDone) break;
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      }
+    })();
+  </script>
+</body>
+</html>

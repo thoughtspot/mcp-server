@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Get Image</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+    }
+    img {
+      max-width: 100%;
+      height: auto;
+    }
+  </style>
+</head>
+<body>
+  <img id="ts-image" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" />
+  <script>
+    (function () {
+      var nextId = 1;
+
+      function sendRequest(method, params) {
+        var id = nextId++;
+        return new Promise(function (resolve, reject) {
+          function listener(event) {
+            if (event.data && event.data.id === id) {
+              window.removeEventListener('message', listener);
+              if ('result' in event.data) resolve(event.data.result);
+              else reject(new Error(JSON.stringify(event.data.error)));
+            }
+          }
+          window.addEventListener('message', listener);
+          window.parent.postMessage({ jsonrpc: '2.0', id: id, method: method, params: params }, '*');
+        });
+      }
+
+      function sendNotification(method, params) {
+        window.parent.postMessage({ jsonrpc: '2.0', method: method, params: params || {} }, '*');
+      }
+
+      function onNotification(method, handler) {
+        window.addEventListener('message', function (event) {
+          if (event.data && event.data.method === method) {
+            handler(event.data.params || {});
+          }
+        });
+      }
+
+      function setImage(imageContent) {
+        if (typeof imageContent !== 'string' || imageContent.length === 0) return;
+        var imgEl = document.getElementById('ts-image');
+        if (imgEl) imgEl.src = imageContent;
+      }
+
+      // The host forwards the tool's result to the app once execution completes.
+      // We use the server-resolved image content from structuredContent to pick
+      // what gets displayed dynamically.
+      onNotification('ui/notifications/tool-result', function (params) {
+        var sc = params && params.structuredContent;
+        if (sc && sc.imageContent) setImage(sc.imageContent);
+        else {
+          sendNotification('ui/notifications/size-changed', { height: 0, width: 0 });
+          sendNotification('ui/notifications/request-teardown');
+        }
+      });
+
+      function reportSize() {
+        var height = document.documentElement.scrollHeight || document.body.offsetHeight;
+        var width = document.documentElement.scrollWidth || document.body.offsetWidth;
+        sendNotification('ui/notifications/size-changed', { height: height, width: width });
+      }
+
+      sendRequest('ui/initialize', {
+        appInfo: { name: 'Get Image', version: '1.0.0' },
+        appCapabilities: {},
+        clientInfo: { name: 'Get Image', version: '1.0.0' },
+        protocolVersion: '2026-01-26',
+      }).then(function () {
+        sendNotification('ui/notifications/initialized');
+        sendNotification('ui/notifications/size-changed', { height: 0, width: 0 });
+      }).catch(function (err) {
+        console.error('MCP Apps init failed:', err);
+        // Send initialized anyway so the host makes the view visible
+        sendNotification('ui/notifications/initialized');
+        sendNotification('ui/notifications/size-changed', { height: 0, width: 0 });
+      });
+
+      // Re-report size once the image has loaded and whenever layout changes.
+      var img = document.getElementById('ts-image');
+      if (img) {
+        img.addEventListener('load', reportSize);
+        img.addEventListener('error', reportSize);
+      }
+      var ro = new ResizeObserver(function () { reportSize(); });
+      ro.observe(document.documentElement);
+    })();
+  </script>
+</body>
+</html>

@@ -439,6 +439,18 @@ export class ThoughtSpotService {
 	/**
 	 * Get answer for a specific question
 	 */
+	@WithSpan("get-viz-image")
+	async getVizImage(sessionId: string, genNo: number): Promise<any> {
+		return this.client.exportAnswerReport({
+			session_identifier: sessionId,
+			generation_number: genNo,
+			file_format: "PNG",
+		});
+	}
+
+	/**
+	 * Get answer for a specific question
+	 */
 	@WithSpan("get-answer-for-question")
 	async getAnswerForQuestion(
 		question: string,

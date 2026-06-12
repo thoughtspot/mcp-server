@@ -100,4 +100,18 @@ export class StorageServiceClient {
 
 		return response.json() as Promise<StreamingMessagesState>;
 	}
+
+	async getState(conversationId: string): Promise<StreamingMessagesState> {
+		const response = await this.stubFor(conversationId).fetch(
+			this.url(conversationId, "state"),
+			{ method: "GET", headers: this.headers() },
+		);
+
+		if (!response.ok) {
+			const text = await response.text();
+			throw new Error(`Failed to get state (${response.status}): ${text}`);
+		}
+
+		return response.json() as Promise<StreamingMessagesState>;
+	}
 }
