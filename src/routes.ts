@@ -1,24 +1,16 @@
+import {
+	PUBLIC_ROUTES as PKG_PUBLIC_ROUTES,
+	PUBLIC_ROUTE_PREFIXES as PKG_PUBLIC_ROUTE_PREFIXES,
+} from "@mouryabalabhadra/ts-cloudflare-auth";
+
+// mcp-server-specific public routes layered on top of pkg-provided OAuth routes.
 export const PUBLIC_ROUTES = {
-	root: "/",
+	...PKG_PUBLIC_ROUTES,
 	hello: "/hello",
-	authorize: "/authorize",
-	callback: "/callback",
-	storeToken: "/store-token",
-	oauthToken: "/token",
-	register: "/register",
-	mcp: "/mcp",
-	sse: "/sse",
-	bearerMcp: "/bearer/mcp",
-	bearerSse: "/bearer/sse",
-	tokenMcp: "/token/mcp",
-	tokenSse: "/token/sse",
 	openaiAppsChallenge: "/.well-known/openai-apps-challenge",
 } as const;
 
-export const PUBLIC_ROUTE_PREFIXES = {
-	bearer: "/bearer",
-	token: "/token",
-} as const;
+export const PUBLIC_ROUTE_PREFIXES = PKG_PUBLIC_ROUTE_PREFIXES;
 
 export const EXACT_PUBLIC_ROUTES_REQUIRING_METRICS = [
 	PUBLIC_ROUTES.root,

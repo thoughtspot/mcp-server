@@ -1,17 +1,22 @@
 import { createExecutionContext, env } from "cloudflare:test";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// Intercept at the OAuthProvider level — this is called after the outer worker
-// strips headers, so we can assert on what it actually receives.
+// Intercept at the pkg's createOAuthHandler — this is called after the outer
+// worker strips headers, so we can assert on what it actually receives.
 const mockOAuthFetch = vi.fn();
 
-vi.mock("@cloudflare/workers-oauth-provider", () => ({
-	default: class MockOAuthProvider {
-		fetch(request: Request, env: any, ctx: any) {
-			return mockOAuthFetch(request, env, ctx);
-		}
-	},
-}));
+vi.mock("@mouryabalabhadra/ts-cloudflare-auth", async () => {
+	const actual = await vi.importActual<
+		typeof import("@mouryabalabhadra/ts-cloudflare-auth")
+	>("@mouryabalabhadra/ts-cloudflare-auth");
+	return {
+		...actual,
+		createOAuthHandler: () => ({
+			fetch: (request: Request, env: any, ctx: any) =>
+				mockOAuthFetch(request, env, ctx),
+		}),
+	};
+});
 
 describe("Header stripping", () => {
 	beforeEach(() => {
