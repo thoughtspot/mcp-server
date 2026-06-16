@@ -59,3 +59,12 @@ export interface Answer {
 	session_identifier: string;
 	generation_number: number;
 }
+
+/**
+ * Identifier for a BACH pinboard session (returned by the BACH service when a pinboard is
+ * loaded or mutated; required on subsequent calls that operate on the same session).
+ */
+export interface BachSession {
+	transactionId: string;
+	generationNumber: string;
+}
