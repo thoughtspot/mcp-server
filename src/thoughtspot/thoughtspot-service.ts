@@ -15,8 +15,7 @@ import { createRequestMetricsRecorder } from "../metrics/runtime/request-metrics
 import type { MetricsEnvLike } from "../metrics/runtime/runtime-config";
 import {
 	UPSTREAM_OPERATION_NAMES,
-	type UpstreamOperation,
-	recordUpstreamCallMetrics,
+	observeUpstreamCall,
 	recordUpstreamStreamStartedMetric,
 } from "../metrics/runtime/tool-metrics";
 import { WithSpan, getActiveSpan } from "../metrics/tracing/tracing-utils";
@@ -45,28 +44,6 @@ export class ThoughtSpotService {
 		private client: ThoughtSpotRestApi,
 		private readonly metrics: ThoughtSpotServiceMetricsOptions = {},
 	) {}
-
-	private async observeUpstreamCall<T>(
-		operation: UpstreamOperation,
-		call: () => Promise<T>,
-	): Promise<T> {
-		const startedAt = Date.now();
-		let outcome: "success" | "upstream_error" = "success";
-
-		try {
-			return await call();
-		} catch (error) {
-			outcome = "upstream_error";
-			throw error;
-		} finally {
-			recordUpstreamCallMetrics(
-				this.metrics.recorder,
-				operation,
-				outcome,
-				Date.now() - startedAt,
-			);
-		}
-	}
 
 	private createStreamMetricsRecorder(): MetricsRecorder {
 		const recorder = createRequestMetricsRecorder(this.metrics.metricsEnv);
@@ -109,7 +86,8 @@ export class ThoughtSpotService {
 			span?.setAttribute("query", query);
 			span?.addEvent("query-get-data-source-suggestions");
 
-			const response = await this.observeUpstreamCall(
+			const response = await observeUpstreamCall(
+				this.metrics.recorder,
 				UPSTREAM_OPERATION_NAMES.getDataSourceSuggestions,
 				() =>
 					this.client.getDataSourceSuggestions({
@@ -176,7 +154,8 @@ export class ThoughtSpotService {
 			);
 			span?.addEvent("get-decomposed-query");
 
-			const resp = await this.observeUpstreamCall(
+			const resp = await observeUpstreamCall(
+				this.metrics.recorder,
 				UPSTREAM_OPERATION_NAMES.queryGetDecomposedQuery,
 				() =>
 					this.client.queryGetDecomposedQuery({
@@ -243,7 +222,8 @@ export class ThoughtSpotService {
 				generation_number,
 			});
 
-			const data = await this.observeUpstreamCall(
+			const data = await observeUpstreamCall(
+				this.metrics.recorder,
 				UPSTREAM_OPERATION_NAMES.exportAnswerReport,
 				() =>
 					this.client.exportAnswerReport({
@@ -286,7 +266,8 @@ export class ThoughtSpotService {
 
 		try {
 			span?.setAttribute("session_identifier", session_identifier);
-			const tml = await this.observeUpstreamCall(
+			const tml = await observeUpstreamCall(
+				this.metrics.recorder,
 				UPSTREAM_OPERATION_NAMES.exportUnsavedAnswerTml,
 				() =>
 					(this.client as any).exportUnsavedAnswerTML({
@@ -317,7 +298,8 @@ export class ThoughtSpotService {
 
 		try {
 			// Use auto mode by default, but support passing an explicit data source context
-			const response = await this.observeUpstreamCall(
+			const response = await observeUpstreamCall(
+				this.metrics.recorder,
 				UPSTREAM_OPERATION_NAMES.createAgentConversation,
 				() =>
 					(this.client as any).createAgentConversationWithAutoMode({
@@ -369,7 +351,8 @@ export class ThoughtSpotService {
 
 			// Validate the response body inside the observed call so an unusable streaming
 			// response is counted as `upstream_error` instead of a false success.
-			const reader = await this.observeUpstreamCall(
+			const reader = await observeUpstreamCall(
+				this.metrics.recorder,
 				UPSTREAM_OPERATION_NAMES.sendAgentConversationMessageStreaming,
 				async () => {
 					const response = await (
@@ -460,7 +443,8 @@ export class ThoughtSpotService {
 		);
 
 		try {
-			const answer = await this.observeUpstreamCall(
+			const answer = await observeUpstreamCall(
+				this.metrics.recorder,
 				UPSTREAM_OPERATION_NAMES.singleAnswer,
 				() =>
 					this.client.singleAnswer({
@@ -477,7 +461,8 @@ export class ThoughtSpotService {
 
 			const [data, session, tml] = await Promise.all([
 				this.getAnswerData(question, session_identifier, generation_number),
-				this.observeUpstreamCall(
+				observeUpstreamCall(
+					this.metrics.recorder,
 					UPSTREAM_OPERATION_NAMES.getAnswerSession,
 					() =>
 						(this.client as any).getAnswerSession({
@@ -595,6 +580,69 @@ export class ThoughtSpotService {
 	}
 
 	/**
+	 * Create an empty liveboard with just a name. Returns the new liveboard's GUID.
+	 */
+	@WithSpan("create-empty-liveboard")
+	async createEmptyLiveboard(name: string): Promise<{ liveboardId: string }> {
+		const tml = {
+			liveboard: { name, visualizations: [], layout: { tiles: [] } },
+		};
+
+		const resp = await observeUpstreamCall(
+			this.metrics.recorder,
+			UPSTREAM_OPERATION_NAMES.importMetadataTml,
+			() =>
+				this.client.importMetadataTML({
+					metadata_tmls: [JSON.stringify(tml)],
+					import_policy: "ALL_OR_NONE",
+					create_new: true,
+				}),
+		);
+
+		const liveboardId = (resp as any)?.[0]?.response?.header?.id_guid;
+		if (!liveboardId) {
+			throw new Error(
+				`createEmptyLiveboard: id_guid missing in response: ${JSON.stringify(resp)}`,
+			);
+		}
+		return { liveboardId };
+	}
+
+	/**
+	 * Initiate a new BACH pinboard session for a liveboard.
+	 */
+	@WithSpan("create-bach-pinboard-session")
+	async createBachPinboardSession(
+		liveboardId: string,
+	): Promise<{ transactionId: string; generationNumber: string }> {
+		return observeUpstreamCall(
+			this.metrics.recorder,
+			UPSTREAM_OPERATION_NAMES.createBachPinboardSession,
+			() => (this.client as any).createBachPinboardSession({ liveboardId }),
+		);
+	}
+
+	/**
+	 * Commit the current generation of a BACH pinboard session back to the saved liveboard. The
+	 * BACH session is unaffected by the save and can continue to receive further mutations.
+	 */
+	@WithSpan("save-bach-pinboard")
+	async saveBachPinboard(
+		transactionId: string,
+		generationNumber: string,
+	): Promise<void> {
+		await observeUpstreamCall(
+			this.metrics.recorder,
+			UPSTREAM_OPERATION_NAMES.saveBachPinboard,
+			() =>
+				(this.client as any).saveBachPinboard({
+					transactionId,
+					generationNumber,
+				}),
+		);
+	}
+
+	/**
 	 * Create liveboard from answers
 	 */
 	@WithSpan("create-liveboard")
@@ -625,7 +673,8 @@ export class ThoughtSpotService {
 			},
 		};
 
-		const resp = await this.observeUpstreamCall(
+		const resp = await observeUpstreamCall(
+			this.metrics.recorder,
 			UPSTREAM_OPERATION_NAMES.importMetadataTml,
 			() =>
 				this.client.importMetadataTML({
@@ -651,7 +700,8 @@ export class ThoughtSpotService {
 
 		span?.addEvent("get-data-sources");
 
-		const resp = await this.observeUpstreamCall(
+		const resp = await observeUpstreamCall(
+			this.metrics.recorder,
 			UPSTREAM_OPERATION_NAMES.searchMetadata,
 			() =>
 				this.client.searchMetadata({
@@ -688,7 +738,8 @@ export class ThoughtSpotService {
 	async getSessionInfo(): Promise<SessionInfo> {
 		const span = getActiveSpan();
 
-		const info = await this.observeUpstreamCall(
+		const info = await observeUpstreamCall(
+			this.metrics.recorder,
 			UPSTREAM_OPERATION_NAMES.getSessionInfo,
 			() => (this.client as any).getSessionInfo(),
 		);
@@ -724,7 +775,8 @@ export class ThoughtSpotService {
 	async searchWorksheets(searchTerm: string): Promise<DataSource[]> {
 		const span = getActiveSpan();
 
-		const resp = await this.observeUpstreamCall(
+		const resp = await observeUpstreamCall(
+			this.metrics.recorder,
 			UPSTREAM_OPERATION_NAMES.searchMetadata,
 			() =>
 				this.client.searchMetadata({
@@ -763,7 +815,8 @@ export class ThoughtSpotService {
 	@WithSpan("validate-connection")
 	async validateConnection(): Promise<boolean> {
 		try {
-			await this.observeUpstreamCall(
+			await observeUpstreamCall(
+				this.metrics.recorder,
 				UPSTREAM_OPERATION_NAMES.getSessionInfo,
 				() => (this.client as any).getSessionInfo(),
 			);
