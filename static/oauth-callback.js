@@ -18,7 +18,7 @@
         if (!base.pathname.endsWith('/')) {
             base.pathname += '/';
         }
-        const tokenUrl = new URL('callosum/v1/v2/auth/token/fetch?validity_time_in_sec=2592000', base.toString());
+        const tokenUrl = new URL('callosum/v1/session/v2/gettoken?refresh=true', base.toString());
         
         document.getElementById('status').textContent = 'Retrieving authentication token...';
         
@@ -130,7 +130,12 @@
             }
         }
         
-        const data = await response.json();
+        const raw = await response.json();
+        // gettoken returns the access token at top-level `token` (with an optional
+        // `refreshToken`). Normalize to the { data: { token } } shape that
+        // /store-token expects (same shape the manual-paste path produces).
+        const accessToken = (raw && raw.data && raw.data.token) || raw.token;
+        const data = { data: { token: accessToken, refreshToken: raw.refreshToken } };
         document.getElementById('status').textContent = 'Authentication successful. Securing your session...';
 
         // Send the token to the server
@@ -139,7 +144,7 @@
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({ 
+            body: JSON.stringify({
                 token: data,
                 oauthReqInfo: oauthReqInfo,
                 instanceUrl: window.INSTANCE_URL

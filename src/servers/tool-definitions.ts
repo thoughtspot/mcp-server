@@ -257,6 +257,48 @@ export const CreateDashboardOutputSchema = z.object({
 		),
 });
 
+export const ListOrgsInputSchema = z.object({});
+
+export const OrgSchema = z.object({
+	id: z.string().describe("The unique identifier of the org."),
+	name: z.string().describe("The name of the org."),
+	description: z
+		.string()
+		.optional()
+		.describe("The description of the org, if any."),
+	is_active: z
+		.boolean()
+		.describe(
+			"Whether this org is the one currently active for the session. Tool calls operate against the active org.",
+		),
+});
+
+export const ListOrgsOutputSchema = z.object({
+	orgs: z
+		.array(OrgSchema)
+		.describe(
+			"The list of orgs the authenticated user is a member of. Use an org `id` with `switch_org` to make subsequent tool calls operate against that org.",
+		),
+});
+
+export const SwitchOrgInputSchema = z.object({
+	org_id: z
+		.string()
+		.describe(
+			"The id of the org to switch to. Must be one of the org ids returned by `list_orgs`. Subsequent tool calls in this session will operate against this org.",
+		),
+});
+
+export const SwitchOrgOutputSchema = z.object({
+	success: z.boolean().describe("Whether the org switch was successful."),
+	active_org_id: z
+		.string()
+		.describe("The id of the org now active for the session."),
+	active_org_name: z
+		.string()
+		.describe("The name of the org now active for the session."),
+});
+
 export enum ToolName {
 	// V1
 	Ping = "ping",
@@ -270,6 +312,8 @@ export enum ToolName {
 	SendSessionMessage = "send_session_message",
 	GetSessionUpdates = "get_session_updates",
 	CreateDashboard = "create_dashboard",
+	ListOrgs = "list_orgs",
+	SwitchOrg = "switch_org",
 }
 
 export const toolDefinitionsV1 = [
@@ -393,6 +437,32 @@ export const toolDefinitionsV2 = [
 		outputSchema: z.toJSONSchema(CreateDashboardOutputSchema),
 		annotations: {
 			title: "Create Dashboard",
+			readOnlyHint: false,
+			destructiveHint: false,
+			openWorldHint: false,
+		},
+	},
+	{
+		name: ToolName.ListOrgs,
+		description:
+			"List the orgs (tenants) the authenticated user is a member of. Each org has an `id` and `name`. The org marked `is_active: true` is the one currently used for tool calls. Use the returned `id` with `switch_org` to operate against a different org. Call this when the user asks which orgs they have access to, or before switching orgs.",
+		inputSchema: z.toJSONSchema(ListOrgsInputSchema),
+		outputSchema: z.toJSONSchema(ListOrgsOutputSchema),
+		annotations: {
+			title: "List Orgs",
+			readOnlyHint: true,
+			destructiveHint: false,
+			openWorldHint: false,
+		},
+	},
+	{
+		name: ToolName.SwitchOrg,
+		description:
+			"Switch the active org for this session. After switching, all subsequent tool calls (analysis sessions, answers, data sources, dashboards) operate against the selected org. Pass an `org_id` returned by `list_orgs`. Note: the active org is per-session and resets if the connection is re-established.",
+		inputSchema: z.toJSONSchema(SwitchOrgInputSchema),
+		outputSchema: z.toJSONSchema(SwitchOrgOutputSchema),
+		annotations: {
+			title: "Switch Org",
 			readOnlyHint: false,
 			destructiveHint: false,
 			openWorldHint: false,

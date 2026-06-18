@@ -28,6 +28,10 @@ export interface SessionInfo {
 	currentOrgId: string;
 	privileges: any;
 	enableSpotterDataSourceDiscovery?: boolean;
+	// The access token surfaced by /prism/preauth/info (set server-side via
+	// sessionInfo.setAccessToken). Present for IAMv2/Okta sessions; used to mint
+	// org-scoped bearer tokens. May be undefined for sessions that don't expose one.
+	accessToken?: string;
 }
 
 export interface BaseMessage {

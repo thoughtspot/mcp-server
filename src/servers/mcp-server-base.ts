@@ -207,6 +207,50 @@ export abstract class BaseMCPServer extends Server {
 		);
 	}
 
+	/**
+	 * The org currently active for this session, if any. When set, all
+	 * ThoughtSpot calls are scoped to this org via the x-thoughtspot-orgs
+	 * header. Subclasses override this to expose their per-session org state.
+	 * Defaults to undefined (the user's default org, as resolved by the cluster).
+	 */
+	protected getActiveOrgId(): string | undefined {
+		return undefined;
+	}
+
+	/**
+	 * The bearer token to use for ThoughtSpot calls. Defaults to the token from
+	 * the OAuth session. Subclasses override this to return an org-scoped bearer
+	 * token when an org has been selected.
+	 */
+	protected getActiveBearerToken(): string {
+		return this.ctx.props.accessToken;
+	}
+
+	/**
+	 * Build a ThoughtSpot service bound to an explicit bearer token and org,
+	 * bypassing the active-org/token resolution. Used for org listing and
+	 * org-token minting, which must authenticate with a specific token.
+	 */
+	protected getThoughtSpotServiceWithToken(
+		bearerToken: string,
+		orgId?: string,
+		recorder?: MetricsRecorder,
+		analyticsContextOverride?: MetricAnalyticsContext,
+	) {
+		return new ThoughtSpotService(
+			getThoughtSpotClient(this.ctx.props.instanceUrl, bearerToken, orgId),
+			{
+				recorder,
+				metricsEnv: this.ctx.env as unknown as Record<string, unknown>,
+				waitUntil: this.getMetricsWaitUntil(),
+				analyticsContext: this.mergeMetricAnalyticsContext(
+					analyticsContextOverride,
+				),
+				eventIdentity: this.getMetricEventIdentity(),
+			},
+		);
+	}
+
 	protected getThoughtSpotService(
 		recorder?: MetricsRecorder,
 		analyticsContextOverride?: MetricAnalyticsContext,
@@ -214,7 +258,8 @@ export abstract class BaseMCPServer extends Server {
 		return new ThoughtSpotService(
 			getThoughtSpotClient(
 				this.ctx.props.instanceUrl,
-				this.ctx.props.accessToken,
+				this.getActiveBearerToken(),
+				this.getActiveOrgId(),
 			),
 			{
 				recorder,
@@ -439,7 +484,21 @@ export abstract class BaseMCPServer extends Server {
 				});
 			},
 		);
+
+		// Subclass post-initialization hook (runs after sessionInfo is available
+		// and handlers are registered). Best-effort: failures must not break the
+		// connection.
+		try {
+			await this.postInit();
+		} catch (error) {
+			console.error("postInit failed:", error);
+		}
 	}
+
+	/**
+	 * Optional hook for subclasses to run setup after init(). Default no-op.
+	 */
+	protected async postInit(): Promise<void> {}
 
 	async addTracker(tracker: Tracker) {
 		this.trackers.add(tracker);

@@ -13,6 +13,7 @@ import {
 } from "../metrics/runtime/metrics-recorder";
 import type { ToolMetricApiSurface } from "../metrics/runtime/tool-metrics";
 import { WithSpan } from "../metrics/tracing/tracing-utils";
+import type { Org } from "../thoughtspot/thoughtspot-client";
 import type { DataSource } from "../thoughtspot/thoughtspot-service";
 import type { Answer, StreamingMessagesState } from "../thoughtspot/types";
 import { McpServerError } from "../utils";
@@ -26,6 +27,7 @@ import {
 	GetRelevantQuestionsSchema,
 	GetSessionUpdatesInputSchema,
 	SendSessionMessageInputSchema,
+	SwitchOrgInputSchema,
 	ToolName,
 } from "./tool-definitions";
 import {
@@ -35,8 +37,89 @@ import {
 } from "./version-registry";
 
 export class MCPServer extends BaseMCPServer {
+	// Active org for this session, held in-memory on the Durable Object instance.
+	// Resets if the DO is evicted/restarted; the user can re-select via switch_org.
+	private activeOrgId: string | undefined;
+
+	// Org-scoped bearer tokens, keyed by org id. Minted on demand from the
+	// global cluster token (props.accessToken) and reused for that org's calls.
+	private orgBearerTokens = new Map<string, string>();
+
 	constructor(ctx: Context) {
 		super(ctx, "ThoughtSpot", "2.0.0");
+	}
+
+	protected getActiveOrgId(): string | undefined {
+		return this.activeOrgId;
+	}
+
+	/**
+	 * When an org is active and we hold a bearer token for it, use that token.
+	 * Otherwise fall back to the session's default access token.
+	 */
+	protected getActiveBearerToken(): string {
+		if (this.activeOrgId) {
+			const orgToken = this.orgBearerTokens.get(this.activeOrgId);
+			if (orgToken) {
+				return orgToken;
+			}
+		}
+		return this.ctx.props.accessToken;
+	}
+
+	/**
+	 * The global (cluster-level) access token used to list orgs and to mint
+	 * per-org tokens. This is the token minted at login by the browser's
+	 * gettoken call and stored as props.accessToken (via /store-token); the
+	 * server uses it directly. It is NOT pinned to a single org.
+	 */
+	private resolveAccessToken(_recorder: MetricsRecorder): string {
+		return this.ctx.props.accessToken;
+	}
+
+	/**
+	 * Ensure we hold an org-scoped token for `orgId`: reuse the cached one, or
+	 * mint a new one from the global token and cache it. Returns the org token.
+	 */
+	private async ensureOrgToken(
+		orgId: string,
+		recorder?: MetricsRecorder,
+	): Promise<string> {
+		const existing = this.orgBearerTokens.get(orgId);
+		if (existing) {
+			return existing;
+		}
+		const orgToken = await this.getThoughtSpotServiceWithToken(
+			this.ctx.props.accessToken,
+			undefined,
+			recorder,
+		).fetchOrgBearerToken(this.ctx.props.accessToken, orgId);
+		this.orgBearerTokens.set(orgId, orgToken);
+		return orgToken;
+	}
+
+	/**
+	 * On connection, mint an org-scoped token for the session's current org so
+	 * there is always an active org token available (matching the original
+	 * single-org behavior). Best-effort: failures don't break the connection.
+	 */
+	protected async postInit(): Promise<void> {
+		const currentOrgId =
+			this.sessionInfo?.currentOrgId !== undefined
+				? String(this.sessionInfo.currentOrgId)
+				: undefined;
+		if (!currentOrgId) {
+			return;
+		}
+		try {
+			await this.ensureOrgToken(currentOrgId);
+			this.activeOrgId = currentOrgId;
+		} catch (error) {
+			console.error(
+				`Failed to mint initial org token for org ${currentOrgId}:`,
+				error,
+			);
+		}
 	}
 
 	protected getToolMetricApiSurface(): ToolMetricApiSurface {
@@ -192,7 +275,7 @@ export class MCPServer extends BaseMCPServer {
 		switch (name) {
 			case ToolName.Ping: {
 				if (this.ctx.props.accessToken && this.ctx.props.instanceUrl) {
-						if (!this.getThoughtSpotService(recorder).validateConnection()) {
+					if (!this.getThoughtSpotService(recorder).validateConnection()) {
 						return this.createErrorResponse(
 							"Failed to validate connection",
 							"Ping failed",
@@ -252,6 +335,14 @@ export class MCPServer extends BaseMCPServer {
 
 			case ToolName.CreateDashboard: {
 				return this.callCreateDashboard(request, recorder);
+			}
+
+			case ToolName.ListOrgs: {
+				return this.callListOrgs(recorder);
+			}
+
+			case ToolName.SwitchOrg: {
+				return this.callSwitchOrg(request, recorder);
 			}
 
 			default:
@@ -576,6 +667,132 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 				link: liveboard.url,
 			},
 			"Dashboard created successfully",
+		);
+	}
+
+	@WithSpan("call-list-orgs")
+	async callListOrgs(recorder: MetricsRecorder) {
+		if (!this.ctx.props.accessToken || !this.ctx.props.instanceUrl) {
+			return this.createErrorResponse(
+				"Access token or instance URL not valid",
+				"List orgs failed",
+			);
+		}
+
+		// Use the global cluster token (from login) to list orgs.
+		const accessToken = this.resolveAccessToken(recorder);
+
+		let orgs: Org[];
+		try {
+			orgs = await this.getThoughtSpotServiceWithToken(
+				accessToken,
+				undefined,
+				recorder,
+			).listOrgs();
+		} catch (error) {
+			return this.createErrorResponse(
+				"Failed to list orgs. Your account may not have orgs enabled, or your authentication may have expired.",
+				`Error listing orgs ${(error as Error)?.message}`,
+			);
+		}
+
+		// Determine the currently active org. If the user has explicitly switched,
+		// use that; otherwise fall back to the org the session resolves to.
+		let activeOrgId = this.getActiveOrgId();
+		if (!activeOrgId) {
+			try {
+				const sessionInfo =
+					await this.getThoughtSpotService(recorder).getSessionInfo();
+				if (sessionInfo.currentOrgId !== undefined) {
+					activeOrgId = String(sessionInfo.currentOrgId);
+				}
+			} catch {
+				// Best-effort: if we can't resolve the current org, leave all inactive.
+			}
+		}
+
+		return this.createStructuredContentSuccessResponse(
+			{
+				orgs: orgs.map((org) => ({
+					id: org.id,
+					name: org.name,
+					description: org.description,
+					is_active: activeOrgId !== undefined && org.id === activeOrgId,
+				})),
+			},
+			`${orgs.length} org(s) found`,
+		);
+	}
+
+	@WithSpan("call-switch-org")
+	async callSwitchOrg(
+		request: z.infer<typeof CallToolRequestSchema>,
+		recorder: MetricsRecorder,
+	) {
+		const span = trace.getSpan(context.active());
+		const { org_id } = SwitchOrgInputSchema.parse(request.params.arguments);
+		span?.setAttribute("requested_org_id", org_id);
+
+		if (!this.ctx.props.accessToken || !this.ctx.props.instanceUrl) {
+			return this.createErrorResponse(
+				"Access token or instance URL not valid",
+				"Switch org failed",
+			);
+		}
+
+		// The global cluster token — used both to verify org access and to mint
+		// the org-scoped bearer token.
+		const accessToken = this.resolveAccessToken(recorder);
+
+		// Validate the requested org against the orgs the user can actually access.
+		// This prevents switching to an org the user isn't a member of (which would
+		// otherwise surface as opaque 401/INACCESSIBLE_ORG errors on later calls).
+		let orgs: Org[];
+		try {
+			orgs = await this.getThoughtSpotServiceWithToken(
+				accessToken,
+				undefined,
+				recorder,
+			).listOrgs();
+		} catch (error) {
+			return this.createErrorResponse(
+				"Failed to verify org access. Your authentication may have expired.",
+				`Error listing orgs while switching ${(error as Error)?.message}`,
+			);
+		}
+
+		const target = orgs.find((org) => org.id === org_id);
+		if (!target) {
+			return this.createErrorResponse(
+				`Org "${org_id}" is not in the list of orgs you have access to. Call list_orgs to see available orgs.`,
+				"Switch org failed: org not accessible",
+			);
+		}
+
+		// Ensure we hold an org-scoped bearer token for this org (reuse cached or
+		// mint from the global token).
+		try {
+			await this.ensureOrgToken(target.id, recorder);
+		} catch (error) {
+			return this.createErrorResponse(
+				`Failed to obtain an access token for org "${target.name}". Please try again.`,
+				`Error minting org bearer token ${(error as Error)?.message}`,
+			);
+		}
+
+		this.activeOrgId = target.id;
+		// Data sources are org-specific; drop the cached set so the next lookup
+		// reflects the newly selected org.
+		this._sources = null;
+		span?.setAttribute("active_org_id", target.id);
+
+		return this.createStructuredContentSuccessResponse(
+			{
+				success: true,
+				active_org_id: target.id,
+				active_org_name: target.name,
+			},
+			`Switched to org ${target.name}`,
 		);
 	}
 
