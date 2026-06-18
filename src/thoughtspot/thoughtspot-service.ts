@@ -21,6 +21,7 @@ import {
 } from "../metrics/runtime/tool-metrics";
 import { WithSpan, getActiveSpan } from "../metrics/tracing/tracing-utils";
 import { processSendAgentConversationMessageStreamingResponse } from "../streaming-utils";
+import type { Org, RefreshedTokens } from "./thoughtspot-client";
 import type {
 	Answer,
 	DataSource,
@@ -714,7 +715,49 @@ export class ThoughtSpotService {
 			privileges: info.privileges,
 			enableSpotterDataSourceDiscovery:
 				info.configInfo?.enableSpotterDataSourceDiscovery,
+			accessToken: info.accessToken,
 		};
+	}
+
+	/**
+	 * List the orgs the authenticated user is a member of.
+	 */
+	@WithSpan("list-orgs")
+	async listOrgs(): Promise<Org[]> {
+		const orgs = (await this.observeUpstreamCall(
+			UPSTREAM_OPERATION_NAMES.listOrgs,
+			() => (this.client as any).listOrgs(),
+		)) as Org[];
+		getActiveSpan()?.setAttribute("total_orgs", orgs.length);
+		return orgs;
+	}
+
+	/**
+	 * Fetch a fresh access token (and refresh token, if any) via gettoken
+	 * with refresh=true, authenticated with the given bearer token.
+	 */
+	@WithSpan("get-refreshed-token")
+	async getRefreshedToken(bearerToken: string): Promise<RefreshedTokens> {
+		return (await this.observeUpstreamCall(
+			UPSTREAM_OPERATION_NAMES.getRefreshedToken,
+			() => (this.client as any).getRefreshedToken({ bearerToken }),
+		)) as RefreshedTokens;
+	}
+
+	/**
+	 * Mint an org-scoped bearer token for `orgId`, authenticated with the given
+	 * access token (typically fetched from session/info).
+	 */
+	@WithSpan("fetch-org-bearer-token")
+	async fetchOrgBearerToken(
+		accessToken: string,
+		orgId: string,
+	): Promise<string> {
+		getActiveSpan()?.setAttribute("org_id", orgId);
+		return (await this.observeUpstreamCall(
+			UPSTREAM_OPERATION_NAMES.fetchOrgBearerToken,
+			() => (this.client as any).fetchOrgBearerToken({ accessToken, orgId }),
+		)) as string;
 	}
 
 	/**
