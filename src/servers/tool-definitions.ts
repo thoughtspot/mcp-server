@@ -71,45 +71,103 @@ export const SearchObjectsInputSchema = z.object({
 		.describe(
 			"The search term to find objects for. This is matched against object names, descriptions and content. For example, 'sales', 'revenue by region', or the name of a liveboard or answer.",
 		),
-	batchSize: z
+	types: z
+		.array(z.string())
+		.optional()
+		.describe(
+			"Restrict results to these object types. Accepts friendly names such as 'liveboard' (alias 'pinboard'/'dashboard'), 'answer', or 'worksheet'. Omit to search all types.",
+		),
+	owner: z
+		.string()
+		.optional()
+		.describe(
+			"Restrict results to objects authored by this user, matched against the author's display name (case-insensitive).",
+		),
+	tag: z
+		.string()
+		.optional()
+		.describe(
+			"Restrict results to objects carrying this tag/sticker, matched by tag name (case-insensitive).",
+		),
+	modified_since: z
+		.number()
+		.int()
+		.optional()
+		.describe(
+			"Only return objects last modified on or after this epoch-millisecond timestamp.",
+		),
+	verified_only: z
+		.boolean()
+		.optional()
+		.describe("If true, only return objects marked as verified."),
+	limit: z
 		.number()
 		.int()
 		.positive()
 		.optional()
+		.describe("The maximum number of results to return. Defaults to 10."),
+	cursor: z
+		.string()
+		.optional()
 		.describe(
-			"The maximum number of results to return. Defaults to 10 if not provided.",
+			"Opaque pagination cursor returned as `next_cursor` by a previous call. Omit for the first page.",
 		),
+});
+
+const SearchObjectHeaderSchema = z.object({
+	id: z.string().describe("The GUID of the object."),
+	name: z.string().describe("The display name/title of the object."),
+	type: z
+		.string()
+		.describe(
+			"The type of the object, for example PINBOARD_ANSWER_BOOK (liveboard), ANSWER or WORKSHEET.",
+		),
+	owner: z
+		.string()
+		.describe("The display name of the user who authored the object."),
+	description: z.string().describe("The description of the object."),
+	tags: z
+		.array(z.string())
+		.describe("The names of the tags/stickers applied to the object."),
+	last_modified: z
+		.number()
+		.optional()
+		.describe("Epoch-millisecond timestamp of the last modification."),
+	last_viewed: z
+		.number()
+		.nullable()
+		.optional()
+		.describe(
+			"Epoch-millisecond timestamp the current user last viewed the object (viewedbymeTime). Null when the search backend does not expose it.",
+		),
+	verified: z.boolean().describe("Whether the object is marked as verified."),
+	frame_url: z
+		.string()
+		.describe("Deep link to open the object in the ThoughtSpot UI."),
+	match_reason: z
+		.string()
+		.describe(
+			"Human-readable explanation of why the object matched the query.",
+		),
+	confidence: z
+		.number()
+		.optional()
+		.describe("The relevance score of the result for the search term."),
 });
 
 export const SearchObjectsOutputSchema = z.object({
 	objects: z
-		.array(
-			z.object({
-				id: z.string().describe("The GUID of the object."),
-				name: z.string().describe("The display name/title of the object."),
-				type: z
-					.string()
-					.describe(
-						"The type of the object, for example ANSWER, LIVEBOARD (Pinboard) or WORKSHEET.",
-					),
-				description: z.string().describe("The description of the object."),
-				authorName: z
-					.string()
-					.describe("The name of the user who authored the object."),
-				isVerified: z
-					.boolean()
-					.describe("Whether the object is marked as verified."),
-				modifiedOn: z
-					.number()
-					.optional()
-					.describe("The epoch timestamp when the object was last modified."),
-				score: z
-					.number()
-					.optional()
-					.describe("The relevance score of the result for the search term."),
-			}),
-		)
-		.describe("The list of objects matching the search term."),
+		.array(SearchObjectHeaderSchema)
+		.describe("Ranked object headers matching the search term."),
+	next_cursor: z
+		.string()
+		.nullable()
+		.describe(
+			"Cursor to pass back as `cursor` to fetch the next page, or null when there are no more results.",
+		),
+	request_id: z
+		.string()
+		.describe("Identifier of the upstream search request, useful for tracing."),
 });
 
 export const CheckConnectivityInputSchema = z.object({});
@@ -384,7 +442,7 @@ export const toolDefinitionsV2 = [
 	{
 		name: ToolName.SearchObjects,
 		description:
-			"Search for objects (answers, liveboards, worksheets, and other metadata) in ThoughtSpot matching a given search term. Returns a list of matching objects with their id, name, type, description and author. Use this to find existing content by name or keyword.",
+			"Search for objects (answers, liveboards, worksheets, and other metadata) in ThoughtSpot matching a given search term. Supports optional filters (types, owner, tag, modified_since, verified_only) and pagination (limit, cursor). Returns ranked object headers with id, name, type, owner, description, tags, last_modified, last_viewed, verified, frame_url, match_reason and confidence, plus next_cursor and request_id. Returns identifiers and metadata only.",
 		inputSchema: z.toJSONSchema(SearchObjectsInputSchema),
 		outputSchema: z.toJSONSchema(SearchObjectsOutputSchema),
 		annotations: {

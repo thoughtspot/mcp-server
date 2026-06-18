@@ -21,7 +21,10 @@ import {
 } from "../metrics/runtime/tool-metrics";
 import { WithSpan, getActiveSpan } from "../metrics/tracing/tracing-utils";
 import { processSendAgentConversationMessageStreamingResponse } from "../streaming-utils";
-import type { SearchObjectResult } from "./thoughtspot-client";
+import type {
+	SearchObjectsParams,
+	SearchObjectsResult,
+} from "./thoughtspot-client";
 import type {
 	Answer,
 	DataSource,
@@ -763,20 +766,19 @@ export class ThoughtSpotService {
 	 */
 	@WithSpan("search-objects")
 	async searchObjects(
-		query: string,
-		batchSize = 10,
-	): Promise<SearchObjectResult[]> {
+		params: SearchObjectsParams,
+	): Promise<SearchObjectsResult> {
 		const span = getActiveSpan();
-		span?.setAttribute("query", query);
-		span?.setAttribute("batch_size", batchSize);
+		span?.setAttribute("query", params.query);
+		span?.setAttribute("limit", params.limit ?? 10);
 
-		const results = await this.observeUpstreamCall(
+		const result = await this.observeUpstreamCall(
 			UPSTREAM_OPERATION_NAMES.searchObjects,
-			() => (this.client as any).searchObjects({ query, batchSize }),
+			() => (this.client as any).searchObjects(params),
 		);
 
-		span?.setAttribute("results_count", results.length);
-		return results;
+		span?.setAttribute("results_count", result.objects.length);
+		return result;
 	}
 
 	/**

@@ -1116,15 +1116,85 @@ fragment worksheetInfo on eureka_WorksheetInfo {
   __typename
 }`;
 
-export interface SearchObjectResult {
+export interface SearchObjectHeader {
 	id: string;
 	name: string;
 	type: string;
+	owner: string;
 	description: string;
-	authorName: string;
-	isVerified: boolean;
-	modifiedOn?: number;
-	score?: number;
+	tags: string[];
+	last_modified?: number;
+	last_viewed?: number | null;
+	verified: boolean;
+	frame_url: string;
+	match_reason: string;
+	confidence?: number;
+}
+
+export interface SearchObjectsParams {
+	query: string;
+	types?: string[];
+	owner?: string;
+	tag?: string;
+	modifiedSince?: number;
+	verifiedOnly?: boolean;
+	limit?: number;
+	cursor?: string;
+}
+
+export interface SearchObjectsResult {
+	objects: SearchObjectHeader[];
+	next_cursor: string | null;
+	request_id: string;
+}
+
+// Friendly object-type names accepted by the `types` filter, mapped to the
+// OBJECT_TYPE_FACET values the Eureka backend understands.
+const OBJECT_TYPE_FACET_MAP: Record<string, string> = {
+	liveboard: "pinboard",
+	pinboard: "pinboard",
+	dashboard: "pinboard",
+	answer: "answer",
+	worksheet: "worksheet",
+	table: "worksheet",
+	model: "worksheet",
+};
+
+// Build a deep link to the object in the ThoughtSpot UI from its result type.
+function buildFrameUrl(
+	instanceUrl: string,
+	resultType: string,
+	id: string,
+	parentId?: string,
+): string {
+	const base = instanceUrl.replace(/\/$/, "");
+	switch (resultType) {
+		case "PINBOARD_VIZ_RESULT":
+			return `${base}/#/pinboard/${parentId ?? id}/${id}`;
+		case "ANSWER_RESULT":
+			return `${base}/#/saved-answer/${id}`;
+		case "WORKSHEET_RESULT":
+			return `${base}/#/data/tables/${id}`;
+		default:
+			return `${base}/#/pinboard/${id}`;
+	}
+}
+
+// Derive a human-readable match reason from the Eureka snippet metadata.
+function deriveMatchReason(snippetInfo: any): string {
+	if (snippetInfo?.titleSnippet?.highlights?.length) {
+		return "Matched in title";
+	}
+	if (snippetInfo?.descriptionSnippet?.highlights?.length) {
+		return "Matched in description";
+	}
+	const tokens = (snippetInfo?.sageQuerySnippet?.token ?? [])
+		.map((t: any) => t?.token)
+		.filter(Boolean);
+	if (tokens.length) {
+		return `Matched query terms: ${tokens.join(", ")}`;
+	}
+	return "Matched search term";
 }
 
 /*
@@ -1134,11 +1204,32 @@ export interface SearchObjectResult {
 function addSearchObjects(client: any, instanceUrl: string, token: string) {
 	(client as any).searchObjects = async ({
 		query,
-		batchSize = 10,
-	}: {
-		query: string;
-		batchSize?: number;
-	}): Promise<SearchObjectResult[]> => {
+		types,
+		owner,
+		tag,
+		modifiedSince,
+		verifiedOnly,
+		limit = 10,
+		cursor,
+	}: SearchObjectsParams): Promise<SearchObjectsResult> => {
+		const offset = cursor ? Number.parseInt(cursor, 10) || 0 : 0;
+
+		// Filters the Eureka backend can apply server-side via facetSelections.
+		const facetSelections: { facetType: string; facetValue: string[] }[] = [];
+		if (types?.length) {
+			const facetValue = [
+				...new Set(
+					types.map(
+						(t) => OBJECT_TYPE_FACET_MAP[t.toLowerCase()] ?? t.toLowerCase(),
+					),
+				),
+			];
+			facetSelections.push({ facetType: "OBJECT_TYPE_FACET", facetValue });
+		}
+		if (verifiedOnly) {
+			facetSelections.push({ facetType: "IS_VERIFIED", facetValue: ["true"] });
+		}
+
 		const endpoint = "/prism/?op=GetEurekaResults";
 		const fetchOptions = {
 			method: "POST",
@@ -1157,16 +1248,18 @@ function addSearchObjects(client: any, instanceUrl: string, token: string) {
 				query: searchObjectsQuery,
 				variables: {
 					params: {
-						batchSize,
-						desiredFacets: [],
-						facetSelections: [],
+						batchSize: limit,
+						// Request the STICKERS facet so tag ids on each result can be
+						// resolved to human-readable tag names.
+						desiredFacets: [{ facetType: "STICKERS", facetValue: [] }],
+						facetSelections,
 						maxPinboardVizCount: 5,
 						filterSelections: [],
-						offset: 0,
+						offset,
 						query,
 						removeDuplicates: true,
 						sortBy: [],
-						currentPageNumber: 1,
+						currentPageNumber: Math.floor(offset / limit) + 1,
 						searchOption: "SEARCH_RESULTS",
 					},
 				},
@@ -1195,10 +1288,24 @@ function addSearchObjects(client: any, instanceUrl: string, token: string) {
 			);
 		}
 
-		const results = data?.data?.queryRequest?.results ?? [];
+		const queryRequest = data?.data?.queryRequest ?? {};
+		const results = queryRequest.results ?? [];
+		const requestId = queryRequest.requestIdentifiers?.apiRequestId ?? "";
 
-		return results
-			.map((result: any): SearchObjectResult | null => {
+		// Build a sticker id -> name map so tagIds can be surfaced as tag names.
+		const stickerNames: Record<string, string> = {};
+		for (const facet of queryRequest.facets ?? []) {
+			if (facet?.facetType === "STICKERS") {
+				for (const value of facet.facetValues ?? []) {
+					if (value?.id) {
+						stickerNames[value.id] = value.name ?? value.id;
+					}
+				}
+			}
+		}
+
+		let objects: SearchObjectHeader[] = results
+			.map((result: any): SearchObjectHeader | null => {
 				// Each result carries every sub-object (searchAnswer, searchPinboard,
 				// searchWorksheet, searchPinboardViz) but only the one matching
 				// resultType is populated; the rest are placeholders with an empty
@@ -1219,22 +1326,57 @@ function addSearchObjects(client: any, instanceUrl: string, token: string) {
 				if (!id) {
 					return null;
 				}
+				const tags = (header?.tagIds ?? []).map(
+					(tagId: string) => stickerNames[tagId] ?? tagId,
+				);
 				return {
 					id,
 					name: header?.title ?? "",
 					type:
 						result?.objectSecurityInfo?.objectType ?? result?.resultType ?? "",
+					owner: header?.authorName ?? "",
 					description: header?.description ?? "",
-					authorName: header?.authorName ?? "",
-					isVerified: header?.isVerified ?? false,
-					modifiedOn: header?.modifiedOn,
-					score: result?.score,
+					tags,
+					last_modified: header?.modifiedOn,
+					// Eureka search does not expose a per-user last-viewed timestamp.
+					last_viewed: null,
+					verified: header?.isVerified ?? false,
+					frame_url: buildFrameUrl(
+						instanceUrl,
+						result?.resultType ?? "",
+						id,
+						result?.objectSecurityInfo?.objectId,
+					),
+					match_reason: deriveMatchReason(result?.snippetInfo),
+					confidence: result?.score,
 				};
 			})
 			.filter(
-				(result: SearchObjectResult | null): result is SearchObjectResult =>
-					result !== null,
+				(obj: SearchObjectHeader | null): obj is SearchObjectHeader =>
+					obj !== null,
 			);
+
+		// owner, tag and modified_since are not reliably expressible through the
+		// Eureka request schema, so they are applied to the returned page here.
+		if (owner) {
+			const needle = owner.toLowerCase();
+			objects = objects.filter((o) => o.owner.toLowerCase().includes(needle));
+		}
+		if (tag) {
+			const needle = tag.toLowerCase();
+			objects = objects.filter((o) =>
+				o.tags.some((t) => t.toLowerCase().includes(needle)),
+			);
+		}
+		if (modifiedSince) {
+			objects = objects.filter((o) => (o.last_modified ?? 0) >= modifiedSince);
+		}
+
+		// A full page of raw results implies there may be more to fetch.
+		const next_cursor =
+			results.length === limit ? String(offset + limit) : null;
+
+		return { objects, next_cursor, request_id: requestId };
 	};
 }
 

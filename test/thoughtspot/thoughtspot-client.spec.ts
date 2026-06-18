@@ -838,6 +838,13 @@ describe("ThoughtSpot Client", () => {
 			const mockResponse = {
 				data: {
 					queryRequest: {
+						requestIdentifiers: { apiRequestId: "req-1" },
+						facets: [
+							{
+								facetType: "STICKERS",
+								facetValues: [{ id: "tag-1", name: "Finance" }],
+							},
+						],
 						results: [
 							{
 								objectSecurityInfo: {
@@ -852,9 +859,13 @@ describe("ThoughtSpot Client", () => {
 										authorName: "alice",
 										modifiedOn: 1700000000000,
 										isVerified: true,
+										tagIds: ["tag-1"],
 									},
 								},
-								resultType: "ANSWER",
+								snippetInfo: {
+									titleSnippet: { highlights: [{ start: 0, end: 5 }] },
+								},
+								resultType: "ANSWER_RESULT",
 								score: 0.9,
 							},
 							{
@@ -872,7 +883,7 @@ describe("ThoughtSpot Client", () => {
 										isVerified: false,
 									},
 								},
-								resultType: "PINBOARD",
+								resultType: "PINBOARD_RESULT",
 								score: 0.8,
 							},
 						],
@@ -888,49 +899,72 @@ describe("ThoughtSpot Client", () => {
 
 			const result = await client.searchObjects({
 				query: "sales",
-				batchSize: 5,
+				limit: 5,
 			});
-
-			expect(fetch).toHaveBeenCalledWith(
-				`${mockInstanceUrl}/prism/?op=GetEurekaResults`,
-				expect.objectContaining({
-					method: "POST",
-					headers: expect.objectContaining({
-						Authorization: "Bearer test-token-123",
-					}),
-				}),
-			);
 
 			const body = JSON.parse((fetch as any).mock.calls[0][1].body);
 			expect(body.operationName).toBe("GetEurekaResults");
 			expect(body.variables.params.query).toBe("sales");
 			expect(body.variables.params.batchSize).toBe(5);
 
-			expect(result).toEqual([
-				{
-					id: "answer-123",
-					name: "Sales by Region",
-					type: "QUESTION_ANSWER_BOOK",
-					description: "Revenue by region",
-					authorName: "alice",
-					isVerified: true,
-					modifiedOn: 1700000000000,
-					score: 0.9,
-				},
-				{
-					id: "lb-456",
-					name: "Sales Overview",
-					type: "PINBOARD_ANSWER_BOOK",
-					description: "Overview",
-					authorName: "bob",
-					isVerified: false,
-					modifiedOn: 1700000001000,
-					score: 0.8,
-				},
+			expect(result).toEqual({
+				objects: [
+					{
+						id: "answer-123",
+						name: "Sales by Region",
+						type: "QUESTION_ANSWER_BOOK",
+						owner: "alice",
+						description: "Revenue by region",
+						tags: ["Finance"],
+						last_modified: 1700000000000,
+						last_viewed: null,
+						verified: true,
+						frame_url: `${mockInstanceUrl}/#/saved-answer/answer-123`,
+						match_reason: "Matched in title",
+						confidence: 0.9,
+					},
+					{
+						id: "lb-456",
+						name: "Sales Overview",
+						type: "PINBOARD_ANSWER_BOOK",
+						owner: "bob",
+						description: "Overview",
+						tags: [],
+						last_modified: 1700000001000,
+						last_viewed: null,
+						verified: false,
+						frame_url: `${mockInstanceUrl}/#/pinboard/lb-456`,
+						match_reason: "Matched search term",
+						confidence: 0.8,
+					},
+				],
+				next_cursor: null,
+				request_id: "req-1",
+			});
+		});
+
+		it("should send server-side facet selections for types and verified_only", async () => {
+			(fetch as any).mockResolvedValue({
+				ok: true,
+				json: vi
+					.fn()
+					.mockResolvedValue({ data: { queryRequest: { results: [] } } }),
+			});
+
+			await client.searchObjects({
+				query: "sales",
+				types: ["liveboard", "answer"],
+				verifiedOnly: true,
+			});
+
+			const body = JSON.parse((fetch as any).mock.calls[0][1].body);
+			expect(body.variables.params.facetSelections).toEqual([
+				{ facetType: "OBJECT_TYPE_FACET", facetValue: ["pinboard", "answer"] },
+				{ facetType: "IS_VERIFIED", facetValue: ["true"] },
 			]);
 		});
 
-		it("should default batchSize to 10 when not provided", async () => {
+		it("should default limit to 10 and offset to 0 when not provided", async () => {
 			(fetch as any).mockResolvedValue({
 				ok: true,
 				json: vi
@@ -942,7 +976,81 @@ describe("ThoughtSpot Client", () => {
 
 			const body = JSON.parse((fetch as any).mock.calls[0][1].body);
 			expect(body.variables.params.batchSize).toBe(10);
-			expect(result).toEqual([]);
+			expect(body.variables.params.offset).toBe(0);
+			expect(result).toEqual({
+				objects: [],
+				next_cursor: null,
+				request_id: "",
+			});
+		});
+
+		it("should page using the cursor and emit next_cursor on a full page", async () => {
+			(fetch as any).mockResolvedValue({
+				ok: true,
+				json: vi.fn().mockResolvedValue({
+					data: {
+						queryRequest: {
+							results: [
+								{
+									objectSecurityInfo: { objectType: "X", objectId: "a" },
+									searchPinboard: { header: { id: "a", title: "A" } },
+									resultType: "PINBOARD_RESULT",
+								},
+								{
+									objectSecurityInfo: { objectType: "X", objectId: "b" },
+									searchPinboard: { header: { id: "b", title: "B" } },
+									resultType: "PINBOARD_RESULT",
+								},
+							],
+						},
+					},
+				}),
+			});
+
+			const result = await client.searchObjects({
+				query: "sales",
+				limit: 2,
+				cursor: "4",
+			});
+
+			const body = JSON.parse((fetch as any).mock.calls[0][1].body);
+			expect(body.variables.params.offset).toBe(4);
+			expect(result.next_cursor).toBe("6");
+		});
+
+		it("should apply modified_since as a client-side filter", async () => {
+			(fetch as any).mockResolvedValue({
+				ok: true,
+				json: vi.fn().mockResolvedValue({
+					data: {
+						queryRequest: {
+							results: [
+								{
+									objectSecurityInfo: { objectType: "X", objectId: "old" },
+									searchPinboard: {
+										header: { id: "old", title: "Old", modifiedOn: 1000 },
+									},
+									resultType: "PINBOARD_RESULT",
+								},
+								{
+									objectSecurityInfo: { objectType: "X", objectId: "new" },
+									searchPinboard: {
+										header: { id: "new", title: "New", modifiedOn: 5000 },
+									},
+									resultType: "PINBOARD_RESULT",
+								},
+							],
+						},
+					},
+				}),
+			});
+
+			const result = await client.searchObjects({
+				query: "sales",
+				modifiedSince: 3000,
+			});
+
+			expect(result.objects.map((o: any) => o.id)).toEqual(["new"]);
 		});
 
 		it("should fall back to objectSecurityInfo.objectId when no header has an id", async () => {
@@ -960,16 +1068,20 @@ describe("ThoughtSpot Client", () => {
 			});
 
 			const result = await client.searchObjects({ query: "sales" });
-			expect(result).toEqual([
+			expect(result.objects).toEqual([
 				{
 					id: "y",
 					name: "",
 					type: "X",
+					owner: "",
 					description: "",
-					authorName: "",
-					isVerified: false,
-					modifiedOn: undefined,
-					score: undefined,
+					tags: [],
+					last_modified: undefined,
+					last_viewed: null,
+					verified: false,
+					frame_url: `${mockInstanceUrl}/#/pinboard/y`,
+					match_reason: "Matched search term",
+					confidence: undefined,
 				},
 			]);
 		});
@@ -987,7 +1099,7 @@ describe("ThoughtSpot Client", () => {
 			});
 
 			const result = await client.searchObjects({ query: "sales" });
-			expect(result).toEqual([]);
+			expect(result.objects).toEqual([]);
 		});
 
 		it("should throw when the response contains GraphQL errors", async () => {

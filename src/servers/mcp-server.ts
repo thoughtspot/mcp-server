@@ -626,19 +626,32 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		request: z.infer<typeof CallToolRequestSchema>,
 		recorder: MetricsRecorder,
 	) {
-		const { query, batchSize } = SearchObjectsInputSchema.parse(
-			request.params.arguments,
-		);
+		const {
+			query,
+			types,
+			owner,
+			tag,
+			modified_since,
+			verified_only,
+			limit,
+			cursor,
+		} = SearchObjectsInputSchema.parse(request.params.arguments);
 
 		try {
-			const objects = await this.getThoughtSpotService(recorder).searchObjects(
+			const result = await this.getThoughtSpotService(recorder).searchObjects({
 				query,
-				batchSize,
-			);
+				types,
+				owner,
+				tag,
+				modifiedSince: modified_since,
+				verifiedOnly: verified_only,
+				limit,
+				cursor,
+			});
 
 			return this.createStructuredContentSuccessResponse(
-				{ objects },
-				`${objects.length} object(s) found`,
+				result,
+				`${result.objects.length} object(s) found`,
 			);
 		} catch (error) {
 			return this.createErrorResponse(

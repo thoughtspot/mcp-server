@@ -109,28 +109,42 @@ describe("MCP Server", () => {
 					},
 				},
 			]),
-			searchObjects: vi.fn().mockResolvedValue([
-				{
-					id: "answer-123",
-					name: "Sales by Region",
-					type: "QUESTION_ANSWER_BOOK",
-					description: "Revenue broken down by region",
-					authorName: "test-user",
-					isVerified: true,
-					modifiedOn: 1700000000000,
-					score: 0.95,
-				},
-				{
-					id: "liveboard-456",
-					name: "Sales Overview",
-					type: "PINBOARD_ANSWER_BOOK",
-					description: "Overview of sales metrics",
-					authorName: "test-user",
-					isVerified: false,
-					modifiedOn: 1700000001000,
-					score: 0.82,
-				},
-			]),
+			searchObjects: vi.fn().mockResolvedValue({
+				objects: [
+					{
+						id: "answer-123",
+						name: "Sales by Region",
+						type: "QUESTION_ANSWER_BOOK",
+						owner: "test-user",
+						description: "Revenue broken down by region",
+						tags: [],
+						last_modified: 1700000000000,
+						last_viewed: null,
+						verified: true,
+						frame_url:
+							"https://test.thoughtspot.cloud/#/saved-answer/answer-123",
+						match_reason: "Matched in title",
+						confidence: 0.95,
+					},
+					{
+						id: "liveboard-456",
+						name: "Sales Overview",
+						type: "PINBOARD_ANSWER_BOOK",
+						owner: "test-user",
+						description: "Overview of sales metrics",
+						tags: [],
+						last_modified: 1700000001000,
+						last_viewed: null,
+						verified: false,
+						frame_url:
+							"https://test.thoughtspot.cloud/#/pinboard/liveboard-456",
+						match_reason: "Matched search term",
+						confidence: 0.82,
+					},
+				],
+				next_cursor: null,
+				request_id: "req-1",
+			}),
 			instanceUrl: "https://test.thoughtspot.cloud",
 		} as any);
 
@@ -423,18 +437,23 @@ describe("MCP Server", () => {
 			const result = await callTool("search_objects", { query: "sales" });
 
 			expect(result.isError).toBeUndefined();
-			const objects = (result.structuredContent as any).objects;
+			const structured = result.structuredContent as any;
+			expect(structured.next_cursor).toBeNull();
+			expect(structured.request_id).toBe("req-1");
+			const objects = structured.objects;
 			expect(objects).toHaveLength(2);
 			expect(objects[0]).toMatchObject({
 				id: "answer-123",
 				name: "Sales by Region",
 				type: "QUESTION_ANSWER_BOOK",
-				isVerified: true,
+				owner: "test-user",
+				verified: true,
+				frame_url: "https://test.thoughtspot.cloud/#/saved-answer/answer-123",
 			});
 			expect(objects[1].id).toBe("liveboard-456");
 		});
 
-		it("should pass the batchSize through to the client", async () => {
+		it("should pass the documented params through to the client", async () => {
 			await server.init();
 			const { callTool } = connect(server);
 
@@ -443,12 +462,29 @@ describe("MCP Server", () => {
 				"test-access-token",
 			);
 
-			await callTool("search_objects", { query: "sales", batchSize: 25 });
-
-			expect((client as any).searchObjects).toHaveBeenCalledWith({
+			await callTool("search_objects", {
 				query: "sales",
-				batchSize: 25,
+				types: ["liveboard"],
+				owner: "alice",
+				tag: "Finance",
+				modified_since: 1700000000000,
+				verified_only: true,
+				limit: 25,
+				cursor: "50",
 			});
+
+			expect((client as any).searchObjects).toHaveBeenCalledWith(
+				expect.objectContaining({
+					query: "sales",
+					types: ["liveboard"],
+					owner: "alice",
+					tag: "Finance",
+					modifiedSince: 1700000000000,
+					verifiedOnly: true,
+					limit: 25,
+					cursor: "50",
+				}),
+			);
 		});
 
 		it("should return an error response when the search fails", async () => {
