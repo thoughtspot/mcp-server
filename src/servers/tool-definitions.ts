@@ -69,7 +69,7 @@ export const SearchObjectsInputSchema = z.object({
 	query: z
 		.string()
 		.describe(
-			"The search term to find objects for. This is matched against object names, descriptions and content. For example, 'sales', 'revenue by region', or the name of a liveboard or answer.",
+			"The search term to find objects for. This is matched against object names, descriptions and content.",
 		),
 	types: z
 		.array(z.string())
@@ -217,7 +217,7 @@ export const SendSessionMessageInputSchema = z.object({
 		.string()
 		.optional()
 		.describe(
-			'Extra information which the Analytics Agent should be aware of while interpreting the `message`. You can use this field to provide background or external information relevant to the request, which the Agent would not be aware of. For example, "The user\'s fiscal year starts in April", or "The user is a manager of the West region".',
+			"Extra information which the Analytics Agent should be aware of while interpreting the `message`. You can use this field to provide background or external information relevant to the request, which the Agent would not be aware of.",
 		),
 });
 
