@@ -167,7 +167,14 @@ export const SearchObjectsOutputSchema = z.object({
 		),
 	request_id: z
 		.string()
-		.describe("Identifier of the upstream search request, useful for tracing."),
+		.describe(
+			"Correlation id sent on the upstream call as x-request-id; trace this in ThoughtSpot's server logs.",
+		),
+	trace_id: z
+		.string()
+		.describe(
+			"Correlation id sent on the upstream call as x-prism-trace-id; trace this in ThoughtSpot's server logs.",
+		),
 });
 
 export const CheckConnectivityInputSchema = z.object({});

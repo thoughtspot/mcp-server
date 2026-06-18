@@ -903,44 +903,66 @@ describe("ThoughtSpot Client", () => {
 			});
 
 			const body = JSON.parse((fetch as any).mock.calls[0][1].body);
+			const headers = (fetch as any).mock.calls[0][1].headers;
 			expect(body.operationName).toBe("GetEurekaResults");
 			expect(body.variables.params.query).toBe("sales");
 			expect(body.variables.params.batchSize).toBe(5);
 
-			expect(result).toEqual({
-				objects: [
-					{
-						id: "answer-123",
-						name: "Sales by Region",
-						type: "QUESTION_ANSWER_BOOK",
-						owner: "alice",
-						description: "Revenue by region",
-						tags: ["Finance"],
-						last_modified: 1700000000000,
-						last_viewed: null,
-						verified: true,
-						frame_url: `${mockInstanceUrl}/#/saved-answer/answer-123`,
-						match_reason: "Matched in title",
-						confidence: 0.9,
-					},
-					{
-						id: "lb-456",
-						name: "Sales Overview",
-						type: "PINBOARD_ANSWER_BOOK",
-						owner: "bob",
-						description: "Overview",
-						tags: [],
-						last_modified: 1700000001000,
-						last_viewed: null,
-						verified: false,
-						frame_url: `${mockInstanceUrl}/#/pinboard/lb-456`,
-						match_reason: "Matched search term",
-						confidence: 0.8,
-					},
-				],
-				next_cursor: null,
-				request_id: "req-1",
+			expect(result.objects).toEqual([
+				{
+					id: "answer-123",
+					name: "Sales by Region",
+					type: "QUESTION_ANSWER_BOOK",
+					owner: "alice",
+					description: "Revenue by region",
+					tags: ["Finance"],
+					last_modified: 1700000000000,
+					last_viewed: null,
+					verified: true,
+					frame_url: `${mockInstanceUrl}/#/saved-answer/answer-123`,
+					match_reason: "Matched in title",
+					confidence: 0.9,
+				},
+				{
+					id: "lb-456",
+					name: "Sales Overview",
+					type: "PINBOARD_ANSWER_BOOK",
+					owner: "bob",
+					description: "Overview",
+					tags: [],
+					last_modified: 1700000001000,
+					last_viewed: null,
+					verified: false,
+					frame_url: `${mockInstanceUrl}/#/pinboard/lb-456`,
+					match_reason: "Matched search term",
+					confidence: 0.8,
+				},
+			]);
+			expect(result.next_cursor).toBeNull();
+			// request_id / trace_id are generated client-side and echoed back.
+			expect(result.request_id).toBe(headers["x-request-id"]);
+			expect(result.trace_id).toBe(headers["x-prism-trace-id"]);
+		});
+
+		it("should generate and send x-request-id and x-prism-trace-id headers", async () => {
+			(fetch as any).mockResolvedValue({
+				ok: true,
+				json: vi
+					.fn()
+					.mockResolvedValue({ data: { queryRequest: { results: [] } } }),
 			});
+
+			const result = await client.searchObjects({ query: "sales" });
+
+			const headers = (fetch as any).mock.calls[0][1].headers;
+			const uuid =
+				/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+			expect(headers["x-request-id"]).toMatch(uuid);
+			expect(headers["x-prism-trace-id"]).toMatch(uuid);
+			// The same ids the request was sent with are echoed back to the caller.
+			expect(result.request_id).toBe(headers["x-request-id"]);
+			expect(result.trace_id).toBe(headers["x-prism-trace-id"]);
+			expect(result.request_id).not.toBe(result.trace_id);
 		});
 
 		it("should send server-side facet selections for types and verified_only", async () => {
@@ -977,11 +999,10 @@ describe("ThoughtSpot Client", () => {
 			const body = JSON.parse((fetch as any).mock.calls[0][1].body);
 			expect(body.variables.params.batchSize).toBe(10);
 			expect(body.variables.params.offset).toBe(0);
-			expect(result).toEqual({
-				objects: [],
-				next_cursor: null,
-				request_id: "",
-			});
+			expect(result.objects).toEqual([]);
+			expect(result.next_cursor).toBeNull();
+			expect(result.request_id).toBeTruthy();
+			expect(result.trace_id).toBeTruthy();
 		});
 
 		it("should page using the cursor and emit next_cursor on a full page", async () => {

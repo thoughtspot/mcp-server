@@ -144,6 +144,7 @@ describe("MCP Server", () => {
 				],
 				next_cursor: null,
 				request_id: "req-1",
+				trace_id: "trace-1",
 			}),
 			instanceUrl: "https://test.thoughtspot.cloud",
 		} as any);
@@ -440,6 +441,7 @@ describe("MCP Server", () => {
 			const structured = result.structuredContent as any;
 			expect(structured.next_cursor).toBeNull();
 			expect(structured.request_id).toBe("req-1");
+			expect(structured.trace_id).toBe("trace-1");
 			const objects = structured.objects;
 			expect(objects).toHaveLength(2);
 			expect(objects[0]).toMatchObject({

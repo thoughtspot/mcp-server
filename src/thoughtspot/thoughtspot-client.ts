@@ -1145,7 +1145,11 @@ export interface SearchObjectsParams {
 export interface SearchObjectsResult {
 	objects: SearchObjectHeader[];
 	next_cursor: string | null;
+	// Client-generated correlation ids sent on the upstream call as the
+	// x-request-id / x-prism-trace-id headers and echoed back here, so the same
+	// id can be traced across this server and ThoughtSpot's server-side logs.
 	request_id: string;
+	trace_id: string;
 }
 
 // Friendly object-type names accepted by the `types` filter, mapped to the
@@ -1230,6 +1234,12 @@ function addSearchObjects(client: any, instanceUrl: string, token: string) {
 			facetSelections.push({ facetType: "IS_VERIFIED", facetValue: ["true"] });
 		}
 
+		// Correlation ids we mint per call and send as x-request-id /
+		// x-prism-trace-id. ThoughtSpot does not return these — it generates its
+		// own — so we generate and echo them back to enable cross-system tracing.
+		const requestId = globalThis.crypto.randomUUID();
+		const traceId = globalThis.crypto.randomUUID();
+
 		const endpoint = "/prism/?op=GetEurekaResults";
 		const fetchOptions = {
 			method: "POST",
@@ -1240,6 +1250,8 @@ function addSearchObjects(client: any, instanceUrl: string, token: string) {
 				// Without it the server falls back to "*" and 500s with
 				// "IllegalArgumentException: Invalid locale format: *".
 				"accept-language": "en-US",
+				"x-request-id": requestId,
+				"x-prism-trace-id": traceId,
 				"user-agent": "ThoughtSpot-ts-client",
 				Authorization: `Bearer ${token}`,
 			},
@@ -1290,7 +1302,6 @@ function addSearchObjects(client: any, instanceUrl: string, token: string) {
 
 		const queryRequest = data?.data?.queryRequest ?? {};
 		const results = queryRequest.results ?? [];
-		const requestId = queryRequest.requestIdentifiers?.apiRequestId ?? "";
 
 		// Build a sticker id -> name map so tagIds can be surfaced as tag names.
 		const stickerNames: Record<string, string> = {};
@@ -1376,7 +1387,12 @@ function addSearchObjects(client: any, instanceUrl: string, token: string) {
 		const next_cursor =
 			results.length === limit ? String(offset + limit) : null;
 
-		return { objects, next_cursor, request_id: requestId };
+		return {
+			objects,
+			next_cursor,
+			request_id: requestId,
+			trace_id: traceId,
+		};
 	};
 }
 
