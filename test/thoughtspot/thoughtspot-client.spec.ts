@@ -933,18 +933,17 @@ describe("ThoughtSpot Client", () => {
 					last_modified: 1700000001000,
 					last_viewed: null,
 					verified: false,
-					frame_url: `${mockInstanceUrl}/#/pinboard/lb-456`,
+					frame_url: `${mockInstanceUrl}/#/insights/pinboard//lb-456`,
 					match_reason: "Matched search term",
 					confidence: 0.8,
 				},
 			]);
 			expect(result.next_cursor).toBeNull();
-			// request_id / trace_id are generated client-side and echoed back.
+			// request_id is generated client-side and echoed back.
 			expect(result.request_id).toBe(headers["x-request-id"]);
-			expect(result.trace_id).toBe(headers["x-prism-trace-id"]);
 		});
 
-		it("should generate and send x-request-id and x-prism-trace-id headers", async () => {
+		it("should generate and send the x-request-id header", async () => {
 			(fetch as any).mockResolvedValue({
 				ok: true,
 				json: vi
@@ -958,11 +957,8 @@ describe("ThoughtSpot Client", () => {
 			const uuid =
 				/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 			expect(headers["x-request-id"]).toMatch(uuid);
-			expect(headers["x-prism-trace-id"]).toMatch(uuid);
-			// The same ids the request was sent with are echoed back to the caller.
+			// The same id the request was sent with is echoed back to the caller.
 			expect(result.request_id).toBe(headers["x-request-id"]);
-			expect(result.trace_id).toBe(headers["x-prism-trace-id"]);
-			expect(result.request_id).not.toBe(result.trace_id);
 		});
 
 		it("should send server-side facet selections for types and verified_only", async () => {
@@ -1002,7 +998,6 @@ describe("ThoughtSpot Client", () => {
 			expect(result.objects).toEqual([]);
 			expect(result.next_cursor).toBeNull();
 			expect(result.request_id).toBeTruthy();
-			expect(result.trace_id).toBeTruthy();
 		});
 
 		it("should page using the cursor and emit next_cursor on a full page", async () => {
@@ -1100,7 +1095,7 @@ describe("ThoughtSpot Client", () => {
 					last_modified: undefined,
 					last_viewed: null,
 					verified: false,
-					frame_url: `${mockInstanceUrl}/#/pinboard/y`,
+					frame_url: `${mockInstanceUrl}/#/insights/pinboard//y`,
 					match_reason: "Matched search term",
 					confidence: undefined,
 				},

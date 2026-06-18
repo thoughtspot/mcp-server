@@ -29,9 +29,8 @@ export interface SearchObjectsParams {
 export interface SearchObjectsResult {
 	objects: SearchObjectHeader[];
 	next_cursor: string | null;
-	// Client-generated correlation ids sent on the upstream call as the
-	// x-request-id / x-prism-trace-id headers and echoed back here, so the same
-	// id can be traced across this server and ThoughtSpot's server-side logs.
+	// Client-generated correlation id sent on the upstream call as the
+	// x-request-id header and echoed back here, so the same id can be traced
+	// across this server and ThoughtSpot's server-side logs.
 	request_id: string;
-	trace_id: string;
 }

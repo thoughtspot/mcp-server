@@ -91,11 +91,10 @@ export function addSearchObjects(
 			facetSelections.push({ facetType: "IS_VERIFIED", facetValue: ["true"] });
 		}
 
-		// Correlation ids we mint per call and send as x-request-id /
-		// x-prism-trace-id. ThoughtSpot does not return these — it generates its
-		// own — so we generate and echo them back to enable cross-system tracing.
+		// Correlation id we mint per call and send as x-request-id. ThoughtSpot
+		// does not return this — it generates its own — so we generate and echo it
+		// back to enable cross-system tracing.
 		const requestId = globalThis.crypto.randomUUID();
-		const traceId = globalThis.crypto.randomUUID();
 
 		const endpoint = "/prism/?op=GetEurekaResults";
 		const fetchOptions = {
@@ -108,7 +107,6 @@ export function addSearchObjects(
 				// "IllegalArgumentException: Invalid locale format: *".
 				"accept-language": "en-US",
 				"x-request-id": requestId,
-				"x-prism-trace-id": traceId,
 				"user-agent": "ThoughtSpot-ts-client",
 				Authorization: `Bearer ${token}`,
 			},
@@ -248,7 +246,6 @@ export function addSearchObjects(
 			objects,
 			next_cursor,
 			request_id: requestId,
-			trace_id: traceId,
 		};
 	};
 }
