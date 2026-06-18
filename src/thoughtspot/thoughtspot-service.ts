@@ -21,6 +21,7 @@ import {
 } from "../metrics/runtime/tool-metrics";
 import { WithSpan, getActiveSpan } from "../metrics/tracing/tracing-utils";
 import { processSendAgentConversationMessageStreamingResponse } from "../streaming-utils";
+import type { SearchObjectResult } from "./thoughtspot-client";
 import type {
 	Answer,
 	DataSource,
@@ -754,6 +755,27 @@ export class ThoughtSpotService {
 
 		span?.setAttribute("results_count", results.length);
 
+		return results;
+	}
+
+	/**
+	 * Search for objects (answers, liveboards, worksheets, etc.) by a search term
+	 */
+	@WithSpan("search-objects")
+	async searchObjects(
+		query: string,
+		batchSize = 10,
+	): Promise<SearchObjectResult[]> {
+		const span = getActiveSpan();
+		span?.setAttribute("query", query);
+		span?.setAttribute("batch_size", batchSize);
+
+		const results = await this.observeUpstreamCall(
+			UPSTREAM_OPERATION_NAMES.searchObjects,
+			() => (this.client as any).searchObjects({ query, batchSize }),
+		);
+
+		span?.setAttribute("results_count", results.length);
 		return results;
 	}
 

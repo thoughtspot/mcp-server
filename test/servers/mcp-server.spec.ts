@@ -109,6 +109,28 @@ describe("MCP Server", () => {
 					},
 				},
 			]),
+			searchObjects: vi.fn().mockResolvedValue([
+				{
+					id: "answer-123",
+					name: "Sales by Region",
+					type: "QUESTION_ANSWER_BOOK",
+					description: "Revenue broken down by region",
+					authorName: "test-user",
+					isVerified: true,
+					modifiedOn: 1700000000000,
+					score: 0.95,
+				},
+				{
+					id: "liveboard-456",
+					name: "Sales Overview",
+					type: "PINBOARD_ANSWER_BOOK",
+					description: "Overview of sales metrics",
+					authorName: "test-user",
+					isVerified: false,
+					modifiedOn: 1700000001000,
+					score: 0.82,
+				},
+			]),
 			instanceUrl: "https://test.thoughtspot.cloud",
 		} as any);
 
@@ -164,9 +186,10 @@ describe("MCP Server", () => {
 
 			const result = await listTools();
 
-			// V2 tools (latest version): 5 tools
-			expect(result.tools).toHaveLength(5);
+			// V2 tools (latest version): 6 tools
+			expect(result.tools).toHaveLength(6);
 			expect(result.tools?.map((t) => t.name)).toEqual([
+				"search_objects",
 				"check_connectivity",
 				"create_analysis_session",
 				"send_session_message",
@@ -201,7 +224,7 @@ describe("MCP Server", () => {
 			);
 		});
 
-		it("should return 5 tools regardless of enableSpotterDataSourceDiscovery when using latest (V2)", async () => {
+		it("should return 6 tools regardless of enableSpotterDataSourceDiscovery when using latest (V2)", async () => {
 			// Mock getThoughtSpotClient with enableSpotterDataSourceDiscovery set to false
 			vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
 				getSessionInfo: vi.fn().mockResolvedValue({
@@ -235,8 +258,9 @@ describe("MCP Server", () => {
 			const result = await listTools();
 
 			// V2 tools don't have a datasource discovery tool, so filtering has no effect
-			expect(result.tools).toHaveLength(5);
+			expect(result.tools).toHaveLength(6);
 			expect(result.tools?.map((t) => t.name)).toEqual([
+				"search_objects",
 				"check_connectivity",
 				"create_analysis_session",
 				"send_session_message",
@@ -388,6 +412,60 @@ describe("MCP Server", () => {
 
 			expect(result.isError).toBeUndefined();
 			expect((result.content as any[])[0].text).toBe('{"success":true}');
+		});
+	});
+
+	describe("Search Objects Tool", () => {
+		it("should return matching objects for a search term", async () => {
+			await server.init();
+			const { callTool } = connect(server);
+
+			const result = await callTool("search_objects", { query: "sales" });
+
+			expect(result.isError).toBeUndefined();
+			const objects = (result.structuredContent as any).objects;
+			expect(objects).toHaveLength(2);
+			expect(objects[0]).toMatchObject({
+				id: "answer-123",
+				name: "Sales by Region",
+				type: "QUESTION_ANSWER_BOOK",
+				isVerified: true,
+			});
+			expect(objects[1].id).toBe("liveboard-456");
+		});
+
+		it("should pass the batchSize through to the client", async () => {
+			await server.init();
+			const { callTool } = connect(server);
+
+			const client = thoughtspotClient.getThoughtSpotClient(
+				"https://test.thoughtspot.cloud",
+				"test-access-token",
+			);
+
+			await callTool("search_objects", { query: "sales", batchSize: 25 });
+
+			expect((client as any).searchObjects).toHaveBeenCalledWith({
+				query: "sales",
+				batchSize: 25,
+			});
+		});
+
+		it("should return an error response when the search fails", async () => {
+			vi.spyOn(
+				ThoughtSpotService.prototype,
+				"searchObjects",
+			).mockRejectedValueOnce(new Error("upstream boom"));
+
+			await server.init();
+			const { callTool } = connect(server);
+
+			const result = await callTool("search_objects", { query: "sales" });
+
+			expect(result.isError).toBe(true);
+			expect((result.content as any[])[0].text).toMatch(
+				/error while searching for objects/i,
+			);
 		});
 	});
 

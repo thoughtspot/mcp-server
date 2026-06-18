@@ -25,6 +25,7 @@ import {
 	GetDataSourceSuggestionsSchema,
 	GetRelevantQuestionsSchema,
 	GetSessionUpdatesInputSchema,
+	SearchObjectsInputSchema,
 	SendSessionMessageInputSchema,
 	ToolName,
 } from "./tool-definitions";
@@ -192,7 +193,9 @@ export class MCPServer extends BaseMCPServer {
 		switch (name) {
 			case ToolName.Ping: {
 				if (this.ctx.props.accessToken && this.ctx.props.instanceUrl) {
-						if (!this.getThoughtSpotService(recorder).validateConnection()) {
+					if (
+						!(await this.getThoughtSpotService(recorder).validateConnection())
+					) {
 						return this.createErrorResponse(
 							"Failed to validate connection",
 							"Ping failed",
@@ -219,6 +222,10 @@ export class MCPServer extends BaseMCPServer {
 				return this.callGetDataSourceSuggestions(request, recorder);
 			}
 
+			case ToolName.SearchObjects: {
+				return this.callSearchObjects(request, recorder);
+			}
+
 			case ToolName.CheckConnectivity: {
 				if (!this.ctx.props.accessToken || !this.ctx.props.instanceUrl) {
 					return this.createErrorResponse(
@@ -226,7 +233,9 @@ export class MCPServer extends BaseMCPServer {
 						"Check connectivity failed",
 					);
 				}
-				if (!this.getThoughtSpotService(recorder).validateConnection()) {
+				if (
+					!(await this.getThoughtSpotService(recorder).validateConnection())
+				) {
 					return this.createErrorResponse(
 						"Failed to validate connection",
 						"Check connectivity failed",
@@ -610,6 +619,33 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			JSON.stringify(dataSourcesInfo),
 			`${dataSources.length} data source suggestion(s) found`,
 		);
+	}
+
+	@WithSpan("call-search-objects")
+	async callSearchObjects(
+		request: z.infer<typeof CallToolRequestSchema>,
+		recorder: MetricsRecorder,
+	) {
+		const { query, batchSize } = SearchObjectsInputSchema.parse(
+			request.params.arguments,
+		);
+
+		try {
+			const objects = await this.getThoughtSpotService(recorder).searchObjects(
+				query,
+				batchSize,
+			);
+
+			return this.createStructuredContentSuccessResponse(
+				{ objects },
+				`${objects.length} object(s) found`,
+			);
+		} catch (error) {
+			return this.createErrorResponse(
+				"Encountered an error while searching for objects. Please check your inputs and try again.",
+				`Error searching objects ${(error as Error).message}`,
+			);
+		}
 	}
 
 	private _sources: {

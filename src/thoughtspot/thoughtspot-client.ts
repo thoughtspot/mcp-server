@@ -1,16 +1,16 @@
 import {
-	createBearerAuthenticationConfig,
 	ThoughtSpotRestApi,
+	createBearerAuthenticationConfig,
 } from "@thoughtspot/rest-api-sdk";
 import type {
 	AgentConversation,
 	RequestContext,
 	ResponseContext,
 } from "@thoughtspot/rest-api-sdk";
-import YAML from "yaml";
-import { of } from "rxjs";
-import type { SessionInfo } from "./types";
 import { customAlphabet } from "nanoid";
+import { of } from "rxjs";
+import YAML from "yaml";
+import type { SessionInfo } from "./types";
 
 /*
  * Inject custom handlers into the ThoughtSpot client
@@ -42,6 +42,7 @@ export const getThoughtSpotClient = (
 	addGetAnswerSession(client, instanceUrl, bearerToken);
 	addCreateAgentConversationWithAutoMode(client, instanceUrl, bearerToken);
 	addSendAgentConversationMessageStreaming(client, instanceUrl, bearerToken);
+	addSearchObjects(client, instanceUrl, bearerToken);
 	return client;
 };
 
@@ -258,6 +259,982 @@ function addCreateAgentConversationWithAutoMode(
 
 		const data = (await response.json()) as AgentConversation;
 		return data;
+	};
+}
+
+const searchObjectsQuery = `
+query GetEurekaResults($params: Input_eureka_SearchRequest) {
+  queryRequest(request: $params) {
+    ...eurekaResults
+    __typename
+  }
+}
+
+fragment eurekaResults on eureka_SearchResponse {
+  facets {
+    facetType
+    facetValue
+    facetValues {
+      id
+      resultCount
+      name
+      __typename
+    }
+    __typename
+  }
+  requestIdentifiers {
+    apiRequestId
+    appActivityId
+    __typename
+  }
+  sageQuerySuggestions {
+    llmReasoning {
+      assumptions
+      clarifications
+      interpretation
+      __typename
+    }
+    tokens
+    tmlTokens
+    worksheetId
+    description
+    title
+    tmlTokens
+    formulaInfo {
+      name
+      expression
+      __typename
+    }
+    parameters {
+      dataType
+      defaultValue {
+        column {
+          id {
+            created
+            description
+            guid
+            indexVersion
+            modified
+            name
+            __typename
+          }
+          joinPaths {
+            id {
+              created
+              description
+              guid
+              indexVersion
+              modified
+              name
+              __typename
+            }
+            isConnected
+            leafTable {
+              created
+              description
+              guid
+              indexVersion
+              modified
+              name
+              __typename
+            }
+            rootTable {
+              created
+              description
+              guid
+              indexVersion
+              modified
+              name
+              __typename
+            }
+            __typename
+          }
+          schemaTableId
+          table {
+            created
+            description
+            guid
+            indexVersion
+            modified
+            name
+            __typename
+          }
+          __typename
+        }
+        constant {
+          boolValue
+          dateEpochValue
+          doubleValue
+          intValue
+          isNull
+          normalize
+          strValue
+          __typename
+        }
+        dataType
+        exprClass
+        exprRef {
+          refId {
+            created
+            description
+            guid
+            indexVersion
+            modified
+            name
+            __typename
+          }
+          __typename
+        }
+        expressionId
+        formatingType
+        __typename
+      }
+      header {
+        authorDisplayName
+        authorGuid
+        authorName
+        created
+        databaseStripe
+        deleted
+        description
+        generationNum
+        hidden
+        idGuid
+        isVersioningEnabled
+        lenientDiscoverability
+        metadataType
+        modified
+        modifiedBy
+        name
+        objId
+        ownerGuid
+        schemaStripe
+        type
+        __typename
+      }
+      linkedParameters
+      listColumnId
+      listConfig {
+        listChoice {
+          displayName
+          value {
+            column {
+              id {
+                created
+                description
+                guid
+                indexVersion
+                modified
+                name
+                __typename
+              }
+              joinPaths {
+                id {
+                  created
+                  description
+                  guid
+                  indexVersion
+                  modified
+                  name
+                  __typename
+                }
+                isConnected
+                leafTable {
+                  created
+                  description
+                  guid
+                  indexVersion
+                  modified
+                  name
+                  __typename
+                }
+                rootTable {
+                  created
+                  description
+                  guid
+                  indexVersion
+                  modified
+                  name
+                  __typename
+                }
+                __typename
+              }
+              schemaTableId
+              table {
+                created
+                description
+                guid
+                indexVersion
+                modified
+                name
+                __typename
+              }
+              __typename
+            }
+            constant {
+              boolValue
+              dateEpochValue
+              doubleValue
+              intValue
+              isNull
+              normalize
+              strValue
+              __typename
+            }
+            dataType
+            exprClass
+            exprRef {
+              refId {
+                created
+                description
+                guid
+                indexVersion
+                modified
+                name
+                __typename
+              }
+              __typename
+            }
+            expressionId
+            formatingType
+            function {
+              hasVarargs
+              isAggregate
+              name
+              __typename
+            }
+            __typename
+          }
+          __typename
+        }
+        __typename
+      }
+      rangeConfig {
+        includeMax
+        includeMin
+        rangeMax {
+          column {
+            id {
+              created
+              description
+              guid
+              indexVersion
+              modified
+              name
+              __typename
+            }
+            joinPaths {
+              id {
+                created
+                description
+                guid
+                indexVersion
+                modified
+                name
+                __typename
+              }
+              isConnected
+              leafTable {
+                created
+                description
+                guid
+                indexVersion
+                modified
+                name
+                __typename
+              }
+              rootTable {
+                created
+                description
+                guid
+                indexVersion
+                modified
+                name
+                __typename
+              }
+              __typename
+            }
+            schemaTableId
+            table {
+              created
+              description
+              guid
+              indexVersion
+              modified
+              name
+              __typename
+            }
+            __typename
+          }
+          constant {
+            boolValue
+            dateEpochValue
+            doubleValue
+            intValue
+            isNull
+            normalize
+            strValue
+            __typename
+          }
+          dataType
+          exprClass
+          exprRef {
+            refId {
+              created
+              description
+              guid
+              indexVersion
+              modified
+              name
+              __typename
+            }
+            __typename
+          }
+          expressionId
+          formatingType
+          __typename
+        }
+        rangeMin {
+          column {
+            id {
+              created
+              description
+              guid
+              indexVersion
+              modified
+              name
+              __typename
+            }
+            joinPaths {
+              id {
+                created
+                description
+                guid
+                indexVersion
+                modified
+                name
+                __typename
+              }
+              isConnected
+              leafTable {
+                created
+                description
+                guid
+                indexVersion
+                modified
+                name
+                __typename
+              }
+              rootTable {
+                created
+                description
+                guid
+                indexVersion
+                modified
+                name
+                __typename
+              }
+              __typename
+            }
+            schemaTableId
+            table {
+              created
+              description
+              guid
+              indexVersion
+              modified
+              name
+              __typename
+            }
+            __typename
+          }
+          constant {
+            boolValue
+            dateEpochValue
+            doubleValue
+            intValue
+            isNull
+            normalize
+            strValue
+            __typename
+          }
+          dataType
+          exprClass
+          exprRef {
+            refId {
+              created
+              description
+              guid
+              indexVersion
+              modified
+              name
+              __typename
+            }
+            __typename
+          }
+          expressionId
+          formatingType
+          __typename
+        }
+        __typename
+      }
+      sapParameterName
+      __typename
+    }
+    sageQueryTokens {
+      additions {
+        phrase {
+          isCompletePhrase
+          numTokens
+          phraseType
+          startIndex
+          __typename
+        }
+        tokens {
+          token
+          dataType
+          typeEnum
+          guid
+          tokenMetadata {
+            name
+            __typename
+          }
+          __typename
+        }
+        __typename
+      }
+      phrases {
+        isCompletePhrase
+        numTokens
+        phraseType
+        startIndex
+        __typename
+      }
+      removals {
+        phrase {
+          isCompletePhrase
+          numTokens
+          phraseType
+          startIndex
+          __typename
+        }
+        tokens {
+          token
+          dataType
+          typeEnum
+          guid
+          tokenMetadata {
+            name
+            __typename
+          }
+          __typename
+        }
+        __typename
+      }
+      tokens {
+        token
+        dataType
+        typeEnum
+        guid
+        tokenMetadata {
+          name
+          __typename
+        }
+        __typename
+      }
+      __typename
+    }
+    tmlPhrases
+    ambiguousPhrases {
+      alternativePhrases {
+        phraseType
+        token {
+          token
+          dataType
+          typeEnum
+          guid
+          tokenMetadata {
+            name
+            __typename
+          }
+          __typename
+        }
+        __typename
+      }
+      ambiguityType
+      token {
+        token
+        dataType
+        typeEnum
+        guid
+        tokenMetadata {
+          name
+          __typename
+        }
+        __typename
+      }
+      __typename
+    }
+    ambiguousTokens {
+      alternativeTokens {
+        token
+        dataType
+        typeEnum
+        guid
+        tokenMetadata {
+          name
+          deprecatedTableGuid
+          deprecatedTableName
+          isFormula
+          rootTables {
+            created
+            description
+            guid
+            indexVersion
+            modified
+            name
+            __typename
+          }
+          schemaTableUserDefinedName
+          table {
+            created
+            description
+            guid
+            indexVersion
+            modified
+            name
+            __typename
+          }
+          __typename
+        }
+        __typename
+      }
+      ambiguityType
+      token {
+        token
+        dataType
+        typeEnum
+        guid
+        tokenMetadata {
+          name
+          __typename
+        }
+        __typename
+      }
+      __typename
+    }
+    sessionId
+    genNo
+    stateKey {
+      generationNumber
+      transactionId
+      __typename
+    }
+    subQueries {
+      tokens
+      cohortConfig {
+        anchorColumnId
+        cohortAnswerGuid
+        cohortGroupingType
+        cohortGuid
+        cohortType
+        combineNonGroupValues
+        description
+        groupExcludedQueryValues
+        hideExcludedQueryValues
+        isEditable
+        name
+        nullOutputValue
+        returnColumnId
+        __typename
+      }
+      formulas {
+        name
+        expression
+        __typename
+      }
+      __typename
+    }
+    visualizationSuggestion {
+      chartType
+      displayMode
+      axisConfigs {
+        category
+        color
+        hidden
+        size
+        sort
+        x
+        y
+        __typename
+      }
+      usersVizIntentApplied
+      customChartConfigs {
+        dimensions {
+          columns
+          key
+          __typename
+        }
+        key
+        __typename
+      }
+      customChartGuid
+      __typename
+    }
+    tableData {
+      columnDataLite {
+        columnId
+        columnDataType
+        dataValue
+        columnName
+        __typename
+      }
+      __typename
+    }
+    warningType
+    cached
+    warningDetails {
+      warningType
+      __typename
+    }
+    __typename
+  }
+  results {
+    objectSecurityInfo {
+      objectType
+      objectId
+      objectIdForDeletionCheck
+      objectTypeForDeletionCheck
+      isD13ySourced
+      offset
+      __typename
+    }
+    searchAnswer {
+      ...eurekaAnswer
+      __typename
+    }
+    searchPinboardViz {
+      answer {
+        ...eurekaAnswer
+        __typename
+      }
+      pinboardHeader {
+        id
+        title
+        __typename
+      }
+      __typename
+    }
+    searchPinboard {
+      header {
+        ...header
+        __typename
+      }
+      usageInfo {
+        ...usageInfo
+        __typename
+      }
+      answers {
+        ...eurekaAnswer
+        __typename
+      }
+      vizCount {
+        charts
+        metrics
+        tables
+        __typename
+      }
+      __typename
+    }
+    searchWorksheet {
+      header {
+        ...header
+        __typename
+      }
+      usageInfo {
+        ...usageInfo
+        __typename
+      }
+      __typename
+    }
+    snippetInfo {
+      titleSnippet {
+        snippetString
+        highlights {
+          start
+          end
+          __typename
+        }
+        __typename
+      }
+      descriptionSnippet {
+        snippetString
+        highlights {
+          start
+          end
+          __typename
+        }
+        __typename
+      }
+      sageQuerySnippet {
+        phrase {
+          isCompletePhrase
+          numTokens
+          phraseType
+          startIndex
+          __typename
+        }
+        token {
+          token
+          dataType
+          typeEnum
+          __typename
+        }
+        __typename
+      }
+      sageQuerySnippetWithHighlights {
+        highlights {
+          start
+          end
+          __typename
+        }
+        phraseType
+        phraseValue
+        __typename
+      }
+      __typename
+    }
+    score
+    debugInfo
+    resultType
+    sageQuery
+    __typename
+  }
+  version
+  nextPageOffset
+  batchSizeRequired
+  isFinalPage
+  totalResults
+  totalFacetResultCount
+  errorCode
+  debugInfo {
+    fewShotExamples {
+      chartType
+      formulas {
+        name
+        expression
+        __typename
+      }
+      id
+      mappingId
+      nlQuery
+      nlQueryConcepts
+      sageQuery
+      scope
+      sql
+      tml
+      feedbackType
+      __typename
+    }
+    __typename
+  }
+  __typename
+}
+
+fragment eurekaAnswer on eureka_AnswerResult {
+  header {
+    ...header
+    __typename
+  }
+  usageInfo {
+    ...usageInfo
+    __typename
+  }
+  preferredViz {
+    ...visualizationMetadata
+    __typename
+  }
+  worksheetInfo {
+    ...worksheetInfo
+    __typename
+  }
+  formatted {
+    phrase {
+      isCompletePhrase
+      numTokens
+      phraseType
+      startIndex
+      __typename
+    }
+    token {
+      token
+      typeEnum
+      __typename
+    }
+    __typename
+  }
+  __typename
+}
+
+fragment header on eureka_Header {
+  id
+  title
+  description
+  authorGuid
+  authorName
+  createdOn
+  isVerified
+  modifiedOn
+  modifiedByUserGuid
+  modifiedByUserName
+  tagIds
+  __typename
+}
+
+fragment usageInfo on eureka_UsageInfo {
+  favouriteCount
+  viewCount
+  __typename
+}
+
+fragment visualizationMetadata on eureka_VisualizationMetadata {
+  vizType
+  chartType
+  vizSnapshotRequestData {
+    parentReportbookGuid
+    parentType
+    version
+    vizGuid
+    __typename
+  }
+  __typename
+}
+
+fragment worksheetInfo on eureka_WorksheetInfo {
+  id
+  name
+  __typename
+}`;
+
+export interface SearchObjectResult {
+	id: string;
+	name: string;
+	type: string;
+	description: string;
+	authorName: string;
+	isVerified: boolean;
+	modifiedOn?: number;
+	score?: number;
+}
+
+/*
+ * Using custom handler because we don't have a public API for full-text object search.
+ * This mirrors the Eureka search used by the ThoughtSpot UI search bar.
+ */
+function addSearchObjects(client: any, instanceUrl: string, token: string) {
+	(client as any).searchObjects = async ({
+		query,
+		batchSize = 10,
+	}: {
+		query: string;
+		batchSize?: number;
+	}): Promise<SearchObjectResult[]> => {
+		const endpoint = "/prism/?op=GetEurekaResults";
+		const fetchOptions = {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json",
+				Accept: "application/json",
+				// The Eureka backend derives the request locale from this header.
+				// Without it the server falls back to "*" and 500s with
+				// "IllegalArgumentException: Invalid locale format: *".
+				"accept-language": "en-US",
+				"user-agent": "ThoughtSpot-ts-client",
+				Authorization: `Bearer ${token}`,
+			},
+			body: JSON.stringify({
+				operationName: "GetEurekaResults",
+				query: searchObjectsQuery,
+				variables: {
+					params: {
+						batchSize,
+						desiredFacets: [],
+						facetSelections: [],
+						maxPinboardVizCount: 5,
+						filterSelections: [],
+						offset: 0,
+						query,
+						removeDuplicates: true,
+						sortBy: [],
+						currentPageNumber: 1,
+						searchOption: "SEARCH_RESULTS",
+					},
+				},
+			}),
+		};
+		const response = await fetch(`${instanceUrl}${endpoint}`, fetchOptions);
+
+		if (!response.ok) {
+			const errorText = await response.text();
+			throw new Error(
+				`searchObjects failed with status ${response.status}: ${errorText}`,
+			);
+		}
+
+		const data = (await response.json()) as any;
+
+		// The Eureka endpoint returns HTTP 200 even on query-level failures,
+		// reporting them in a top-level `errors` array (with `data` null) or in
+		// `queryRequest.errorCode`. Without this check those surface as an empty
+		// result set and get reported as a successful "0 objects found".
+		const graphqlError = data?.errors?.[0]?.message;
+		const errorCode = data?.data?.queryRequest?.errorCode;
+		if (graphqlError || errorCode) {
+			throw new Error(
+				`searchObjects failed: ${graphqlError ?? `errorCode ${errorCode}`}`,
+			);
+		}
+
+		const results = data?.data?.queryRequest?.results ?? [];
+
+		return results
+			.map((result: any): SearchObjectResult | null => {
+				// Each result carries every sub-object (searchAnswer, searchPinboard,
+				// searchWorksheet, searchPinboardViz) but only the one matching
+				// resultType is populated; the rest are placeholders with an empty
+				// header id. Pick the first header that actually has an id.
+				const candidates = [
+					result?.searchAnswer?.header,
+					result?.searchPinboard?.header,
+					result?.searchWorksheet?.header,
+					result?.searchPinboardViz?.answer?.header,
+					result?.searchPinboardViz?.pinboardHeader,
+				];
+				const header = candidates.find((h) => h?.id);
+				// Prefer the object's own header id. objectSecurityInfo.objectId
+				// points at the containing liveboard for viz results, which would
+				// make every viz in a liveboard collapse to the same id — so it is
+				// only a fallback for objects that expose no populated header.
+				const id = header?.id ?? result?.objectSecurityInfo?.objectId;
+				if (!id) {
+					return null;
+				}
+				return {
+					id,
+					name: header?.title ?? "",
+					type:
+						result?.objectSecurityInfo?.objectType ?? result?.resultType ?? "",
+					description: header?.description ?? "",
+					authorName: header?.authorName ?? "",
+					isVerified: header?.isVerified ?? false,
+					modifiedOn: header?.modifiedOn,
+					score: result?.score,
+				};
+			})
+			.filter(
+				(result: SearchObjectResult | null): result is SearchObjectResult =>
+					result !== null,
+			);
 	};
 }
 

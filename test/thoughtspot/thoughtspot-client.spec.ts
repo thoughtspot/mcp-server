@@ -1,11 +1,11 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { getThoughtSpotClient } from "../../src/thoughtspot/thoughtspot-client";
 import {
-	createBearerAuthenticationConfig,
 	ThoughtSpotRestApi,
+	createBearerAuthenticationConfig,
 } from "@thoughtspot/rest-api-sdk";
 import type { ResponseContext } from "@thoughtspot/rest-api-sdk";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import YAML from "yaml";
+import { getThoughtSpotClient } from "../../src/thoughtspot/thoughtspot-client";
 
 // Mock the ThoughtSpot REST API SDK
 vi.mock("@thoughtspot/rest-api-sdk", () => ({
@@ -824,6 +824,196 @@ describe("ThoughtSpot Client", () => {
 			const id1 = JSON.parse((fetch as any).mock.calls[0][1].body).id;
 			const id2 = JSON.parse((fetch as any).mock.calls[1][1].body).id;
 			expect(id1).not.toBe(id2);
+		});
+	});
+
+	describe("searchObjects", () => {
+		let client: any;
+
+		beforeEach(() => {
+			client = getThoughtSpotClient(mockInstanceUrl, mockBearerToken) as any;
+		});
+
+		it("should search objects and map the results", async () => {
+			const mockResponse = {
+				data: {
+					queryRequest: {
+						results: [
+							{
+								objectSecurityInfo: {
+									objectType: "QUESTION_ANSWER_BOOK",
+									objectId: "answer-123",
+								},
+								searchAnswer: {
+									header: {
+										id: "answer-123",
+										title: "Sales by Region",
+										description: "Revenue by region",
+										authorName: "alice",
+										modifiedOn: 1700000000000,
+										isVerified: true,
+									},
+								},
+								resultType: "ANSWER",
+								score: 0.9,
+							},
+							{
+								objectSecurityInfo: {
+									objectType: "PINBOARD_ANSWER_BOOK",
+									objectId: "lb-456",
+								},
+								searchPinboard: {
+									header: {
+										id: "lb-456",
+										title: "Sales Overview",
+										description: "Overview",
+										authorName: "bob",
+										modifiedOn: 1700000001000,
+										isVerified: false,
+									},
+								},
+								resultType: "PINBOARD",
+								score: 0.8,
+							},
+						],
+						totalResults: 2,
+					},
+				},
+			};
+
+			(fetch as any).mockResolvedValue({
+				ok: true,
+				json: vi.fn().mockResolvedValue(mockResponse),
+			});
+
+			const result = await client.searchObjects({
+				query: "sales",
+				batchSize: 5,
+			});
+
+			expect(fetch).toHaveBeenCalledWith(
+				`${mockInstanceUrl}/prism/?op=GetEurekaResults`,
+				expect.objectContaining({
+					method: "POST",
+					headers: expect.objectContaining({
+						Authorization: "Bearer test-token-123",
+					}),
+				}),
+			);
+
+			const body = JSON.parse((fetch as any).mock.calls[0][1].body);
+			expect(body.operationName).toBe("GetEurekaResults");
+			expect(body.variables.params.query).toBe("sales");
+			expect(body.variables.params.batchSize).toBe(5);
+
+			expect(result).toEqual([
+				{
+					id: "answer-123",
+					name: "Sales by Region",
+					type: "QUESTION_ANSWER_BOOK",
+					description: "Revenue by region",
+					authorName: "alice",
+					isVerified: true,
+					modifiedOn: 1700000000000,
+					score: 0.9,
+				},
+				{
+					id: "lb-456",
+					name: "Sales Overview",
+					type: "PINBOARD_ANSWER_BOOK",
+					description: "Overview",
+					authorName: "bob",
+					isVerified: false,
+					modifiedOn: 1700000001000,
+					score: 0.8,
+				},
+			]);
+		});
+
+		it("should default batchSize to 10 when not provided", async () => {
+			(fetch as any).mockResolvedValue({
+				ok: true,
+				json: vi
+					.fn()
+					.mockResolvedValue({ data: { queryRequest: { results: [] } } }),
+			});
+
+			const result = await client.searchObjects({ query: "sales" });
+
+			const body = JSON.parse((fetch as any).mock.calls[0][1].body);
+			expect(body.variables.params.batchSize).toBe(10);
+			expect(result).toEqual([]);
+		});
+
+		it("should fall back to objectSecurityInfo.objectId when no header has an id", async () => {
+			(fetch as any).mockResolvedValue({
+				ok: true,
+				json: vi.fn().mockResolvedValue({
+					data: {
+						queryRequest: {
+							results: [
+								{ objectSecurityInfo: { objectType: "X", objectId: "y" } },
+							],
+						},
+					},
+				}),
+			});
+
+			const result = await client.searchObjects({ query: "sales" });
+			expect(result).toEqual([
+				{
+					id: "y",
+					name: "",
+					type: "X",
+					description: "",
+					authorName: "",
+					isVerified: false,
+					modifiedOn: undefined,
+					score: undefined,
+				},
+			]);
+		});
+
+		it("should skip results with neither a header id nor an objectId", async () => {
+			(fetch as any).mockResolvedValue({
+				ok: true,
+				json: vi.fn().mockResolvedValue({
+					data: {
+						queryRequest: {
+							results: [{ resultType: "PINBOARD_RESULT" }],
+						},
+					},
+				}),
+			});
+
+			const result = await client.searchObjects({ query: "sales" });
+			expect(result).toEqual([]);
+		});
+
+		it("should throw when the response contains GraphQL errors", async () => {
+			(fetch as any).mockResolvedValue({
+				ok: true,
+				json: vi.fn().mockResolvedValue({
+					errors: [{ message: "Invalid locale format: *" }],
+					data: { queryRequest: null },
+				}),
+			});
+
+			await expect(client.searchObjects({ query: "sales" })).rejects.toThrow(
+				/searchObjects failed: Invalid locale format/,
+			);
+		});
+
+		it("should throw when the response is not ok", async () => {
+			(fetch as any).mockResolvedValue({
+				ok: false,
+				status: 401,
+				text: vi.fn().mockResolvedValue("unauthorized"),
+			});
+
+			await expect(client.searchObjects({ query: "sales" })).rejects.toThrow(
+				/searchObjects failed with status 401/,
+			);
 		});
 	});
 

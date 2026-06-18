@@ -1,9 +1,16 @@
 #!/usr/bin/env node
 
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { validateAndSanitizeUrl } from "./oauth-manager/oauth-utils.js";
 import { MCPServer } from "./servers/mcp-server.js";
 import type { Props } from "./utils.js";
-import { validateAndSanitizeUrl } from "./oauth-manager/oauth-utils.js";
+
+// The stdio MCP transport reserves stdout exclusively for JSON-RPC framing.
+// console.log/info/debug write to stdout in Node, which corrupts the protocol
+// (the client tries to JSON.parse the log lines). Route all of them to stderr.
+console.log = (...args: unknown[]) => console.error(...args);
+console.info = (...args: unknown[]) => console.error(...args);
+console.debug = (...args: unknown[]) => console.error(...args);
 
 async function main() {
 	const instanceUrl = process.env.TS_INSTANCE;

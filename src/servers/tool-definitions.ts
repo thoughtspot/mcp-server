@@ -65,6 +65,53 @@ export const GetAnswerOutputSchema = z.object({
 		.describe("Information about the fields in the answer"),
 });
 
+export const SearchObjectsInputSchema = z.object({
+	query: z
+		.string()
+		.describe(
+			"The search term to find objects for. This is matched against object names, descriptions and content. For example, 'sales', 'revenue by region', or the name of a liveboard or answer.",
+		),
+	batchSize: z
+		.number()
+		.int()
+		.positive()
+		.optional()
+		.describe(
+			"The maximum number of results to return. Defaults to 10 if not provided.",
+		),
+});
+
+export const SearchObjectsOutputSchema = z.object({
+	objects: z
+		.array(
+			z.object({
+				id: z.string().describe("The GUID of the object."),
+				name: z.string().describe("The display name/title of the object."),
+				type: z
+					.string()
+					.describe(
+						"The type of the object, for example ANSWER, LIVEBOARD (Pinboard) or WORKSHEET.",
+					),
+				description: z.string().describe("The description of the object."),
+				authorName: z
+					.string()
+					.describe("The name of the user who authored the object."),
+				isVerified: z
+					.boolean()
+					.describe("Whether the object is marked as verified."),
+				modifiedOn: z
+					.number()
+					.optional()
+					.describe("The epoch timestamp when the object was last modified."),
+				score: z
+					.number()
+					.optional()
+					.describe("The relevance score of the result for the search term."),
+			}),
+		)
+		.describe("The list of objects matching the search term."),
+});
+
 export const CheckConnectivityInputSchema = z.object({});
 
 export const CheckConnectivityOutputSchema = z.object({
@@ -265,6 +312,7 @@ export enum ToolName {
 	CreateLiveboard = "createLiveboard",
 	GetDataSourceSuggestions = "getDataSourceSuggestions",
 	// V2 (Spotter 3)
+	SearchObjects = "search_objects",
 	CheckConnectivity = "check_connectivity",
 	CreateAnalysisSession = "create_analysis_session",
 	SendSessionMessage = "send_session_message",
@@ -333,6 +381,19 @@ export const toolDefinitionsV1 = [
 ];
 
 export const toolDefinitionsV2 = [
+	{
+		name: ToolName.SearchObjects,
+		description:
+			"Search for objects (answers, liveboards, worksheets, and other metadata) in ThoughtSpot matching a given search term. Returns a list of matching objects with their id, name, type, description and author. Use this to find existing content by name or keyword.",
+		inputSchema: z.toJSONSchema(SearchObjectsInputSchema),
+		outputSchema: z.toJSONSchema(SearchObjectsOutputSchema),
+		annotations: {
+			title: "Search Objects",
+			readOnlyHint: true,
+			destructiveHint: false,
+			openWorldHint: false,
+		},
+	},
 	{
 		name: ToolName.CheckConnectivity,
 		description:
