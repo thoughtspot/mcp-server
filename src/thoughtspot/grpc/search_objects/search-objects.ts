@@ -32,8 +32,10 @@ function buildFrameUrl(
 			return `${base}/#/saved-answer/${id}`;
 		case "WORKSHEET_RESULT":
 			return `${base}/#/data/tables/${id}`;
+		case "LOGICAL_TABLE_RESULT":
+			return `${base}/#/data/tables/${id}`;
 		default:
-			return `${base}/#/insights/pinboard//${id}`;
+			return `${base}/#/insights/pinboard/${id}`;
 	}
 }
 
