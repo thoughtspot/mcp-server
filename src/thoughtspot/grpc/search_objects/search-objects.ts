@@ -75,7 +75,16 @@ export function addSearchObjects(
 		limit = 10,
 		cursor,
 	}: SearchObjectsParams): Promise<SearchObjectsResult> => {
-		const offset = cursor ? Number.parseInt(cursor, 10) || 0 : 0;
+		const rawOffset = cursor ? Number.parseInt(cursor, 10) || 0 : 0;
+		// Snap to a page boundary so `offset` and `currentPageNumber` (which the
+		// Eureka backend may use independently) can never disagree when a caller
+		// reuses a cursor minted under a different `limit`. With a stable limit
+		// this is a no-op.
+		const startOffset = Math.floor(rawOffset / limit) * limit;
+
+		// owner, tag and modified_since are not reliably expressible through the
+		// Eureka request schema, so they are applied to each fetched page below.
+		const hasPostFilters = Boolean(owner || tag || modifiedSince);
 
 		// Filters the Eureka backend can apply server-side via facetSelections.
 		const facetSelections: { facetType: string; facetValue: string[] }[] = [];
@@ -99,150 +108,192 @@ export function addSearchObjects(
 		const requestId = globalThis.crypto.randomUUID();
 
 		const endpoint = "/prism/?op=GetEurekaResults";
-		const fetchOptions = {
-			method: "POST",
-			headers: {
-				"Content-Type": "application/json",
-				Accept: "application/json",
-				// The Eureka backend derives the request locale from this header.
-				// Without it the server falls back to "*" and 500s with
-				// "IllegalArgumentException: Invalid locale format: *".
-				"accept-language": "en-US",
-				"x-request-id": requestId,
-				"user-agent": "ThoughtSpot-ts-client",
-				Authorization: `Bearer ${token}`,
-			},
-			body: JSON.stringify({
-				operationName: "GetEurekaResults",
-				query: searchObjectsQuery,
-				variables: {
-					params: {
-						batchSize: limit,
-						// Request the STICKERS facet so tag ids on each result can be
-						// resolved to human-readable tag names.
-						desiredFacets: [{ facetType: "STICKERS", facetValue: [] }],
-						facetSelections,
-						maxPinboardVizCount: 5,
-						filterSelections: [],
-						offset,
-						query,
-						removeDuplicates: true,
-						sortBy: [],
-						currentPageNumber: Math.floor(offset / limit) + 1,
-						searchOption: "SEARCH_RESULTS",
-					},
+
+		// Fetch and map a single raw page at the given offset, applying the
+		// post-filters. Returns the surfaced objects plus the raw result count
+		// (used to decide whether more pages may exist).
+		const fetchPage = async (
+			pageOffset: number,
+		): Promise<{ pageObjects: SearchObjectHeader[]; rawCount: number }> => {
+			const fetchOptions = {
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json",
+					Accept: "application/json",
+					// The Eureka backend derives the request locale from this header.
+					// Without it the server falls back to "*" and 500s with
+					// "IllegalArgumentException: Invalid locale format: *".
+					"accept-language": "en-US",
+					"x-request-id": requestId,
+					"user-agent": "ThoughtSpot-ts-client",
+					Authorization: `Bearer ${token}`,
 				},
-			}),
-		};
-		const response = await fetch(`${instanceUrl}${endpoint}`, fetchOptions);
+				body: JSON.stringify({
+					operationName: "GetEurekaResults",
+					query: searchObjectsQuery,
+					variables: {
+						params: {
+							batchSize: limit,
+							// Request the STICKERS facet so tag ids on each result can be
+							// resolved to human-readable tag names.
+							desiredFacets: [{ facetType: "STICKERS", facetValue: [] }],
+							facetSelections,
+							maxPinboardVizCount: 5,
+							filterSelections: [],
+							offset: pageOffset,
+							query,
+							removeDuplicates: true,
+							sortBy: [],
+							// pageOffset is always a multiple of limit, so this is exact.
+							currentPageNumber: pageOffset / limit + 1,
+							searchOption: "SEARCH_RESULTS",
+						},
+					},
+				}),
+			};
+			const response = await fetch(`${instanceUrl}${endpoint}`, fetchOptions);
 
-		if (!response.ok) {
-			const errorText = await response.text();
-			throw new Error(
-				`searchObjects failed with status ${response.status}: ${errorText}`,
-			);
-		}
+			if (!response.ok) {
+				const errorText = await response.text();
+				throw new Error(
+					`searchObjects failed with status ${response.status}: ${errorText}`,
+				);
+			}
 
-		const data = (await response.json()) as any;
+			const data = (await response.json()) as any;
 
-		// The Eureka endpoint returns HTTP 200 even on query-level failures,
-		// reporting them in a top-level `errors` array (with `data` null) or in
-		// `queryRequest.errorCode`. Without this check those surface as an empty
-		// result set and get reported as a successful "0 objects found".
-		const graphqlError = data?.errors?.[0]?.message;
-		const errorCode = data?.data?.queryRequest?.errorCode;
-		if (graphqlError || errorCode) {
-			throw new Error(
-				`searchObjects failed: ${graphqlError ?? `errorCode ${errorCode}`}`,
-			);
-		}
+			// The Eureka endpoint returns HTTP 200 even on query-level failures,
+			// reporting them in a top-level `errors` array (with `data` null) or in
+			// `queryRequest.errorCode`. Without this check those surface as an empty
+			// result set and get reported as a successful "0 objects found".
+			const graphqlError = data?.errors?.[0]?.message;
+			const errorCode = data?.data?.queryRequest?.errorCode;
+			if (graphqlError || errorCode) {
+				throw new Error(
+					`searchObjects failed: ${graphqlError ?? `errorCode ${errorCode}`}`,
+				);
+			}
 
-		const queryRequest = data?.data?.queryRequest ?? {};
-		const results = queryRequest.results ?? [];
+			const queryRequest = data?.data?.queryRequest ?? {};
+			const results = queryRequest.results ?? [];
 
-		// Build a sticker id -> name map so tagIds can be surfaced as tag names.
-		const stickerNames: Record<string, string> = {};
-		for (const facet of queryRequest.facets ?? []) {
-			if (facet?.facetType === "STICKERS") {
-				for (const value of facet.facetValues ?? []) {
-					if (value?.id) {
-						stickerNames[value.id] = value.name ?? value.id;
+			// Build a sticker id -> name map so tagIds can be surfaced as tag names.
+			const stickerNames: Record<string, string> = {};
+			for (const facet of queryRequest.facets ?? []) {
+				if (facet?.facetType === "STICKERS") {
+					for (const value of facet.facetValues ?? []) {
+						if (value?.id) {
+							stickerNames[value.id] = value.name ?? value.id;
+						}
 					}
 				}
 			}
-		}
 
-		let objects: SearchObjectHeader[] = results
-			.map((result: any): SearchObjectHeader | null => {
-				// Each result carries every sub-object (searchAnswer, searchPinboard,
-				// searchWorksheet, searchPinboardViz) but only the one matching
-				// resultType is populated; the rest are placeholders with an empty
-				// header id. Pick the first header that actually has an id.
-				const candidates = [
-					result?.searchAnswer?.header,
-					result?.searchPinboard?.header,
-					result?.searchWorksheet?.header,
-					result?.searchPinboardViz?.answer?.header,
-					result?.searchPinboardViz?.pinboardHeader,
-				];
-				const header = candidates.find((h) => h?.id);
-				// Prefer the object's own header id. objectSecurityInfo.objectId
-				// points at the containing liveboard for viz results, which would
-				// make every viz in a liveboard collapse to the same id — so it is
-				// only a fallback for objects that expose no populated header.
-				const id = header?.id ?? result?.objectSecurityInfo?.objectId;
-				if (!id) {
-					return null;
-				}
-				const tags = (header?.tagIds ?? []).map(
-					(tagId: string) => stickerNames[tagId] ?? tagId,
-				);
-				return {
-					id,
-					name: header?.title ?? "",
-					type:
-						result?.objectSecurityInfo?.objectType ?? result?.resultType ?? "",
-					owner: header?.authorName ?? "",
-					description: header?.description ?? "",
-					tags,
-					last_modified: header?.modifiedOn,
-					// Eureka search does not expose a per-user last-viewed timestamp.
-					last_viewed: null,
-					verified: header?.isVerified ?? false,
-					frame_url: buildFrameUrl(
-						instanceUrl,
-						result?.resultType ?? "",
+			let pageObjects: SearchObjectHeader[] = results
+				.map((result: any): SearchObjectHeader | null => {
+					// Each result carries every sub-object (searchAnswer, searchPinboard,
+					// searchWorksheet, searchPinboardViz) but only the one matching
+					// resultType is populated; the rest are placeholders with an empty
+					// header id. Pick the first header that actually has an id.
+					const candidates = [
+						result?.searchAnswer?.header,
+						result?.searchPinboard?.header,
+						result?.searchWorksheet?.header,
+						result?.searchPinboardViz?.answer?.header,
+						result?.searchPinboardViz?.pinboardHeader,
+					];
+					const header = candidates.find((h) => h?.id);
+					// Prefer the object's own header id. objectSecurityInfo.objectId
+					// points at the containing liveboard for viz results, which would
+					// make every viz in a liveboard collapse to the same id — so it is
+					// only a fallback for objects that expose no populated header.
+					const id = header?.id ?? result?.objectSecurityInfo?.objectId;
+					if (!id) {
+						return null;
+					}
+					const tags = (header?.tagIds ?? []).map(
+						(tagId: string) => stickerNames[tagId] ?? tagId,
+					);
+					return {
 						id,
-						result?.objectSecurityInfo?.objectId,
-					),
-					match_reason: deriveMatchReason(result?.snippetInfo),
-					confidence: result?.score,
-				};
-			})
-			.filter(
-				(obj: SearchObjectHeader | null): obj is SearchObjectHeader =>
-					obj !== null,
-			);
+						name: header?.title ?? "",
+						type:
+							result?.objectSecurityInfo?.objectType ??
+							result?.resultType ??
+							"",
+						owner: header?.authorName ?? "",
+						description: header?.description ?? "",
+						tags,
+						last_modified: header?.modifiedOn,
+						// Eureka search does not expose a per-user last-viewed timestamp.
+						last_viewed: null,
+						verified: header?.isVerified ?? false,
+						frame_url: buildFrameUrl(
+							instanceUrl,
+							result?.resultType ?? "",
+							id,
+							result?.objectSecurityInfo?.objectId,
+						),
+						match_reason: deriveMatchReason(result?.snippetInfo),
+						confidence: result?.score,
+					};
+				})
+				.filter(
+					(obj: SearchObjectHeader | null): obj is SearchObjectHeader =>
+						obj !== null,
+				);
 
-		// owner, tag and modified_since are not reliably expressible through the
-		// Eureka request schema, so they are applied to the returned page here.
-		if (owner) {
-			const needle = owner.toLowerCase();
-			objects = objects.filter((o) => o.owner.toLowerCase().includes(needle));
-		}
-		if (tag) {
-			const needle = tag.toLowerCase();
-			objects = objects.filter((o) =>
-				o.tags.some((t) => t.toLowerCase().includes(needle)),
+			if (owner) {
+				const needle = owner.toLowerCase();
+				pageObjects = pageObjects.filter((o) =>
+					o.owner.toLowerCase().includes(needle),
+				);
+			}
+			if (tag) {
+				const needle = tag.toLowerCase();
+				pageObjects = pageObjects.filter((o) =>
+					o.tags.some((t) => t.toLowerCase().includes(needle)),
+				);
+			}
+			if (modifiedSince) {
+				pageObjects = pageObjects.filter(
+					(o) => (o.last_modified ?? 0) >= modifiedSince,
+				);
+			}
+
+			return { pageObjects, rawCount: results.length };
+		};
+
+		// Accumulate across pages so post-filters can't make us return a short or
+		// empty page (with a misleading cursor) while matches remain. With no post
+		// filters this fetches exactly one page. A page cap bounds upstream calls
+		// when filters match very little.
+		const MAX_PAGES = 20;
+		const objects: SearchObjectHeader[] = [];
+		let pageOffset = startOffset;
+		let rawCount = 0;
+		let pages = 0;
+		do {
+			const page = await fetchPage(pageOffset);
+			objects.push(...page.pageObjects);
+			rawCount = page.rawCount;
+			pageOffset += limit;
+			pages += 1;
+		} while (
+			hasPostFilters &&
+			objects.length < limit &&
+			rawCount === limit &&
+			pages < MAX_PAGES
+		);
+
+		if (hasPostFilters && objects.length < limit && rawCount === limit) {
+			console.warn(
+				`searchObjects: stopped after ${MAX_PAGES} pages with ${objects.length}/${limit} matches; more may exist (continue via next_cursor).`,
 			);
 		}
-		if (modifiedSince) {
-			objects = objects.filter((o) => (o.last_modified ?? 0) >= modifiedSince);
-		}
 
-		// A full page of raw results implies there may be more to fetch.
-		const next_cursor =
-			results.length === limit ? String(offset + limit) : null;
+		// A full final raw page implies the backend may have more to return.
+		const next_cursor = rawCount === limit ? String(pageOffset) : null;
 
 		return {
 			objects,

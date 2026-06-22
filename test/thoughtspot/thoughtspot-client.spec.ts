@@ -1069,6 +1069,79 @@ describe("ThoughtSpot Client", () => {
 			expect(result.objects.map((o: any) => o.id)).toEqual(["new"]);
 		});
 
+		// Helper: a single raw Eureka result owned by `author`.
+		const ownedResult = (id: string, author: string) => ({
+			objectSecurityInfo: { objectType: "X", objectId: id },
+			searchPinboard: { header: { id, title: id, authorName: author } },
+			resultType: "PINBOARD_RESULT",
+		});
+		const pageResponse = (results: any[]) => ({
+			ok: true,
+			json: vi.fn().mockResolvedValue({ data: { queryRequest: { results } } }),
+		});
+
+		it("keeps fetching pages so a post-filter never returns a short page while matches remain", async () => {
+			// Each full page of `limit` raw rows contributes only one owner match,
+			// so a single fetch would return 1 object (and a misleading cursor).
+			(fetch as any)
+				.mockResolvedValueOnce(
+					pageResponse([ownedResult("a1", "alice"), ownedResult("b1", "bob")]),
+				)
+				.mockResolvedValueOnce(
+					pageResponse([ownedResult("a2", "alice"), ownedResult("b2", "bob")]),
+				);
+
+			const result = await client.searchObjects({
+				query: "sales",
+				owner: "alice",
+				limit: 2,
+			});
+
+			expect((fetch as any).mock.calls.length).toBe(2);
+			expect(
+				JSON.parse((fetch as any).mock.calls[0][1].body).variables.params
+					.offset,
+			).toBe(0);
+			expect(
+				JSON.parse((fetch as any).mock.calls[1][1].body).variables.params
+					.offset,
+			).toBe(2);
+			expect(result.objects.map((o: any) => o.id)).toEqual(["a1", "a2"]);
+			// A full final raw page means more may exist: resume past both pages.
+			expect(result.next_cursor).toBe("4");
+		});
+
+		it("stops paging and emits a null cursor once raw results are exhausted", async () => {
+			(fetch as any)
+				.mockResolvedValueOnce(
+					pageResponse([ownedResult("a1", "alice"), ownedResult("b1", "bob")]),
+				)
+				// Shorter-than-limit page => backend has nothing more to give.
+				.mockResolvedValueOnce(pageResponse([ownedResult("b2", "bob")]));
+
+			const result = await client.searchObjects({
+				query: "sales",
+				owner: "alice",
+				limit: 2,
+			});
+
+			expect((fetch as any).mock.calls.length).toBe(2);
+			expect(result.objects.map((o: any) => o.id)).toEqual(["a1"]);
+			expect(result.next_cursor).toBeNull();
+		});
+
+		it("realigns a cursor minted under a different limit to a page boundary", async () => {
+			(fetch as any).mockResolvedValue(pageResponse([]));
+
+			await client.searchObjects({ query: "sales", limit: 10, cursor: "25" });
+
+			const params = JSON.parse((fetch as any).mock.calls[0][1].body).variables
+				.params;
+			// 25 snaps down to 20 so offset and currentPageNumber stay consistent.
+			expect(params.offset).toBe(20);
+			expect(params.currentPageNumber).toBe(3);
+		});
+
 		it("should fall back to objectSecurityInfo.objectId when no header has an id", async () => {
 			(fetch as any).mockResolvedValue({
 				ok: true,
