@@ -1311,7 +1311,7 @@ describe("ThoughtSpot Client", () => {
 						columns: ["city", "Total quantity purchased", "Total sales"],
 						data_rows: [
 							["Boulder", 677792, 34070647.18],
-							["Atlanta", 424496, 21161832.426],
+							["Atlanta", 424496, 21161832.43],
 						],
 						total_row_count: 2,
 						row_count: 2,
@@ -1474,7 +1474,7 @@ describe("ThoughtSpot Client", () => {
 				columns: ["city", "Total sales"],
 				data_rows: [
 					["Boulder", 34070647.18],
-					["Atlanta", 21161832.426],
+					["Atlanta", 21161832.43],
 				],
 			});
 		});
@@ -1504,16 +1504,17 @@ describe("ThoughtSpot Client", () => {
 			expect(result.data[0].columns).toEqual(["city", "Total sales"]);
 			expect(result.data[0].data_rows).toEqual([
 				["Boulder", 34070647.18],
-				["Atlanta", 21161832.426],
+				["Atlanta", 21161832.43],
 			]);
 			// row_count falls back to the returned row count.
 			expect(result.data[0].row_count).toBe(2);
 		});
 
-		// Floating-point representation noise from upstream (e.g. 10679247.690000001)
-		// is collapsed to its intended value, while integers, strings, and nulls
-		// pass through untouched.
-		it("rounds floating-point noise in COMPACT rows", async () => {
+		// Numeric cells are rounded to 2 decimal places: floating-point noise
+		// (e.g. 10679247.690000001) collapses to its intended value and long
+		// fractional tails (120.030833623) are trimmed, while integers, strings,
+		// and nulls pass through untouched.
+		it("rounds numeric cells to 2 decimals in COMPACT rows", async () => {
 			(fetch as any)
 				.mockResolvedValueOnce(metaResponse("ANSWER", "Noisy Answer"))
 				.mockResolvedValueOnce({
@@ -1523,10 +1524,10 @@ describe("ThoughtSpot Client", () => {
 						metadata_name: "Noisy Answer",
 						contents: [
 							{
-								column_names: ["city", "Total sales", "Orders"],
+								column_names: ["city", "Total sales", "Avg", "Orders"],
 								data_rows: [
-									["Boulder", 10679247.690000001, 42],
-									["Atlanta", 0.1 + 0.2, null],
+									["Boulder", 10679247.690000001, 120.030833623, 42],
+									["Atlanta", 0.1 + 0.2, 121.694679091, null],
 								],
 								returned_data_row_count: 2,
 							},
@@ -1537,12 +1538,12 @@ describe("ThoughtSpot Client", () => {
 			const result = await client.fetchData({ objectId: "obj-1" });
 
 			expect(result.data[0].data_rows).toEqual([
-				["Boulder", 10679247.69, 42],
-				["Atlanta", 0.3, null],
+				["Boulder", 10679247.69, 120.03, 42],
+				["Atlanta", 0.3, 121.69, null],
 			]);
 		});
 
-		it("rounds floating-point noise in FULL rows", async () => {
+		it("rounds numeric cells to 2 decimals in FULL rows", async () => {
 			(fetch as any)
 				.mockResolvedValueOnce(metaResponse("ANSWER", "Noisy Full"))
 				.mockResolvedValueOnce({

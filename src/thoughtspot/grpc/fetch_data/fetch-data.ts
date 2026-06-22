@@ -40,16 +40,16 @@ function isObjectRow(row: unknown): row is Record<string, unknown> {
 	return typeof row === "object" && row !== null && !Array.isArray(row);
 }
 
-// Round a single cell, collapsing floating-point representation noise (e.g.
-// 10679247.690000001 -> 10679247.69) while leaving non-finite numbers,
-// integers, strings, and nulls untouched. Significant-figure rounding keeps
-// genuine precision regardless of magnitude, so small metrics (0.0023) and
-// large aggregates are both handled correctly.
+// Round a single cell to 2 decimal places, collapsing floating-point
+// representation noise (e.g. 10679247.690000001 -> 10679247.69) and trimming
+// long fractional tails to keep the payload compact. Integers, strings, nulls,
+// and non-finite numbers pass through untouched. Note: sub-cent precision is
+// intentionally dropped, which suits currency-style aggregates.
 function roundCell(value: unknown): unknown {
 	if (typeof value !== "number" || !Number.isFinite(value)) {
 		return value;
 	}
-	return Number(value.toPrecision(12));
+	return Math.round(value * 100) / 100;
 }
 
 function roundRow(row: unknown[]): unknown[] {
