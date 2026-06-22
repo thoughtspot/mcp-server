@@ -1510,6 +1510,61 @@ describe("ThoughtSpot Client", () => {
 			expect(result.data[0].row_count).toBe(2);
 		});
 
+		// Floating-point representation noise from upstream (e.g. 10679247.690000001)
+		// is collapsed to its intended value, while integers, strings, and nulls
+		// pass through untouched.
+		it("rounds floating-point noise in COMPACT rows", async () => {
+			(fetch as any)
+				.mockResolvedValueOnce(metaResponse("ANSWER", "Noisy Answer"))
+				.mockResolvedValueOnce({
+					ok: true,
+					json: vi.fn().mockResolvedValue({
+						metadata_id: "obj-1",
+						metadata_name: "Noisy Answer",
+						contents: [
+							{
+								column_names: ["city", "Total sales", "Orders"],
+								data_rows: [
+									["Boulder", 10679247.690000001, 42],
+									["Atlanta", 0.1 + 0.2, null],
+								],
+								returned_data_row_count: 2,
+							},
+						],
+					}),
+				});
+
+			const result = await client.fetchData({ objectId: "obj-1" });
+
+			expect(result.data[0].data_rows).toEqual([
+				["Boulder", 10679247.69, 42],
+				["Atlanta", 0.3, null],
+			]);
+		});
+
+		it("rounds floating-point noise in FULL rows", async () => {
+			(fetch as any)
+				.mockResolvedValueOnce(metaResponse("ANSWER", "Noisy Full"))
+				.mockResolvedValueOnce({
+					ok: true,
+					json: vi.fn().mockResolvedValue({
+						metadata_id: "obj-1",
+						metadata_name: "Noisy Full",
+						contents: [
+							{
+								data_rows: [
+									{ city: "Boulder", "Total sales": 10679247.690000001 },
+								],
+							},
+						],
+					}),
+				});
+
+			const result = await client.fetchData({ objectId: "obj-1" });
+
+			expect(result.data[0].data_rows).toEqual([["Boulder", 10679247.69]]);
+		});
+
 		it("throws for an unsupported object type", async () => {
 			(fetch as any).mockResolvedValueOnce(metaResponse("LOGICAL_TABLE"));
 
