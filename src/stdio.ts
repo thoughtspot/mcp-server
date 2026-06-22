@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { loginWithSSO } from "./local-auth/sso-login.js";
 import { validateAndSanitizeUrl } from "./oauth-manager/oauth-utils.js";
 import { MCPServer } from "./servers/mcp-server.js";
 import type { Props } from "./utils.js";
@@ -13,18 +14,27 @@ console.info = (...args: unknown[]) => console.error(...args);
 console.debug = (...args: unknown[]) => console.error(...args);
 
 async function main() {
-	const instanceUrl = process.env.TS_INSTANCE;
-	const accessToken = process.env.TS_AUTH_TOKEN;
-
-	if (!instanceUrl || !accessToken) {
-		console.error(
-			"Error: TS_INSTANCE and TS_AUTH_TOKEN environment variables must be set",
-		);
-		process.exit(1);
+	// TS_INSTANCE is optional now: it only prefills the cluster field on the
+	// login page. The user picks (or confirms) the cluster in the browser, so
+	// any cluster can be targeted from a single launch. Because it is merely a
+	// prefill, an invalid value is ignored rather than aborting startup.
+	let defaultInstanceUrl = "";
+	if (process.env.TS_INSTANCE) {
+		try {
+			defaultInstanceUrl = validateAndSanitizeUrl(process.env.TS_INSTANCE);
+		} catch (e) {
+			console.error(
+				`[ThoughtSpot MCP] Ignoring invalid TS_INSTANCE: ${(e as Error).message}`,
+			);
+		}
 	}
 
+	// Authentication is always interactive SSO: open the browser, let the user
+	// choose a cluster and sign in, and capture the resulting bearer token.
+	const { instanceUrl, accessToken } = await loginWithSSO(defaultInstanceUrl);
+
 	const props: Props = {
-		instanceUrl: validateAndSanitizeUrl(instanceUrl),
+		instanceUrl,
 		accessToken,
 		clientName: {
 			clientId: "stdio-client",

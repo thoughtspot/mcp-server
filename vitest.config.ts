@@ -20,6 +20,11 @@ export default defineWorkersConfig({
             provider: "istanbul",
             enabled: true,
             include: ["src/**/*.ts"],
+            // Node-only entrypoint: spins up a loopback HTTP server and shells
+            // out to a browser via node:child_process, neither of which runs in
+            // the workerd test pool. Its pure logic is extracted to sso-utils.ts,
+            // which is covered. (stdio.ts is the same kind of Node entrypoint.)
+            exclude: ["src/local-auth/sso-login.ts"],
             reporter: ["text", "json", "html", "lcov"],
             thresholds: {
                 lines: 85,
