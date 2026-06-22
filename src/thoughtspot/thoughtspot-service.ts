@@ -22,6 +22,8 @@ import {
 import { WithSpan, getActiveSpan } from "../metrics/tracing/tracing-utils";
 import { processSendAgentConversationMessageStreamingResponse } from "../streaming-utils";
 import type {
+	FetchDataParams,
+	FetchDataResult,
 	SearchObjectsParams,
 	SearchObjectsResult,
 } from "./thoughtspot-client";
@@ -778,6 +780,25 @@ export class ThoughtSpotService {
 		);
 
 		span?.setAttribute("results_count", result.objects.length);
+		return result;
+	}
+
+	/**
+	 * Fetch the full data of a saved Answer or Liveboard by its GUID, shaped to
+	 * its object type.
+	 */
+	@WithSpan("fetch-data")
+	async fetchData(params: FetchDataParams): Promise<FetchDataResult> {
+		const span = getActiveSpan();
+		span?.setAttribute("object_id", params.objectId);
+
+		const result = await this.observeUpstreamCall(
+			UPSTREAM_OPERATION_NAMES.fetchData,
+			() => (this.client as any).fetchData(params),
+		);
+
+		span?.setAttribute("object_type", result.type);
+		span?.setAttribute("viz_count", result.data.length);
 		return result;
 	}
 

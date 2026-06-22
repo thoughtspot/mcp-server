@@ -1218,6 +1218,346 @@ describe("ThoughtSpot Client", () => {
 		});
 	});
 
+	describe("fetchData", () => {
+		let client: any;
+
+		beforeEach(() => {
+			client = getThoughtSpotClient(mockInstanceUrl, mockBearerToken) as any;
+		});
+
+		const metaResponse = (type: string, name = "My Object") => ({
+			ok: true,
+			json: vi.fn().mockResolvedValue([
+				{
+					metadata_id: "obj-1",
+					metadata_name: name,
+					metadata_type: type,
+					metadata_header: { description: "A description" },
+				},
+			]),
+		});
+
+		// Mirrors the real /metadata/answer/data FULL response: column_names plus
+		// object rows keyed by column name.
+		it("fetches and maps a saved Answer", async () => {
+			(fetch as any)
+				.mockResolvedValueOnce(metaResponse("ANSWER", "Test Answer v1"))
+				.mockResolvedValueOnce({
+					ok: true,
+					json: vi.fn().mockResolvedValue({
+						metadata_id: "obj-1",
+						metadata_name: "Test Answer v1",
+						contents: [
+							{
+								available_data_row_count: 2,
+								column_names: [
+									"city",
+									"Total quantity purchased",
+									"Total sales",
+								],
+								data_rows: [
+									{
+										city: "Boulder",
+										"Total quantity purchased": 677792,
+										"Total sales": 34070647.18,
+									},
+									{
+										city: "Atlanta",
+										"Total quantity purchased": 424496,
+										"Total sales": 21161832.426,
+									},
+								],
+								record_offset: 0,
+								record_size: 10,
+								returned_data_row_count: 2,
+								sampling_ratio: 1,
+							},
+						],
+					}),
+				});
+
+			const result = await client.fetchData({ objectId: "obj-1" });
+
+			// First call resolves the type via metadata search.
+			const metaUrl = (fetch as any).mock.calls[0][0];
+			const metaBody = JSON.parse((fetch as any).mock.calls[0][1].body);
+			expect(metaUrl).toBe(`${mockInstanceUrl}/api/rest/2.0/metadata/search`);
+			expect(metaBody).toEqual({ metadata: [{ identifier: "obj-1" }] });
+
+			// Second call fetches the answer data.
+			const dataUrl = (fetch as any).mock.calls[1][0];
+			const dataBody = JSON.parse((fetch as any).mock.calls[1][1].body);
+			const dataHeaders = (fetch as any).mock.calls[1][1].headers;
+			expect(dataUrl).toBe(
+				`${mockInstanceUrl}/api/rest/2.0/metadata/answer/data`,
+			);
+			expect(dataBody).toEqual({
+				metadata_identifier: "obj-1",
+				data_format: "FULL",
+				record_offset: 0,
+				record_size: 1000,
+			});
+
+			// FULL object rows are normalized into columns + positional rows.
+			expect(result).toEqual({
+				id: "obj-1",
+				name: "Test Answer v1",
+				type: "ANSWER",
+				description: "A description",
+				data: [
+					{
+						viz_id: undefined,
+						viz_name: undefined,
+						columns: ["city", "Total quantity purchased", "Total sales"],
+						data_rows: [
+							["Boulder", 677792, 34070647.18],
+							["Atlanta", 424496, 21161832.426],
+						],
+						total_row_count: 2,
+						row_count: 2,
+						sampling_ratio: 1,
+					},
+				],
+				request_id: dataHeaders["x-request-id"],
+			});
+			// Same correlation id is sent on both upstream calls.
+			expect((fetch as any).mock.calls[0][1].headers["x-request-id"]).toBe(
+				dataHeaders["x-request-id"],
+			);
+		});
+
+		// Mirrors the real /metadata/liveboard/data FULL response: one content
+		// entry per visualization, each with visualization_id/name.
+		it("fetches a Liveboard with one entry per visualization", async () => {
+			(fetch as any)
+				.mockResolvedValueOnce(
+					metaResponse("LIVEBOARD", "Test MCP Liveboard 1"),
+				)
+				.mockResolvedValueOnce({
+					ok: true,
+					json: vi.fn().mockResolvedValue({
+						metadata_id: "obj-1",
+						metadata_name: "Test MCP Liveboard 1",
+						contents: [
+							{
+								available_data_row_count: 1,
+								column_names: ["item type", "Total sales"],
+								data_rows: [
+									{ "item type": "Dresses", "Total sales": 7896217.73 },
+								],
+								returned_data_row_count: 1,
+								sampling_ratio: 1,
+								visualization_id: "de1240fc-2d4d-4c67-9317-02e9c6e3bf1c",
+								visualization_name: "Total sales by item type by year",
+							},
+							{
+								available_data_row_count: 1,
+								column_names: ["city", "Total sales"],
+								data_rows: [{ city: "Billings", "Total sales": 3198084.8 }],
+								returned_data_row_count: 1,
+								sampling_ratio: 1,
+								visualization_id: "cf049bb9-f3b7-466b-9000-41d814d3967a",
+								visualization_name: "Total sales by city (this year, 2026)",
+							},
+						],
+					}),
+				});
+
+			const result = await client.fetchData({ objectId: "obj-1", maxRows: 50 });
+
+			const dataUrl = (fetch as any).mock.calls[1][0];
+			const dataBody = JSON.parse((fetch as any).mock.calls[1][1].body);
+			expect(dataUrl).toBe(
+				`${mockInstanceUrl}/api/rest/2.0/metadata/liveboard/data`,
+			);
+			expect(dataBody.record_size).toBe(50);
+			// No viz filter when fetching the whole Liveboard.
+			expect(dataBody.visualization_identifiers).toBeUndefined();
+
+			expect(result.type).toBe("LIVEBOARD");
+			expect(result.name).toBe("Test MCP Liveboard 1");
+			expect(result.data).toEqual([
+				{
+					viz_id: "de1240fc-2d4d-4c67-9317-02e9c6e3bf1c",
+					viz_name: "Total sales by item type by year",
+					columns: ["item type", "Total sales"],
+					data_rows: [["Dresses", 7896217.73]],
+					total_row_count: 1,
+					row_count: 1,
+					sampling_ratio: 1,
+				},
+				{
+					viz_id: "cf049bb9-f3b7-466b-9000-41d814d3967a",
+					viz_name: "Total sales by city (this year, 2026)",
+					columns: ["city", "Total sales"],
+					data_rows: [["Billings", 3198084.8]],
+					total_row_count: 1,
+					row_count: 1,
+					sampling_ratio: 1,
+				},
+			]);
+		});
+
+		// An answer pinned inside a Liveboard: pass the Liveboard GUID plus the
+		// visualization GUID; the request carries visualization_identifiers.
+		it("fetches a specific visualization inside a Liveboard", async () => {
+			(fetch as any)
+				.mockResolvedValueOnce(
+					metaResponse("LIVEBOARD", "Test MCP Liveboard 1"),
+				)
+				.mockResolvedValueOnce({
+					ok: true,
+					json: vi.fn().mockResolvedValue({
+						metadata_id: "obj-1",
+						metadata_name: "Test MCP Liveboard 1",
+						contents: [
+							{
+								available_data_row_count: 1,
+								column_names: ["item type", "Total sales"],
+								data_rows: [
+									{ "item type": "Dresses", "Total sales": 7896217.73 },
+								],
+								returned_data_row_count: 1,
+								sampling_ratio: 1,
+								visualization_id: "de1240fc-2d4d-4c67-9317-02e9c6e3bf1c",
+								visualization_name: "Total sales by item type by year",
+							},
+						],
+					}),
+				});
+
+			const result = await client.fetchData({
+				objectId: "obj-1",
+				vizIds: ["de1240fc-2d4d-4c67-9317-02e9c6e3bf1c"],
+			});
+
+			const dataUrl = (fetch as any).mock.calls[1][0];
+			const dataBody = JSON.parse((fetch as any).mock.calls[1][1].body);
+			expect(dataUrl).toBe(
+				`${mockInstanceUrl}/api/rest/2.0/metadata/liveboard/data`,
+			);
+			expect(dataBody.visualization_identifiers).toEqual([
+				"de1240fc-2d4d-4c67-9317-02e9c6e3bf1c",
+			]);
+			expect(result.data).toHaveLength(1);
+			expect(result.data[0].viz_id).toBe(
+				"de1240fc-2d4d-4c67-9317-02e9c6e3bf1c",
+			);
+		});
+
+		// COMPACT format returns positional rows alongside column_names; the
+		// handler should pass them through aligned to the columns.
+		it("tolerates COMPACT positional rows", async () => {
+			(fetch as any)
+				.mockResolvedValueOnce(metaResponse("ANSWER", "Compact Answer"))
+				.mockResolvedValueOnce({
+					ok: true,
+					json: vi.fn().mockResolvedValue({
+						metadata_id: "obj-1",
+						metadata_name: "Compact Answer",
+						contents: [
+							{
+								column_names: ["city", "Total sales"],
+								data_rows: [
+									["Boulder", 34070647.18],
+									["Atlanta", 21161832.426],
+								],
+								returned_data_row_count: 2,
+							},
+						],
+					}),
+				});
+
+			const result = await client.fetchData({ objectId: "obj-1" });
+
+			expect(result.data[0]).toMatchObject({
+				columns: ["city", "Total sales"],
+				data_rows: [
+					["Boulder", 34070647.18],
+					["Atlanta", 21161832.426],
+				],
+			});
+		});
+
+		// FULL rows without column_names: columns are derived from row keys.
+		it("derives columns from row keys when column_names is absent", async () => {
+			(fetch as any)
+				.mockResolvedValueOnce(metaResponse("ANSWER", "No Columns"))
+				.mockResolvedValueOnce({
+					ok: true,
+					json: vi.fn().mockResolvedValue({
+						metadata_id: "obj-1",
+						metadata_name: "No Columns",
+						contents: [
+							{
+								data_rows: [
+									{ city: "Boulder", "Total sales": 34070647.18 },
+									{ city: "Atlanta", "Total sales": 21161832.426 },
+								],
+							},
+						],
+					}),
+				});
+
+			const result = await client.fetchData({ objectId: "obj-1" });
+
+			expect(result.data[0].columns).toEqual(["city", "Total sales"]);
+			expect(result.data[0].data_rows).toEqual([
+				["Boulder", 34070647.18],
+				["Atlanta", 21161832.426],
+			]);
+			// row_count falls back to the returned row count.
+			expect(result.data[0].row_count).toBe(2);
+		});
+
+		it("throws for an unsupported object type", async () => {
+			(fetch as any).mockResolvedValueOnce(metaResponse("LOGICAL_TABLE"));
+
+			await expect(client.fetchData({ objectId: "obj-1" })).rejects.toThrow(
+				/does not support object type "LOGICAL_TABLE"/,
+			);
+			// No data call is made for unsupported types.
+			expect((fetch as any).mock.calls.length).toBe(1);
+		});
+
+		it("throws when no object matches the id", async () => {
+			(fetch as any).mockResolvedValueOnce({
+				ok: true,
+				json: vi.fn().mockResolvedValue([]),
+			});
+
+			await expect(client.fetchData({ objectId: "missing" })).rejects.toThrow(
+				/found no object with id missing/,
+			);
+		});
+
+		it("throws when metadata resolution is not ok", async () => {
+			(fetch as any).mockResolvedValueOnce({
+				ok: false,
+				status: 404,
+				text: vi.fn().mockResolvedValue("not found"),
+			});
+
+			await expect(client.fetchData({ objectId: "obj-1" })).rejects.toThrow(
+				/failed to resolve object with status 404/,
+			);
+		});
+
+		it("throws when the data fetch is not ok", async () => {
+			(fetch as any)
+				.mockResolvedValueOnce(metaResponse("ANSWER"))
+				.mockResolvedValueOnce({
+					ok: false,
+					status: 403,
+					text: vi.fn().mockResolvedValue("forbidden"),
+				});
+
+			await expect(client.fetchData({ objectId: "obj-1" })).rejects.toThrow(
+				/fetchData failed with status 403/,
+			);
+		});
+	});
+
 	describe("GraphQL Queries", () => {
 		it("should have the correct GraphQL mutation structure for GetUnsavedAnswerTML", () => {
 			// This test ensures the GraphQL query is properly structured

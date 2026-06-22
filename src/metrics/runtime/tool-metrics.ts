@@ -22,6 +22,7 @@ export const UPSTREAM_OPERATION_NAMES = {
 	importMetadataTml: "import_metadata_tml",
 	searchMetadata: "search_metadata",
 	searchObjects: "search_objects",
+	fetchData: "fetch_data",
 } as const;
 
 export type UpstreamOperation =
