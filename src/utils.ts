@@ -1,5 +1,5 @@
 import { type Span, SpanStatusCode } from "@opentelemetry/api";
-import type { ApiVersionMode } from "./metrics/runtime/metric-types";
+import type { ApiVersionMode, AuthMode } from "./metrics/runtime/metric-types";
 import { getActiveSpan } from "./metrics/tracing/tracing-utils";
 
 export type Props = {
@@ -13,6 +13,12 @@ export type Props = {
 	apiVersion?: string;
 	apiVersionMode?: ApiVersionMode;
 	apiRequestedVersion?: string;
+	/**
+	 * How the user authenticated for this connection. Used to gate tools that are only
+	 * available to OAuth users (e.g. `list_orgs`). Set to "oauth" by the OAuth flow and
+	 * "bearer"/"token" by the static-token flow in bearer.ts.
+	 */
+	authMode?: AuthMode;
 };
 
 export class McpServerError extends Error {

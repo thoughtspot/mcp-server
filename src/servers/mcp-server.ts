@@ -25,6 +25,7 @@ import {
 	GetDataSourceSuggestionsSchema,
 	GetRelevantQuestionsSchema,
 	GetSessionUpdatesInputSchema,
+	ListOrgsInputSchema,
 	SendSessionMessageInputSchema,
 	ToolName,
 } from "./tool-definitions";
@@ -41,6 +42,14 @@ export class MCPServer extends BaseMCPServer {
 
 	protected getToolMetricApiSurface(): ToolMetricApiSurface {
 		return "mcp";
+	}
+
+	/**
+	 * Whether the current connection authenticated via OAuth (as opposed to a static
+	 * bearer/token). Used to gate OAuth-only tools such as `list_orgs`.
+	 */
+	protected isOAuthAuth(): boolean {
+		return this.ctx.props.authMode === "oauth";
 	}
 
 	protected getToolMetricApiVersionLabel(): string | undefined {
@@ -136,6 +145,11 @@ export class MCPServer extends BaseMCPServer {
 			);
 		}
 
+		// Org tools (e.g. list_orgs) are only available to OAuth-authenticated users.
+		if (!this.isOAuthAuth()) {
+			tools = tools.filter((tool) => tool.name !== ToolName.ListOrgs);
+		}
+
 		return { tools };
 	}
 
@@ -192,7 +206,7 @@ export class MCPServer extends BaseMCPServer {
 		switch (name) {
 			case ToolName.Ping: {
 				if (this.ctx.props.accessToken && this.ctx.props.instanceUrl) {
-						if (!this.getThoughtSpotService(recorder).validateConnection()) {
+					if (!this.getThoughtSpotService(recorder).validateConnection()) {
 						return this.createErrorResponse(
 							"Failed to validate connection",
 							"Ping failed",
@@ -252,6 +266,18 @@ export class MCPServer extends BaseMCPServer {
 
 			case ToolName.CreateDashboard: {
 				return this.callCreateDashboard(request, recorder);
+			}
+
+			case ToolName.ListOrgs: {
+				// Defense in depth: this tool is omitted from listTools for non-OAuth
+				// connections, but reject direct invocation as well.
+				if (!this.isOAuthAuth()) {
+					return this.createErrorResponse(
+						"The list_orgs tool is only available when authenticated via OAuth.",
+						"List orgs rejected: non-OAuth auth mode",
+					);
+				}
+				return this.callListOrgs(recorder);
 			}
 
 			default:
@@ -609,6 +635,19 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		return this.createSuccessResponse(
 			JSON.stringify(dataSourcesInfo),
 			`${dataSources.length} data source suggestion(s) found`,
+		);
+	}
+
+	@WithSpan("call-list-orgs")
+	async callListOrgs(recorder: MetricsRecorder) {
+		const span = trace.getSpan(context.active());
+
+		const orgs = await this.getThoughtSpotService(recorder).searchOrgs();
+		span?.setAttribute("total_orgs", orgs.length);
+
+		return this.createStructuredContentSuccessResponse(
+			{ orgs },
+			`${orgs.length} org(s) found`,
 		);
 	}
 

@@ -257,6 +257,24 @@ export const CreateDashboardOutputSchema = z.object({
 		),
 });
 
+export const ListOrgsInputSchema = z.object({});
+
+export const ListOrgsOutputSchema = z.object({
+	orgs: z
+		.array(
+			z.object({
+				id: z.number().describe("Unique identifier of the Org."),
+				name: z.string().describe("Name of the Org."),
+				description: z.string().optional().describe("Description of the Org."),
+				status: z
+					.string()
+					.optional()
+					.describe("Status of the Org (ACTIVE or IN_ACTIVE)."),
+			}),
+		)
+		.describe("The list of Orgs the user can access."),
+});
+
 export enum ToolName {
 	// V1
 	Ping = "ping",
@@ -270,6 +288,7 @@ export enum ToolName {
 	SendSessionMessage = "send_session_message",
 	GetSessionUpdates = "get_session_updates",
 	CreateDashboard = "create_dashboard",
+	ListOrgs = "list_orgs",
 }
 
 export const toolDefinitionsV1 = [
@@ -394,6 +413,19 @@ export const toolDefinitionsV2 = [
 		annotations: {
 			title: "Create Dashboard",
 			readOnlyHint: false,
+			destructiveHint: false,
+			openWorldHint: false,
+		},
+	},
+	{
+		name: ToolName.ListOrgs,
+		description:
+			"List the Orgs configured on the ThoughtSpot instance, including the ID, name, description, and status of each Org, along with the ID of the Org that is currently active for this session. Only available when authenticated via OAuth.",
+		inputSchema: z.toJSONSchema(ListOrgsInputSchema),
+		outputSchema: z.toJSONSchema(ListOrgsOutputSchema),
+		annotations: {
+			title: "List Orgs",
+			readOnlyHint: true,
 			destructiveHint: false,
 			openWorldHint: false,
 		},

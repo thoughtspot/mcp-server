@@ -91,6 +91,9 @@ async function handleTokenAuth(
 			accessToken: accessToken,
 			instanceUrl: validateAndSanitizeUrl(tsHost),
 			clientName,
+			// Distinguishes static-token auth ("bearer"/"token") from OAuth. Used to gate
+			// OAuth-only tools such as `list_orgs`.
+			authMode: authRouteFamily,
 		};
 		const requestedApiVersion = url.searchParams.get("api-version");
 

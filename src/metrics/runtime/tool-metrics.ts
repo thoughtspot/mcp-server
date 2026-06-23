@@ -21,6 +21,7 @@ export const UPSTREAM_OPERATION_NAMES = {
 		"send_agent_conversation_message_streaming",
 	importMetadataTml: "import_metadata_tml",
 	searchMetadata: "search_metadata",
+	searchOrgs: "search_orgs",
 } as const;
 
 export type UpstreamOperation =

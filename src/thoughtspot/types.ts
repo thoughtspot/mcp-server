@@ -18,6 +18,13 @@ export interface DataSourceSuggestionResponse {
 	dataSources: DataSourceSuggestion[];
 }
 
+export interface Org {
+	id: number;
+	name: string;
+	description?: string;
+	status?: string;
+}
+
 export interface SessionInfo {
 	mixpanelToken: string;
 	userGUID: string;

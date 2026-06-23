@@ -72,6 +72,8 @@ function createMCPRouter(
 					? normalizeRequestedApiVersionForAnalytics(requestedApiVersion)
 					: undefined,
 				apiVersionMode,
+				// These routers are only mounted for the OAuth endpoints (/mcp, /sse).
+				authMode: "oauth",
 			};
 
 			// Route to the appropriate serve method

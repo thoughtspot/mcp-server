@@ -26,6 +26,7 @@ import type {
 	DataSource,
 	DataSourceSuggestion,
 	Message,
+	Org,
 	SessionInfo,
 } from "./types";
 
@@ -715,6 +716,39 @@ export class ThoughtSpotService {
 			enableSpotterDataSourceDiscovery:
 				info.configInfo?.enableSpotterDataSourceDiscovery,
 		};
+	}
+
+	/**
+	 * List the Orgs configured on the ThoughtSpot instance.
+	 *
+	 * Uses the public POST /api/rest/2.0/orgs/search endpoint. Requires Org
+	 * administration privileges; callers without them will receive an upstream
+	 * 401/403, which is surfaced to the tool layer.
+	 */
+	@WithSpan("search-orgs")
+	async searchOrgs(): Promise<Org[]> {
+		const span = getActiveSpan();
+
+		const orgs = await this.observeUpstreamCall(
+			UPSTREAM_OPERATION_NAMES.searchOrgs,
+			() => this.client.searchOrgs({ status: "ACTIVE" }),
+		);
+
+		const results: Org[] = (orgs ?? [])
+			.filter(
+				(org): org is typeof org & { id: number } =>
+					typeof org.id === "number" && org.status === "ACTIVE",
+			)
+			.map((org) => ({
+				id: org.id,
+				name: org.name ?? "",
+				description: org.description ?? undefined,
+				status: org.status ?? undefined,
+			}));
+
+		span?.setAttribute("results_count", results.length);
+
+		return results;
 	}
 
 	/**
