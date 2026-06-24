@@ -94,6 +94,18 @@ export abstract class BaseMCPServer extends Server {
 	}
 
 	/**
+	 * Whether Orgs are enabled on this cluster (from session info). Fails closed:
+	 * if session info is unavailable or the flag is absent, returns false so the
+	 * org tools stay hidden.
+	 */
+	protected isOrgsEnabled(): boolean {
+		if (!this.sessionInfo) {
+			return false;
+		}
+		return this.sessionInfo.orgsEnabled === true;
+	}
+
+	/**
 	 * Initialize span with common attributes (user_guid and instance_url)
 	 */
 	protected initSpanWithCommonAttributes(): Span | undefined {
@@ -187,23 +199,78 @@ export abstract class BaseMCPServer extends Server {
 		};
 	}
 
-	protected async getStorageService(): Promise<StorageServiceClient> {
-		const accessToken = this.ctx.props.accessToken;
-		if (!accessToken || accessToken.length === 0) {
-			throw new Error("Access token is required to use Storage Service");
+	/**
+	 * Stable per-login hash used to namespace this user's durable storage (both
+	 * conversation buffers and active-org state), keeping users isolated.
+	 *
+	 * Keyed on the refresh token when present (OAuth): it is stable across the
+	 * access token's 24h rotation and only changes on full reauthentication, so
+	 * storage survives token refresh and resets on reauth. Falls back to the
+	 * access token for static bearer/token connections, which have no refresh
+	 * token (their token is long-lived).
+	 */
+	protected async getStorageKeyHash(): Promise<string> {
+		const keyToken = this.ctx.props.refreshToken ?? this.ctx.props.accessToken;
+		if (!keyToken || keyToken.length === 0) {
+			throw new Error("A token is required to derive the storage key");
 		}
-		const encodedAccessToken = new TextEncoder().encode(accessToken);
 		const hashBuffer = await crypto.subtle.digest(
 			"SHA-256",
-			encodedAccessToken,
+			new TextEncoder().encode(keyToken),
 		);
-		const hashUrlSafe = Buffer.from(new Uint8Array(hashBuffer)).toString(
-			"base64url",
-		);
+		return Buffer.from(new Uint8Array(hashBuffer)).toString("base64url");
+	}
+
+	protected async getStorageService(): Promise<StorageServiceClient> {
+		const hashUrlSafe = await this.getStorageKeyHash();
 		return new StorageServiceClient(
 			this.ctx.env
 				.CONVERSATION_STORAGE_OBJECT as unknown as DurableObjectNamespace,
 			hashUrlSafe,
+		);
+	}
+
+	/**
+	 * The org currently active for this session, if any. When set, all
+	 * ThoughtSpot calls are scoped to this org via the x-thoughtspot-orgs header.
+	 * Subclasses override this to expose their per-session org state. Defaults to
+	 * undefined (the user's default org, as resolved by the cluster).
+	 */
+	protected getActiveOrgId(): string | undefined {
+		return undefined;
+	}
+
+	/**
+	 * The bearer token to use for ThoughtSpot calls. Defaults to the token from
+	 * the session. Subclasses override this to return an org-scoped bearer token
+	 * when an org has been selected.
+	 */
+	protected getActiveBearerToken(): string {
+		return this.ctx.props.accessToken;
+	}
+
+	/**
+	 * Build a ThoughtSpot service bound to an explicit bearer token and org,
+	 * bypassing the active-org/token resolution. Used for org-token minting,
+	 * which must authenticate with a specific token.
+	 */
+	protected getThoughtSpotServiceWithToken(
+		bearerToken: string,
+		orgId?: string,
+		recorder?: MetricsRecorder,
+		analyticsContextOverride?: MetricAnalyticsContext,
+	) {
+		return new ThoughtSpotService(
+			getThoughtSpotClient(this.ctx.props.instanceUrl, bearerToken, orgId),
+			{
+				recorder,
+				metricsEnv: this.ctx.env as unknown as Record<string, unknown>,
+				waitUntil: this.getMetricsWaitUntil(),
+				analyticsContext: this.mergeMetricAnalyticsContext(
+					analyticsContextOverride,
+				),
+				eventIdentity: this.getMetricEventIdentity(),
+			},
 		);
 	}
 
@@ -214,7 +281,8 @@ export abstract class BaseMCPServer extends Server {
 		return new ThoughtSpotService(
 			getThoughtSpotClient(
 				this.ctx.props.instanceUrl,
-				this.ctx.props.accessToken,
+				this.getActiveBearerToken(),
+				this.getActiveOrgId(),
 			),
 			{
 				recorder,
@@ -439,7 +507,21 @@ export abstract class BaseMCPServer extends Server {
 				});
 			},
 		);
+
+		// Subclass post-initialization hook (runs after sessionInfo is available
+		// and handlers are registered). Best-effort: failures must not break the
+		// connection.
+		try {
+			await this.postInit();
+		} catch (error) {
+			console.error("postInit failed:", error);
+		}
 	}
+
+	/**
+	 * Optional hook for subclasses to run setup after init(). Default no-op.
+	 */
+	protected async postInit(): Promise<void> {}
 
 	async addTracker(tracker: Tracker) {
 		this.trackers.add(tracker);

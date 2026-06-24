@@ -37,6 +37,41 @@ export class StorageServiceClient {
 		return `https://internal/storage/${encodeURIComponent(conversationId)}/${operation}`;
 	}
 
+	// Reserved pseudo-conversation id for the per-user active-org DO instance. Uses
+	// the same hash-namespaced addressing as conversations, but a distinct instance
+	// that holds only the active org (no message TTL), shared across the user's
+	// sessions.
+	private static readonly ACTIVE_ORG_ID = "__active_org__";
+
+	/** Read the user's active org id, or null if none has been set. */
+	async getActiveOrg(): Promise<string | null> {
+		const id = StorageServiceClient.ACTIVE_ORG_ID;
+		const response = await this.stubFor(id).fetch(this.url(id, "active-org"), {
+			method: "GET",
+			headers: this.headers(),
+		});
+		if (!response.ok) {
+			const body = await response.text();
+			throw new Error(`Failed to get active org (${response.status}): ${body}`);
+		}
+		const data = (await response.json()) as { activeOrgId: string | null };
+		return data.activeOrgId ?? null;
+	}
+
+	/** Persist the user's active org id (shared across their sessions). */
+	async setActiveOrg(activeOrgId: string): Promise<void> {
+		const id = StorageServiceClient.ACTIVE_ORG_ID;
+		const response = await this.stubFor(id).fetch(this.url(id, "active-org"), {
+			method: "POST",
+			headers: this.headers(),
+			body: JSON.stringify({ activeOrgId }),
+		});
+		if (!response.ok) {
+			const body = await response.text();
+			throw new Error(`Failed to set active org (${response.status}): ${body}`);
+		}
+	}
+
 	/**
 	 * Initialize a conversation. Must be called before appending messages.
 	 * Can also be called on an existing conversation that is already marked done,

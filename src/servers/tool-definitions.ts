@@ -270,9 +270,29 @@ export const ListOrgsOutputSchema = z.object({
 					.string()
 					.optional()
 					.describe("Status of the Org (ACTIVE or IN_ACTIVE)."),
+				is_active: z
+					.boolean()
+					.describe(
+						"Whether this is the Org currently active for the session. Tool calls operate against the active Org.",
+					),
 			}),
 		)
 		.describe("The list of Orgs the user can access."),
+});
+
+export const SwitchOrgInputSchema = z.object({
+	org_id: z
+		.number()
+		.describe(
+			"The id of the Org to switch to. Use an `id` returned by `list_orgs`. Subsequent tool calls in this session operate against this Org.",
+		),
+});
+
+export const SwitchOrgOutputSchema = z.object({
+	success: z.boolean().describe("Whether the Org switch was successful."),
+	active_org_id: z
+		.number()
+		.describe("The id of the Org now active for the session."),
 });
 
 export enum ToolName {
@@ -289,6 +309,7 @@ export enum ToolName {
 	GetSessionUpdates = "get_session_updates",
 	CreateDashboard = "create_dashboard",
 	ListOrgs = "list_orgs",
+	SwitchOrg = "switch_org",
 }
 
 export const toolDefinitionsV1 = [
@@ -420,12 +441,25 @@ export const toolDefinitionsV2 = [
 	{
 		name: ToolName.ListOrgs,
 		description:
-			"List the Orgs configured on the ThoughtSpot instance, including the ID, name, description, and status of each Org, along with the ID of the Org that is currently active for this session. Only available when authenticated via OAuth.",
+			"List the Orgs the authenticated user can access on the ThoughtSpot instance, including the ID, name, description, and status of each Org. The Org marked `is_active: true` is the one currently active for this session, which all tool calls operate against. Use this to tell the user which Org they are in. Only available when authenticated via OAuth.",
 		inputSchema: z.toJSONSchema(ListOrgsInputSchema),
 		outputSchema: z.toJSONSchema(ListOrgsOutputSchema),
 		annotations: {
 			title: "List Orgs",
 			readOnlyHint: true,
+			destructiveHint: false,
+			openWorldHint: false,
+		},
+	},
+	{
+		name: ToolName.SwitchOrg,
+		description:
+			"Switch the active Org for this session. After switching, all subsequent tool calls (analysis sessions, answers, data sources, dashboards) operate against the selected Org. Pass an `org_id` returned by `list_orgs`. If you do not have access to the Org, the switch fails. The active Org is per-session and resets if the connection is re-established. Only available when authenticated via OAuth.",
+		inputSchema: z.toJSONSchema(SwitchOrgInputSchema),
+		outputSchema: z.toJSONSchema(SwitchOrgOutputSchema),
+		annotations: {
+			title: "Switch Org",
+			readOnlyHint: false,
 			destructiveHint: false,
 			openWorldHint: false,
 		},

@@ -6,6 +6,8 @@ const STORAGE_BATCH_SIZE = 127; // Cloudflare DO bulk get/put limit is 128, we u
 
 const MESSAGE_KEY_PREFIX = "message-";
 const IS_DONE_KEY = "is-done";
+// Storage key for the active org on the per-user active-org DO instance.
+const ACTIVE_ORG_KEY = "active-org";
 const WRITE_BOOKMARK_KEY = "write-bookmark";
 const READ_BOOKMARK_KEY = "read-bookmark";
 
@@ -54,6 +56,25 @@ export class ConversationStorageServerSQLite {
 				case "GET /messages": {
 					const state = await this.getNewMessagesAndUpdateBookmark();
 					return Response.json(state);
+				}
+
+				// Active-org state. Stored on a DO addressed by the user's storage-key
+				// hash (not a conversation id), so it is shared across all of the
+				// user's MCP sessions. No TTL: it must persist until the user switches
+				// again or reauthenticates (a new login yields a new hash).
+				case "GET /active-org": {
+					const activeOrgId =
+						(await this.state.storage.get<string>(ACTIVE_ORG_KEY)) ?? null;
+					return Response.json({ activeOrgId });
+				}
+
+				case "POST /active-org": {
+					const body = (await request.json()) as { activeOrgId: string };
+					await this.state.storage.put<string>(
+						ACTIVE_ORG_KEY,
+						body.activeOrgId,
+					);
+					return Response.json({ ok: true });
 				}
 
 				default:

@@ -35,6 +35,9 @@ export interface SessionInfo {
 	currentOrgId: string;
 	privileges: any;
 	enableSpotterDataSourceDiscovery?: boolean;
+	// Whether Orgs are enabled on this cluster (configInfo.orgsConfiguration.enabled).
+	// Gates the org tools (list_orgs/switch_org).
+	orgsEnabled?: boolean;
 }
 
 export interface BaseMessage {

@@ -21,6 +21,7 @@ import {
 } from "../metrics/runtime/tool-metrics";
 import { WithSpan, getActiveSpan } from "../metrics/tracing/tracing-utils";
 import { processSendAgentConversationMessageStreamingResponse } from "../streaming-utils";
+import type { RefreshedTokens } from "./thoughtspot-client";
 import type {
 	Answer,
 	DataSource,
@@ -715,6 +716,7 @@ export class ThoughtSpotService {
 			privileges: info.privileges,
 			enableSpotterDataSourceDiscovery:
 				info.configInfo?.enableSpotterDataSourceDiscovery,
+			orgsEnabled: info.configInfo?.orgsConfiguration?.enabled,
 		};
 	}
 
@@ -749,6 +751,38 @@ export class ThoughtSpotService {
 		span?.setAttribute("results_count", results.length);
 
 		return results;
+	}
+
+	/**
+	 * Fetch a fresh (cluster-wide) access token via gettoken with refresh=true,
+	 * authenticated with the given bearer token.
+	 */
+	@WithSpan("get-refreshed-token")
+	async getRefreshedToken(
+		bearerToken: string,
+		refreshToken?: string,
+	): Promise<RefreshedTokens> {
+		return (await this.observeUpstreamCall(
+			UPSTREAM_OPERATION_NAMES.getRefreshedToken,
+			() =>
+				(this.client as any).getRefreshedToken({ bearerToken, refreshToken }),
+		)) as RefreshedTokens;
+	}
+
+	/**
+	 * Mint an org-scoped bearer token for `orgId`, authenticated with the given
+	 * (cluster-wide) access token.
+	 */
+	@WithSpan("fetch-org-bearer-token")
+	async fetchOrgBearerToken(
+		accessToken: string,
+		orgId: string,
+	): Promise<string> {
+		getActiveSpan()?.setAttribute("org_id", orgId);
+		return (await this.observeUpstreamCall(
+			UPSTREAM_OPERATION_NAMES.fetchOrgBearerToken,
+			() => (this.client as any).fetchOrgBearerToken({ accessToken, orgId }),
+		)) as string;
 	}
 
 	/**

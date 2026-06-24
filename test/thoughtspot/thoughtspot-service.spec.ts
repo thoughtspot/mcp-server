@@ -1852,4 +1852,57 @@ describe("thoughtspot-service", () => {
 			]);
 		});
 	});
+
+	describe("searchOrgs", () => {
+		it("returns ACTIVE orgs only, mapping id/name/description/status", async () => {
+			mockClient.searchOrgs = vi.fn().mockResolvedValue([
+				{ id: 0, name: "Primary", status: "ACTIVE", description: "P" },
+				{ id: 5, name: "Inactive", status: "IN_ACTIVE" },
+				{ id: 9, name: "Data", status: "ACTIVE" },
+			]);
+			const service = new ThoughtSpotService(mockClient);
+			const orgs = await service.searchOrgs();
+			expect(mockClient.searchOrgs).toHaveBeenCalledWith({ status: "ACTIVE" });
+			expect(orgs).toEqual([
+				{ id: 0, name: "Primary", description: "P", status: "ACTIVE" },
+				{ id: 9, name: "Data", description: undefined, status: "ACTIVE" },
+			]);
+		});
+
+		it("tolerates a nullish upstream response", async () => {
+			mockClient.searchOrgs = vi.fn().mockResolvedValue(undefined);
+			const service = new ThoughtSpotService(mockClient);
+			await expect(service.searchOrgs()).resolves.toEqual([]);
+		});
+	});
+
+	describe("fetchOrgBearerToken", () => {
+		it("delegates to the client with the access token and org id", async () => {
+			mockClient.fetchOrgBearerToken = vi
+				.fn()
+				.mockResolvedValue("org-token-xyz");
+			const service = new ThoughtSpotService(mockClient);
+			const token = await service.fetchOrgBearerToken("global-tok", "101");
+			expect(mockClient.fetchOrgBearerToken).toHaveBeenCalledWith({
+				accessToken: "global-tok",
+				orgId: "101",
+			});
+			expect(token).toBe("org-token-xyz");
+		});
+	});
+
+	describe("getRefreshedToken", () => {
+		it("passes the bearer and refresh tokens to the client", async () => {
+			mockClient.getRefreshedToken = vi
+				.fn()
+				.mockResolvedValue({ accessToken: "new-a", refreshToken: "same-r" });
+			const service = new ThoughtSpotService(mockClient);
+			const res = await service.getRefreshedToken("bear", "ref");
+			expect(mockClient.getRefreshedToken).toHaveBeenCalledWith({
+				bearerToken: "bear",
+				refreshToken: "ref",
+			});
+			expect(res).toEqual({ accessToken: "new-a", refreshToken: "same-r" });
+		});
+	});
 });

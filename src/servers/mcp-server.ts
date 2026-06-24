@@ -25,8 +25,8 @@ import {
 	GetDataSourceSuggestionsSchema,
 	GetRelevantQuestionsSchema,
 	GetSessionUpdatesInputSchema,
-	ListOrgsInputSchema,
 	SendSessionMessageInputSchema,
+	SwitchOrgInputSchema,
 	ToolName,
 } from "./tool-definitions";
 import {
@@ -36,8 +36,114 @@ import {
 } from "./version-registry";
 
 export class MCPServer extends BaseMCPServer {
+	// In-memory mirror of the active org, loaded once per request lifecycle from
+	// the shared per-user store (keyed by the storage-key hash, so it is the same
+	// across all of the user's MCP sessions/DOs). Read synchronously by the
+	// active-org/token accessors; the durable source of truth is the store.
+	private activeOrgId: string | undefined;
+
+	// Org-scoped bearer tokens, keyed by org id. In-memory only (runtime-derived,
+	// not identity); re-minted as needed.
+	private orgBearerTokens: Record<string, string> = {};
+
 	constructor(ctx: Context) {
 		super(ctx, "ThoughtSpot", "2.0.0");
+	}
+
+	/**
+	 * The single accessor for the active org. Reads the in-memory mirror, which is
+	 * loaded from the shared store on connect (postInit).
+	 */
+	protected getActiveOrgId(): string | undefined {
+		return this.activeOrgId;
+	}
+
+	/**
+	 * Use the org-scoped bearer token for the active org if we hold one; otherwise
+	 * fall back to the session's global access token (from props/grant).
+	 */
+	protected getActiveBearerToken(): string {
+		const orgToken = this.activeOrgId
+			? this.orgBearerTokens[this.activeOrgId]
+			: undefined;
+		return orgToken ?? this.ctx.props.accessToken;
+	}
+
+	/**
+	 * Load the active org from the shared per-user store into the in-memory mirror.
+	 * Keyed by the storage-key hash (refresh-token based), so a switch made in any
+	 * of the user's MCP sessions is visible here.
+	 */
+	private async loadActiveOrg(): Promise<void> {
+		const storage = await this.getStorageService();
+		const stored = await storage.getActiveOrg();
+		// Always reflect the store (including back to undefined if cleared), since
+		// the value may have changed in another of the user's sessions/DOs.
+		this.activeOrgId = stored ?? undefined;
+	}
+
+	/**
+	 * Re-read the active org from the shared store. Because the MCP client may
+	 * fan requests across multiple DOs, we re-read on each org-aware tool call so
+	 * a switch made elsewhere is reflected, rather than trusting a stale mirror.
+	 */
+	private async ensureActiveOrgLoaded(): Promise<void> {
+		await this.loadActiveOrg();
+	}
+
+	/**
+	 * Persist the active org to the shared per-user store and update the in-memory
+	 * mirror. Shared across the user's sessions; persists until the next switch or
+	 * reauthentication (a new login changes the storage-key hash).
+	 */
+	private async setActiveOrg(orgId: string): Promise<void> {
+		this.activeOrgId = orgId;
+		const storage = await this.getStorageService();
+		await storage.setActiveOrg(orgId);
+	}
+
+	/**
+	 * Ensure we hold an org-scoped bearer token for `orgId`: reuse the in-memory
+	 * one, or mint a new one from the global access token. Returns the org token.
+	 */
+	private async ensureOrgToken(
+		orgId: string,
+		recorder?: MetricsRecorder,
+	): Promise<string> {
+		const cached = this.orgBearerTokens[orgId];
+		if (cached) {
+			return cached;
+		}
+		const orgToken = await this.getThoughtSpotServiceWithToken(
+			this.ctx.props.accessToken,
+			undefined,
+			recorder,
+		).fetchOrgBearerToken(this.ctx.props.accessToken, orgId);
+		this.orgBearerTokens[orgId] = orgToken;
+		return orgToken;
+	}
+
+	/**
+	 * On connect: load the active org from the shared per-user store. If one is
+	 * stored (the user switched in this or another session), mint its token so
+	 * subsequent calls are scoped to it. If none is stored, do NOT write one — the
+	 * absence means "no explicit switch", and calls fall back to the global token /
+	 * the cluster-resolved default org. Best-effort: failures must not break the
+	 * connection. Only OAuth sessions can mint org tokens, so this is a no-op
+	 * otherwise.
+	 */
+	protected async postInit(): Promise<void> {
+		if (!this.isOAuthAuth()) {
+			return;
+		}
+		try {
+			await this.loadActiveOrg();
+			if (this.activeOrgId) {
+				await this.ensureOrgToken(this.activeOrgId);
+			}
+		} catch (error) {
+			console.error("Failed to load/mint active org on connect:", error);
+		}
 	}
 
 	protected getToolMetricApiSurface(): ToolMetricApiSurface {
@@ -50,6 +156,15 @@ export class MCPServer extends BaseMCPServer {
 	 */
 	protected isOAuthAuth(): boolean {
 		return this.ctx.props.authMode === "oauth";
+	}
+
+	/**
+	 * Org tools (list_orgs/switch_org) are available only when the connection is
+	 * OAuth (the only auth mode that can mint org-scoped tokens) AND the cluster
+	 * has Orgs enabled. Fails closed if either is unknown.
+	 */
+	protected areOrgToolsAvailable(): boolean {
+		return this.isOAuthAuth() && this.isOrgsEnabled();
 	}
 
 	protected getToolMetricApiVersionLabel(): string | undefined {
@@ -145,9 +260,13 @@ export class MCPServer extends BaseMCPServer {
 			);
 		}
 
-		// Org tools (e.g. list_orgs) are only available to OAuth-authenticated users.
-		if (!this.isOAuthAuth()) {
-			tools = tools.filter((tool) => tool.name !== ToolName.ListOrgs);
+		// Org tools (list_orgs, switch_org) require OAuth AND Orgs enabled on the
+		// cluster.
+		if (!this.areOrgToolsAvailable()) {
+			tools = tools.filter(
+				(tool) =>
+					tool.name !== ToolName.ListOrgs && tool.name !== ToolName.SwitchOrg,
+			);
 		}
 
 		return { tools };
@@ -269,15 +388,27 @@ export class MCPServer extends BaseMCPServer {
 			}
 
 			case ToolName.ListOrgs: {
-				// Defense in depth: this tool is omitted from listTools for non-OAuth
-				// connections, but reject direct invocation as well.
-				if (!this.isOAuthAuth()) {
+				// Defense in depth: omitted from listTools when unavailable, but
+				// reject direct invocation as well.
+				if (!this.areOrgToolsAvailable()) {
 					return this.createErrorResponse(
-						"The list_orgs tool is only available when authenticated via OAuth.",
-						"List orgs rejected: non-OAuth auth mode",
+						"The list_orgs tool is only available when authenticated via OAuth on a cluster with Orgs enabled.",
+						"List orgs rejected: org tools unavailable",
 					);
 				}
 				return this.callListOrgs(recorder);
+			}
+
+			case ToolName.SwitchOrg: {
+				// Defense in depth: omitted from listTools when unavailable, but
+				// reject direct invocation as well.
+				if (!this.areOrgToolsAvailable()) {
+					return this.createErrorResponse(
+						"The switch_org tool is only available when authenticated via OAuth on a cluster with Orgs enabled.",
+						"Switch org rejected: org tools unavailable",
+					);
+				}
+				return this.callSwitchOrg(request, recorder);
 			}
 
 			default:
@@ -645,9 +776,62 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		const orgs = await this.getThoughtSpotService(recorder).searchOrgs();
 		span?.setAttribute("total_orgs", orgs.length);
 
+		// Read the active org from the shared per-user store (the single source of
+		// truth). Ensure it's loaded first — this request may run on a different DO
+		// than the one that handled postInit/switch_org.
+		await this.ensureActiveOrgLoaded();
+		const activeOrgId = this.getActiveOrgId();
+
 		return this.createStructuredContentSuccessResponse(
-			{ orgs },
+			{
+				orgs: orgs.map((org) => ({
+					...org,
+					is_active:
+						activeOrgId !== undefined && String(org.id) === activeOrgId,
+				})),
+			},
 			`${orgs.length} org(s) found`,
+		);
+	}
+
+	@WithSpan("call-switch-org")
+	async callSwitchOrg(
+		request: z.infer<typeof CallToolRequestSchema>,
+		recorder: MetricsRecorder,
+	) {
+		const span = trace.getSpan(context.active());
+		const { org_id } = SwitchOrgInputSchema.parse(request.params.arguments);
+		const orgId = String(org_id);
+		span?.setAttribute("requested_org_id", orgId);
+
+		// Mint (or reuse) an org-scoped bearer token for the requested org. No
+		// pre-validation against list_orgs: if the user can't access the org, the
+		// mint returns 401, which we surface as "org not accessible".
+		try {
+			await this.ensureOrgToken(orgId, recorder);
+		} catch (error) {
+			const message = (error as Error)?.message ?? "";
+			if (message.includes("401")) {
+				return this.createErrorResponse(
+					`You do not have access to org "${orgId}", or it does not exist. Call list_orgs to see the orgs you can access.`,
+					"Switch org failed: org not accessible (401)",
+				);
+			}
+			return this.createErrorResponse(
+				`Failed to switch to org "${orgId}". Please try again.`,
+				`Error switching org ${message}`,
+			);
+		}
+
+		await this.setActiveOrg(orgId);
+		// Data sources are org-specific; drop the cached set so the next lookup
+		// reflects the newly selected org.
+		this._sources = null;
+		span?.setAttribute("active_org_id", orgId);
+
+		return this.createStructuredContentSuccessResponse(
+			{ success: true, active_org_id: org_id },
+			`Switched to org ${orgId}`,
 		);
 	}
 

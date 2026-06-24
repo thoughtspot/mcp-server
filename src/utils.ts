@@ -4,6 +4,22 @@ import { getActiveSpan } from "./metrics/tracing/tracing-utils";
 
 export type Props = {
 	accessToken: string;
+	/**
+	 * Refresh token returned alongside the global access token by
+	 * callosum/v1/session/v2/gettoken. Stored for future token refresh; not yet
+	 * used to refresh automatically.
+	 */
+	refreshToken?: string;
+	/**
+	 * When the global access token was issued (epoch millis), from gettoken's
+	 * `tokenCreatedTime`. Stored as-is.
+	 */
+	tokenCreatedTime?: number;
+	/**
+	 * When the global access token expires (epoch millis), from gettoken's
+	 * `tokenExpiryDuration` (an absolute timestamp despite the name). Stored as-is.
+	 */
+	tokenExpiryDuration?: number;
 	instanceUrl: string;
 	clientName: {
 		clientId: string;

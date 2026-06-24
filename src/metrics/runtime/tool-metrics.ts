@@ -22,6 +22,8 @@ export const UPSTREAM_OPERATION_NAMES = {
 	importMetadataTml: "import_metadata_tml",
 	searchMetadata: "search_metadata",
 	searchOrgs: "search_orgs",
+	fetchOrgBearerToken: "fetch_org_bearer_token",
+	getRefreshedToken: "get_refreshed_token",
 } as const;
 
 export type UpstreamOperation =
