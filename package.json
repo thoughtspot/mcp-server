@@ -57,7 +57,7 @@
     "@hono/zod-validator": "^0.7.2",
     "@microlabs/otel-cf-workers": "^1.0.0-rc.52",
     "@modelcontextprotocol/sdk": "^1.20.1",
-    "@thoughtspot/mcp-auth": "file:../ts-mcp-auth",
+    "@thoughtspot/mcp-auth": "1.0.0",
     "@thoughtspot/rest-api-sdk": "^2.22.0",
     "agents": "^0.13.1",
     "hono": "^4.12.21",
