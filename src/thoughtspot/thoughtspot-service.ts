@@ -698,6 +698,26 @@ export class ThoughtSpotService {
 			UPSTREAM_OPERATION_NAMES.getSessionInfo,
 			() => (this.client as any).getSessionInfo(),
 		);
+
+		// Log every feature flag the instance reports, so we can see which
+		// capabilities (Spotter discovery, Eureka, etc.) are enabled for this
+		// session. configInfo holds the flags; we print the booleans only to
+		// avoid leaking secrets like the mixpanel SDK keys.
+		const configInfo = info.configInfo ?? {};
+		const flags = Object.fromEntries(
+			Object.entries(configInfo).filter(
+				([, value]) => typeof value === "boolean",
+			),
+		);
+		console.error(
+			"[ThoughtSpot MCP] Session config flags:",
+			JSON.stringify(flags),
+		);
+		console.error(
+			"[ThoughtSpot MCP] All configInfo keys:",
+			Object.keys(configInfo).join(", "),
+		);
+
 		const devMixpanelToken = info.configInfo.mixpanelConfig.devSdkKey;
 		const prodMixpanelToken = info.configInfo.mixpanelConfig.prodSdkKey;
 		const mixpanelToken = info.configInfo.mixpanelConfig.production
@@ -720,6 +740,7 @@ export class ThoughtSpotService {
 			privileges: info.privileges,
 			enableSpotterDataSourceDiscovery:
 				info.configInfo?.enableSpotterDataSourceDiscovery,
+			useEurekaSearchMCPTools: info.configInfo?.useEurekaSearchMCPTools,
 		};
 	}
 
@@ -771,7 +792,10 @@ export class ThoughtSpotService {
 		params: SearchObjectsParams,
 	): Promise<SearchObjectsResult> {
 		const span = getActiveSpan();
-		span?.setAttribute("query", params.query);
+		span?.setAttribute(
+			"query",
+			Array.isArray(params.query) ? params.query.join(", ") : params.query,
+		);
 		span?.setAttribute("limit", params.limit ?? 10);
 
 		const result = await this.observeUpstreamCall(

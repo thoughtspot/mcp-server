@@ -1,21 +1,10 @@
+import { resolveObjectTypeFacets } from "../../terminology";
 import { searchObjectsQuery } from "./search-objects-query";
 import type {
 	SearchObjectHeader,
 	SearchObjectsParams,
 	SearchObjectsResult,
 } from "./search-objects-types";
-
-// Friendly object-type names accepted by the `types` filter, mapped to the
-// OBJECT_TYPE_FACET values the Eureka backend understands.
-const OBJECT_TYPE_FACET_MAP: Record<string, string> = {
-	liveboard: "pinboard",
-	pinboard: "pinboard",
-	dashboard: "pinboard",
-	answer: "answer",
-	worksheet: "worksheet",
-	table: "worksheet",
-	model: "worksheet",
-};
 
 // Build a deep link to the object in the ThoughtSpot UI from its result type.
 function buildFrameUrl(
@@ -65,54 +54,43 @@ export function addSearchObjects(
 	instanceUrl: string,
 	token: string,
 ) {
-	(client as any).searchObjects = async ({
-		query,
-		types,
-		owner,
-		tag,
-		modifiedSince,
-		verifiedOnly,
-		limit = 10,
-		cursor,
-	}: SearchObjectsParams): Promise<SearchObjectsResult> => {
-		const rawOffset = cursor ? Number.parseInt(cursor, 10) || 0 : 0;
-		// Snap to a page boundary so `offset` and `currentPageNumber` (which the
-		// Eureka backend may use independently) can never disagree when a caller
-		// reuses a cursor minted under a different `limit`. With a stable limit
-		// this is a no-op.
-		const startOffset = Math.floor(rawOffset / limit) * limit;
+	(client as any).searchObjects = async (
+		params: SearchObjectsParams,
+	): Promise<SearchObjectsResult> => {
+		const {
+			types,
+			owner,
+			tag,
+			modifiedSince,
+			verifiedOnly,
+			limit = 10,
+		} = params;
 
 		// owner, tag and modified_since are not reliably expressible through the
 		// Eureka request schema, so they are applied to each fetched page below.
 		const hasPostFilters = Boolean(owner || tag || modifiedSince);
 
 		// Filters the Eureka backend can apply server-side via facetSelections.
+		// Shared across every term of a multi-term search.
 		const facetSelections: { facetType: string; facetValue: string[] }[] = [];
 		if (types?.length) {
-			const facetValue = [
-				...new Set(
-					types.map(
-						(t) => OBJECT_TYPE_FACET_MAP[t.toLowerCase()] ?? t.toLowerCase(),
-					),
-				),
-			];
-			facetSelections.push({ facetType: "OBJECT_TYPE_FACET", facetValue });
+			facetSelections.push({
+				facetType: "OBJECT_TYPE_FACET",
+				facetValue: resolveObjectTypeFacets(types),
+			});
 		}
 		if (verifiedOnly) {
 			facetSelections.push({ facetType: "IS_VERIFIED", facetValue: ["true"] });
 		}
 
-		// Correlation id we mint per call and send as x-request-id. ThoughtSpot
-		// does not return this — it generates its own — so we generate and echo it
-		// back to enable cross-system tracing.
-		const requestId = globalThis.crypto.randomUUID();
-
 		const endpoint = "/prism/?op=GetEurekaResults";
 
-		// Fetch and map a single raw page at the given offset, applying the
-		// post-filters. Returns the surfaced objects plus the raw result count
-		// (used to decide whether more pages may exist).
+		// Fetch and map a single raw page at the given offset for one query term,
+		// applying the post-filters. Returns the surfaced objects plus the raw
+		// result count (used to decide whether more pages may exist).
 		const fetchPage = async (
+			query: string,
+			requestId: string,
 			pageOffset: number,
 		): Promise<{ pageObjects: SearchObjectHeader[]; rawCount: number }> => {
 			const fetchOptions = {
@@ -264,41 +242,106 @@ export function addSearchObjects(
 			return { pageObjects, rawCount: results.length };
 		};
 
-		// Accumulate across pages so post-filters can't make us return a short or
-		// empty page (with a misleading cursor) while matches remain. With no post
-		// filters this fetches exactly one page. A page cap bounds upstream calls
-		// when filters match very little.
-		const MAX_PAGES = 20;
-		const objects: SearchObjectHeader[] = [];
-		let pageOffset = startOffset;
-		let rawCount = 0;
-		let pages = 0;
-		do {
-			const page = await fetchPage(pageOffset);
-			objects.push(...page.pageObjects);
-			rawCount = page.rawCount;
-			pageOffset += limit;
-			pages += 1;
-		} while (
-			hasPostFilters &&
-			objects.length < limit &&
-			rawCount === limit &&
-			pages < MAX_PAGES
-		);
+		// Run a complete search for a single query term, paginating as needed to
+		// satisfy the post-filters. Each term mints its own x-request-id so the
+		// upstream calls of a multi-term search can be traced independently.
+		const searchSingle = async (
+			query: string,
+			cursor?: string,
+		): Promise<SearchObjectsResult> => {
+			const rawOffset = cursor ? Number.parseInt(cursor, 10) || 0 : 0;
+			// Snap to a page boundary so `offset` and `currentPageNumber` (which the
+			// Eureka backend may use independently) can never disagree when a caller
+			// reuses a cursor minted under a different `limit`. With a stable limit
+			// this is a no-op.
+			const startOffset = Math.floor(rawOffset / limit) * limit;
 
-		if (hasPostFilters && objects.length < limit && rawCount === limit) {
-			console.warn(
-				`searchObjects: stopped after ${MAX_PAGES} pages with ${objects.length}/${limit} matches; more may exist (continue via next_cursor).`,
+			// Correlation id we mint per call and send as x-request-id. ThoughtSpot
+			// does not return this — it generates its own — so we generate and echo
+			// it back to enable cross-system tracing.
+			const requestId = globalThis.crypto.randomUUID();
+
+			// Accumulate across pages so post-filters can't make us return a short or
+			// empty page (with a misleading cursor) while matches remain. With no
+			// post filters this fetches exactly one page. A page cap bounds upstream
+			// calls when filters match very little.
+			const MAX_PAGES = 20;
+			const objects: SearchObjectHeader[] = [];
+			let pageOffset = startOffset;
+			let rawCount = 0;
+			let pages = 0;
+			do {
+				const page = await fetchPage(query, requestId, pageOffset);
+				objects.push(...page.pageObjects);
+				rawCount = page.rawCount;
+				pageOffset += limit;
+				pages += 1;
+			} while (
+				hasPostFilters &&
+				objects.length < limit &&
+				rawCount === limit &&
+				pages < MAX_PAGES
 			);
+
+			if (hasPostFilters && objects.length < limit && rawCount === limit) {
+				console.warn(
+					`searchObjects: stopped after ${MAX_PAGES} pages with ${objects.length}/${limit} matches; more may exist (continue via next_cursor).`,
+				);
+			}
+
+			// A full final raw page implies the backend may have more to return.
+			const next_cursor = rawCount === limit ? String(pageOffset) : null;
+
+			return {
+				objects,
+				next_cursor,
+				request_id: requestId,
+			};
+		};
+
+		// Normalize the query into distinct, non-empty search terms. A caller can
+		// pass a single string or an array of terms (for example when the user's
+		// request spans several separate things).
+		const rawTerms = Array.isArray(params.query)
+			? params.query
+			: [params.query];
+		const terms = [...new Set(rawTerms.map((t) => t.trim()).filter(Boolean))];
+
+		// Single term: full behavior, including cursor-based pagination.
+		if (terms.length <= 1) {
+			return searchSingle(terms[0] ?? "", params.cursor);
 		}
 
-		// A full final raw page implies the backend may have more to return.
-		const next_cursor = rawCount === limit ? String(pageOffset) : null;
+		// Multiple terms: fire one search per term in parallel and merge the
+		// results. Cursor pagination is not supported across a multi-term fan-out
+		// (each term paginates independently), so the merged next_cursor is null.
+		const perTerm = await Promise.all(terms.map((term) => searchSingle(term)));
+		return mergeTermResults(perTerm);
+	};
+}
 
-		return {
-			objects,
-			next_cursor,
-			request_id: requestId,
-		};
+// Merge the per-term results of a multi-term search into a single result.
+// De-duplicates objects by id (keeping the highest-confidence hit), sorts by
+// confidence descending, and joins the per-term request ids for tracing.
+function mergeTermResults(results: SearchObjectsResult[]): SearchObjectsResult {
+	const byId = new Map<string, SearchObjectHeader>();
+	for (const result of results) {
+		for (const obj of result.objects) {
+			const existing = byId.get(obj.id);
+			if (!existing || (obj.confidence ?? 0) > (existing.confidence ?? 0)) {
+				byId.set(obj.id, obj);
+			}
+		}
+	}
+
+	const objects = [...byId.values()].sort(
+		(a, b) => (b.confidence ?? 0) - (a.confidence ?? 0),
+	);
+
+	return {
+		objects,
+		// Pagination across multiple independent term searches is ambiguous.
+		next_cursor: null,
+		request_id: results.map((r) => r.request_id).join(","),
 	};
 }

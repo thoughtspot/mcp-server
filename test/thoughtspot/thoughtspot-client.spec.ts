@@ -1216,6 +1216,97 @@ describe("ThoughtSpot Client", () => {
 				/searchObjects failed with status 401/,
 			);
 		});
+
+		it("resolves friendly/legacy type synonyms to Eureka facet values", async () => {
+			(fetch as any).mockResolvedValue({
+				ok: true,
+				json: vi
+					.fn()
+					.mockResolvedValue({ data: { queryRequest: { results: [] } } }),
+			});
+
+			await client.searchObjects({
+				query: "sales",
+				// dashboard -> pinboard; worksheet + logical table + data model ->
+				// worksheet (deduped).
+				types: ["dashboard", "worksheet", "logical table", "data model"],
+			});
+
+			const body = JSON.parse((fetch as any).mock.calls[0][1].body);
+			expect(body.variables.params.facetSelections).toEqual([
+				{
+					facetType: "OBJECT_TYPE_FACET",
+					facetValue: ["pinboard", "worksheet"],
+				},
+			]);
+		});
+
+		// A raw Eureka result with a given id and relevance score.
+		const scoredResult = (id: string, score: number) => ({
+			objectSecurityInfo: { objectType: "X", objectId: id },
+			searchPinboard: { header: { id, title: id } },
+			resultType: "PINBOARD_RESULT",
+			score,
+		});
+
+		it("fires a parallel search per term and merges the results", async () => {
+			(fetch as any)
+				.mockResolvedValueOnce(
+					pageResponse([scoredResult("a", 0.5), scoredResult("shared", 0.7)]),
+				)
+				.mockResolvedValueOnce(
+					pageResponse([scoredResult("b", 0.9), scoredResult("shared", 0.4)]),
+				);
+
+			const result = await client.searchObjects({
+				query: ["sales", "marketing"],
+			});
+
+			// One upstream call per term.
+			expect((fetch as any).mock.calls.length).toBe(2);
+			expect(
+				JSON.parse((fetch as any).mock.calls[0][1].body).variables.params.query,
+			).toBe("sales");
+			expect(
+				JSON.parse((fetch as any).mock.calls[1][1].body).variables.params.query,
+			).toBe("marketing");
+
+			// Deduped by id (the higher-confidence "shared" wins) and sorted by
+			// confidence descending.
+			expect(result.objects.map((o: any) => o.id)).toEqual([
+				"b",
+				"shared",
+				"a",
+			]);
+			expect(
+				result.objects.find((o: any) => o.id === "shared").confidence,
+			).toBe(0.7);
+			// Pagination is not supported across a multi-term fan-out.
+			expect(result.next_cursor).toBeNull();
+			// The per-term request ids are joined for tracing.
+			expect(result.request_id.split(",")).toHaveLength(2);
+		});
+
+		it("treats a single-element query array like a single-term search", async () => {
+			(fetch as any).mockResolvedValue(pageResponse([scoredResult("a", 0.5)]));
+
+			const result = await client.searchObjects({ query: ["sales"] });
+
+			expect((fetch as any).mock.calls.length).toBe(1);
+			expect(result.objects.map((o: any) => o.id)).toEqual(["a"]);
+		});
+
+		it("ignores blank and duplicate terms in a multi-term query", async () => {
+			(fetch as any).mockResolvedValue(pageResponse([scoredResult("a", 0.5)]));
+
+			await client.searchObjects({ query: ["sales", "  ", "sales"] });
+
+			// "sales" deduped, blank dropped -> a single search.
+			expect((fetch as any).mock.calls.length).toBe(1);
+			expect(
+				JSON.parse((fetch as any).mock.calls[0][1].body).variables.params.query,
+			).toBe("sales");
+		});
 	});
 
 	describe("fetchData", () => {

@@ -16,7 +16,8 @@ export interface SearchObjectHeader {
 }
 
 export interface SearchObjectsParams {
-	query: string;
+	// A single search term, or several terms to search in parallel and merge.
+	query: string | string[];
 	types?: string[];
 	owner?: string;
 	tag?: string;

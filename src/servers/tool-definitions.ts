@@ -67,15 +67,15 @@ export const GetAnswerOutputSchema = z.object({
 
 export const SearchObjectsInputSchema = z.object({
 	query: z
-		.string()
+		.union([z.string(), z.array(z.string())])
 		.describe(
-			"The search term to find objects for. This is matched against object names, descriptions and content.",
+			"The search term(s) to find objects for, matched against object names, descriptions and content. Pass a single string for one search, or an array of distinct terms when the user's request covers several separate things. Each term is searched in parallel and the results are merged and de-duplicated. Note: pagination via `cursor` only applies to a single-term search.",
 		),
 	types: z
 		.array(z.string())
 		.optional()
 		.describe(
-			"Restrict results to these object types. Accepts friendly names such as 'liveboard' (alias 'pinboard'/'dashboard'), 'answer', or 'worksheet'. Omit to search all types.",
+			"Restrict results to these object types. Accepts friendly and legacy names: 'liveboard' (aliases 'pinboard', 'dashboard'), 'answer', and 'worksheet' (aliases 'logical table', 'data model', 'data source'). Omit to search all types.",
 		),
 	owner: z
 		.string()
