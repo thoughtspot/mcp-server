@@ -77,7 +77,7 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 
 	it("parses a text event and stores a text message", async () => {
 		const storage = makeMockStorage();
-		const line = `data: ${JSON.stringify([{ type: "text", content: "Hello world", metadata: {} }])}\n`;
+		const line = `data: ${JSON.stringify([{ type: "text", content: "Hello world", metadata: { format: "markdown" } }])}\n`;
 		const reader = makeReader([line]);
 
 		await processSendAgentConversationMessageStreamingResponse(
@@ -104,7 +104,7 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 			...NOOP_METRICS_RECORDER,
 			count: vi.fn(),
 		};
-		const line = `data: ${JSON.stringify([{ type: "text", content: "Hello world", metadata: {} }])}\n`;
+		const line = `data: ${JSON.stringify([{ type: "text", content: "Hello world", metadata: { format: "markdown" } }])}\n`;
 		const reader = makeReader([line]);
 
 		await processSendAgentConversationMessageStreamingResponse(
@@ -128,7 +128,7 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 
 	it("sets is_thinking=true on a text event when metadata.type is 'thinking'", async () => {
 		const storage = makeMockStorage();
-		const line = `data: ${JSON.stringify([{ type: "text", content: "Reasoning...", metadata: { type: "thinking" } }])}\n`;
+		const line = `data: ${JSON.stringify([{ type: "text", content: "Reasoning...", metadata: { type: "thinking", format: "markdown" } }])}\n`;
 		const reader = makeReader([line]);
 
 		await processSendAgentConversationMessageStreamingResponse(
@@ -145,7 +145,7 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 
 	it("parses a text-chunk event and stores a text_chunk message", async () => {
 		const storage = makeMockStorage();
-		const line = `data: ${JSON.stringify([{ type: "text-chunk", content: "chunk content", metadata: {} }])}\n`;
+		const line = `data: ${JSON.stringify([{ type: "text-chunk", content: "chunk content", metadata: { format: "markdown" } }])}\n`;
 		const reader = makeReader([line]);
 
 		await processSendAgentConversationMessageStreamingResponse(
@@ -162,7 +162,7 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 
 	it("sets is_thinking=true on a text-chunk event when metadata.type is 'thinking'", async () => {
 		const storage = makeMockStorage();
-		const line = `data: ${JSON.stringify([{ type: "text-chunk", content: "thinking chunk", metadata: { type: "thinking" } }])}\n`;
+		const line = `data: ${JSON.stringify([{ type: "text-chunk", content: "thinking chunk", metadata: { type: "thinking", format: "markdown" } }])}\n`;
 		const reader = makeReader([line]);
 
 		await processSendAgentConversationMessageStreamingResponse(
@@ -175,6 +175,165 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		expect(storage.appendMessagesAndRestartTtl).toHaveBeenCalledWith(CONV_ID, [
 			{ is_thinking: true, type: "text_chunk", text: "thinking chunk" },
 		]);
+	});
+
+	it("ignores a text event whose metadata.format is not 'markdown'", async () => {
+		const storage = makeMockStorage();
+		const line = `data: ${JSON.stringify([{ type: "text", content: "plain text", metadata: { format: "plaintext" } }])}\n`;
+		const reader = makeReader([line]);
+
+		await processSendAgentConversationMessageStreamingResponse(
+			CONV_ID,
+			reader,
+			storage.appendMessages,
+			INSTANCE_URL,
+		);
+
+		// Only the terminal done call should have been made (no message stored)
+		expect(storage.appendMessagesAndRestartTtl).toHaveBeenCalledOnce();
+		expect(storage.appendMessagesAndRestartTtl).toHaveBeenCalledWith(
+			CONV_ID,
+			[],
+			true,
+		);
+		expect(tracingState.span?.setAttributes).toHaveBeenCalledWith({
+			total_messages_parsed: 0,
+			total_text_messages_parsed: 0,
+			total_answer_messages_parsed: 0,
+			total_messages_ignored: 1,
+		});
+	});
+
+	it("ignores a text event with no metadata.format", async () => {
+		const storage = makeMockStorage();
+		const line = `data: ${JSON.stringify([{ type: "text", content: "no format", metadata: {} }])}\n`;
+		const reader = makeReader([line]);
+
+		await processSendAgentConversationMessageStreamingResponse(
+			CONV_ID,
+			reader,
+			storage.appendMessages,
+			INSTANCE_URL,
+		);
+
+		expect(storage.appendMessagesAndRestartTtl).toHaveBeenCalledOnce();
+		expect(storage.appendMessagesAndRestartTtl).toHaveBeenCalledWith(
+			CONV_ID,
+			[],
+			true,
+		);
+		expect(tracingState.span?.setAttributes).toHaveBeenCalledWith({
+			total_messages_parsed: 0,
+			total_text_messages_parsed: 0,
+			total_answer_messages_parsed: 0,
+			total_messages_ignored: 1,
+		});
+	});
+
+	it("does not record a metric for a text event whose format is not 'markdown'", async () => {
+		const storage = makeMockStorage();
+		const recorder: MetricsRecorder = {
+			...NOOP_METRICS_RECORDER,
+			count: vi.fn(),
+		};
+		const line = `data: ${JSON.stringify([{ type: "text", content: "plain text", metadata: { format: "plaintext" } }])}\n`;
+		const reader = makeReader([line]);
+
+		await processSendAgentConversationMessageStreamingResponse(
+			CONV_ID,
+			reader,
+			storage.appendMessages,
+			INSTANCE_URL,
+			recorder,
+		);
+
+		expect(recorder.count).not.toHaveBeenCalled();
+	});
+
+	it("ignores a text-chunk event whose metadata.format is not 'markdown'", async () => {
+		const storage = makeMockStorage();
+		const line = `data: ${JSON.stringify([{ type: "text-chunk", content: "plain chunk", metadata: { format: "plaintext" } }])}\n`;
+		const reader = makeReader([line]);
+
+		await processSendAgentConversationMessageStreamingResponse(
+			CONV_ID,
+			reader,
+			storage.appendMessages,
+			INSTANCE_URL,
+		);
+
+		expect(storage.appendMessagesAndRestartTtl).toHaveBeenCalledOnce();
+		expect(storage.appendMessagesAndRestartTtl).toHaveBeenCalledWith(
+			CONV_ID,
+			[],
+			true,
+		);
+		expect(tracingState.span?.setAttributes).toHaveBeenCalledWith({
+			total_messages_parsed: 0,
+			total_text_messages_parsed: 0,
+			total_answer_messages_parsed: 0,
+			total_messages_ignored: 1,
+		});
+	});
+
+	it("ignores a text-chunk event with no metadata.format", async () => {
+		const storage = makeMockStorage();
+		const line = `data: ${JSON.stringify([{ type: "text-chunk", content: "no format chunk", metadata: {} }])}\n`;
+		const reader = makeReader([line]);
+
+		await processSendAgentConversationMessageStreamingResponse(
+			CONV_ID,
+			reader,
+			storage.appendMessages,
+			INSTANCE_URL,
+		);
+
+		expect(storage.appendMessagesAndRestartTtl).toHaveBeenCalledOnce();
+		expect(storage.appendMessagesAndRestartTtl).toHaveBeenCalledWith(
+			CONV_ID,
+			[],
+			true,
+		);
+		expect(tracingState.span?.setAttributes).toHaveBeenCalledWith({
+			total_messages_parsed: 0,
+			total_text_messages_parsed: 0,
+			total_answer_messages_parsed: 0,
+			total_messages_ignored: 1,
+		});
+	});
+
+	it("stores only markdown text items when mixed with non-markdown items", async () => {
+		const storage = makeMockStorage();
+		const items = [
+			{ type: "text", content: "keep me", metadata: { format: "markdown" } },
+			{ type: "text", content: "drop me", metadata: { format: "plaintext" } },
+			{
+				type: "text-chunk",
+				content: "keep chunk",
+				metadata: { format: "markdown" },
+			},
+			{ type: "text-chunk", content: "drop chunk", metadata: {} },
+		];
+		const line = `data: ${JSON.stringify(items)}\n`;
+		const reader = makeReader([line]);
+
+		await processSendAgentConversationMessageStreamingResponse(
+			CONV_ID,
+			reader,
+			storage.appendMessages,
+			INSTANCE_URL,
+		);
+
+		expect(storage.appendMessagesAndRestartTtl).toHaveBeenCalledWith(CONV_ID, [
+			{ is_thinking: false, type: "text", text: "keep me" },
+			{ is_thinking: false, type: "text_chunk", text: "keep chunk" },
+		]);
+		expect(tracingState.span?.setAttributes).toHaveBeenCalledWith({
+			total_messages_parsed: 2,
+			total_text_messages_parsed: 2,
+			total_answer_messages_parsed: 0,
+			total_messages_ignored: 2,
+		});
 	});
 
 	it("parses an answer event and constructs the correct iframe URL", async () => {
@@ -330,7 +489,7 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 	it("ignores blank lines and heartbeat lines", async () => {
 		const storage = makeMockStorage();
 		// Blank line and heartbeat, then a real message
-		const chunk = `\n: heartbeat\ndata: ${JSON.stringify([{ type: "text", content: "hi", metadata: {} }])}\n`;
+		const chunk = `\n: heartbeat\ndata: ${JSON.stringify([{ type: "text", content: "hi", metadata: { format: "markdown" } }])}\n`;
 		const reader = makeReader([chunk]);
 
 		await processSendAgentConversationMessageStreamingResponse(
@@ -404,7 +563,7 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 	it("handles multiple chunks and assembles partial lines across reads correctly", async () => {
 		const storage = makeMockStorage();
 		// Split the data line across two chunks
-		const fullLine = `data: ${JSON.stringify([{ type: "text", content: "split message", metadata: {} }])}`;
+		const fullLine = `data: ${JSON.stringify([{ type: "text", content: "split message", metadata: { format: "markdown" } }])}`;
 		const part1 = fullLine.slice(0, 20);
 		const part2 = `${fullLine.slice(20)}\n`;
 		const reader = makeReader([part1, part2]);
@@ -423,8 +582,8 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 
 	it("processes multiple messages from multiple chunks and stores them in order", async () => {
 		const storage = makeMockStorage();
-		const chunk1 = `data: ${JSON.stringify([{ type: "text", content: "first", metadata: {} }])}\n`;
-		const chunk2 = `data: ${JSON.stringify([{ type: "text-chunk", content: "second", metadata: {} }])}\n`;
+		const chunk1 = `data: ${JSON.stringify([{ type: "text", content: "first", metadata: { format: "markdown" } }])}\n`;
+		const chunk2 = `data: ${JSON.stringify([{ type: "text-chunk", content: "second", metadata: { format: "markdown" } }])}\n`;
 		const reader = makeReader([chunk1, chunk2]);
 
 		await processSendAgentConversationMessageStreamingResponse(
@@ -455,8 +614,8 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 	it("processes multiple events in the same line as a batch", async () => {
 		const storage = makeMockStorage();
 		const items = [
-			{ type: "text", content: "one", metadata: {} },
-			{ type: "text-chunk", content: "two", metadata: {} },
+			{ type: "text", content: "one", metadata: { format: "markdown" } },
+			{ type: "text-chunk", content: "two", metadata: { format: "markdown" } },
 		];
 		const chunk = `data: ${JSON.stringify(items)}\n`;
 		const reader = makeReader([chunk]);
