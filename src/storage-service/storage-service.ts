@@ -43,8 +43,14 @@ export class StorageServiceClient {
 	// sessions.
 	private static readonly ACTIVE_ORG_ID = "__active_org__";
 
-	/** Read the user's active org id, or null if none has been set. */
-	async getActiveOrg(): Promise<string | null> {
+	/**
+	 * Read the user's active org id and its (lazily-minted, shared) org token.
+	 * Either may be null: no active org set, or no token minted yet.
+	 */
+	async getActiveOrg(): Promise<{
+		activeOrgId: string | null;
+		orgToken: string | null;
+	}> {
 		const id = StorageServiceClient.ACTIVE_ORG_ID;
 		const response = await this.stubFor(id).fetch(this.url(id, "active-org"), {
 			method: "GET",
@@ -54,11 +60,21 @@ export class StorageServiceClient {
 			const body = await response.text();
 			throw new Error(`Failed to get active org (${response.status}): ${body}`);
 		}
-		const data = (await response.json()) as { activeOrgId: string | null };
-		return data.activeOrgId ?? null;
+		const data = (await response.json()) as {
+			activeOrgId: string | null;
+			orgToken: string | null;
+		};
+		return {
+			activeOrgId: data.activeOrgId ?? null,
+			orgToken: data.orgToken ?? null,
+		};
 	}
 
-	/** Persist the user's active org id (shared across their sessions). */
+	/**
+	 * Persist the user's active org id (shared across their sessions). Changing the
+	 * active org clears any stored org token (it belonged to the prior org); the
+	 * token is re-minted lazily on next use.
+	 */
 	async setActiveOrg(activeOrgId: string): Promise<void> {
 		const id = StorageServiceClient.ACTIVE_ORG_ID;
 		const response = await this.stubFor(id).fetch(this.url(id, "active-org"), {
@@ -69,6 +85,79 @@ export class StorageServiceClient {
 		if (!response.ok) {
 			const body = await response.text();
 			throw new Error(`Failed to set active org (${response.status}): ${body}`);
+		}
+	}
+
+	/**
+	 * Persist a lazily-minted org token for the current active org, so other
+	 * sessions/DOs reuse it instead of re-minting. Passing an empty string clears
+	 * the stored token (used to evict a stale org token before re-minting).
+	 */
+	async setActiveOrgToken(orgToken: string): Promise<void> {
+		const id = StorageServiceClient.ACTIVE_ORG_ID;
+		const response = await this.stubFor(id).fetch(
+			this.url(id, "active-org-token"),
+			{
+				method: "POST",
+				headers: this.headers(),
+				body: JSON.stringify({ orgToken: orgToken || null }),
+			},
+		);
+		if (!response.ok) {
+			const body = await response.text();
+			throw new Error(
+				`Failed to set active org token (${response.status}): ${body}`,
+			);
+		}
+	}
+
+	/**
+	 * Read the keep-warm TS access token (kept fresh by the DO alarm). Returns null
+	 * if no token store has been seeded yet. Lives on the same per-user instance as
+	 * the active org.
+	 */
+	async getTokenStore(): Promise<{
+		accessToken: string | null;
+		expiresAt: number | null;
+	}> {
+		const id = StorageServiceClient.ACTIVE_ORG_ID;
+		const response = await this.stubFor(id).fetch(this.url(id, "token-store"), {
+			method: "GET",
+			headers: this.headers(),
+		});
+		if (!response.ok) {
+			const body = await response.text();
+			throw new Error(
+				`Failed to get token store (${response.status}): ${body}`,
+			);
+		}
+		return (await response.json()) as {
+			accessToken: string | null;
+			expiresAt: number | null;
+		};
+	}
+
+	/**
+	 * Seed the keep-warm token store and arm the refresh alarm. Idempotent: safe to
+	 * call on every connect; it updates the tokens and only arms the alarm once.
+	 */
+	async seedTokenStore(store: {
+		accessToken: string;
+		refreshToken: string;
+		instanceUrl: string;
+		expiresAt?: number;
+	}): Promise<void> {
+		const id = StorageServiceClient.ACTIVE_ORG_ID;
+		const response = await this.stubFor(id).fetch(this.url(id, "token-store"), {
+			method: "POST",
+			headers: this.headers(),
+			body: JSON.stringify(store),
+		});
+		if (!response.ok) {
+			const body = await response.text();
+			throw new Error(
+				`Failed to seed token store (${response.status}): ${body}`,
+			);
 		}
 	}
 

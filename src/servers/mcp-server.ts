@@ -11,9 +11,13 @@ import {
 	type MetricsRecorder,
 	NOOP_METRICS_RECORDER,
 } from "../metrics/runtime/metrics-recorder";
+import type { MetricAnalyticsContext } from "../metrics/runtime/metrics-sink";
 import type { ToolMetricApiSurface } from "../metrics/runtime/tool-metrics";
 import { WithSpan } from "../metrics/tracing/tracing-utils";
-import type { DataSource } from "../thoughtspot/thoughtspot-service";
+import type {
+	DataSource,
+	ThoughtSpotService,
+} from "../thoughtspot/thoughtspot-service";
 import type { Answer, StreamingMessagesState } from "../thoughtspot/types";
 import { McpServerError } from "../utils";
 import { BaseMCPServer, type Context } from "./mcp-server-base";
@@ -42,12 +46,29 @@ export class MCPServer extends BaseMCPServer {
 	// active-org/token accessors; the durable source of truth is the store.
 	private activeOrgId: string | undefined;
 
-	// Org-scoped bearer tokens, keyed by org id. In-memory only (runtime-derived,
-	// not identity); re-minted as needed.
-	private orgBearerTokens: Record<string, string> = {};
+	// In-memory mirror of the active org's bearer token, loaded from the shared
+	// store alongside activeOrgId. The org token lives in the shared store (not a
+	// per-DO map) so it is minted ONCE and reused across all of the user's
+	// fanned-out MCP sessions/DOs — avoiding a mint call per fanned-out request
+	// (important for clients like ChatGPT that open a new session per tool call).
+	private activeOrgToken: string | undefined;
+
+	// In-memory copy of the keep-warm global token loaded from the token store on
+	// connect. The token store (refreshed by a DO alarm) is the source of truth so
+	// the token survives the ~24h expiry even while the user is absent; props is
+	// only the login-time seed/fallback.
+	private warmGlobalToken: string | undefined;
 
 	constructor(ctx: Context) {
 		super(ctx, "ThoughtSpot", "2.0.0");
+	}
+
+	/**
+	 * The global (cluster-wide) token to use: the keep-warm token from the token
+	 * store if loaded, else the login-time token from props.
+	 */
+	private getGlobalToken(): string {
+		return this.warmGlobalToken ?? this.ctx.props.accessToken;
 	}
 
 	/**
@@ -63,23 +84,22 @@ export class MCPServer extends BaseMCPServer {
 	 * fall back to the session's global access token (from props/grant).
 	 */
 	protected getActiveBearerToken(): string {
-		const orgToken = this.activeOrgId
-			? this.orgBearerTokens[this.activeOrgId]
-			: undefined;
-		return orgToken ?? this.ctx.props.accessToken;
+		const orgToken = this.activeOrgId ? this.activeOrgToken : undefined;
+		return orgToken ?? this.getGlobalToken();
 	}
 
 	/**
-	 * Load the active org from the shared per-user store into the in-memory mirror.
-	 * Keyed by the storage-key hash (refresh-token based), so a switch made in any
-	 * of the user's MCP sessions is visible here.
+	 * Load the active org (id + org token) from the shared per-user store into the
+	 * in-memory mirrors. Keyed by the storage-key hash (refresh-token based), so a
+	 * switch made in any of the user's MCP sessions is visible here.
 	 */
 	private async loadActiveOrg(): Promise<void> {
 		const storage = await this.getStorageService();
 		const stored = await storage.getActiveOrg();
 		// Always reflect the store (including back to undefined if cleared), since
 		// the value may have changed in another of the user's sessions/DOs.
-		this.activeOrgId = stored ?? undefined;
+		this.activeOrgId = stored.activeOrgId ?? undefined;
+		this.activeOrgToken = stored.orgToken ?? undefined;
 	}
 
 	/**
@@ -98,52 +118,237 @@ export class MCPServer extends BaseMCPServer {
 	 */
 	private async setActiveOrg(orgId: string): Promise<void> {
 		this.activeOrgId = orgId;
+		// Changing the active org invalidates any held org token; it is re-minted
+		// lazily on next use. setActiveOrg also clears the stored token (DO route).
+		this.activeOrgToken = undefined;
 		const storage = await this.getStorageService();
 		await storage.setActiveOrg(orgId);
 	}
 
 	/**
-	 * Ensure we hold an org-scoped bearer token for `orgId`: reuse the in-memory
-	 * one, or mint a new one from the global access token. Returns the org token.
+	 * Ensure we hold an org-scoped bearer token for the active `orgId`. If the
+	 * shared store already has one (minted by this or another fanned-out session),
+	 * reuse it. Otherwise mint from the keep-warm global token and persist it to the
+	 * shared store so other sessions/DOs reuse it instead of re-minting. Returns the
+	 * org token.
 	 */
 	private async ensureOrgToken(
 		orgId: string,
 		recorder?: MetricsRecorder,
 	): Promise<string> {
-		const cached = this.orgBearerTokens[orgId];
-		if (cached) {
-			return cached;
+		// Reuse the token already loaded for this org (from the shared store).
+		if (this.activeOrgId === orgId && this.activeOrgToken) {
+			return this.activeOrgToken;
 		}
+		// Mint from the keep-warm global token so it works even after the login-time
+		// token would have expired.
+		const globalToken = this.getGlobalToken();
 		const orgToken = await this.getThoughtSpotServiceWithToken(
-			this.ctx.props.accessToken,
+			globalToken,
 			undefined,
 			recorder,
-		).fetchOrgBearerToken(this.ctx.props.accessToken, orgId);
-		this.orgBearerTokens[orgId] = orgToken;
+		).fetchOrgBearerToken(globalToken, orgId);
+		this.activeOrgToken = orgToken;
+		// Persist to the shared store so the fan-out reuses it (one mint, not N).
+		const storage = await this.getStorageService();
+		await storage.setActiveOrgToken(orgToken);
 		return orgToken;
 	}
 
 	/**
-	 * On connect: load the active org from the shared per-user store. If one is
-	 * stored (the user switched in this or another session), mint its token so
-	 * subsequent calls are scoped to it. If none is stored, do NOT write one — the
-	 * absence means "no explicit switch", and calls fall back to the global token /
-	 * the cluster-resolved default org. Best-effort: failures must not break the
-	 * connection. Only OAuth sessions can mint org tokens, so this is a no-op
-	 * otherwise.
+	 * Whether an error (thrown Error, or an `{ error }` result returned by a
+	 * service method) carries a 401/unauthorized signal. ThoughtSpot client
+	 * methods throw `Error`s whose message embeds the HTTP status (e.g.
+	 * "... failed with status 401: ..."); some service methods catch that and
+	 * return it nested under `error`. We sniff both shapes for the status code.
+	 */
+	private isUnauthorizedError(value: unknown): boolean {
+		const message =
+			value instanceof Error
+				? value.message
+				: typeof (value as { error?: { message?: string } } | null)?.error
+							?.message === "string"
+					? (value as { error: { message: string } }).error.message
+					: "";
+		return /status 401\b/.test(message) || /\b401\b/.test(message);
+	}
+
+	/**
+	 * Drop the active org's token (in memory and in the shared store) and mint a
+	 * fresh one from the keep-warm global token. Used to recover from a stale
+	 * org token: org-scoped tokens have a 30-day validity, so a user returning to
+	 * a previously-selected org after a long absence can hit a 401 with no other
+	 * recovery path than re-switching. This re-mints transparently instead.
+	 */
+	private async forceRemintOrgToken(
+		orgId: string,
+		recorder?: MetricsRecorder,
+	): Promise<void> {
+		this.activeOrgToken = undefined;
+		// Clear the shared store too, so other fanned-out sessions don't keep
+		// reusing the stale token. ensureOrgToken re-persists the fresh one.
+		try {
+			const storage = await this.getStorageService();
+			await storage.setActiveOrgToken("");
+		} catch (error) {
+			// Best-effort: a failed clear must not block the re-mint+retry.
+			console.error("Failed to clear stale org token in store:", error);
+		}
+		await this.ensureOrgToken(orgId, recorder);
+	}
+
+	/**
+	 * Run an org-scoped ThoughtSpot call with a single reactive re-mint on a stale
+	 * org token. `fn` receives a freshly-bound service (so the retry picks up the
+	 * re-minted token). If the first attempt fails with a 401 AND an org token was
+	 * actually in use, we re-mint that org's token once and retry. All other
+	 * failures — and the case where no org token is active (so the global token is
+	 * what 401'd) — pass straight through unchanged.
+	 *
+	 * Covers both error shapes: methods that throw, and methods that return an
+	 * `{ error }` result. The retry triggers on either.
+	 */
+	protected async withOrgTokenRetry<T>(
+		recorder: MetricsRecorder | undefined,
+		fn: (service: ThoughtSpotService) => Promise<T>,
+		analyticsContextOverride?: MetricAnalyticsContext,
+	): Promise<T> {
+		const orgId = this.activeOrgId;
+		const usedOrgToken = Boolean(orgId && this.activeOrgToken);
+
+		const attempt = () =>
+			fn(this.getThoughtSpotService(recorder, analyticsContextOverride));
+
+		// Only org-token calls are eligible for re-mint. If no org token is in use,
+		// a 401 is about the global token (a different concern) — pass through.
+		if (!usedOrgToken || !orgId) {
+			return attempt();
+		}
+
+		try {
+			const result = await attempt();
+			// Methods that swallow the 401 into an `{ error }` result: re-mint+retry
+			// once if that's what we got.
+			if (this.isUnauthorizedError(result)) {
+				await this.forceRemintOrgToken(orgId, recorder);
+				return attempt();
+			}
+			return result;
+		} catch (error) {
+			if (this.isUnauthorizedError(error)) {
+				await this.forceRemintOrgToken(orgId, recorder);
+				return attempt();
+			}
+			throw error;
+		}
+	}
+
+	/**
+	 * validateConnection swallows a 401 into a `false` return (no throw, no
+	 * `{ error }`), so withOrgTokenRetry can't see the auth failure. Handle it
+	 * directly: if the check fails WHILE an org token is in use, re-mint that
+	 * org's token once and re-validate — a stale org token is the most likely
+	 * cause of a false negative here.
+	 */
+	private async validateConnectionWithOrgRetry(
+		recorder?: MetricsRecorder,
+	): Promise<boolean> {
+		const orgId = this.activeOrgId;
+		const usedOrgToken = Boolean(orgId && this.activeOrgToken);
+		const ok = await this.getThoughtSpotService(recorder).validateConnection();
+		if (ok || !usedOrgToken || !orgId) {
+			return ok;
+		}
+		await this.forceRemintOrgToken(orgId, recorder);
+		return this.getThoughtSpotService(recorder).validateConnection();
+	}
+
+	/**
+	 * On connect:
+	 * 1. Always seed + keep warm the cluster-wide (global) token. This is org
+	 *    agnostic: on a non-org cluster it is the only token, and on an org cluster
+	 *    it is the basis for minting org-scoped tokens. Runs regardless of orgs.
+	 * 2. If (and only if) Orgs are enabled on the cluster, establish the active
+	 *    org and mint its org-scoped token. On a non-org cluster we read no org
+	 *    info from session info and attach no org header — calls just use the
+	 *    cluster-wide token.
+	 *
+	 * Active-org rule when orgs are enabled: a prior switch (stored in the shared
+	 * per-user store) wins; otherwise default to the session's current org.
+	 * Best-effort: failures must not break the connection. Only OAuth sessions
+	 * carry a cluster-wide token that can mint tokens, so this is a no-op otherwise.
 	 */
 	protected async postInit(): Promise<void> {
 		if (!this.isOAuthAuth()) {
 			return;
 		}
+		// Always: keep the cluster-wide token warm (org-agnostic).
+		try {
+			await this.loadOrSeedWarmToken();
+		} catch (error) {
+			console.error("Failed to load/seed keep-warm token on connect:", error);
+		}
+
+		// Org overlay: only when Orgs are enabled on this cluster. On a non-org
+		// cluster we skip all org logic — no active org, no org-scoped token, no
+		// x-thoughtspot-orgs header — and calls fall back to the cluster-wide token.
+		if (!this.isOrgsEnabled()) {
+			return;
+		}
 		try {
 			await this.loadActiveOrg();
+			// First connect / nothing stored: default the active org to the session's
+			// current org (set the id; the org token is minted lazily below).
+			if (!this.activeOrgId) {
+				const currentOrgId =
+					this.sessionInfo?.currentOrgId != null
+						? String(this.sessionInfo.currentOrgId)
+						: undefined;
+				if (currentOrgId) {
+					await this.setActiveOrg(currentOrgId);
+				}
+			}
+			// Ensure the active org's token exists in the shared store (mint once,
+			// reused across the fan-out). Runs after the id is set so the token isn't
+			// cleared by setActiveOrg.
 			if (this.activeOrgId) {
 				await this.ensureOrgToken(this.activeOrgId);
 			}
 		} catch (error) {
-			console.error("Failed to load/mint active org on connect:", error);
+			console.error("Failed to set/mint active org on connect:", error);
 		}
+	}
+
+	/**
+	 * Load the keep-warm global token from the per-user token store into memory. If
+	 * the store hasn't been seeded yet (first connect), seed it from the login-time
+	 * props (token + refresh token + expiry) so the DO alarm can keep it fresh, and
+	 * use the props token for this request. The store (alarm-refreshed) is the
+	 * source of truth thereafter, so the token survives the ~24h expiry across an
+	 * absence.
+	 */
+	private async loadOrSeedWarmToken(): Promise<void> {
+		const storage = await this.getStorageService();
+		const store = await storage.getTokenStore();
+		if (store.accessToken) {
+			this.warmGlobalToken = store.accessToken;
+			return;
+		}
+		// Not seeded yet — seed from props if we have both tokens.
+		const { accessToken, refreshToken, tokenExpiryDuration, instanceUrl } =
+			this.ctx.props;
+		if (accessToken && refreshToken) {
+			await storage.seedTokenStore({
+				accessToken,
+				refreshToken,
+				instanceUrl,
+				expiresAt:
+					typeof tokenExpiryDuration === "number"
+						? tokenExpiryDuration
+						: undefined,
+			});
+		}
+		this.warmGlobalToken = accessToken;
 	}
 
 	protected getToolMetricApiSurface(): ToolMetricApiSurface {
@@ -325,7 +530,7 @@ export class MCPServer extends BaseMCPServer {
 		switch (name) {
 			case ToolName.Ping: {
 				if (this.ctx.props.accessToken && this.ctx.props.instanceUrl) {
-					if (!this.getThoughtSpotService(recorder).validateConnection()) {
+					if (!(await this.validateConnectionWithOrgRetry(recorder))) {
 						return this.createErrorResponse(
 							"Failed to validate connection",
 							"Ping failed",
@@ -359,7 +564,7 @@ export class MCPServer extends BaseMCPServer {
 						"Check connectivity failed",
 					);
 				}
-				if (!this.getThoughtSpotService(recorder).validateConnection()) {
+				if (!(await this.validateConnectionWithOrgRetry(recorder))) {
 					return this.createErrorResponse(
 						"Failed to validate connection",
 						"Check connectivity failed",
@@ -431,9 +636,9 @@ export class MCPServer extends BaseMCPServer {
 			sourceIds,
 		);
 
-		const relevantQuestions = await this.getThoughtSpotService(
-			recorder,
-		).getRelevantQuestions(query, sourceIds!, additionalContext ?? "");
+		const relevantQuestions = await this.withOrgTokenRetry(recorder, (svc) =>
+			svc.getRelevantQuestions(query, sourceIds!, additionalContext ?? ""),
+		);
 
 		if (relevantQuestions.error) {
 			console.error(
@@ -481,9 +686,9 @@ export class MCPServer extends BaseMCPServer {
 			request.params.arguments,
 		);
 
-		const answer = await this.getThoughtSpotService(
-			recorder,
-		).getAnswerForQuestion(question, sourceId, false);
+		const answer = await this.withOrgTokenRetry(recorder, (svc) =>
+			svc.getAnswerForQuestion(question, sourceId, false),
+		);
 
 		if (answer.error) {
 			return this.createErrorResponse(
@@ -519,9 +724,9 @@ export class MCPServer extends BaseMCPServer {
 			session_identifier: answer.session_identifier,
 			generation_number: answer.generation_number,
 		}));
-		const liveboard = await this.getThoughtSpotService(
-			recorder,
-		).fetchTMLAndCreateLiveboard(name, transformedAnswers, noteTile);
+		const liveboard = await this.withOrgTokenRetry(recorder, (svc) =>
+			svc.fetchTMLAndCreateLiveboard(name, transformedAnswers, noteTile),
+		);
 
 		if (liveboard.error) {
 			return this.createErrorResponse(
@@ -553,10 +758,9 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 
 		let response: AgentConversation;
 		try {
-			response =
-				await this.getThoughtSpotService(recorder).createAgentConversation(
-					data_source_id,
-				);
+			response = await this.withOrgTokenRetry(recorder, (svc) =>
+				svc.createAgentConversation(data_source_id),
+			);
 		} catch (error) {
 			if (!(error as any)?.message?.includes("failed with status 401")) {
 				throw error;
@@ -611,13 +815,16 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			);
 		}
 
-		await this.getThoughtSpotService(recorder, {
-			analyticalSessionId: analytical_session_id,
-		}).sendAgentConversationMessageStreaming(
-			analytical_session_id,
-			message,
-			storageService.appendMessages.bind(storageService),
-			additional_context,
+		await this.withOrgTokenRetry(
+			recorder,
+			(svc) =>
+				svc.sendAgentConversationMessageStreaming(
+					analytical_session_id,
+					message,
+					storageService.appendMessages.bind(storageService),
+					additional_context,
+				),
+			{ analyticalSessionId: analytical_session_id },
 		);
 
 		return this.createStructuredContentSuccessResponse(
@@ -676,7 +883,6 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			total_session_updates: messagesState.messages.length,
 			is_done: messagesState.isDone,
 		});
-
 		return this.createStructuredContentSuccessResponse(
 			{
 				session_updates: messagesState.messages,
@@ -717,9 +923,9 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			);
 		}
 
-		const liveboard = await this.getThoughtSpotService(
-			recorder,
-		).fetchTMLAndCreateLiveboard(title, transformedAnswers, note_tile);
+		const liveboard = await this.withOrgTokenRetry(recorder, (svc) =>
+			svc.fetchTMLAndCreateLiveboard(title, transformedAnswers, note_tile),
+		);
 
 		if (liveboard.error) {
 			return this.createErrorResponse(
@@ -744,10 +950,9 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		const { query } = GetDataSourceSuggestionsSchema.parse(
 			request.params.arguments,
 		);
-		const dataSources =
-			await this.getThoughtSpotService(recorder).getDataSourceSuggestions(
-				query,
-			);
+		const dataSources = await this.withOrgTokenRetry(recorder, (svc) =>
+			svc.getDataSourceSuggestions(query),
+		);
 
 		if (!dataSources || dataSources.length === 0) {
 			return this.createErrorResponse(
@@ -773,7 +978,16 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 	async callListOrgs(recorder: MetricsRecorder) {
 		const span = trace.getSpan(context.active());
 
-		const orgs = await this.getThoughtSpotService(recorder).searchOrgs();
+		// Listing orgs is a cluster-level (ORG_ADMINISTRATION) operation, not an
+		// org-scoped one: it must use the global/cluster-wide token with NO org
+		// header. An org-scoped token is pinned to a single org and can fail or
+		// under-report when enumerating orgs. (Hence this does not go through
+		// withOrgTokenRetry — there is no org token in play to re-mint.)
+		const orgs = await this.getThoughtSpotServiceWithToken(
+			this.getGlobalToken(),
+			undefined,
+			recorder,
+		).searchOrgs();
 		span?.setAttribute("total_orgs", orgs.length);
 
 		// Read the active org from the shared per-user store (the single source of
@@ -804,9 +1018,11 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		const orgId = String(org_id);
 		span?.setAttribute("requested_org_id", orgId);
 
-		// Mint (or reuse) an org-scoped bearer token for the requested org. No
-		// pre-validation against list_orgs: if the user can't access the org, the
-		// mint returns 401, which we surface as "org not accessible".
+		// Set the active org first (clears any prior org's token), then mint the new
+		// org's token and persist it to the shared store. Minting also validates
+		// access: no pre-validation against list_orgs — if the user can't access the
+		// org, the mint returns 401, surfaced as "org not accessible".
+		await this.setActiveOrg(orgId);
 		try {
 			await this.ensureOrgToken(orgId, recorder);
 		} catch (error) {
@@ -823,7 +1039,6 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			);
 		}
 
-		await this.setActiveOrg(orgId);
 		// Data sources are org-specific; drop the cached set so the next lookup
 		// reflects the newly selected org.
 		this._sources = null;
@@ -846,7 +1061,9 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			return this._sources;
 		}
 
-		const sources = await this.getThoughtSpotService(recorder).getDataSources();
+		const sources = await this.withOrgTokenRetry(recorder, (svc) =>
+			svc.getDataSources(),
+		);
 		this._sources = {
 			list: sources,
 			map: new Map(sources.map((s) => [s.id, s])),

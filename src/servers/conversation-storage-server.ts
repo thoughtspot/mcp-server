@@ -6,10 +6,32 @@ const STORAGE_BATCH_SIZE = 127; // Cloudflare DO bulk get/put limit is 128, we u
 
 const MESSAGE_KEY_PREFIX = "message-";
 const IS_DONE_KEY = "is-done";
-// Storage key for the active org on the per-user active-org DO instance.
+// Storage keys for the active org on the per-user active-org DO instance.
 const ACTIVE_ORG_KEY = "active-org";
+// Org-scoped bearer token for the active org, stored alongside it so it is
+// minted once and shared across all of the user's MCP sessions/DOs (rather than
+// each fanned-out DO re-minting). Cleared when the active org changes.
+const ORG_TOKEN_KEY = "active-org-token";
 const WRITE_BOOKMARK_KEY = "write-bookmark";
 const READ_BOOKMARK_KEY = "read-bookmark";
+
+// Keep-warm token store. Lives on the same per-user instance as the active org
+// (keyed by hash(refreshToken)), NOT on conversation instances. The TS access
+// token can only be refreshed while it is still valid (the refresh call needs a
+// live access token + the refresh token), so we proactively re-mint it on an
+// alarm well before the ~24h expiry. This keeps the token alive even if the user
+// is absent for days.
+const TOKEN_STORE_KEY = "token-store";
+// Refresh interval — comfortably under the ~24h access-token expiry.
+const TOKEN_REFRESH_INTERVAL_MS = 12 * 60 * 60 * 1000; // 12 hours
+
+type TokenStore = {
+	accessToken: string;
+	refreshToken: string;
+	instanceUrl: string;
+	// Absolute epoch-ms expiry of the access token, if known.
+	expiresAt?: number;
+};
 
 /**
  * A Durable Object that stores streaming conversation messages and exposes them over HTTP.
@@ -63,17 +85,63 @@ export class ConversationStorageServerSQLite {
 				// user's MCP sessions. No TTL: it must persist until the user switches
 				// again or reauthenticates (a new login yields a new hash).
 				case "GET /active-org": {
-					const activeOrgId =
-						(await this.state.storage.get<string>(ACTIVE_ORG_KEY)) ?? null;
-					return Response.json({ activeOrgId });
+					const [activeOrgId, orgToken] = await Promise.all([
+						this.state.storage.get<string>(ACTIVE_ORG_KEY),
+						this.state.storage.get<string>(ORG_TOKEN_KEY),
+					]);
+					return Response.json({
+						activeOrgId: activeOrgId ?? null,
+						orgToken: orgToken ?? null,
+					});
 				}
 
+				// Set the active org. Changing the org always invalidates the stored
+				// org token (it belongs to the previous org) unless an explicit
+				// orgToken is provided in the same write.
 				case "POST /active-org": {
-					const body = (await request.json()) as { activeOrgId: string };
+					const body = (await request.json()) as {
+						activeOrgId: string;
+						orgToken?: string | null;
+					};
 					await this.state.storage.put<string>(
 						ACTIVE_ORG_KEY,
 						body.activeOrgId,
 					);
+					if (body.orgToken) {
+						await this.state.storage.put<string>(ORG_TOKEN_KEY, body.orgToken);
+					} else {
+						await this.state.storage.delete(ORG_TOKEN_KEY);
+					}
+					return Response.json({ ok: true });
+				}
+
+				// Persist a lazily-minted org token for the current active org without
+				// changing the active org id. An empty/missing token clears the stored
+				// token (used to evict a stale org token before re-minting).
+				case "POST /active-org-token": {
+					const body = (await request.json()) as { orgToken?: string | null };
+					if (body.orgToken) {
+						await this.state.storage.put<string>(ORG_TOKEN_KEY, body.orgToken);
+					} else {
+						await this.state.storage.delete(ORG_TOKEN_KEY);
+					}
+					return Response.json({ ok: true });
+				}
+
+				// Keep-warm token store. GET returns the current (alarm-refreshed) TS
+				// token; POST seeds it and arms the refresh alarm if not already armed.
+				case "GET /token-store": {
+					const store =
+						(await this.state.storage.get<TokenStore>(TOKEN_STORE_KEY)) ?? null;
+					return Response.json({
+						accessToken: store?.accessToken ?? null,
+						expiresAt: store?.expiresAt ?? null,
+					});
+				}
+
+				case "POST /token-store": {
+					const body = (await request.json()) as TokenStore;
+					await this.seedTokenStore(body);
 					return Response.json({ ok: true });
 				}
 
@@ -218,7 +286,84 @@ export class ConversationStorageServerSQLite {
 		await this.state.storage.setAlarm(Date.now() + DEFAULT_TTL_MS);
 	}
 
+	/*
+	 * Seed the keep-warm token store and arm the refresh alarm if it isn't already
+	 * armed. Idempotent: re-seeding updates the tokens but won't stack alarms.
+	 */
+	private async seedTokenStore(store: TokenStore): Promise<void> {
+		await this.state.storage.put<TokenStore>(TOKEN_STORE_KEY, store);
+		const existingAlarm = await this.state.storage.getAlarm();
+		if (existingAlarm == null) {
+			await this.state.storage.setAlarm(Date.now() + TOKEN_REFRESH_INTERVAL_MS);
+		}
+	}
+
+	/*
+	 * Refresh the stored TS access token using the still-valid access token plus
+	 * the refresh token (gettoken?refresh=true with X-Refresh-Token). Persists the
+	 * new token and re-arms the alarm. On failure, clears the store so callers fall
+	 * back to the grant token / re-auth, and does NOT re-arm (chain stops).
+	 */
+	private async refreshTokenStore(): Promise<void> {
+		const store = await this.state.storage.get<TokenStore>(TOKEN_STORE_KEY);
+		if (!store) {
+			return; // nothing to refresh
+		}
+		try {
+			const response = await fetch(
+				`${store.instanceUrl}/callosum/v1/session/v2/gettoken?refresh=true`,
+				{
+					method: "GET",
+					headers: {
+						"Content-Type": "application/json",
+						Accept: "application/json",
+						"user-agent": "ThoughtSpot-ts-client",
+						Authorization: `Bearer ${store.accessToken}`,
+						"X-Refresh-Token": store.refreshToken,
+					},
+				},
+			);
+			if (!response.ok) {
+				const text = await response.text();
+				throw new Error(`status ${response.status}: ${text}`);
+			}
+			const data = (await response.json()) as any;
+			const accessToken = data?.token ?? data?.data?.token;
+			if (!accessToken || typeof accessToken !== "string") {
+				throw new Error("no token in refresh response");
+			}
+			const refreshToken =
+				data?.refreshToken ?? data?.data?.refreshToken ?? store.refreshToken;
+			const expiresAt =
+				data?.tokenExpiryDuration ?? data?.data?.tokenExpiryDuration;
+			await this.state.storage.put<TokenStore>(TOKEN_STORE_KEY, {
+				accessToken,
+				refreshToken,
+				instanceUrl: store.instanceUrl,
+				expiresAt: typeof expiresAt === "number" ? expiresAt : undefined,
+			});
+			// Re-arm for the next refresh.
+			await this.state.storage.setAlarm(Date.now() + TOKEN_REFRESH_INTERVAL_MS);
+		} catch (error) {
+			console.error(
+				"Token keep-warm refresh failed; stopping refresh chain:",
+				error instanceof Error ? error.message : String(error),
+			);
+			// Stop the chain — the token can no longer be refreshed (the user must
+			// re-authenticate). Leave the (now-stale) store so reads still fall back.
+		}
+	}
+
 	async alarm(): Promise<void> {
+		// The active-org/token-store instance owns a keep-warm token refresh alarm;
+		// it must NOT run the conversation-cleanup path (which deletes all storage).
+		const tokenStore =
+			await this.state.storage.get<TokenStore>(TOKEN_STORE_KEY);
+		if (tokenStore) {
+			await this.refreshTokenStore();
+			return;
+		}
+
 		// Check for any abnormalities in the state prior to deleting
 		const [isDone, readBookmark, writeBookmark] =
 			await this.getIsDoneAndReadWriteBookmarks();

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderTokenCallback } from "../../src/oauth-manager/token-utils";
 
 // Import the actual static file content directly

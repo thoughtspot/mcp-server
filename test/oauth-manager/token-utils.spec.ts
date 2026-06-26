@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { renderTokenCallback } from "../../src/oauth-manager/token-utils";
 
 describe("Token Utils", () => {
