@@ -997,16 +997,15 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 	async callListOrgs(recorder: MetricsRecorder) {
 		const span = trace.getSpan(context.active());
 
-		// Listing orgs is a cluster-level (ORG_ADMINISTRATION) operation, not an
-		// org-scoped one: it must use the global/cluster-wide token with NO org
-		// header. An org-scoped token is pinned to a single org and can fail or
-		// under-report when enumerating orgs. (Hence this does not go through
-		// withOrgTokenRetry — there is no org token in play to re-mint.)
+		// List the user's own orgs via the user-scoped v1 session/orgs endpoint
+		// (NOT the admin orgs/search, which 403s for non-admins). It is authenticated
+		// with the global/cluster-wide token and sends no org header, so it does not
+		// go through withOrgTokenRetry — there is no org token in play to re-mint.
 		const orgs = await this.getThoughtSpotServiceWithToken(
 			this.getGlobalToken(),
 			undefined,
 			recorder,
-		).searchOrgs();
+		).listOrgs();
 		span?.setAttribute("total_orgs", orgs.length);
 
 		// Read the active org from the shared per-user store (the single source of

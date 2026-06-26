@@ -85,6 +85,7 @@ function makeClientMock(opts: {
 	orgs?: Array<{ id: number; name: string; status: string }>;
 	fetchOrgBearerToken?: ReturnType<typeof vi.fn>;
 	searchOrgs?: ReturnType<typeof vi.fn>;
+	listOrgs?: ReturnType<typeof vi.fn>;
 	validateConnection?: ReturnType<typeof vi.fn>;
 }) {
 	const orgsConfiguration =
@@ -120,6 +121,16 @@ function makeClientMock(opts: {
 					{ id: 101, name: "DataPlatform", status: "ACTIVE" },
 				],
 			),
+		// list_orgs uses the user-scoped client.listOrgs() (v1 session/orgs),
+		// returning already-mapped Org[] ({ id, name, description }).
+		listOrgs:
+			opts.listOrgs ??
+			vi.fn().mockResolvedValue(
+				opts.orgs ?? [
+					{ id: 0, name: "Primary", description: "Primary" },
+					{ id: 101, name: "DataPlatform" },
+				],
+			),
 		fetchOrgBearerToken:
 			opts.fetchOrgBearerToken ?? vi.fn().mockResolvedValue("org-scoped-token"),
 		validateConnection:
@@ -136,6 +147,7 @@ function makeServer(opts: {
 	tokenStore?: Map<string, any>;
 	fetchOrgBearerToken?: ReturnType<typeof vi.fn>;
 	searchOrgs?: ReturnType<typeof vi.fn>;
+	listOrgs?: ReturnType<typeof vi.fn>;
 	validateConnection?: ReturnType<typeof vi.fn>;
 	touchLog?: string[];
 }) {

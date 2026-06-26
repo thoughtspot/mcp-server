@@ -1876,6 +1876,28 @@ describe("thoughtspot-service", () => {
 		});
 	});
 
+	describe("listOrgs", () => {
+		it("delegates to client.listOrgs and returns the user's orgs", async () => {
+			mockClient.listOrgs = vi.fn().mockResolvedValue([
+				{ id: 0, name: "Primary", description: "P" },
+				{ id: 101, name: "DataPlatform" },
+			]);
+			const service = new ThoughtSpotService(mockClient);
+			const orgs = await service.listOrgs();
+			expect(mockClient.listOrgs).toHaveBeenCalled();
+			expect(orgs).toEqual([
+				{ id: 0, name: "Primary", description: "P" },
+				{ id: 101, name: "DataPlatform" },
+			]);
+		});
+
+		it("tolerates a nullish upstream response", async () => {
+			mockClient.listOrgs = vi.fn().mockResolvedValue(undefined);
+			const service = new ThoughtSpotService(mockClient);
+			await expect(service.listOrgs()).resolves.toEqual([]);
+		});
+	});
+
 	describe("fetchOrgBearerToken", () => {
 		it("delegates to the client with the access token and org id", async () => {
 			mockClient.fetchOrgBearerToken = vi

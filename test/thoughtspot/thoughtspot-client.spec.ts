@@ -991,4 +991,54 @@ mutation GetUnsavedAnswerTML($session: BachSessionIdInput!, $exportDependencies:
 			).rejects.toThrow(/no token/);
 		});
 	});
+
+	describe("listOrgs (user-scoped org membership)", () => {
+		function makeClient() {
+			return getThoughtSpotClient(mockInstanceUrl, mockBearerToken) as any;
+		}
+
+		it("calls the v1 session/orgs endpoint and maps orgId/orgName/description", async () => {
+			(global.fetch as any).mockResolvedValue(
+				new Response(
+					JSON.stringify({
+						orgs: [
+							{ orgId: 0, orgName: "Primary", description: "Primary org" },
+							{ orgId: 101, orgName: "DataPlatform" },
+						],
+						currentOrgId: 0,
+					}),
+					{ status: 200 },
+				),
+			);
+			const client = makeClient();
+			const orgs = await client.listOrgs();
+
+			const [url, init] = (global.fetch as any).mock.calls[0];
+			// User-scoped v1 endpoint, NOT the admin orgs/search.
+			expect(url).toContain("/callosum/v1/session/orgs");
+			expect(url).not.toContain("orgs/search");
+			expect(init.method).toBe("GET");
+			expect(init.headers.Authorization).toBe(`Bearer ${mockBearerToken}`);
+			expect(orgs).toEqual([
+				{ id: 0, name: "Primary", description: "Primary org" },
+				{ id: 101, name: "DataPlatform", description: undefined },
+			]);
+		});
+
+		it("returns an empty list when the response has no orgs array", async () => {
+			(global.fetch as any).mockResolvedValue(
+				new Response(JSON.stringify({ currentOrgId: 0 }), { status: 200 }),
+			);
+			const client = makeClient();
+			await expect(client.listOrgs()).resolves.toEqual([]);
+		});
+
+		it("throws (with status) on a non-OK response — e.g. an unexpected 403", async () => {
+			(global.fetch as any).mockResolvedValue(
+				new Response("Operation is not allowed", { status: 403 }),
+			);
+			const client = makeClient();
+			await expect(client.listOrgs()).rejects.toThrow(/status 403/);
+		});
+	});
 });

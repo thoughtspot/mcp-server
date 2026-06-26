@@ -10,7 +10,7 @@ import type {
 import { customAlphabet } from "nanoid";
 import { of } from "rxjs";
 import YAML from "yaml";
-import type { SessionInfo } from "./types";
+import type { Org, SessionInfo } from "./types";
 
 /*
  * Inject custom handlers into the ThoughtSpot client
@@ -64,6 +64,7 @@ export const getThoughtSpotClient = (
 	);
 	addGetRefreshedToken(client, instanceUrl);
 	addFetchOrgBearerToken(client, instanceUrl);
+	addListOrgs(client, instanceUrl, bearerToken);
 	return client;
 };
 
@@ -400,6 +401,38 @@ function addGetRefreshedToken(client: any, instanceUrl: string) {
 			refreshToken:
 				typeof newRefreshToken === "string" ? newRefreshToken : undefined,
 		};
+	};
+}
+
+/*
+ * Lists the orgs the authenticated user is a member of, via the v1 session orgs
+ * endpoint. We deliberately avoid the v2 orgs/search REST endpoint because it
+ * requires ORG_ADMINISTRATION and returns 403 ("Operation is not allowed") for
+ * regular (non-admin) users. This endpoint is user-scoped and available to any
+ * user; it returns { orgs: [{ orgId, orgName, description, isActive }], ... }.
+ */
+function addListOrgs(client: any, instanceUrl: string, token: string) {
+	(client as any).listOrgs = async (): Promise<Org[]> => {
+		const endpoint = "/callosum/v1/session/orgs?batchsize=-1&offset=-1";
+		const response = await fetch(`${instanceUrl}${endpoint}`, {
+			method: "GET",
+			headers: buildHeaders(token),
+		});
+
+		if (!response.ok) {
+			const errorText = await response.text();
+			throw new Error(
+				`listOrgs failed with status ${response.status}: ${errorText}`,
+			);
+		}
+
+		const data = (await response.json()) as any;
+		const orgs: any[] = Array.isArray(data?.orgs) ? data.orgs : [];
+		return orgs.map((org) => ({
+			id: Number(org.orgId ?? org.id),
+			name: org.orgName ?? org.name ?? String(org.orgId ?? org.id),
+			description: org.description || undefined,
+		}));
 	};
 }
 

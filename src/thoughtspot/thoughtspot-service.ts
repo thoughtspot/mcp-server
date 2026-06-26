@@ -754,6 +754,22 @@ export class ThoughtSpotService {
 	}
 
 	/**
+	 * List the orgs the authenticated user is a member of, via the user-scoped v1
+	 * session orgs endpoint. Unlike searchOrgs (admin-only orgs/search, 403 for
+	 * regular users), this works for any user, so it is what list_orgs uses.
+	 */
+	async listOrgs(): Promise<Org[]> {
+		const span = getActiveSpan();
+		const orgs = (await this.observeUpstreamCall(
+			UPSTREAM_OPERATION_NAMES.listOrgs,
+			() => (this.client as any).listOrgs(),
+		)) as Org[] | undefined;
+		const results: Org[] = orgs ?? [];
+		span?.setAttribute("results_count", results.length);
+		return results;
+	}
+
+	/**
 	 * Fetch a fresh (cluster-wide) access token via gettoken with refresh=true,
 	 * authenticated with the given bearer token.
 	 */
