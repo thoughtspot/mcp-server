@@ -22,8 +22,17 @@ const READ_BOOKMARK_KEY = "read-bookmark";
 // alarm well before the ~24h expiry. This keeps the token alive even if the user
 // is absent for days.
 const TOKEN_STORE_KEY = "token-store";
-// Refresh interval — comfortably under the ~24h access-token expiry.
-const TOKEN_REFRESH_INTERVAL_MS = 12 * 60 * 60 * 1000; // 12 hours
+// Refresh interval. The TS access token expires at ~24h; refreshing at 11h means
+// that if one refresh fails, the NEXT regular alarm (another 11h later, at ~22h
+// elapsed) still fires before the 24h expiry — i.e. the 11h cadence builds in a
+// second attempt without any special backoff logic. The alarm therefore re-arms
+// on failure too (not just success).
+const TOKEN_REFRESH_INTERVAL_MS = 11 * 60 * 60 * 1000; // 11 hours
+// If the user has not made a tool call for this long, the keep-warm session is
+// abandoned: we stop refreshing and delete the token + active-org state, so the
+// user re-authenticates on their next use (and we stop spending refresh calls on
+// a user who is gone). Caps the per-user keep-warm cost at ~14 days of absence.
+const SESSION_IDLE_TTL_MS = 14 * 24 * 60 * 60 * 1000; // 14 days
 
 type TokenStore = {
 	accessToken: string;
@@ -31,6 +40,9 @@ type TokenStore = {
 	instanceUrl: string;
 	// Absolute epoch-ms expiry of the access token, if known.
 	expiresAt?: number;
+	// Absolute epoch-ms of the user's last tool call (activity). Used to abandon
+	// the keep-warm session after SESSION_IDLE_TTL_MS of inactivity.
+	lastSeenAt?: number;
 };
 
 /**
@@ -142,6 +154,14 @@ export class ConversationStorageServerSQLite {
 				case "POST /token-store": {
 					const body = (await request.json()) as TokenStore;
 					await this.seedTokenStore(body);
+					return Response.json({ ok: true });
+				}
+
+				// Record user activity (called on each tool call) so the keep-warm
+				// alarm can abandon idle sessions. Throttled to one write per hour to
+				// avoid a storage write on every fanned-out call.
+				case "POST /touch": {
+					await this.touchLastSeen();
 					return Response.json({ ok: true });
 				}
 
@@ -291,7 +311,13 @@ export class ConversationStorageServerSQLite {
 	 * armed. Idempotent: re-seeding updates the tokens but won't stack alarms.
 	 */
 	private async seedTokenStore(store: TokenStore): Promise<void> {
-		await this.state.storage.put<TokenStore>(TOKEN_STORE_KEY, store);
+		// Seeding is itself user activity (it happens on connect), so stamp
+		// lastSeenAt now if the caller didn't provide one.
+		const toStore: TokenStore = {
+			...store,
+			lastSeenAt: store.lastSeenAt ?? Date.now(),
+		};
+		await this.state.storage.put<TokenStore>(TOKEN_STORE_KEY, toStore);
 		const existingAlarm = await this.state.storage.getAlarm();
 		if (existingAlarm == null) {
 			await this.state.storage.setAlarm(Date.now() + TOKEN_REFRESH_INTERVAL_MS);
@@ -299,16 +325,65 @@ export class ConversationStorageServerSQLite {
 	}
 
 	/*
+	 * Record that the user just made a tool call, for idle-session detection.
+	 * Throttled: only persists when the stored lastSeenAt is more than an hour old,
+	 * so rapid fanned-out calls don't each incur a storage write. No-op if no
+	 * token store exists (nothing to keep warm).
+	 */
+	private async touchLastSeen(): Promise<void> {
+		const store = await this.state.storage.get<TokenStore>(TOKEN_STORE_KEY);
+		if (!store) {
+			return;
+		}
+		const now = Date.now();
+		const THROTTLE_MS = 60 * 60 * 1000; // 1 hour
+		if (store.lastSeenAt && now - store.lastSeenAt < THROTTLE_MS) {
+			return;
+		}
+		await this.state.storage.put<TokenStore>(TOKEN_STORE_KEY, {
+			...store,
+			lastSeenAt: now,
+		});
+	}
+
+	/*
 	 * Refresh the stored TS access token using the still-valid access token plus
 	 * the refresh token (gettoken?refresh=true with X-Refresh-Token). Persists the
-	 * new token and re-arms the alarm. On failure, clears the store so callers fall
-	 * back to the grant token / re-auth, and does NOT re-arm (chain stops).
+	 * new token and re-arms the alarm.
+	 *
+	 * Two behaviors guard the long-running chain:
+	 *  - Idle abandonment: if the user hasn't made a tool call in
+	 *    SESSION_IDLE_TTL_MS (14d), delete the keep-warm token + active-org state
+	 *    and stop the chain. The user re-authenticates on their next use, and we
+	 *    stop spending refresh calls on a user who is gone.
+	 *  - Re-arm on failure: a refresh failure re-arms the alarm anyway (rather than
+	 *    stopping). Because the interval is 11h and the token lives ~24h, the next
+	 *    alarm (~22h elapsed) still fires before expiry — a built-in second
+	 *    attempt without bespoke backoff.
 	 */
 	private async refreshTokenStore(): Promise<void> {
 		const store = await this.state.storage.get<TokenStore>(TOKEN_STORE_KEY);
 		if (!store) {
 			return; // nothing to refresh
 		}
+
+		// Abandon the session if the user has been idle past the TTL: delete the
+		// keep-warm token AND the active-org state, and do NOT re-arm.
+		if (
+			store.lastSeenAt != null &&
+			Date.now() - store.lastSeenAt >= SESSION_IDLE_TTL_MS
+		) {
+			console.log(
+				"Keep-warm session idle past TTL; deleting token + active-org state and stopping refresh",
+			);
+			await this.state.storage.delete([
+				TOKEN_STORE_KEY,
+				ACTIVE_ORG_KEY,
+				ORG_TOKEN_KEY,
+			]);
+			return;
+		}
+
 		try {
 			const response = await fetch(
 				`${store.instanceUrl}/callosum/v1/session/v2/gettoken?refresh=true`,
@@ -341,16 +416,21 @@ export class ConversationStorageServerSQLite {
 				refreshToken,
 				instanceUrl: store.instanceUrl,
 				expiresAt: typeof expiresAt === "number" ? expiresAt : undefined,
+				// Preserve activity tracking across refreshes.
+				lastSeenAt: store.lastSeenAt,
 			});
 			// Re-arm for the next refresh.
 			await this.state.storage.setAlarm(Date.now() + TOKEN_REFRESH_INTERVAL_MS);
 		} catch (error) {
 			console.error(
-				"Token keep-warm refresh failed; stopping refresh chain:",
+				"Token keep-warm refresh failed; will retry on next interval:",
 				error instanceof Error ? error.message : String(error),
 			);
-			// Stop the chain — the token can no longer be refreshed (the user must
-			// re-authenticate). Leave the (now-stale) store so reads still fall back.
+			// Re-arm anyway. With an 11h interval under a ~24h token life, the next
+			// alarm (~22h elapsed) still fires before expiry, giving a second attempt
+			// without bespoke backoff. The (still-valid) stored token is left intact
+			// so reads keep working until then.
+			await this.state.storage.setAlarm(Date.now() + TOKEN_REFRESH_INTERVAL_MS);
 		}
 	}
 

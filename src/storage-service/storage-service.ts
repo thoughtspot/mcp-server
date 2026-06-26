@@ -162,6 +162,25 @@ export class StorageServiceClient {
 	}
 
 	/**
+	 * Record user activity (a tool call) for idle-session detection. Best-effort
+	 * and throttled server-side; safe to call on every tool invocation. Lives on
+	 * the same per-user instance as the active org / token store.
+	 */
+	async touchLastSeen(): Promise<void> {
+		const id = StorageServiceClient.ACTIVE_ORG_ID;
+		const response = await this.stubFor(id).fetch(this.url(id, "touch"), {
+			method: "POST",
+			headers: this.headers(),
+		});
+		if (!response.ok) {
+			const body = await response.text();
+			throw new Error(
+				`Failed to touch last-seen (${response.status}): ${body}`,
+			);
+		}
+	}
+
+	/**
 	 * Initialize a conversation. Must be called before appending messages.
 	 * Can also be called on an existing conversation that is already marked done,
 	 * to prime it for a follow-up message.

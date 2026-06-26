@@ -351,6 +351,19 @@ export class MCPServer extends BaseMCPServer {
 		this.warmGlobalToken = accessToken;
 	}
 
+	/**
+	 * Record user activity for idle-session detection. Fire-and-forget: never
+	 * block or fail a tool call on this (the throttling + delete logic lives in
+	 * the DO). No-op if there's no keep-warm store to age out.
+	 */
+	private touchLastSeen(): void {
+		this.getStorageService()
+			.then((storage) => storage.touchLastSeen())
+			.catch((error) => {
+				console.error("Failed to record last-seen activity:", error);
+			});
+	}
+
 	protected getToolMetricApiSurface(): ToolMetricApiSurface {
 		return "mcp";
 	}
@@ -526,6 +539,12 @@ export class MCPServer extends BaseMCPServer {
 	) {
 		const { name } = request.params;
 		this.trackers.track(TrackEvent.CallTool, { toolName: name });
+
+		// Record user activity for idle-session detection (best-effort, throttled
+		// server-side). Only OAuth sessions have a keep-warm token store to age out.
+		if (this.isOAuthAuth()) {
+			this.touchLastSeen();
+		}
 
 		switch (name) {
 			case ToolName.Ping: {

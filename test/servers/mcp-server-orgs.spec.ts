@@ -23,6 +23,7 @@ vi.mock("../../src/metrics/mixpanel/mixpanel", () => ({
 function makeStorageNamespace(
 	store: Map<string, { activeOrgId?: string; orgToken?: string }>,
 	tokenStore?: Map<string, any>,
+	touchLog?: string[],
 ) {
 	return {
 		idFromName: (name: string) => ({ name }),
@@ -62,6 +63,10 @@ function makeStorageNamespace(
 				}
 				if (op === "token-store" && init?.method === "POST") {
 					tokenStore?.set(id.name, JSON.parse(String(init?.body)));
+					return Response.json({ ok: true });
+				}
+				if (op === "touch" && init?.method === "POST") {
+					touchLog?.push(id.name);
 					return Response.json({ ok: true });
 				}
 				return new Response("Not Found", { status: 404 });
@@ -132,6 +137,7 @@ function makeServer(opts: {
 	fetchOrgBearerToken?: ReturnType<typeof vi.fn>;
 	searchOrgs?: ReturnType<typeof vi.fn>;
 	validateConnection?: ReturnType<typeof vi.fn>;
+	touchLog?: string[];
 }) {
 	vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue(
 		makeClientMock(opts),
@@ -141,7 +147,11 @@ function makeServer(opts: {
 		new Map<string, { activeOrgId?: string; orgToken?: string }>();
 	const tokenStore = opts.tokenStore ?? new Map<string, any>();
 	const env = {
-		CONVERSATION_STORAGE_OBJECT: makeStorageNamespace(store, tokenStore),
+		CONVERSATION_STORAGE_OBJECT: makeStorageNamespace(
+			store,
+			tokenStore,
+			opts.touchLog,
+		),
 	} as any;
 	const props = {
 		instanceUrl: "https://test.thoughtspot.cloud",
@@ -665,6 +675,110 @@ describe("MCP Server org tools", () => {
 			// Two probes: the failing one, then the post-re-mint success.
 			expect(getSessionInfo.mock.calls.length).toBe(sessionCallsBefore + 2);
 			expect(mint.mock.calls.length).toBe(mintsBefore + 1);
+		});
+
+		it("propagates the error and does not loop if the retry also 401s", async () => {
+			const store = new Map<
+				string,
+				{ activeOrgId?: string; orgToken?: string }
+			>();
+			let mintN = 0;
+			const mint = vi
+				.fn()
+				.mockImplementation(async () => `org-token-${++mintN}`);
+			const server = await makeServerWithActiveOrg({ store, mint });
+			const mintsBefore = mint.mock.calls.length;
+
+			// Always 401: re-mint happens once, the retry also 401s, and the error is
+			// surfaced (exactly two attempts, not an infinite loop).
+			let calls = 0;
+			await expect(
+				server.withOrgTokenRetry(undefined, async () => {
+					calls++;
+					throw new Error("failed with status 401: still expired");
+				}),
+			).rejects.toThrow(/401/);
+			expect(calls).toBe(2); // initial + one retry only
+			expect(mint.mock.calls.length).toBe(mintsBefore + 1); // one re-mint only
+		});
+
+		it("passes a non-401 error straight through without re-minting", async () => {
+			const store = new Map<
+				string,
+				{ activeOrgId?: string; orgToken?: string }
+			>();
+			let mintN = 0;
+			const mint = vi
+				.fn()
+				.mockImplementation(async () => `org-token-${++mintN}`);
+			const server = await makeServerWithActiveOrg({ store, mint });
+			const mintsBefore = mint.mock.calls.length;
+
+			let calls = 0;
+			await expect(
+				server.withOrgTokenRetry(undefined, async () => {
+					calls++;
+					throw new Error("failed with status 500: server error");
+				}),
+			).rejects.toThrow(/500/);
+			expect(calls).toBe(1); // no retry for non-401
+			expect(mint.mock.calls.length).toBe(mintsBefore); // no re-mint
+		});
+
+		it("does not treat a successful non-error result as unauthorized", async () => {
+			const store = new Map<
+				string,
+				{ activeOrgId?: string; orgToken?: string }
+			>();
+			let mintN = 0;
+			const mint = vi
+				.fn()
+				.mockImplementation(async () => `org-token-${++mintN}`);
+			const server = await makeServerWithActiveOrg({ store, mint });
+			const mintsBefore = mint.mock.calls.length;
+
+			// A normal result that merely contains "401" in unrelated data must not
+			// trigger a re-mint — only an { error } shape or a thrown 401 does.
+			let calls = 0;
+			const result = await server.withOrgTokenRetry(undefined, async () => {
+				calls++;
+				return { rows: [{ value: "401 Main St" }] };
+			});
+			expect(result).toEqual({ rows: [{ value: "401 Main St" }] });
+			expect(calls).toBe(1);
+			expect(mint.mock.calls.length).toBe(mintsBefore);
+		});
+	});
+
+	describe("idle-activity tracking on tool calls", () => {
+		// touchLastSeen is fire-and-forget; flush the microtask queue so the
+		// POST /touch lands before we assert.
+		const flush = () => new Promise((r) => setTimeout(r, 0));
+
+		it("records activity (POST /touch) on a tool call for OAuth sessions", async () => {
+			const touchLog: string[] = [];
+			const { server } = makeServer({
+				authMode: "oauth",
+				session: { orgsEnabled: true, currentOrgId: "0" },
+				touchLog,
+			});
+			await server.init();
+			await connect(server).callTool("ping", {});
+			await flush();
+			expect(touchLog.length).toBeGreaterThan(0);
+		});
+
+		it("does NOT record activity for non-OAuth (bearer) sessions", async () => {
+			const touchLog: string[] = [];
+			const { server } = makeServer({
+				authMode: "bearer",
+				session: { orgsEnabled: true, currentOrgId: "0" },
+				touchLog,
+			});
+			await server.init();
+			await connect(server).callTool("ping", {});
+			await flush();
+			expect(touchLog.length).toBe(0);
 		});
 	});
 });
