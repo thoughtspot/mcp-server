@@ -856,4 +856,139 @@ mutation GetUnsavedAnswerTML($session: BachSessionIdInput!, $exportDependencies:
 			expect(query).toContain("edoc");
 		});
 	});
+
+	describe("fetchOrgBearerToken (org-scoped token mint)", () => {
+		function makeClient() {
+			return getThoughtSpotClient(mockInstanceUrl, mockBearerToken) as any;
+		}
+
+		it("calls the v2 auth/token/fetch endpoint with org_identifier and a 30-day validity", async () => {
+			(global.fetch as any).mockResolvedValue(
+				new Response(JSON.stringify({ data: { token: "org-tok" } }), {
+					status: 200,
+				}),
+			);
+			const client = makeClient();
+			const token = await client.fetchOrgBearerToken({
+				accessToken: "global-tok",
+				orgId: "101",
+			});
+
+			expect(token).toBe("org-tok");
+			const [url, init] = (global.fetch as any).mock.calls[0];
+			expect(url).toContain("/callosum/v1/v2/auth/token/fetch");
+			expect(url).toContain("org_identifier=101");
+			// Default validity is 30 days in seconds.
+			expect(url).toContain(`validity_time_in_sec=${30 * 24 * 60 * 60}`);
+			expect(init.method).toBe("GET");
+			// Authenticates with the (global) access token, no org header on the mint.
+			expect(init.headers.Authorization).toBe("Bearer global-tok");
+		});
+
+		it("honors an explicit validityTimeInSec override", async () => {
+			(global.fetch as any).mockResolvedValue(
+				new Response(JSON.stringify({ token: "org-tok" }), { status: 200 }),
+			);
+			const client = makeClient();
+			await client.fetchOrgBearerToken({
+				accessToken: "g",
+				orgId: "5",
+				validityTimeInSec: 300,
+			});
+			const [url] = (global.fetch as any).mock.calls[0];
+			expect(url).toContain("validity_time_in_sec=300");
+			expect(url).toContain("org_identifier=5");
+		});
+
+		it("reads the token from either data.token or top-level token", async () => {
+			(global.fetch as any).mockResolvedValue(
+				new Response(JSON.stringify({ token: "flat-tok" }), { status: 200 }),
+			);
+			const client = makeClient();
+			await expect(
+				client.fetchOrgBearerToken({ accessToken: "g", orgId: "1" }),
+			).resolves.toBe("flat-tok");
+		});
+
+		it("throws on a non-OK response, including the status", async () => {
+			(global.fetch as any).mockResolvedValue(
+				new Response("forbidden", { status: 403 }),
+			);
+			const client = makeClient();
+			await expect(
+				client.fetchOrgBearerToken({ accessToken: "g", orgId: "999" }),
+			).rejects.toThrow(/status 403/);
+		});
+
+		it("throws when the response has no token", async () => {
+			(global.fetch as any).mockResolvedValue(
+				new Response(JSON.stringify({ data: {} }), { status: 200 }),
+			);
+			const client = makeClient();
+			await expect(
+				client.fetchOrgBearerToken({ accessToken: "g", orgId: "1" }),
+			).rejects.toThrow(/no token/);
+		});
+	});
+
+	describe("getRefreshedToken (keep-warm refresh)", () => {
+		function makeClient() {
+			return getThoughtSpotClient(mockInstanceUrl, mockBearerToken) as any;
+		}
+
+		it("calls gettoken?refresh=true with the access token and X-Refresh-Token header", async () => {
+			(global.fetch as any).mockResolvedValue(
+				new Response(
+					JSON.stringify({ token: "new-access", refreshToken: "new-refresh" }),
+					{ status: 200 },
+				),
+			);
+			const client = makeClient();
+			const result = await client.getRefreshedToken({
+				bearerToken: "old-access",
+				refreshToken: "the-refresh",
+			});
+
+			expect(result).toEqual({
+				accessToken: "new-access",
+				refreshToken: "new-refresh",
+			});
+			const [url, init] = (global.fetch as any).mock.calls[0];
+			expect(url).toContain("/callosum/v1/session/v2/gettoken?refresh=true");
+			expect(init.headers.Authorization).toBe("Bearer old-access");
+			expect(init.headers["X-Refresh-Token"]).toBe("the-refresh");
+		});
+
+		it("omits the X-Refresh-Token header when no refresh token is given", async () => {
+			(global.fetch as any).mockResolvedValue(
+				new Response(JSON.stringify({ token: "new-access" }), { status: 200 }),
+			);
+			const client = makeClient();
+			const result = await client.getRefreshedToken({ bearerToken: "old" });
+			expect(result.accessToken).toBe("new-access");
+			expect(result.refreshToken).toBeUndefined();
+			const [, init] = (global.fetch as any).mock.calls[0];
+			expect(init.headers["X-Refresh-Token"]).toBeUndefined();
+		});
+
+		it("throws on a non-OK response, including the status", async () => {
+			(global.fetch as any).mockResolvedValue(
+				new Response("bad", { status: 401 }),
+			);
+			const client = makeClient();
+			await expect(
+				client.getRefreshedToken({ bearerToken: "x", refreshToken: "y" }),
+			).rejects.toThrow(/status 401/);
+		});
+
+		it("throws when the refresh response has no token", async () => {
+			(global.fetch as any).mockResolvedValue(
+				new Response(JSON.stringify({}), { status: 200 }),
+			);
+			const client = makeClient();
+			await expect(
+				client.getRefreshedToken({ bearerToken: "x", refreshToken: "y" }),
+			).rejects.toThrow(/no token/);
+		});
+	});
 });
