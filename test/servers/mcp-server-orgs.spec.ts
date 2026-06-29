@@ -158,12 +158,13 @@ function makeServer(opts: {
 		opts.store ??
 		new Map<string, { activeOrgId?: string; orgToken?: string }>();
 	const tokenStore = opts.tokenStore ?? new Map<string, any>();
+	// The token/org methods now route to USER_TOKEN_OBJECT; conversation methods
+	// to CONVERSATION_STORAGE_OBJECT. The fake namespace dispatches by path, so a
+	// single shared instance backs both bindings in tests.
+	const namespace = makeStorageNamespace(store, tokenStore, opts.touchLog);
 	const env = {
-		CONVERSATION_STORAGE_OBJECT: makeStorageNamespace(
-			store,
-			tokenStore,
-			opts.touchLog,
-		),
+		CONVERSATION_STORAGE_OBJECT: namespace,
+		USER_TOKEN_OBJECT: namespace,
 	} as any;
 	const props = {
 		instanceUrl: "https://test.thoughtspot.cloud",
@@ -659,8 +660,10 @@ describe("MCP Server org tools", () => {
 			vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue(
 				client,
 			);
+			const ns = makeStorageNamespace(store, new Map());
 			const env = {
-				CONVERSATION_STORAGE_OBJECT: makeStorageNamespace(store, new Map()),
+				CONVERSATION_STORAGE_OBJECT: ns,
+				USER_TOKEN_OBJECT: ns,
 			} as any;
 			const props = {
 				instanceUrl: "https://test.thoughtspot.cloud",

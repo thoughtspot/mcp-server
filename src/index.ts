@@ -19,8 +19,9 @@ import {
 import { PUBLIC_ROUTES } from "./routes";
 import { ConversationStorageServerSQLite } from "./servers/conversation-storage-server";
 import { MCPServer } from "./servers/mcp-server";
+import { UserTokenStoreSQLite } from "./servers/user-token-store-server";
 
-export { ConversationStorageServerSQLite };
+export { ConversationStorageServerSQLite, UserTokenStoreSQLite };
 
 // OTEL configuration function
 const config: ResolveConfigFn = (env: Env, _trigger) => {

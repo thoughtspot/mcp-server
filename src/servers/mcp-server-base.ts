@@ -227,6 +227,7 @@ export abstract class BaseMCPServer extends Server {
 			this.ctx.env
 				.CONVERSATION_STORAGE_OBJECT as unknown as DurableObjectNamespace,
 			hashUrlSafe,
+			this.ctx.env.USER_TOKEN_OBJECT as unknown as DurableObjectNamespace,
 		);
 	}
 

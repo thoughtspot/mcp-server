@@ -16,6 +16,10 @@ export class StorageServiceClient {
 	constructor(
 		private readonly namespace: DurableObjectNamespace,
 		private readonly accessTokenHashUrlSafe: string,
+		// Namespace for the per-user token/org Durable Object (UserTokenStoreSQLite),
+		// separate from the conversation namespace. Optional only so existing
+		// callers/tests that don't use token/org methods keep compiling.
+		private readonly userTokenNamespace?: DurableObjectNamespace,
 	) {}
 
 	private headers(): HeadersInit {
@@ -32,15 +36,28 @@ export class StorageServiceClient {
 		return this.namespace.get(id);
 	}
 
+	// Stub for the per-user token/org DO instance, addressed by the user's
+	// storage-key hash on the dedicated UserTokenStoreSQLite namespace.
+	private userStubFor(id: string): DurableObjectStub {
+		const ns = this.userTokenNamespace;
+		if (!ns) {
+			throw new Error(
+				"StorageServiceClient: userTokenNamespace not configured for token/org operation",
+			);
+		}
+		const doId = ns.idFromName(`${this.accessTokenHashUrlSafe}:${id}`);
+		return ns.get(doId);
+	}
+
 	// DO stubs ignore the hostname; we use a placeholder so the path is parsed correctly.
 	private url(conversationId: string, operation: string): string {
 		return `https://internal/storage/${encodeURIComponent(conversationId)}/${operation}`;
 	}
 
-	// Reserved pseudo-conversation id for the per-user active-org DO instance. Uses
-	// the same hash-namespaced addressing as conversations, but a distinct instance
-	// that holds only the active org (no message TTL), shared across the user's
-	// sessions.
+	// Reserved pseudo-id for the per-user token/org DO instance. Uses the same
+	// hash-namespaced addressing as conversations, but on the dedicated
+	// UserTokenStoreSQLite namespace; holds active org + keep-warm token, shared
+	// across the user's sessions.
 	private static readonly ACTIVE_ORG_ID = "__active_org__";
 
 	/**
@@ -52,10 +69,13 @@ export class StorageServiceClient {
 		orgToken: string | null;
 	}> {
 		const id = StorageServiceClient.ACTIVE_ORG_ID;
-		const response = await this.stubFor(id).fetch(this.url(id, "active-org"), {
-			method: "GET",
-			headers: this.headers(),
-		});
+		const response = await this.userStubFor(id).fetch(
+			this.url(id, "active-org"),
+			{
+				method: "GET",
+				headers: this.headers(),
+			},
+		);
 		if (!response.ok) {
 			const body = await response.text();
 			throw new Error(`Failed to get active org (${response.status}): ${body}`);
@@ -77,11 +97,14 @@ export class StorageServiceClient {
 	 */
 	async setActiveOrg(activeOrgId: string): Promise<void> {
 		const id = StorageServiceClient.ACTIVE_ORG_ID;
-		const response = await this.stubFor(id).fetch(this.url(id, "active-org"), {
-			method: "POST",
-			headers: this.headers(),
-			body: JSON.stringify({ activeOrgId }),
-		});
+		const response = await this.userStubFor(id).fetch(
+			this.url(id, "active-org"),
+			{
+				method: "POST",
+				headers: this.headers(),
+				body: JSON.stringify({ activeOrgId }),
+			},
+		);
 		if (!response.ok) {
 			const body = await response.text();
 			throw new Error(`Failed to set active org (${response.status}): ${body}`);
@@ -95,7 +118,7 @@ export class StorageServiceClient {
 	 */
 	async setActiveOrgToken(orgToken: string): Promise<void> {
 		const id = StorageServiceClient.ACTIVE_ORG_ID;
-		const response = await this.stubFor(id).fetch(
+		const response = await this.userStubFor(id).fetch(
 			this.url(id, "active-org-token"),
 			{
 				method: "POST",
@@ -121,10 +144,13 @@ export class StorageServiceClient {
 		expiresAt: number | null;
 	}> {
 		const id = StorageServiceClient.ACTIVE_ORG_ID;
-		const response = await this.stubFor(id).fetch(this.url(id, "token-store"), {
-			method: "GET",
-			headers: this.headers(),
-		});
+		const response = await this.userStubFor(id).fetch(
+			this.url(id, "token-store"),
+			{
+				method: "GET",
+				headers: this.headers(),
+			},
+		);
 		if (!response.ok) {
 			const body = await response.text();
 			throw new Error(
@@ -148,11 +174,14 @@ export class StorageServiceClient {
 		expiresAt?: number;
 	}): Promise<void> {
 		const id = StorageServiceClient.ACTIVE_ORG_ID;
-		const response = await this.stubFor(id).fetch(this.url(id, "token-store"), {
-			method: "POST",
-			headers: this.headers(),
-			body: JSON.stringify(store),
-		});
+		const response = await this.userStubFor(id).fetch(
+			this.url(id, "token-store"),
+			{
+				method: "POST",
+				headers: this.headers(),
+				body: JSON.stringify(store),
+			},
+		);
 		if (!response.ok) {
 			const body = await response.text();
 			throw new Error(
@@ -168,7 +197,7 @@ export class StorageServiceClient {
 	 */
 	async touchLastSeen(): Promise<void> {
 		const id = StorageServiceClient.ACTIVE_ORG_ID;
-		const response = await this.stubFor(id).fetch(this.url(id, "touch"), {
+		const response = await this.userStubFor(id).fetch(this.url(id, "touch"), {
 			method: "POST",
 			headers: this.headers(),
 		});
