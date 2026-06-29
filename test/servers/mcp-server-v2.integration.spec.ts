@@ -451,7 +451,7 @@ describe("V2 Streaming Parser + Real Storage Integration", () => {
 		await client.initializeConversation("stream-conv-1");
 
 		const reader = makeReader([
-			`data: [{"type":"text","content":"Revenue is $5M","metadata":{}}]\n`,
+			`data: [{"type":"text","content":"Revenue is $5M","metadata":{"format":"markdown"}}]\n`,
 		]);
 
 		await processSendAgentConversationMessageStreamingResponse(
@@ -512,9 +512,9 @@ describe("V2 Streaming Parser + Real Storage Integration", () => {
 		const client = createRealStorageClient();
 		await client.initializeConversation("stream-conv-3");
 
-		const thinkingLine = `data: [{"type":"text","content":"Let me analyze...","metadata":{"type":"thinking"}}]\n`;
+		const thinkingLine = `data: [{"type":"text","content":"Let me analyze...","metadata":{"type":"thinking","format":"markdown"}}]\n`;
 		const answerLine = `data: [{"type":"answer","metadata":{"session_id":"s1","gen_no":1,"transaction_id":"t1","generation_number":1,"title":"Chart","sage_query":"select *","type":null}}]\n`;
-		const textLine = `data: [{"type":"text","content":"Here is your answer.","metadata":{}}]\n`;
+		const textLine = `data: [{"type":"text","content":"Here is your answer.","metadata":{"format":"markdown"}}]\n`;
 
 		const reader = makeReader([thinkingLine, answerLine, textLine]);
 
