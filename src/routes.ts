@@ -6,7 +6,6 @@ import {
 // mcp-server-specific public routes layered on top of pkg-provided OAuth routes.
 export const PUBLIC_ROUTES = {
 	...PKG_PUBLIC_ROUTES,
-	hello: "/hello",
 	openaiAppsChallenge: "/.well-known/openai-apps-challenge",
 } as const;
 
@@ -14,7 +13,6 @@ export const PUBLIC_ROUTE_PREFIXES = PKG_PUBLIC_ROUTE_PREFIXES;
 
 export const EXACT_PUBLIC_ROUTES_REQUIRING_METRICS = [
 	PUBLIC_ROUTES.root,
-	PUBLIC_ROUTES.hello,
 	PUBLIC_ROUTES.authorize,
 	PUBLIC_ROUTES.callback,
 	PUBLIC_ROUTES.storeToken,

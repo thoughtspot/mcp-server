@@ -31,7 +31,7 @@ describe("Header stripping", () => {
 			fetch: (request: Request, env: any, ctx: any) => Promise<Response>;
 		};
 
-		const request = new Request("https://example.com/hello", {
+		const request = new Request("https://example.com/mcp", {
 			headers: { traceparent: "00-abc123-def456-01" },
 		});
 
@@ -47,7 +47,7 @@ describe("Header stripping", () => {
 			fetch: (request: Request, env: any, ctx: any) => Promise<Response>;
 		};
 
-		const request = new Request("https://example.com/hello", {
+		const request = new Request("https://example.com/mcp", {
 			headers: { tracestate: "vendor=value" },
 		});
 
@@ -63,7 +63,7 @@ describe("Header stripping", () => {
 			fetch: (request: Request, env: any, ctx: any) => Promise<Response>;
 		};
 
-		const request = new Request("https://example.com/hello", {
+		const request = new Request("https://example.com/mcp", {
 			headers: {
 				traceparent: "00-abc123-def456-01",
 				tracestate: "vendor=value",
@@ -85,7 +85,7 @@ describe("Header stripping", () => {
 			fetch: (request: Request, env: any, ctx: any) => Promise<Response>;
 		};
 
-		const request = new Request("https://example.com/hello", {
+		const request = new Request("https://example.com/mcp", {
 			headers: { traceparent: "00-abc123-def456-01" },
 		});
 
@@ -100,7 +100,7 @@ describe("Header stripping", () => {
 			fetch: (request: Request, env: any, ctx: any) => Promise<Response>;
 		};
 
-		const request = new Request("https://example.com/hello", {
+		const request = new Request("https://example.com/mcp", {
 			headers: { "x-custom-header": "value" },
 		});
 

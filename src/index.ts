@@ -26,7 +26,7 @@ import {
 } from "./metrics/runtime/request-metrics";
 import { ConversationStorageServerSQLite } from "./servers/conversation-storage-server";
 import { MCPServer } from "./servers/mcp-server";
-import type { Props } from "./utils";
+import { type Props, normalizeClientName } from "./utils";
 
 export { ConversationStorageServerSQLite };
 
@@ -84,11 +84,7 @@ const hooks: AuthHooks<Props> = {
 
 		const props: Props = {
 			...base,
-			clientName: (base.clientName ?? {
-				clientId: "Bearer Token client",
-				clientName: "Bearer Token client",
-				registrationDate: Date.now(),
-			}) as Props["clientName"],
+			clientName: normalizeClientName(base.clientName),
 		};
 
 		let apiVersion: string | undefined;
@@ -122,11 +118,8 @@ const oauthFetchHandler = createOAuthHandler<Props>({
 		logo: "https://avatars.githubusercontent.com/u/8906680?s=200&v=4",
 		description: "MCP Server for ThoughtSpot Agent",
 	},
-	mcpServerClass: ThoughtSpotMCP as unknown as Parameters<
-		typeof createOAuthHandler
-	>[0]["mcpServerClass"],
-	// Cast needed: pkg AuthHooks<BaseProps> has a narrower clientName than local Props.
-	hooks: hooks as any,
+	mcpServerClass: ThoughtSpotMCP,
+	hooks,
 	enrichMcpRequestProps(request, _ctx, baseProps): Props {
 		// OAuth-authenticated /mcp + /sse: derive apiVersion from query params,
 		// defaulting to legacy for backwards compatibility (matches prior behaviour).
@@ -144,6 +137,7 @@ const oauthFetchHandler = createOAuthHandler<Props>({
 
 		return {
 			...(baseProps as Props),
+			clientName: normalizeClientName(baseProps.clientName),
 			apiVersion,
 			apiRequestedVersion: requestedApiVersion
 				? normalizeRequestedApiVersionForAnalytics(requestedApiVersion)
@@ -156,7 +150,6 @@ const oauthFetchHandler = createOAuthHandler<Props>({
 		app.get("/", async (c) => {
 			return c.env.ASSETS!.fetch("/index.html");
 		});
-		app.get("/hello", (c) => c.json({ message: "Hello, World!" }));
 		app.get("/.well-known/openai-apps-challenge", (c) => {
 			return c.text(process.env.OPEN_AI_TOKEN as string);
 		});

@@ -1,5 +1,8 @@
 import { type Span, SpanStatusCode } from "@opentelemetry/api";
-import { McpServerError as PkgMcpServerError } from "@thoughtspot/mcp-auth";
+import {
+	type BaseProps,
+	McpServerError as PkgMcpServerError,
+} from "@thoughtspot/mcp-auth";
 import type { ApiVersionMode } from "./metrics/runtime/metric-types";
 import { getActiveSpan } from "./metrics/tracing/tracing-utils";
 
@@ -15,6 +18,21 @@ export type Props = {
 	apiVersionMode?: ApiVersionMode;
 	apiRequestedVersion?: string;
 };
+
+const DEFAULT_CLIENT_NAME = "Bearer Token client";
+
+export function normalizeClientName(
+	clientName: BaseProps["clientName"],
+): Props["clientName"] {
+	return {
+		clientId: clientName?.clientId ?? DEFAULT_CLIENT_NAME,
+		clientName: clientName?.clientName ?? DEFAULT_CLIENT_NAME,
+		registrationDate:
+			(clientName && "registrationDate" in clientName
+				? clientName.registrationDate
+				: undefined) ?? Date.now(),
+	};
+}
 
 /**
  * Local McpServerError that wraps the base pkg error with OTel span
