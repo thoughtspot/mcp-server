@@ -28,6 +28,9 @@ export interface SessionInfo {
 	currentOrgId: string;
 	privileges: any;
 	enableSpotterDataSourceDiscovery?: boolean;
+	// Gates the Eureka-backed object search tools (`search_objects`, `fetch_data`).
+	// When absent or not true, those tools are hidden and refused.
+	useEurekaSearchMCPTools?: boolean;
 }
 
 export interface BaseMessage {

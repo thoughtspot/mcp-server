@@ -41,6 +41,7 @@ describe("MCP Server", () => {
 					selfClusterName: "test-cluster",
 					selfClusterId: "test-cluster-123",
 					enableSpotterDataSourceDiscovery: true,
+					useEurekaSearchMCPTools: true,
 				},
 				userName: "test-user",
 				currentOrgId: "test-org",
@@ -199,6 +200,7 @@ describe("MCP Server", () => {
 					currentOrgId: "test-org",
 					privileges: [],
 					enableSpotterDataSourceDiscovery: true,
+					useEurekaSearchMCPTools: true,
 				},
 				{
 					clientId: "test-client-id",
@@ -272,6 +274,7 @@ describe("MCP Server", () => {
 						selfClusterName: "test-cluster",
 						selfClusterId: "test-cluster-123",
 						enableSpotterDataSourceDiscovery: false,
+						useEurekaSearchMCPTools: true,
 					},
 					userName: "test-user",
 					currentOrgId: "test-org",
@@ -299,6 +302,78 @@ describe("MCP Server", () => {
 				"get_session_updates",
 				"create_dashboard",
 			]);
+		});
+	});
+
+	describe("Eureka search MCP tools gate (useEurekaSearchMCPTools)", () => {
+		// Builds a server whose cluster reports useEurekaSearchMCPTools = false.
+		const buildGatedServer = () => {
+			vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
+				getSessionInfo: vi.fn().mockResolvedValue({
+					clusterId: "test-cluster-123",
+					clusterName: "test-cluster",
+					releaseVersion: "10.13.0.cl-110",
+					userGUID: "test-user-123",
+					configInfo: {
+						mixpanelConfig: {
+							devSdkKey: "test-dev-token",
+							prodSdkKey: "test-prod-token",
+							production: false,
+						},
+						selfClusterName: "test-cluster",
+						selfClusterId: "test-cluster-123",
+						enableSpotterDataSourceDiscovery: true,
+						useEurekaSearchMCPTools: false,
+					},
+					userName: "test-user",
+					currentOrgId: "test-org",
+					privileges: [],
+				}),
+				searchMetadata: vi.fn().mockResolvedValue([]),
+				instanceUrl: "https://test.thoughtspot.cloud",
+			} as any);
+			return new MCPServer({ props: mockProps, env: {} as any });
+		};
+
+		it("hides search_objects and fetch_data from listTools when the flag is off", async () => {
+			const gatedServer = buildGatedServer();
+			await gatedServer.init();
+			const { listTools } = connect(gatedServer);
+
+			const result = await listTools();
+			const names = result.tools?.map((t) => t.name) ?? [];
+
+			expect(names).not.toContain("search_objects");
+			expect(names).not.toContain("fetch_data");
+			// The non-gated V2 tools are still present.
+			expect(names).toContain("check_connectivity");
+			expect(names).toContain("create_dashboard");
+		});
+
+		it("refuses search_objects calls when the flag is off", async () => {
+			const gatedServer = buildGatedServer();
+			await gatedServer.init();
+			const { callTool } = connect(gatedServer);
+
+			const result = await callTool("search_objects", { query: "sales" });
+
+			expect(result.isError).toBe(true);
+			expect((result.content as any[])[0].text).toMatch(
+				/not available on this ThoughtSpot cluster/i,
+			);
+		});
+
+		it("refuses fetch_data calls when the flag is off", async () => {
+			const gatedServer = buildGatedServer();
+			await gatedServer.init();
+			const { callTool } = connect(gatedServer);
+
+			const result = await callTool("fetch_data", { object_id: "answer-1" });
+
+			expect(result.isError).toBe(true);
+			expect((result.content as any[])[0].text).toMatch(
+				/not available on this ThoughtSpot cluster/i,
+			);
 		});
 	});
 
@@ -618,6 +693,7 @@ describe("MCP Server", () => {
 					currentOrgId: "test-org",
 					privileges: [],
 					enableSpotterDataSourceDiscovery: true,
+					useEurekaSearchMCPTools: true,
 				}),
 				queryGetDecomposedQuery: vi
 					.fn()
@@ -662,6 +738,7 @@ describe("MCP Server", () => {
 					currentOrgId: "test-org",
 					privileges: [],
 					enableSpotterDataSourceDiscovery: true,
+					useEurekaSearchMCPTools: true,
 				}),
 				queryGetDecomposedQuery: vi
 					.fn()
@@ -710,6 +787,7 @@ describe("MCP Server", () => {
 					currentOrgId: "test-org",
 					privileges: [],
 					enableSpotterDataSourceDiscovery: true,
+					useEurekaSearchMCPTools: true,
 				}),
 				queryGetDecomposedQuery: vi
 					.fn()
@@ -754,6 +832,7 @@ describe("MCP Server", () => {
 					currentOrgId: "test-org",
 					privileges: [],
 					enableSpotterDataSourceDiscovery: true,
+					useEurekaSearchMCPTools: true,
 				}),
 				queryGetDecomposedQuery: vi.fn().mockResolvedValue({
 					decomposedQueryResponse: {
@@ -848,6 +927,7 @@ describe("MCP Server", () => {
 					currentOrgId: "test-org",
 					privileges: [],
 					enableSpotterDataSourceDiscovery: true,
+					useEurekaSearchMCPTools: true,
 				}),
 				singleAnswer: vi
 					.fn()
@@ -927,6 +1007,7 @@ describe("MCP Server", () => {
 					currentOrgId: "test-org",
 					privileges: [],
 					enableSpotterDataSourceDiscovery: true,
+					useEurekaSearchMCPTools: true,
 				}),
 				exportUnsavedAnswerTML: vi.fn().mockResolvedValue({
 					answer: {
@@ -1185,6 +1266,7 @@ describe("MCP Server", () => {
 					currentOrgId: "test-org",
 					privileges: [],
 					enableSpotterDataSourceDiscovery: true,
+					useEurekaSearchMCPTools: true,
 				}),
 				getDataSourceSuggestions: vi.fn().mockResolvedValue({
 					data_sources: [
@@ -1265,6 +1347,7 @@ describe("MCP Server", () => {
 					currentOrgId: "test-org",
 					privileges: [],
 					enableSpotterDataSourceDiscovery: true,
+					useEurekaSearchMCPTools: true,
 				}),
 				getDataSourceSuggestions: vi.fn().mockResolvedValue({
 					dataSources: [],
@@ -1306,6 +1389,7 @@ describe("MCP Server", () => {
 					currentOrgId: "test-org",
 					privileges: [],
 					enableSpotterDataSourceDiscovery: true,
+					useEurekaSearchMCPTools: true,
 				}),
 				getDataSourceSuggestions: vi.fn().mockResolvedValue({
 					data_sources: [
@@ -1356,6 +1440,7 @@ describe("MCP Server", () => {
 						selfClusterName: "test-cluster",
 						selfClusterId: "test-cluster-123",
 						enableSpotterDataSourceDiscovery: true,
+						useEurekaSearchMCPTools: true,
 					},
 					userName: "test-user",
 					currentOrgId: "test-org",
@@ -1400,6 +1485,7 @@ describe("MCP Server", () => {
 						selfClusterName: "test-cluster",
 						selfClusterId: "test-cluster-123",
 						enableSpotterDataSourceDiscovery: true,
+						useEurekaSearchMCPTools: true,
 					},
 					userName: "test-user",
 					currentOrgId: "test-org",
@@ -1442,6 +1528,7 @@ describe("MCP Server", () => {
 						selfClusterName: "test-cluster",
 						selfClusterId: "test-cluster-123",
 						enableSpotterDataSourceDiscovery: true,
+						useEurekaSearchMCPTools: true,
 					},
 					userName: "test-user",
 					currentOrgId: "test-org",
@@ -1479,6 +1566,7 @@ describe("MCP Server", () => {
 						selfClusterName: "test-cluster",
 						selfClusterId: "test-cluster-123",
 						enableSpotterDataSourceDiscovery: true,
+						useEurekaSearchMCPTools: true,
 					},
 					userName: "test-user",
 					currentOrgId: "test-org",

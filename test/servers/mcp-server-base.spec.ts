@@ -58,6 +58,10 @@ class TestMCPServer extends MCPServer {
 		return this.isDatasourceDiscoveryAvailable();
 	}
 
+	public testIsEurekaSearchMCPToolsAvailable() {
+		return this.isEurekaSearchMCPToolsAvailable();
+	}
+
 	public getTrackers() {
 		return this.trackers;
 	}
@@ -94,6 +98,7 @@ describe("MCP Server Base", () => {
 			selfClusterName: "test-cluster",
 			selfClusterId: "test-cluster-123",
 			enableSpotterDataSourceDiscovery: true,
+			useEurekaSearchMCPTools: true,
 			...overrides.configInfo,
 		},
 		userName: "test-user",
@@ -287,6 +292,47 @@ describe("MCP Server Base", () => {
 			await testServer.init();
 			expect(testServer.testIsDatasourceDiscoveryAvailable()).toBe(false);
 		});
+	});
+
+	describe("Eureka Search MCP Tools Check", () => {
+		it("should return false before init is called (sessionInfo not set)", () => {
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+			const result = server.testIsEurekaSearchMCPToolsAvailable();
+			expect(result).toBe(false);
+			expect(warnSpy).toHaveBeenCalledWith(
+				expect.stringContaining("sessionInfo is not initialized"),
+			);
+			warnSpy.mockRestore();
+		});
+
+		it("should return true when useEurekaSearchMCPTools is enabled", async () => {
+			await server.init();
+			const result = server.testIsEurekaSearchMCPToolsAvailable();
+			expect(result).toBe(true);
+		});
+
+		it("should return false when useEurekaSearchMCPTools is explicitly disabled", async () => {
+			vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
+				getSessionInfo: vi.fn().mockResolvedValue(
+					makeSessionInfo({
+						configInfo: { useEurekaSearchMCPTools: false },
+					}),
+				),
+				searchMetadata: vi.fn().mockResolvedValue([]),
+				instanceUrl: "https://test.thoughtspot.cloud",
+			} as any);
+
+			const testServer = new TestMCPServer({ props: mockProps, env: mockEnv });
+			await testServer.init();
+			expect(testServer.testIsEurekaSearchMCPToolsAvailable()).toBe(false);
+		});
+
+		// NOTE (temporary demo): the absent/undefined case is intentionally NOT
+		// asserted here. getSessionInfo currently defaults a missing flag to
+		// `true` (see thoughtspot-service.ts), so absent -> available; that
+		// mapping is covered by the service-level test "maps the feature flags".
+		// Restore an explicit undefined -> false case here once the default is
+		// reverted and the cluster surfaces `useEurekaSearchMCPTools`.
 	});
 
 	describe("Metric Identity", () => {

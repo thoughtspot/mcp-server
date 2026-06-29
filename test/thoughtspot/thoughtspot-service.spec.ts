@@ -1230,6 +1230,8 @@ describe("thoughtspot-service", () => {
 				releaseVersion: "8.0.0",
 				currentOrgId: "org-123",
 				privileges: ["READ", "WRITE"],
+				// TEMPORARY (demo): absent flag defaults to true in the mapping.
+				useEurekaSearchMCPTools: true,
 			});
 		});
 
@@ -1258,6 +1260,35 @@ describe("thoughtspot-service", () => {
 			const result = await getSessionInfo(mockClient);
 
 			expect(result.mixpanelToken).toBe("dev-key");
+		});
+
+		it("maps the feature flags (enableSpotterDataSourceDiscovery, useEurekaSearchMCPTools)", async () => {
+			const mockResponse = {
+				configInfo: {
+					mixpanelConfig: {
+						production: true,
+						devSdkKey: "dev-key",
+						prodSdkKey: "prod-key",
+					},
+					selfClusterName: "test-cluster",
+					selfClusterId: "cluster-123",
+					enableSpotterDataSourceDiscovery: true,
+					useEurekaSearchMCPTools: true,
+				},
+				userGUID: "user-123",
+				userName: "testuser",
+				releaseVersion: "8.0.0",
+				currentOrgId: "org-123",
+				privileges: [],
+			};
+			(mockClient as any).getSessionInfo = vi
+				.fn()
+				.mockResolvedValue(mockResponse);
+
+			const result = await getSessionInfo(mockClient);
+
+			expect(result.enableSpotterDataSourceDiscovery).toBe(true);
+			expect(result.useEurekaSearchMCPTools).toBe(true);
 		});
 
 		it("should handle API errors", async () => {

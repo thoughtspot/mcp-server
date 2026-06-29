@@ -138,6 +138,16 @@ export class MCPServer extends BaseMCPServer {
 			);
 		}
 
+		// Filter out the Eureka-backed object search tools when the cluster flag
+		// (useEurekaSearchMCPTools) is absent or disabled.
+		if (!this.isEurekaSearchMCPToolsAvailable()) {
+			tools = tools.filter(
+				(tool) =>
+					tool.name !== ToolName.SearchObjects &&
+					tool.name !== ToolName.FetchData,
+			);
+		}
+
 		return { tools };
 	}
 
@@ -224,10 +234,22 @@ export class MCPServer extends BaseMCPServer {
 			}
 
 			case ToolName.SearchObjects: {
+				if (!this.isEurekaSearchMCPToolsAvailable()) {
+					return this.createErrorResponse(
+						"This tool is not available on this ThoughtSpot cluster.",
+						"search_objects is disabled (useEurekaSearchMCPTools is not enabled)",
+					);
+				}
 				return this.callSearchObjects(request, recorder);
 			}
 
 			case ToolName.FetchData: {
+				if (!this.isEurekaSearchMCPToolsAvailable()) {
+					return this.createErrorResponse(
+						"This tool is not available on this ThoughtSpot cluster.",
+						"fetch_data is disabled (useEurekaSearchMCPTools is not enabled)",
+					);
+				}
 				return this.callFetchData(request, recorder);
 			}
 

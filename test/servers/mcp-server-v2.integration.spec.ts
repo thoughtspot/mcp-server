@@ -136,6 +136,7 @@ const mockSessionInfoResponse = {
 		selfClusterName: "test-cluster",
 		selfClusterId: "test-cluster-123",
 		enableSpotterDataSourceDiscovery: true,
+		useEurekaSearchMCPTools: true,
 	},
 	userName: "test-user",
 	currentOrgId: "test-org",

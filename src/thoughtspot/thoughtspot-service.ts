@@ -740,7 +740,13 @@ export class ThoughtSpotService {
 			privileges: info.privileges,
 			enableSpotterDataSourceDiscovery:
 				info.configInfo?.enableSpotterDataSourceDiscovery,
-			useEurekaSearchMCPTools: info.configInfo?.useEurekaSearchMCPTools,
+			// TEMPORARY (demo only): default to true when the cluster does not
+			// report the flag, so the Eureka search tools are available even on
+			// clusters that have not yet surfaced `useEurekaSearchMCPTools` in
+			// configInfo. An explicit `false` from the cluster is still honored.
+			// TODO: revert to `info.configInfo?.useEurekaSearchMCPTools` once the
+			// flag is propagated through /prism/preauth/info.
+			useEurekaSearchMCPTools: info.configInfo?.useEurekaSearchMCPTools ?? true,
 		};
 	}
 

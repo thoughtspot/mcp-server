@@ -94,6 +94,21 @@ export abstract class BaseMCPServer extends Server {
 	}
 
 	/**
+	 * Check if the Eureka-backed object search tools (`search_objects`,
+	 * `fetch_data`) are available for this cluster. Fails closed: if the cluster
+	 * does not report the flag (or it is not enabled), the tools are unavailable.
+	 */
+	protected isEurekaSearchMCPToolsAvailable(): boolean {
+		if (!this.sessionInfo) {
+			console.warn(
+				"[DEBUG] sessionInfo is not initialized when checking Eureka search MCP tools availability",
+			);
+			return false;
+		}
+		return String(this.sessionInfo.useEurekaSearchMCPTools) === "true";
+	}
+
+	/**
 	 * Initialize span with common attributes (user_guid and instance_url)
 	 */
 	protected initSpanWithCommonAttributes(): Span | undefined {
