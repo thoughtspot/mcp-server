@@ -289,10 +289,11 @@ export class MCPServer extends BaseMCPServer {
 			console.error("Failed to load/seed keep-warm token on connect:", error);
 		}
 
-		// Org overlay: only when Orgs are enabled on this cluster. On a non-org
-		// cluster we skip all org logic — no active org, no org-scoped token, no
+		// Org overlay: only when org tools are available (OAuth + Orgs enabled on
+		// the cluster + the v2 API surface). On a non-org cluster or a v1 session we
+		// skip all org logic — no active org, no org-scoped token, no
 		// x-thoughtspot-orgs header — and calls fall back to the cluster-wide token.
-		if (!this.isOrgsEnabled()) {
+		if (!this.areOrgToolsAvailable()) {
 			return;
 		}
 		try {
@@ -377,12 +378,33 @@ export class MCPServer extends BaseMCPServer {
 	}
 
 	/**
-	 * Org tools (list_orgs/switch_org) are available only when the connection is
-	 * OAuth (the only auth mode that can mint org-scoped tokens) AND the cluster
-	 * has Orgs enabled. Fails closed if either is unknown.
+	 * Whether the resolved API surface is v2 (the tool set that includes the org
+	 * tools). Org behavior is v2-only: v1 (backwards-compatibility) sessions must
+	 * behave exactly as legacy single-org, with no org overlay. Determined from the
+	 * same resolveApiVersion the tool listing uses (single source of truth) by
+	 * checking whether the resolved tool set contains the org tools — so it tracks
+	 * the registry rather than hardcoding version labels. Fails closed on error.
+	 */
+	protected isV2ApiSurface(): boolean {
+		try {
+			const versionConfig = resolveApiVersion(this.ctx.props.apiVersion);
+			return versionConfig.tools.some(
+				(tool) => tool?.name === ToolName.ListOrgs,
+			);
+		} catch {
+			return false;
+		}
+	}
+
+	/**
+	 * Org tools (list_orgs/switch_org) AND the org overlay (active org, org-scoped
+	 * token, x-thoughtspot-orgs header) are available only when the connection is
+	 * OAuth (the only auth mode that can mint org-scoped tokens), the cluster has
+	 * Orgs enabled, AND the client is on the v2 API surface. v1 sessions get no org
+	 * behavior at all. Fails closed if anything is unknown.
 	 */
 	protected areOrgToolsAvailable(): boolean {
-		return this.isOAuthAuth() && this.isOrgsEnabled();
+		return this.isOAuthAuth() && this.isOrgsEnabled() && this.isV2ApiSurface();
 	}
 
 	protected getToolMetricApiVersionLabel(): string | undefined {

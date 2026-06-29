@@ -150,6 +150,7 @@ function makeServer(opts: {
 	listOrgs?: ReturnType<typeof vi.fn>;
 	validateConnection?: ReturnType<typeof vi.fn>;
 	touchLog?: string[];
+	apiVersion?: string;
 }) {
 	vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue(
 		makeClientMock(opts),
@@ -172,7 +173,7 @@ function makeServer(opts: {
 		refreshToken: "refresh-token",
 		tokenExpiryDuration: 1893456000000,
 		authMode: opts.authMode,
-		apiVersion: "latest",
+		apiVersion: opts.apiVersion ?? "latest",
 		clientName: {
 			clientId: "c",
 			clientName: "c",
@@ -222,6 +223,38 @@ describe("MCP Server org tools", () => {
 			const names = (await listTools()).tools?.map((t) => t.name) ?? [];
 			expect(names).not.toContain("list_orgs");
 			expect(names).not.toContain("switch_org");
+		});
+
+		it("hides org tools on the v1 (backwards-compatibility) API surface, even with OAuth + orgs enabled", async () => {
+			const { server } = makeServer({
+				authMode: "oauth",
+				session: { orgsEnabled: true },
+				apiVersion: "backwards-compatibility-default",
+			});
+			await server.init();
+			const { listTools } = connect(server);
+			const names = (await listTools()).tools?.map((t) => t.name) ?? [];
+			expect(names).not.toContain("list_orgs");
+			expect(names).not.toContain("switch_org");
+		});
+
+		it("does NOT apply the org overlay (no active org / no mint) on a v1 session", async () => {
+			const mint = vi.fn().mockResolvedValue("org-scoped-token");
+			const store = new Map<
+				string,
+				{ activeOrgId?: string; orgToken?: string }
+			>();
+			const { server } = makeServer({
+				authMode: "oauth",
+				session: { orgsEnabled: true, currentOrgId: "0" },
+				apiVersion: "backwards-compatibility-default",
+				fetchOrgBearerToken: mint,
+				store,
+			});
+			await server.init();
+			// v1 session: no active org defaulted, no org token minted.
+			expect(mint).not.toHaveBeenCalled();
+			expect([...store.values()].some((r) => r.activeOrgId)).toBe(false);
 		});
 
 		it("fails closed: hides org tools when orgs-enabled flag is absent", async () => {
