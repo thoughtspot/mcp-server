@@ -148,10 +148,14 @@ const oauthFetchHandler = createOAuthHandler<Props>({
 	// Extra routes mounted on the default handler app (consumer-specific).
 	extraRoutes(app) {
 		app.get("/", async (c) => {
-			return c.env.ASSETS!.fetch("/index.html");
+			if (!c.env.ASSETS) {
+				console.error("ASSETS binding is not configured");
+				return c.text("Internal Server Error", 500);
+			}
+			return c.env.ASSETS.fetch("/index.html");
 		});
 		app.get("/.well-known/openai-apps-challenge", (c) => {
-			return c.text(process.env.OPEN_AI_TOKEN as string);
+			return c.text(c.env.OPEN_AI_TOKEN as string);
 		});
 	},
 });
