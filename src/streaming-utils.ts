@@ -133,6 +133,7 @@ export const processSendAgentConversationMessageStreamingResponse = async (
 										gen_no: item.metadata?.gen_no,
 									}),
 									answer_title: item.metadata?.title,
+									answer_data_source_id: item.metadata?.worksheet_id,
 									answer_query: item.metadata?.sage_query,
 									iframe_url: iframeUrl,
 								});

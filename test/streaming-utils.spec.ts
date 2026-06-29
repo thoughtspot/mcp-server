@@ -345,6 +345,7 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 			generation_number: 7,
 			title: "My Answer",
 			sage_query: "show sales",
+			worksheet_id: "ws-123",
 		};
 		const line = `data: ${JSON.stringify([{ type: "answer", metadata }])}\n`;
 		const reader = makeReader([line]);
@@ -363,6 +364,7 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 				type: "answer",
 				answer_id: JSON.stringify({ session_id: "sess-1", gen_no: 42 }),
 				answer_title: "My Answer",
+				answer_data_source_id: "ws-123",
 				answer_query: "show sales",
 				iframe_url: expectedIframeUrl,
 			},
