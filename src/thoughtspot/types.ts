@@ -43,6 +43,7 @@ export interface AnswerMessage extends BaseMessage {
 	type: "answer";
 	answer_id: string;
 	answer_title: string;
+	answer_data_source_id: string;
 	answer_query: string;
 	iframe_url: string;
 }

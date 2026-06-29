@@ -152,6 +152,12 @@ export const ConversationUpdateSchema = z.object({
 		.describe(
 			"A human-readable title describing what the answer shows. Only present when `type` is `answer`.",
 		),
+	answer_data_source_id: z
+		.string()
+		.optional()
+		.describe(
+			"The identifier of the data source which the answer is created on. Only present when `type` is `answer`. You can use this to understand which answers were created with the same data source, or to initiate future conversations using the same data source.",
+		),
 	answer_query: z
 		.string()
 		.optional()
