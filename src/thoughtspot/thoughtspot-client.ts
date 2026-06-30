@@ -15,9 +15,7 @@ import type { Org, SessionInfo } from "./types";
 /*
  * Inject custom handlers into the ThoughtSpot client
  */
-// Header used by ThoughtSpot to select which org a request operates against.
-// The same access token works across all orgs the user belongs to; the active
-// org is chosen per-request via this header.
+// Per-request org selector; the access token works across all the user's orgs.
 const ORG_HEADER = "x-thoughtspot-orgs";
 
 export const getThoughtSpotClient = (
@@ -67,10 +65,7 @@ export const getThoughtSpotClient = (
 	return client;
 };
 
-/*
- * Build the auth/content headers for the custom raw-fetch handlers below,
- * including the org-scoping header when an active org is set.
- */
+// Auth/content headers for the raw-fetch handlers, incl. the org header if set.
 function buildHeaders(
 	token: string,
 	orgId?: string,
@@ -353,13 +348,9 @@ function addSendAgentConversationMessageStreaming(
 	};
 }
 
-/*
- * Lists the orgs the authenticated user is a member of, via the v1 session orgs
- * endpoint. We deliberately avoid the v2 orgs/search REST endpoint because it
- * requires ORG_ADMINISTRATION and returns 403 ("Operation is not allowed") for
- * regular (non-admin) users. This endpoint is user-scoped and available to any
- * user; it returns { orgs: [{ orgId, orgName, description, isActive }], ... }.
- */
+// Lists the user's orgs via the user-scoped v1 session/orgs endpoint. We avoid
+// the v2 orgs/search REST endpoint because it needs ORG_ADMINISTRATION and 403s
+// for regular users.
 function addListOrgs(client: any, instanceUrl: string, token: string) {
 	(client as any).listOrgs = async (): Promise<Org[]> => {
 		const endpoint = "/callosum/v1/session/orgs?batchsize=-1&offset=-1";
@@ -385,19 +376,12 @@ function addListOrgs(client: any, instanceUrl: string, token: string) {
 	};
 }
 
-// Default validity for a minted org-scoped bearer token (30 days, in seconds),
-// matching the validity the connector uses at login.
+// Org-scoped token validity (30 days), matching the connector's login validity.
 const ORG_TOKEN_VALIDITY_SEC = 30 * 24 * 60 * 60;
 
-/*
- * Mints an ORG-SCOPED bearer token for the given org, authenticated with the
- * caller's (cluster-wide) access token. Uses the Callosum v2 auth/token/fetch
- * endpoint with org_identifier; the returned token is pinned to that org
- * server-side.
- *
- * Note: the working path on these clusters is /callosum/v1/v2/auth/token/fetch
- * (the /callosum/v2/... path 404s), and the token is nested under data.token.
- */
+// Mint an org-scoped token via auth/token/fetch?org_identifier=... The working
+// path is /callosum/v1/v2/auth/token/fetch (the /callosum/v2/... path 404s);
+// token is nested under data.token.
 function addFetchOrgBearerToken(client: any, instanceUrl: string) {
 	(client as any).fetchOrgBearerToken = async ({
 		accessToken,
@@ -415,8 +399,7 @@ function addFetchOrgBearerToken(client: any, instanceUrl: string) {
 		const endpoint = `/callosum/v1/v2/auth/token/fetch?${params.toString()}`;
 		const response = await fetch(`${instanceUrl}${endpoint}`, {
 			method: "GET",
-			// Authenticate with the access token; no org header (the org is selected
-			// via org_identifier and pinned into the returned token).
+			// No org header — the org is selected via org_identifier.
 			headers: buildHeaders(accessToken),
 		});
 

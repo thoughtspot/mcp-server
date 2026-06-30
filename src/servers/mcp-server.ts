@@ -40,60 +40,37 @@ import {
 } from "./version-registry";
 
 export class MCPServer extends BaseMCPServer {
-	// In-memory mirror of the active org, loaded once per request lifecycle from
-	// the shared per-user store (keyed by the storage-key hash, so it is the same
-	// across all of the user's MCP sessions/DOs). Read synchronously by the
-	// active-org/token accessors; the durable source of truth is the store.
+	// In-memory mirrors of the active org + its org-scoped token, loaded each
+	// request from the shared per-user store (the durable source of truth; shared
+	// so the token is minted once and reused across the user's fanned-out sessions).
 	private activeOrgId: string | undefined;
-
-	// In-memory mirror of the active org's bearer token, loaded from the shared
-	// store alongside activeOrgId. The org token lives in the shared store (not a
-	// per-DO map) so it is minted ONCE and reused across all of the user's
-	// fanned-out MCP sessions/DOs — avoiding a mint call per fanned-out request
-	// (important for clients like ChatGPT that open a new session per tool call).
 	private activeOrgToken: string | undefined;
 
-	// In-memory copy of the keep-warm global token loaded from the token store on
-	// connect. The token store (refreshed by a DO alarm) is the source of truth so
-	// the token survives the ~24h expiry even while the user is absent; props is
-	// only the login-time seed/fallback.
+	// In-memory copy of the keep-warm global token, loaded from the (alarm-refreshed)
+	// token store on connect; props is only the login-time seed/fallback.
 	private warmGlobalToken: string | undefined;
 
 	constructor(ctx: Context) {
 		super(ctx, "ThoughtSpot", "2.0.0");
 	}
 
-	/**
-	 * The global (cluster-wide) token to use: the keep-warm token from the token
-	 * store if loaded, else the login-time token from props.
-	 */
+	// Keep-warm token if loaded, else the login-time props token.
 	private getGlobalToken(): string {
 		return this.warmGlobalToken ?? this.ctx.props.accessToken;
 	}
 
-	/**
-	 * The single accessor for the active org. Reads the in-memory mirror, which is
-	 * loaded from the shared store on connect (postInit).
-	 */
 	protected getActiveOrgId(): string | undefined {
 		return this.activeOrgId;
 	}
 
-	/**
-	 * Use the org-scoped bearer token for the active org if we hold one; otherwise
-	 * fall back to the session's global access token (from props/grant).
-	 */
+	// Org-scoped token for the active org if held, else the global token.
 	protected getActiveBearerToken(): string {
 		const orgToken = this.activeOrgId ? this.activeOrgToken : undefined;
 		return orgToken ?? this.getGlobalToken();
 	}
 
-	/**
-	 * Load the active org (id + org token) from the shared per-user store into the
-	 * in-memory mirrors. Keyed by the storage-key hash, so a switch made in any of
-	 * the user's (possibly fanned-out) MCP sessions is reflected. Re-read on each
-	 * org-aware call rather than trusting a stale mirror.
-	 */
+	// Load active org + its token from the shared store. Re-read on each org-aware
+	// call so a switch in another fanned-out session is reflected.
 	private async loadActiveOrg(): Promise<void> {
 		const storage = await this.getStorageService();
 		const stored = await storage.getActiveOrg();
@@ -101,37 +78,22 @@ export class MCPServer extends BaseMCPServer {
 		this.activeOrgToken = stored.orgToken ?? undefined;
 	}
 
-	/**
-	 * Persist the active org to the shared per-user store and update the in-memory
-	 * mirror. Shared across the user's sessions; persists until the next switch or
-	 * reauthentication (a new login changes the storage-key hash).
-	 */
 	private async setActiveOrg(orgId: string): Promise<void> {
 		this.activeOrgId = orgId;
-		// Changing the active org invalidates any held org token; it is re-minted
-		// lazily on next use. setActiveOrg also clears the stored token (DO route).
-		this.activeOrgToken = undefined;
+		this.activeOrgToken = undefined; // belongs to the prior org; re-minted lazily
 		const storage = await this.getStorageService();
 		await storage.setActiveOrg(orgId);
 	}
 
-	/**
-	 * Ensure we hold an org-scoped bearer token for the active `orgId`. If the
-	 * shared store already has one (minted by this or another fanned-out session),
-	 * reuse it. Otherwise mint from the keep-warm global token and persist it to the
-	 * shared store so other sessions/DOs reuse it instead of re-minting. Returns the
-	 * org token.
-	 */
+	// Return the active org's token, reusing the shared-store one if present, else
+	// minting from the global token and persisting it (so the fan-out mints once).
 	private async ensureOrgToken(
 		orgId: string,
 		recorder?: MetricsRecorder,
 	): Promise<string> {
-		// Reuse the token already loaded for this org (from the shared store).
 		if (this.activeOrgId === orgId && this.activeOrgToken) {
 			return this.activeOrgToken;
 		}
-		// Mint from the keep-warm global token so it works even after the login-time
-		// token would have expired.
 		const globalToken = this.getGlobalToken();
 		const orgToken = await this.getOrgService(
 			globalToken,
@@ -139,22 +101,14 @@ export class MCPServer extends BaseMCPServer {
 			recorder,
 		).fetchOrgBearerToken(globalToken, orgId);
 		this.activeOrgToken = orgToken;
-		// Persist to the shared store so the fan-out reuses it (one mint, not N).
 		const storage = await this.getStorageService();
 		await storage.setActiveOrgToken(orgToken);
 		return orgToken;
 	}
 
-	/**
-	 * Whether an error (thrown Error, or an `{ error }` result returned by a
-	 * service method) carries a 401/unauthorized signal. ThoughtSpot client
-	 * methods throw `Error`s whose message embeds the HTTP status in the form
-	 * "... failed with status 401: ..."; some service methods catch that and
-	 * return it nested under `error`. We match ONLY that structured status form —
-	 * deliberately not a bare "401" anywhere in the string, which would false-match
-	 * unrelated content (a datasource id, a liveboard title, a row count) and
-	 * wrongly trigger a re-mint + retry.
-	 */
+	// Whether an error (thrown, or an `{ error }` result) carries a 401. Matches
+	// only the structured "status 401" form the client emits — NOT a bare "401",
+	// which would false-match unrelated content and wrongly trigger a re-mint.
 	private isUnauthorizedError(value: unknown): boolean {
 		const message =
 			value instanceof Error
@@ -166,41 +120,26 @@ export class MCPServer extends BaseMCPServer {
 		return /\bstatus 401\b/.test(message);
 	}
 
-	/**
-	 * Drop the active org's token (in memory and in the shared store) and mint a
-	 * fresh one from the keep-warm global token. Used to recover from a stale
-	 * org token: org-scoped tokens have a 30-day validity, so a user returning to
-	 * a previously-selected org after a long absence can hit a 401 with no other
-	 * recovery path than re-switching. This re-mints transparently instead.
-	 */
+	// Evict the active org's token (memory + shared store) and re-mint. Recovers
+	// from a stale org token (30-day validity) without making the user re-switch.
 	private async forceRemintOrgToken(
 		orgId: string,
 		recorder?: MetricsRecorder,
 	): Promise<void> {
 		this.activeOrgToken = undefined;
-		// Clear the shared store too, so other fanned-out sessions don't keep
-		// reusing the stale token. ensureOrgToken re-persists the fresh one.
 		try {
 			const storage = await this.getStorageService();
 			await storage.setActiveOrgToken("");
 		} catch (error) {
-			// Best-effort: a failed clear must not block the re-mint+retry.
+			// Best-effort: a failed clear must not block the re-mint.
 			console.error("Failed to clear stale org token in store:", error);
 		}
 		await this.ensureOrgToken(orgId, recorder);
 	}
 
-	/**
-	 * Run an org-scoped ThoughtSpot call with a single reactive re-mint on a stale
-	 * org token. `fn` receives a freshly-bound service (so the retry picks up the
-	 * re-minted token). If the first attempt fails with a 401 AND an org token was
-	 * actually in use, we re-mint that org's token once and retry. All other
-	 * failures — and the case where no org token is active (so the global token is
-	 * what 401'd) — pass straight through unchanged.
-	 *
-	 * Covers both error shapes: methods that throw, and methods that return an
-	 * `{ error }` result. The retry triggers on either.
-	 */
+	// Run an org-scoped call with a single reactive re-mint+retry on a 401, but
+	// only when an org token is actually in use (a global-token 401 is a separate
+	// concern and passes through). Handles both thrown and `{ error }`-result 401s.
 	protected async withOrgTokenRetry<T>(
 		recorder: MetricsRecorder | undefined,
 		fn: (service: ThoughtSpotService) => Promise<T>,
@@ -212,16 +151,12 @@ export class MCPServer extends BaseMCPServer {
 		const attempt = () =>
 			fn(this.getThoughtSpotService(recorder, analyticsContextOverride));
 
-		// Only org-token calls are eligible for re-mint. If no org token is in use,
-		// a 401 is about the global token (a different concern) — pass through.
 		if (!usedOrgToken || !orgId) {
 			return attempt();
 		}
 
 		try {
 			const result = await attempt();
-			// Methods that swallow the 401 into an `{ error }` result: re-mint+retry
-			// once if that's what we got.
 			if (this.isUnauthorizedError(result)) {
 				await this.forceRemintOrgToken(orgId, recorder);
 				return attempt();
@@ -236,13 +171,9 @@ export class MCPServer extends BaseMCPServer {
 		}
 	}
 
-	/**
-	 * validateConnection swallows a 401 into a `false` return (no throw, no
-	 * `{ error }`), so withOrgTokenRetry can't see the auth failure. Handle it
-	 * directly: if the check fails WHILE an org token is in use, re-mint that
-	 * org's token once and re-validate — a stale org token is the most likely
-	 * cause of a false negative here.
-	 */
+	// validateConnection maps a 401 to `false` (no throw / no `{ error }`), so the
+	// generic retry can't see it. If it fails while an org token is in use, re-mint
+	// and re-validate — a stale org token is the likely cause.
 	private async validateConnectionWithOrgRetry(
 		recorder?: MetricsRecorder,
 	): Promise<boolean> {
@@ -256,43 +187,25 @@ export class MCPServer extends BaseMCPServer {
 		return this.getThoughtSpotService(recorder).validateConnection();
 	}
 
-	/**
-	 * On connect:
-	 * 1. Always seed + keep warm the cluster-wide (global) token. This is org
-	 *    agnostic: on a non-org cluster it is the only token, and on an org cluster
-	 *    it is the basis for minting org-scoped tokens. Runs regardless of orgs.
-	 * 2. If (and only if) Orgs are enabled on the cluster, establish the active
-	 *    org and mint its org-scoped token. On a non-org cluster we read no org
-	 *    info from session info and attach no org header — calls just use the
-	 *    cluster-wide token.
-	 *
-	 * Active-org rule when orgs are enabled: a prior switch (stored in the shared
-	 * per-user store) wins; otherwise default to the session's current org.
-	 * Best-effort: failures must not break the connection. Only OAuth sessions
-	 * carry a cluster-wide token that can mint tokens, so this is a no-op otherwise.
-	 */
+	// On connect (OAuth only): keep the cluster-wide token warm, then — only when
+	// org tools are available (OAuth + orgs enabled + v2) — establish the active
+	// org (a prior switch wins, else the session's current org) and mint its token.
+	// A v1 or non-org session gets no org overlay. Best-effort: never break connect.
 	protected async postInit(): Promise<void> {
 		if (!this.isOAuthAuth()) {
 			return;
 		}
-		// Always: keep the cluster-wide token warm (org-agnostic).
 		try {
 			await this.loadOrSeedWarmToken();
 		} catch (error) {
 			console.error("Failed to load/seed keep-warm token on connect:", error);
 		}
 
-		// Org overlay: only when org tools are available (OAuth + Orgs enabled on
-		// the cluster + the v2 API surface). On a non-org cluster or a v1 session we
-		// skip all org logic — no active org, no org-scoped token, no
-		// x-thoughtspot-orgs header — and calls fall back to the cluster-wide token.
 		if (!this.areOrgToolsAvailable()) {
 			return;
 		}
 		try {
 			await this.loadActiveOrg();
-			// First connect / nothing stored: default the active org to the session's
-			// current org (set the id; the org token is minted lazily below).
 			if (!this.activeOrgId) {
 				const currentOrgId =
 					this.sessionInfo?.currentOrgId != null
@@ -302,9 +215,7 @@ export class MCPServer extends BaseMCPServer {
 					await this.setActiveOrg(currentOrgId);
 				}
 			}
-			// Ensure the active org's token exists in the shared store (mint once,
-			// reused across the fan-out). Runs after the id is set so the token isn't
-			// cleared by setActiveOrg.
+			// After the id is set, so setActiveOrg doesn't clear what we mint.
 			if (this.activeOrgId) {
 				await this.ensureOrgToken(this.activeOrgId);
 			}
@@ -313,20 +224,10 @@ export class MCPServer extends BaseMCPServer {
 		}
 	}
 
-	/**
-	 * Load the keep-warm global token from the per-user token store into memory.
-	 * Re-seed from the login-time props (token + refresh token + expiry) when the
-	 * store is either:
-	 *   - not yet seeded (first connect), or
-	 *   - holding an EXPIRED token — i.e. the alarm refresh chain has died (e.g.
-	 *     consecutive transient failures). In that case the stale stored token must
-	 *     not be trusted; this connect's props carry a freshly-issued token from the
-	 *     current grant, so we re-seed and heal the chain. (Previously we only
-	 *     re-seeded when the stored token was ABSENT, so an expired-but-present
-	 *     token stranded the user until full re-auth.)
-	 * The store (alarm-refreshed) is the source of truth otherwise, so the token
-	 * survives the ~24h expiry across an absence.
-	 */
+	// Load the keep-warm global token into memory. Re-seed from props when the
+	// store is unseeded OR holds an expired token (the refresh chain died) — the
+	// connect's props carry a fresh grant token, which heals the chain. Otherwise
+	// the alarm-refreshed store is the source of truth.
 	private async loadOrSeedWarmToken(): Promise<void> {
 		const storage = await this.getStorageService();
 		const store = await storage.getTokenStore();
@@ -336,9 +237,6 @@ export class MCPServer extends BaseMCPServer {
 			this.warmGlobalToken = store.accessToken;
 			return;
 		}
-		// Not seeded, or the stored token has expired — (re)seed from props if we
-		// have both tokens. seedTokenStore is idempotent and arms the alarm if it
-		// isn't already armed.
 		const { accessToken, refreshToken, tokenExpiryDuration, instanceUrl } =
 			this.ctx.props;
 		if (accessToken && refreshToken) {
@@ -354,16 +252,12 @@ export class MCPServer extends BaseMCPServer {
 			this.warmGlobalToken = accessToken;
 			return;
 		}
-		// No props refresh token to re-seed with: fall back to whatever we have
-		// (the stored token if present, else the props access token).
+		// No refresh token to re-seed with: use whatever we have.
 		this.warmGlobalToken = store.accessToken ?? accessToken;
 	}
 
-	/**
-	 * Record user activity for idle-session detection. Fire-and-forget: never
-	 * block or fail a tool call on this (the throttling + delete logic lives in
-	 * the DO). No-op if there's no keep-warm store to age out.
-	 */
+	// Record user activity for idle detection. Fire-and-forget (throttle + delete
+	// live in the DO); no-op if there's no keep-warm store.
 	private touchLastSeen(): void {
 		this.getStorageService()
 			.then((storage) => storage.touchLastSeen())
@@ -384,34 +278,20 @@ export class MCPServer extends BaseMCPServer {
 		return this.ctx.props.authMode === "oauth";
 	}
 
-	/**
-	 * Whether the resolved API surface is v2 (the tool set that includes the org
-	 * tools). Org behavior is v2-only: v1 (backwards-compatibility) sessions must
-	 * behave exactly as legacy single-org, with no org overlay. Determined from the
-	 * same resolveApiVersion the tool listing uses (single source of truth) by
-	 * checking whether the resolved tool set contains the org tools — so it tracks
-	 * the registry rather than hardcoding version labels. Fails closed on error.
-	 */
-	protected isV2ApiSurface(): boolean {
+	// Org tools + overlay require OAuth, orgs enabled, and the v2 surface (v1 gets
+	// no org behavior). v2 is inferred from the resolved tool set, not a hardcoded
+	// label. Fails closed.
+	protected areOrgToolsAvailable(): boolean {
+		if (!this.isOAuthAuth() || !this.isOrgsEnabled()) {
+			return false;
+		}
 		try {
-			const versionConfig = resolveApiVersion(this.ctx.props.apiVersion);
-			return versionConfig.tools.some(
+			return resolveApiVersion(this.ctx.props.apiVersion).tools.some(
 				(tool) => tool?.name === ToolName.ListOrgs,
 			);
 		} catch {
 			return false;
 		}
-	}
-
-	/**
-	 * Org tools (list_orgs/switch_org) AND the org overlay (active org, org-scoped
-	 * token, x-thoughtspot-orgs header) are available only when the connection is
-	 * OAuth (the only auth mode that can mint org-scoped tokens), the cluster has
-	 * Orgs enabled, AND the client is on the v2 API surface. v1 sessions get no org
-	 * behavior at all. Fails closed if anything is unknown.
-	 */
-	protected areOrgToolsAvailable(): boolean {
-		return this.isOAuthAuth() && this.isOrgsEnabled() && this.isV2ApiSurface();
 	}
 
 	protected getToolMetricApiVersionLabel(): string | undefined {
@@ -507,8 +387,7 @@ export class MCPServer extends BaseMCPServer {
 			);
 		}
 
-		// Org tools (list_orgs, switch_org) require OAuth AND Orgs enabled on the
-		// cluster.
+		// Org tools are gated (OAuth + orgs enabled + v2).
 		if (!this.areOrgToolsAvailable()) {
 			tools = tools.filter(
 				(tool) =>
@@ -569,8 +448,7 @@ export class MCPServer extends BaseMCPServer {
 		const { name } = request.params;
 		this.trackers.track(TrackEvent.CallTool, { toolName: name });
 
-		// Record user activity for idle-session detection (best-effort, throttled
-		// server-side). Only OAuth sessions have a keep-warm token store to age out.
+		// Record activity for idle detection (OAuth sessions only).
 		if (this.isOAuthAuth()) {
 			this.touchLastSeen();
 		}
@@ -641,8 +519,7 @@ export class MCPServer extends BaseMCPServer {
 			}
 
 			case ToolName.ListOrgs: {
-				// Defense in depth: omitted from listTools when unavailable, but
-				// reject direct invocation as well.
+				// Defense in depth: also reject direct invocation when unavailable.
 				if (!this.areOrgToolsAvailable()) {
 					return this.createErrorResponse(
 						"The list_orgs tool is only available when authenticated via OAuth on a cluster with Orgs enabled.",
@@ -653,8 +530,7 @@ export class MCPServer extends BaseMCPServer {
 			}
 
 			case ToolName.SwitchOrg: {
-				// Defense in depth: omitted from listTools when unavailable, but
-				// reject direct invocation as well.
+				// Defense in depth: also reject direct invocation when unavailable.
 				if (!this.areOrgToolsAvailable()) {
 					return this.createErrorResponse(
 						"The switch_org tool is only available when authenticated via OAuth on a cluster with Orgs enabled.",
@@ -1027,8 +903,7 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 	async callListOrgs(recorder: MetricsRecorder) {
 		const span = trace.getSpan(context.active());
 
-		// List the user's own orgs (user-scoped v1 session/orgs endpoint), using the
-		// global/cluster-wide token — no org header, no org-token retry needed.
+		// User-scoped list via the global token — no org header.
 		const orgs = await this.getOrgService(
 			this.getGlobalToken(),
 			undefined,
@@ -1036,8 +911,7 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		).listOrgs();
 		span?.setAttribute("total_orgs", orgs.length);
 
-		// Re-read the active org from the shared store (this request may run on a
-		// different DO than the one that handled postInit/switch_org).
+		// Re-read from the shared store: this may run on a different DO than the switch.
 		await this.loadActiveOrg();
 		const activeOrgId = this.getActiveOrgId();
 
@@ -1063,18 +937,12 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		const orgId = String(org_id);
 		span?.setAttribute("requested_org_id", orgId);
 
-		// Set the active org first (clears any prior org's token), then mint the new
-		// org's token and persist it to the shared store. Minting also validates
-		// access: no pre-validation against list_orgs — if the user can't access the
-		// org, the mint returns 401 (token rejected) or 403 (no access), surfaced as
-		// "org not accessible".
+		// The mint validates access — 401/403 means the user can't reach the org.
 		await this.setActiveOrg(orgId);
 		try {
 			await this.ensureOrgToken(orgId, recorder);
 		} catch (error) {
 			const message = (error as Error)?.message ?? "";
-			// The mint returns 401 (token rejected) or 403 (no access) when the user
-			// can't access the org.
 			if (/\bstatus 40[13]\b/.test(message)) {
 				return this.createErrorResponse(
 					`You do not have access to org "${orgId}", or it does not exist. Call list_orgs to see the orgs you can access.`,

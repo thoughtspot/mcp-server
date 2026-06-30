@@ -132,11 +132,8 @@ export function recordUpstreamCallMetrics(
 	recorder.histogram(METRIC_NAMES.upstreamDurationMs, durationMs, labels);
 }
 
-/**
- * Run an upstream call, recording success/error + duration metrics for it.
- * Shared by the service classes so they don't each reimplement the timing +
- * outcome bookkeeping.
- */
+// Run an upstream call, recording success/error + duration. Shared by the
+// service classes.
 export async function observeUpstreamCall<T>(
 	recorder: MetricsRecorder | undefined,
 	operation: UpstreamOperation,

@@ -54,10 +54,7 @@ export class StorageServiceClient {
 		return `https://internal/storage/${encodeURIComponent(conversationId)}/${operation}`;
 	}
 
-	// Reserved pseudo-id for the per-user token/org DO instance. Uses the same
-	// hash-namespaced addressing as conversations, but on the dedicated
-	// UserTokenStoreSQLite namespace; holds active org + keep-warm token, shared
-	// across the user's sessions.
+	// Pseudo-id addressing the per-user token/org instance (see userStubFor).
 	private static readonly ACTIVE_ORG_ID = "__active_org__";
 
 	/**
@@ -111,11 +108,8 @@ export class StorageServiceClient {
 		}
 	}
 
-	/**
-	 * Persist a lazily-minted org token for the current active org, so other
-	 * sessions/DOs reuse it instead of re-minting. Passing an empty string clears
-	 * the stored token (used to evict a stale org token before re-minting).
-	 */
+	// Persist the active org's token for reuse across sessions. Empty string clears
+	// it (to evict a stale token before re-minting).
 	async setActiveOrgToken(orgToken: string): Promise<void> {
 		const id = StorageServiceClient.ACTIVE_ORG_ID;
 		const response = await this.userStubFor(id).fetch(
@@ -134,11 +128,7 @@ export class StorageServiceClient {
 		}
 	}
 
-	/**
-	 * Read the keep-warm TS access token (kept fresh by the DO alarm). Returns null
-	 * if no token store has been seeded yet. Lives on the same per-user instance as
-	 * the active org.
-	 */
+	// Read the keep-warm token (alarm-refreshed); accessToken is null if unseeded.
 	async getTokenStore(): Promise<{
 		accessToken: string | null;
 		expiresAt: number | null;
@@ -163,10 +153,7 @@ export class StorageServiceClient {
 		};
 	}
 
-	/**
-	 * Seed the keep-warm token store and arm the refresh alarm. Idempotent: safe to
-	 * call on every connect; it updates the tokens and only arms the alarm once.
-	 */
+	// Seed the keep-warm token store + arm the refresh alarm. Idempotent per connect.
 	async seedTokenStore(store: {
 		accessToken: string;
 		refreshToken: string;
@@ -190,11 +177,7 @@ export class StorageServiceClient {
 		}
 	}
 
-	/**
-	 * Record user activity (a tool call) for idle-session detection. Best-effort
-	 * and throttled server-side; safe to call on every tool invocation. Lives on
-	 * the same per-user instance as the active org / token store.
-	 */
+	// Record user activity for idle detection; throttled server-side.
 	async touchLastSeen(): Promise<void> {
 		const id = StorageServiceClient.ACTIVE_ORG_ID;
 		const response = await this.userStubFor(id).fetch(this.url(id, "touch"), {

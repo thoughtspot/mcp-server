@@ -4,21 +4,10 @@ import { getActiveSpan } from "./metrics/tracing/tracing-utils";
 
 export type Props = {
 	accessToken: string;
-	/**
-	 * Refresh token returned alongside the global access token by
-	 * callosum/v1/session/v2/gettoken. Stored for future token refresh; not yet
-	 * used to refresh automatically.
-	 */
+	// From gettoken, for keep-warm refresh.
 	refreshToken?: string;
-	/**
-	 * When the global access token was issued (epoch millis), from gettoken's
-	 * `tokenCreatedTime`. Stored as-is.
-	 */
 	tokenCreatedTime?: number;
-	/**
-	 * When the global access token expires (epoch millis), from gettoken's
-	 * `tokenExpiryDuration` (an absolute timestamp despite the name). Stored as-is.
-	 */
+	// Absolute epoch-ms expiry (despite the name).
 	tokenExpiryDuration?: number;
 	instanceUrl: string;
 	clientName: {
@@ -29,11 +18,7 @@ export type Props = {
 	apiVersion?: string;
 	apiVersionMode?: ApiVersionMode;
 	apiRequestedVersion?: string;
-	/**
-	 * How the user authenticated for this connection. Used to gate tools that are only
-	 * available to OAuth users (e.g. `list_orgs`). Set to "oauth" by the OAuth flow and
-	 * "bearer"/"token" by the static-token flow in bearer.ts.
-	 */
+	// Auth method ("oauth" vs "bearer"/"token"); gates OAuth-only tools.
 	authMode?: AuthMode;
 };
 

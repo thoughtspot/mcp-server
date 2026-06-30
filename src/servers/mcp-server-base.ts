@@ -232,55 +232,20 @@ export abstract class BaseMCPServer extends Server {
 		);
 	}
 
-	/**
-	 * The org currently active for this session, if any. When set, all
-	 * ThoughtSpot calls are scoped to this org via the x-thoughtspot-orgs header.
-	 * Subclasses override this to expose their per-session org state. Defaults to
-	 * undefined (the user's default org, as resolved by the cluster).
-	 */
+	// Active org for ThoughtSpot calls (x-thoughtspot-orgs header); none by default.
+	// Subclasses override to supply per-session org state.
 	protected getActiveOrgId(): string | undefined {
 		return undefined;
 	}
 
-	/**
-	 * The bearer token to use for ThoughtSpot calls. Defaults to the token from
-	 * the session. Subclasses override this to return an org-scoped bearer token
-	 * when an org has been selected.
-	 */
+	// Bearer token for ThoughtSpot calls; the session token by default. Subclasses
+	// override to return an org-scoped token.
 	protected getActiveBearerToken(): string {
 		return this.ctx.props.accessToken;
 	}
 
-	/**
-	 * Build a ThoughtSpot service bound to an explicit bearer token and org,
-	 * bypassing the active-org/token resolution. Used for org-token minting,
-	 * which must authenticate with a specific token.
-	 */
-	protected getThoughtSpotServiceWithToken(
-		bearerToken: string,
-		orgId?: string,
-		recorder?: MetricsRecorder,
-		analyticsContextOverride?: MetricAnalyticsContext,
-	) {
-		return new ThoughtSpotService(
-			getThoughtSpotClient(this.ctx.props.instanceUrl, bearerToken, orgId),
-			{
-				recorder,
-				metricsEnv: this.ctx.env as unknown as Record<string, unknown>,
-				waitUntil: this.getMetricsWaitUntil(),
-				analyticsContext: this.mergeMetricAnalyticsContext(
-					analyticsContextOverride,
-				),
-				eventIdentity: this.getMetricEventIdentity(),
-			},
-		);
-	}
-
-	/**
-	 * Build an OrgService bound to an explicit bearer token (and optional org) for
-	 * org listing / org-token minting. Authenticated with the given token, so
-	 * callers pass the cluster-wide token here.
-	 */
+	// Build an OrgService bound to an explicit (cluster-wide) token for org listing
+	// / org-token minting.
 	protected getOrgService(
 		bearerToken: string,
 		orgId?: string,

@@ -7,21 +7,16 @@ import {
 import { WithSpan, getActiveSpan } from "../metrics/tracing/tracing-utils";
 import type { Org } from "./types";
 
-/**
- * Org/token operations, kept separate from ThoughtSpotService (which serves
- * Spotter conversation/answer flows). Covers listing the user's orgs and minting
- * org-scoped bearer tokens — the building blocks for the multi-org (v2) tools.
- */
+// Org/token operations, separate from ThoughtSpotService (Spotter flows): listing
+// the user's orgs and minting org-scoped tokens for the multi-org (v2) tools.
 export class OrgService {
 	constructor(
 		private readonly client: ThoughtSpotRestApi,
 		private readonly recorder?: MetricsRecorder,
 	) {}
 
-	/**
-	 * List the orgs the authenticated user is a member of (user-scoped v1
-	 * session/orgs endpoint; works for any user, unlike the admin-only orgs/search).
-	 */
+	// List the user's orgs (user-scoped v1 session/orgs; works for any user, unlike
+	// the admin-only orgs/search).
 	@WithSpan("list-orgs")
 	async listOrgs(): Promise<Org[]> {
 		const orgs = (await observeUpstreamCall(
@@ -34,10 +29,7 @@ export class OrgService {
 		return results;
 	}
 
-	/**
-	 * Mint an org-scoped bearer token for `orgId`, authenticated with the given
-	 * (cluster-wide) access token.
-	 */
+	// Mint an org-scoped token for `orgId`, authenticated with the given token.
 	@WithSpan("fetch-org-bearer-token")
 	async fetchOrgBearerToken(
 		accessToken: string,
