@@ -266,10 +266,6 @@ export const ListOrgsOutputSchema = z.object({
 				id: z.number().describe("Unique identifier of the Org."),
 				name: z.string().describe("Name of the Org."),
 				description: z.string().optional().describe("Description of the Org."),
-				status: z
-					.string()
-					.optional()
-					.describe("Status of the Org (ACTIVE or IN_ACTIVE)."),
 				is_active: z
 					.boolean()
 					.describe(
@@ -441,7 +437,7 @@ export const toolDefinitionsV2 = [
 	{
 		name: ToolName.ListOrgs,
 		description:
-			"List the Orgs the authenticated user can access on the ThoughtSpot instance, including the ID, name, description, and status of each Org. The Org marked `is_active: true` is the one currently active for this session, which all tool calls operate against. Use this to tell the user which Org they are in. Only available when authenticated via OAuth.",
+			"List the Orgs the authenticated user can access on the ThoughtSpot instance, including the ID, name, and description of each Org. The Org marked `is_active: true` is the one currently active for this session, which all tool calls operate against. Use this to tell the user which Org they are in. Only available when authenticated via OAuth.",
 		inputSchema: z.toJSONSchema(ListOrgsInputSchema),
 		outputSchema: z.toJSONSchema(ListOrgsOutputSchema),
 		annotations: {

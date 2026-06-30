@@ -10,7 +10,7 @@ import type {
 import { customAlphabet } from "nanoid";
 import { of } from "rxjs";
 import YAML from "yaml";
-import type { Org, SessionInfo } from "./types";
+import { type Org, type SessionInfo, ThoughtSpotApiError } from "./types";
 
 /*
  * Inject custom handlers into the ThoughtSpot client
@@ -221,8 +221,10 @@ function addGetAnswerSession(
 
 		if (!response.ok) {
 			const errorText = await response.text();
-			throw new Error(
-				`getAnswerSession failed with status ${response.status}: ${errorText}`,
+			throw new ThoughtSpotApiError(
+				response.status,
+				"getAnswerSession",
+				errorText,
 			);
 		}
 		const data = (await response.json()) as any;
@@ -277,8 +279,10 @@ function addCreateAgentConversationWithAutoMode(
 
 		if (!response.ok) {
 			const errorText = await response.text();
-			throw new Error(
-				`createAgentConversationWithAutoMode failed with status ${response.status}: ${errorText}`,
+			throw new ThoughtSpotApiError(
+				response.status,
+				"createAgentConversationWithAutoMode",
+				errorText,
 			);
 		}
 
@@ -339,8 +343,10 @@ function addSendAgentConversationMessageStreaming(
 
 		if (!response.ok) {
 			const errorText = await response.text();
-			throw new Error(
-				`sendAgentConversationMessageStreaming failed with status ${response.status}: ${errorText}`,
+			throw new ThoughtSpotApiError(
+				response.status,
+				"sendAgentConversationMessageStreaming",
+				errorText,
 			);
 		}
 
@@ -361,9 +367,7 @@ function addListOrgs(client: any, instanceUrl: string, token: string) {
 
 		if (!response.ok) {
 			const errorText = await response.text();
-			throw new Error(
-				`listOrgs failed with status ${response.status}: ${errorText}`,
-			);
+			throw new ThoughtSpotApiError(response.status, "listOrgs", errorText);
 		}
 
 		const data = (await response.json()) as any;
@@ -405,8 +409,10 @@ function addFetchOrgBearerToken(client: any, instanceUrl: string) {
 
 		if (!response.ok) {
 			const errorText = await response.text();
-			throw new Error(
-				`fetchOrgBearerToken failed with status ${response.status}: ${errorText}`,
+			throw new ThoughtSpotApiError(
+				response.status,
+				"fetchOrgBearerToken",
+				errorText,
 			);
 		}
 

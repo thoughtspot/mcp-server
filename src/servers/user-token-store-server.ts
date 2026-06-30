@@ -201,13 +201,16 @@ export class UserTokenStoreSQLite {
 			}
 			const refreshToken =
 				data?.refreshToken ?? data?.data?.refreshToken ?? store.refreshToken;
-			const expiresAt =
+			const newExpiresAt =
 				data?.tokenExpiryDuration ?? data?.data?.tokenExpiryDuration;
 			await this.state.storage.put<TokenStore>(TOKEN_STORE_KEY, {
 				accessToken,
 				refreshToken,
 				instanceUrl: store.instanceUrl,
-				expiresAt: typeof expiresAt === "number" ? expiresAt : undefined,
+				// Keep the prior expiry if the refresh response omits one, so we never
+				// lose expiry tracking (which would defeat the reconnect self-heal).
+				expiresAt:
+					typeof newExpiresAt === "number" ? newExpiresAt : store.expiresAt,
 				lastSeenAt: store.lastSeenAt,
 			});
 			await this.state.storage.setAlarm(Date.now() + TOKEN_REFRESH_INTERVAL_MS);

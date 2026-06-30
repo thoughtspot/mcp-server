@@ -2,6 +2,7 @@ import { connect } from "mcp-testing-kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MCPServer } from "../../src/servers/mcp-server";
 import * as thoughtspotClient from "../../src/thoughtspot/thoughtspot-client";
+import { ThoughtSpotApiError } from "../../src/thoughtspot/types";
 
 vi.mock("../../src/metrics/mixpanel/mixpanel", () => ({
 	MixpanelTracker: vi.fn().mockImplementation(() => ({ track: vi.fn() })),
@@ -410,15 +411,15 @@ describe("MCP Server org tools", () => {
 		});
 
 		it("returns 'not accessible' when minting the org token 403s (no access)", async () => {
-			// Org access-denied commonly surfaces as 403, not 401 — must give the
-			// same accurate "no access" guidance, not a generic "try again".
+			// Access-denied commonly surfaces as 403, not 401 — same "no access"
+			// guidance. Uses the real typed error to exercise status-based detection.
 			const { server } = makeServer({
 				authMode: "oauth",
 				session: { orgsEnabled: true },
 				fetchOrgBearerToken: vi
 					.fn()
 					.mockRejectedValue(
-						new Error("fetchOrgBearerToken failed with status 403: forbidden"),
+						new ThoughtSpotApiError(403, "fetchOrgBearerToken", "forbidden"),
 					),
 			});
 			await server.init();

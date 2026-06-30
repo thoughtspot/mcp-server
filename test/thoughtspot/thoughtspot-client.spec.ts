@@ -459,9 +459,10 @@ describe("ThoughtSpot Client", () => {
 					session_identifier: "session-123",
 					generation_number: 2,
 				}),
-			).rejects.toThrow(
-				"getAnswerSession failed with status 401: Invalid token",
-			);
+			).rejects.toMatchObject({
+				status: 401,
+				message: "getAnswerSession failed with status 401",
+			});
 		});
 
 		it("should throw when response is missing answer session", async () => {
@@ -640,9 +641,10 @@ describe("ThoughtSpot Client", () => {
 
 			await expect(
 				client.createAgentConversationWithAutoMode({}),
-			).rejects.toThrow(
-				"createAgentConversationWithAutoMode failed with status 401: Unauthorized",
-			);
+			).rejects.toMatchObject({
+				status: 401,
+				message: "createAgentConversationWithAutoMode failed with status 401",
+			});
 		});
 
 		it("should handle network errors", async () => {
@@ -753,9 +755,10 @@ describe("ThoughtSpot Client", () => {
 					conversation_identifier: "foo",
 					message: "bar",
 				}),
-			).rejects.toThrow(
-				"sendAgentConversationMessageStreaming failed with status 401: Invalid token",
-			);
+			).rejects.toMatchObject({
+				status: 401,
+				message: "sendAgentConversationMessageStreaming failed with status 401",
+			});
 		});
 
 		it("should use correct headers for send agent conversation message streaming request", async () => {

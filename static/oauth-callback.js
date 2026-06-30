@@ -76,11 +76,21 @@
                             // Case 1: tokenText is a quoted string
                             tokenData = { data: { token: parsed } };
                         } else if (parsed.data && parsed.data.token) {
-                            // Case 2: { data: { token: ... } }
-                            tokenData = { data: { token: parsed.data.token } };
+                            // Case 2: { data: { token, refreshToken?, ... } }
+                            tokenData = { data: {
+                                token: parsed.data.token,
+                                refreshToken: parsed.data.refreshToken,
+                                tokenCreatedTime: parsed.data.tokenCreatedTime,
+                                tokenExpiryDuration: parsed.data.tokenExpiryDuration,
+                            } };
                         } else if (parsed.token) {
-                            // Case 3: { token: ... }
-                            tokenData = { data: { token: parsed.token } };
+                            // Case 3: { token, refreshToken?, ... }
+                            tokenData = { data: {
+                                token: parsed.token,
+                                refreshToken: parsed.refreshToken,
+                                tokenCreatedTime: parsed.tokenCreatedTime,
+                                tokenExpiryDuration: parsed.tokenExpiryDuration,
+                            } };
                         } else {
                             throw new Error('Unrecognized token format.');
                         }
@@ -131,11 +141,14 @@
         }
         
         const raw = await response.json();
-        // gettoken returns the access token at top-level `token`, plus refreshToken
-        // and the token's created/expiry timestamps. Normalize to the
-        // { data: { token, ... } } shape that /store-token expects (same shape the
-        // manual-paste path produces), carrying all fields through as-is.
+        // gettoken returns the access token + refreshToken + timestamps. Normalize
+        // to the { data: { token, ... } } shape /store-token expects.
         const src = (raw && raw.data) ? raw.data : raw;
+        if (!src || !src.token) {
+            // Fail loudly at login rather than storing an undefined token and
+            // failing opaquely on the first tool call.
+            throw new Error('Authentication response did not contain a token.');
+        }
         const data = {
             data: {
                 token: src.token,

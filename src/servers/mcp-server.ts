@@ -18,7 +18,11 @@ import type {
 	DataSource,
 	ThoughtSpotService,
 } from "../thoughtspot/thoughtspot-service";
-import type { Answer, StreamingMessagesState } from "../thoughtspot/types";
+import {
+	type Answer,
+	type StreamingMessagesState,
+	ThoughtSpotApiError,
+} from "../thoughtspot/types";
 import { McpServerError } from "../utils";
 import { BaseMCPServer, type Context } from "./mcp-server-base";
 import {
@@ -106,18 +110,28 @@ export class MCPServer extends BaseMCPServer {
 		return orgToken;
 	}
 
-	// Whether an error (thrown, or an `{ error }` result) carries a 401. Matches
-	// only the structured "status 401" form the client emits — NOT a bare "401",
-	// which would false-match unrelated content and wrongly trigger a re-mint.
-	private isUnauthorizedError(value: unknown): boolean {
-		const message =
+	// HTTP status from an error (thrown, or stored on an `{ error }` result),
+	// preferring the structured ThoughtSpotApiError. Falls back to parsing a
+	// "status NNN" message for untyped errors (e.g. from the SDK or network layer).
+	private apiErrorStatus(value: unknown): number | undefined {
+		const err =
 			value instanceof Error
-				? value.message
-				: typeof (value as { error?: { message?: string } } | null)?.error
-							?.message === "string"
-					? (value as { error: { message: string } }).error.message
-					: "";
-		return /\bstatus 401\b/.test(message);
+				? value
+				: ((value as { error?: unknown } | null)?.error ?? value);
+		if (err instanceof ThoughtSpotApiError) {
+			return err.status;
+		}
+		const message =
+			typeof (err as { message?: unknown })?.message === "string"
+				? (err as { message: string }).message
+				: "";
+		const match = message.match(/\bstatus (\d{3})\b/);
+		return match ? Number(match[1]) : undefined;
+	}
+
+	// Whether an error carries a 401 (the org-token-stale signal for re-mint).
+	private isUnauthorizedError(value: unknown): boolean {
+		return this.apiErrorStatus(value) === 401;
 	}
 
 	// Evict the active org's token (memory + shared store) and re-mint. Recovers
@@ -686,7 +700,7 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 				svc.createAgentConversation(data_source_id),
 			);
 		} catch (error) {
-			if (!(error as any)?.message?.includes("failed with status 401")) {
+			if (this.apiErrorStatus(error) !== 401) {
 				throw error;
 			}
 
@@ -942,8 +956,8 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		try {
 			await this.ensureOrgToken(orgId, recorder);
 		} catch (error) {
-			const message = (error as Error)?.message ?? "";
-			if (/\bstatus 40[13]\b/.test(message)) {
+			const status = this.apiErrorStatus(error);
+			if (status === 401 || status === 403) {
 				return this.createErrorResponse(
 					`You do not have access to org "${orgId}", or it does not exist. Call list_orgs to see the orgs you can access.`,
 					"Switch org failed: org not accessible (401/403)",
@@ -951,7 +965,7 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			}
 			return this.createErrorResponse(
 				`Failed to switch to org "${orgId}". Please try again.`,
-				`Error switching org ${message}`,
+				`Error switching org ${(error as Error)?.message ?? ""}`,
 			);
 		}
 

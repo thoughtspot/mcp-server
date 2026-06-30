@@ -400,6 +400,31 @@ describe("UserTokenStoreSQLite", () => {
 			expect(after.lastSeenAt).toBe(seen); // activity tracking survives refresh
 		});
 
+		it("keeps the prior expiresAt when the refresh response omits one", async () => {
+			await server.fetch(makeRequest("POST", "token-store", seedBody()));
+			const priorExpiry = Date.now() + 24 * 60 * 60 * 1000;
+			const stored = mock.store.get("token-store") as Record<string, unknown>;
+			mock.store.set("token-store", { ...stored, expiresAt: priorExpiry });
+			// Refresh response has a token but NO tokenExpiryDuration.
+			const fetchSpy = vi
+				.spyOn(globalThis, "fetch")
+				.mockResolvedValue(
+					new Response(JSON.stringify({ token: "access-2" }), { status: 200 }),
+				);
+
+			await server.alarm();
+			fetchSpy.mockRestore();
+
+			const after = mock.store.get("token-store") as {
+				accessToken: string;
+				expiresAt?: number;
+			};
+			expect(after.accessToken).toBe("access-2");
+			// Expiry tracking preserved (not dropped to undefined), so reconnect
+			// self-heal still works.
+			expect(after.expiresAt).toBe(priorExpiry);
+		});
+
 		it("seeding twice does not stack alarms (idempotent arm)", async () => {
 			await server.fetch(makeRequest("POST", "token-store", seedBody()));
 			mock.storage.setAlarm.mockClear();
