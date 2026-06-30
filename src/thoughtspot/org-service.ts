@@ -15,8 +15,7 @@ export class OrgService {
 		private readonly recorder?: MetricsRecorder,
 	) {}
 
-	// List the user's orgs (user-scoped v1 session/orgs; works for any user, unlike
-	// the admin-only orgs/search).
+	// User-scoped v1 session/orgs — works for any user, unlike the admin-only orgs/search.
 	@WithSpan("list-orgs")
 	async listOrgs(): Promise<Org[]> {
 		const orgs = (await observeUpstreamCall(
@@ -29,7 +28,6 @@ export class OrgService {
 		return results;
 	}
 
-	// Mint an org-scoped token for `orgId`, authenticated with the given token.
 	@WithSpan("fetch-org-bearer-token")
 	async fetchOrgBearerToken(
 		accessToken: string,

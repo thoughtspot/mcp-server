@@ -198,7 +198,6 @@ export class ConversationStorageServerSQLite {
 	}
 
 	async alarm(): Promise<void> {
-
 		// Check for any abnormalities in the state prior to deleting
 		const [isDone, readBookmark, writeBookmark] =
 			await this.getIsDoneAndReadWriteBookmarks();

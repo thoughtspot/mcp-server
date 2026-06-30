@@ -1,24 +1,13 @@
 import type { Message, StreamingMessagesState } from "../thoughtspot/types";
 
-/**
- * Client for the ConversationStorageServer Durable Object.
- *
- * Communicates directly with the DO via its stub (bypassing the OAuth layer), mapping to the
- * following HTTP endpoints exposed by the server:
- *   POST  /storage/<storageId>/initialize —> initializeConversation
- *   POST  /storage/<storageId>/append     —> appendMessagesAndRestartTtl
- *   GET   /storage/<storageId>/messages   —> getNewMessagesAndUpdateBookmark
- *
- * The storageId is derived by taking a hash of the user's access token and combining it with the
- * conversationId, to ensure no users can access each other's conversations.
- */
+// Client for the conversation-storage and per-user token/org Durable Objects,
+// talking to their stubs directly (bypassing the OAuth layer). The storage id is
+// hash(user) + conversationId, so users can't reach each other's conversations.
 export class StorageServiceClient {
 	constructor(
 		private readonly namespace: DurableObjectNamespace,
 		private readonly accessTokenHashUrlSafe: string,
-		// Namespace for the per-user token/org Durable Object (UserTokenStoreSQLite),
-		// separate from the conversation namespace. Optional only so existing
-		// callers/tests that don't use token/org methods keep compiling.
+		// Optional so non-token callers still compile.
 		private readonly userTokenNamespace?: DurableObjectNamespace,
 	) {}
 
@@ -36,8 +25,6 @@ export class StorageServiceClient {
 		return this.namespace.get(id);
 	}
 
-	// Stub for the per-user token/org DO instance, addressed by the user's
-	// storage-key hash on the dedicated UserTokenStoreSQLite namespace.
 	private userStubFor(id: string): DurableObjectStub {
 		const ns = this.userTokenNamespace;
 		if (!ns) {
@@ -49,18 +36,13 @@ export class StorageServiceClient {
 		return ns.get(doId);
 	}
 
-	// DO stubs ignore the hostname; we use a placeholder so the path is parsed correctly.
+	// DO stubs ignore the hostname; a placeholder keeps the path parseable.
 	private url(conversationId: string, operation: string): string {
 		return `https://internal/storage/${encodeURIComponent(conversationId)}/${operation}`;
 	}
 
-	// Pseudo-id addressing the per-user token/org instance (see userStubFor).
 	private static readonly ACTIVE_ORG_ID = "__active_org__";
 
-	/**
-	 * Read the user's active org id and its (lazily-minted, shared) org token.
-	 * Either may be null: no active org set, or no token minted yet.
-	 */
 	async getActiveOrg(): Promise<{
 		activeOrgId: string | null;
 		orgToken: string | null;
@@ -87,11 +69,8 @@ export class StorageServiceClient {
 		};
 	}
 
-	/**
-	 * Persist the user's active org id (shared across their sessions). Changing the
-	 * active org clears any stored org token (it belonged to the prior org); the
-	 * token is re-minted lazily on next use.
-	 */
+	// Pass orgToken to commit id+token atomically (validated switch); omit it on the
+	// postInit default path, where the prior token is cleared and re-minted lazily.
 	async setActiveOrg(activeOrgId: string, orgToken?: string): Promise<void> {
 		const id = StorageServiceClient.ACTIVE_ORG_ID;
 		const response = await this.userStubFor(id).fetch(
@@ -99,8 +78,6 @@ export class StorageServiceClient {
 			{
 				method: "POST",
 				headers: this.headers(),
-				// Persist the token atomically with the id when provided (on a
-				// validated switch); omit it for the postInit default path.
 				body: JSON.stringify({ activeOrgId, orgToken: orgToken ?? null }),
 			},
 		);
@@ -110,8 +87,7 @@ export class StorageServiceClient {
 		}
 	}
 
-	// Persist the active org's token for reuse across sessions. Empty string clears
-	// it (to evict a stale token before re-minting).
+	// Empty string clears the token (to evict a stale one before re-minting).
 	async setActiveOrgToken(orgToken: string): Promise<void> {
 		const id = StorageServiceClient.ACTIVE_ORG_ID;
 		const response = await this.userStubFor(id).fetch(
@@ -194,11 +170,7 @@ export class StorageServiceClient {
 		}
 	}
 
-	/**
-	 * Initialize a conversation. Must be called before appending messages.
-	 * Can also be called on an existing conversation that is already marked done,
-	 * to prime it for a follow-up message.
-	 */
+	// Call before appending; also re-primes a done conversation for a follow-up.
 	async initializeConversation(conversationId: string): Promise<void> {
 		const response = await this.stubFor(conversationId).fetch(
 			this.url(conversationId, "initialize"),
@@ -213,10 +185,7 @@ export class StorageServiceClient {
 		}
 	}
 
-	/**
-	 * Append new messages to a conversation and restart its TTL.
-	 * Optionally mark the conversation as done.
-	 */
+	// Append messages and restart the TTL; isDone marks the conversation complete.
 	async appendMessages(
 		conversationId: string,
 		messages: Message[],
@@ -237,11 +206,8 @@ export class StorageServiceClient {
 		}
 	}
 
-	/**
-	 * Retrieve all messages that have been added since the last call to this method
-	 * (tracked via a per-conversation bookmark) and advance the bookmark.
-	 * Also returns whether the conversation has been marked done.
-	 */
+	// Return messages added since the last call (advancing a per-conversation
+	// bookmark) plus whether the conversation is done.
 	async getNewMessages(
 		conversationId: string,
 	): Promise<StreamingMessagesState> {

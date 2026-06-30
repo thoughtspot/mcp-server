@@ -1,34 +1,22 @@
 const ACTIVE_ORG_KEY = "active-org";
-// Org-scoped token, minted once and shared across the user's sessions. Cleared
-// when the active org changes.
 const ORG_TOKEN_KEY = "active-org-token";
 const TOKEN_STORE_KEY = "token-store";
-// Refresh at 11h (token lives ~24h): a failed refresh leaves the next regular
-// alarm at ~22h still inside the expiry window, a built-in second attempt — so
-// the alarm re-arms on failure too.
+// 11h refresh on a ~24h token: a failed attempt re-arms at ~22h, still inside the
+// expiry window, giving a second chance before expiry.
 const TOKEN_REFRESH_INTERVAL_MS = 11 * 60 * 60 * 1000;
-// After this much inactivity the session is abandoned: stop refreshing and drop
-// the token + active-org state so the user re-authenticates on return.
 const SESSION_IDLE_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 
 export type TokenStore = {
 	accessToken: string;
 	refreshToken: string;
 	instanceUrl: string;
-	// Absolute epoch-ms expiry of the access token, if known.
 	expiresAt?: number;
-	// Absolute epoch-ms of the user's last tool call, for idle abandonment.
 	lastSeenAt?: number;
 };
 
-/**
- * Per-user token/org Durable Object, separate from conversation storage and
- * addressed by the user's storage-key hash so one instance is shared across all
- * of the user's (fanned-out) MCP sessions. Owns the active org + its org-scoped
- * token, and the keep-warm cluster token (refreshed by an 11h alarm, abandoned
- * after 14 idle days). Routes: GET/POST /active-org, POST /active-org-token,
- * GET/POST /token-store, POST /touch.
- */
+// Per-user token/org DO, shared across the user's fanned-out sessions via the
+// storage-key hash. Owns the active org + org token and the keep-warm cluster
+// token (11h refresh alarm, abandoned after 14 idle days).
 export class UserTokenStoreSQLite {
 	constructor(
 		private state: DurableObjectState,
@@ -37,7 +25,6 @@ export class UserTokenStoreSQLite {
 
 	async fetch(request: Request): Promise<Response> {
 		const url = new URL(request.url);
-		// Path shape mirrors the conversation DO: /storage/<id>/<operation>.
 		const parts = url.pathname.split("/");
 		const operation = parts[3] ?? "";
 
@@ -54,31 +41,32 @@ export class UserTokenStoreSQLite {
 					});
 				}
 
-				// Clear the stored token only when the org id actually changes — NOT
-				// when re-setting the same org (every cold connect does this), which
-				// would race the fan-out and delete a token a sibling just minted.
+				// Clear the token only on a real org change; re-setting the same org
+				// (every cold connect) must not delete a token a sibling just minted.
 				case "POST /active-org": {
 					const body = (await request.json()) as {
 						activeOrgId: string;
 						orgToken?: string | null;
 					};
+					if (body.orgToken) {
+						await this.state.storage.put({
+							[ACTIVE_ORG_KEY]: body.activeOrgId,
+							[ORG_TOKEN_KEY]: body.orgToken,
+						});
+						return Response.json({ ok: true });
+					}
 					const previousOrgId =
 						await this.state.storage.get<string>(ACTIVE_ORG_KEY);
 					await this.state.storage.put<string>(
 						ACTIVE_ORG_KEY,
 						body.activeOrgId,
 					);
-					if (body.orgToken) {
-						await this.state.storage.put<string>(ORG_TOKEN_KEY, body.orgToken);
-					} else if (previousOrgId !== body.activeOrgId) {
-						// Org actually changed — the old token no longer applies.
+					if (previousOrgId !== body.activeOrgId) {
 						await this.state.storage.delete(ORG_TOKEN_KEY);
 					}
 					return Response.json({ ok: true });
 				}
 
-				// Set (or, with an empty/missing token, clear) the org token without
-				// touching the active org id.
 				case "POST /active-org-token": {
 					const body = (await request.json()) as { orgToken?: string | null };
 					if (body.orgToken) {
@@ -119,10 +107,8 @@ export class UserTokenStoreSQLite {
 		}
 	}
 
-	// Seed the token store and arm the refresh alarm if not already armed.
 	// Idempotent: re-seeding updates tokens without stacking alarms.
 	private async seedTokenStore(store: TokenStore): Promise<void> {
-		// Seeding happens on connect, so it counts as activity.
 		const toStore: TokenStore = {
 			...store,
 			lastSeenAt: store.lastSeenAt ?? Date.now(),
@@ -134,8 +120,7 @@ export class UserTokenStoreSQLite {
 		}
 	}
 
-	// Stamp last activity for idle detection, throttled to ~1/hour so rapid
-	// fanned-out calls don't each write. No-op if there's no token store.
+	// Stamp last activity, throttled to ~1/hour so fanned-out calls don't each write.
 	private async touchLastSeen(): Promise<void> {
 		const store = await this.state.storage.get<TokenStore>(TOKEN_STORE_KEY);
 		if (!store) {
@@ -152,17 +137,13 @@ export class UserTokenStoreSQLite {
 		});
 	}
 
-	// Refresh the stored access token (gettoken?refresh=true + X-Refresh-Token)
-	// and re-arm. Past the idle TTL, abandon instead: drop the token + active-org
-	// state and stop. On failure, re-arm anyway — the 11h/24h margin gives a second
-	// attempt before expiry without bespoke backoff.
+	// Refresh the keep-warm token and re-arm. Past the idle TTL, abandon instead.
 	private async refreshTokenStore(): Promise<void> {
 		const store = await this.state.storage.get<TokenStore>(TOKEN_STORE_KEY);
 		if (!store) {
 			return;
 		}
 
-		// Idle past the TTL: abandon (delete state, do not re-arm).
 		if (
 			store.lastSeenAt != null &&
 			Date.now() - store.lastSeenAt >= SESSION_IDLE_TTL_MS
@@ -207,8 +188,7 @@ export class UserTokenStoreSQLite {
 				accessToken,
 				refreshToken,
 				instanceUrl: store.instanceUrl,
-				// Keep the prior expiry if the refresh response omits one, so we never
-				// lose expiry tracking (which would defeat the reconnect self-heal).
+				// Keep the prior expiry if the response omits one.
 				expiresAt:
 					typeof newExpiresAt === "number" ? newExpiresAt : store.expiresAt,
 				lastSeenAt: store.lastSeenAt,
@@ -219,12 +199,11 @@ export class UserTokenStoreSQLite {
 				"Token keep-warm refresh failed; will retry on next interval:",
 				error instanceof Error ? error.message : String(error),
 			);
-			// Re-arm anyway; the stored token is left intact so reads work until then.
+			// Re-arm anyway; the stored token stays intact so reads work until then.
 			await this.state.storage.setAlarm(Date.now() + TOKEN_REFRESH_INTERVAL_MS);
 		}
 	}
 
-	// This DO's only alarm is the keep-warm refresh — no branching needed.
 	async alarm(): Promise<void> {
 		await this.refreshTokenStore();
 	}
