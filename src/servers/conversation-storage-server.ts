@@ -198,9 +198,6 @@ export class ConversationStorageServerSQLite {
 	}
 
 	async alarm(): Promise<void> {
-		// This DO only stores conversation messages (per-conversation, 30-min TTL).
-		// The alarm is solely the conversation-cleanup path. Per-user token/org
-		// state and its keep-warm alarm now live in UserTokenStoreSQLite.
 
 		// Check for any abnormalities in the state prior to deleting
 		const [isDone, readBookmark, writeBookmark] =
