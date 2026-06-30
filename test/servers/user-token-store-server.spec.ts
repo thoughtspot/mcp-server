@@ -143,6 +143,23 @@ describe("UserTokenStoreSQLite", () => {
 			expect(mock.store.has("active-org-token")).toBe(false);
 			expect(mock.store.get("active-org")).toBe("202");
 		});
+
+		it("PRESERVES the stored token when re-setting the SAME org id (fan-out safety)", async () => {
+			await server.fetch(
+				makeRequest("POST", "active-org", {
+					activeOrgId: "101",
+					orgToken: "org-tok",
+				}),
+			);
+			// A concurrent/cold-start sibling re-asserts the same active org with no
+			// token (postInit default path). The token another session just minted
+			// must NOT be deleted, or the fan-out would thrash re-minting.
+			await server.fetch(
+				makeRequest("POST", "active-org", { activeOrgId: "101" }),
+			);
+			expect(mock.store.get("active-org-token")).toBe("org-tok");
+			expect(mock.store.get("active-org")).toBe("101");
+		});
 	});
 
 	describe("POST /active-org-token clear", () => {

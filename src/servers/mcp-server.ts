@@ -158,9 +158,12 @@ export class MCPServer extends BaseMCPServer {
 	/**
 	 * Whether an error (thrown Error, or an `{ error }` result returned by a
 	 * service method) carries a 401/unauthorized signal. ThoughtSpot client
-	 * methods throw `Error`s whose message embeds the HTTP status (e.g.
-	 * "... failed with status 401: ..."); some service methods catch that and
-	 * return it nested under `error`. We sniff both shapes for the status code.
+	 * methods throw `Error`s whose message embeds the HTTP status in the form
+	 * "... failed with status 401: ..."; some service methods catch that and
+	 * return it nested under `error`. We match ONLY that structured status form —
+	 * deliberately not a bare "401" anywhere in the string, which would false-match
+	 * unrelated content (a datasource id, a liveboard title, a row count) and
+	 * wrongly trigger a re-mint + retry.
 	 */
 	private isUnauthorizedError(value: unknown): boolean {
 		const message =
@@ -170,7 +173,16 @@ export class MCPServer extends BaseMCPServer {
 							?.message === "string"
 					? (value as { error: { message: string } }).error.message
 					: "";
-		return /status 401\b/.test(message) || /\b401\b/.test(message);
+		return /\bstatus 401\b/.test(message);
+	}
+
+	/**
+	 * Whether an error message indicates the user cannot access the target org:
+	 * the mint endpoint returns 401 (token rejected) or 403 (no access to that
+	 * org) in that case. Matches the structured "status 401/403" form only.
+	 */
+	private isOrgAccessDeniedError(message: string): boolean {
+		return /\bstatus 40[13]\b/.test(message);
 	}
 
 	/**
@@ -321,21 +333,31 @@ export class MCPServer extends BaseMCPServer {
 	}
 
 	/**
-	 * Load the keep-warm global token from the per-user token store into memory. If
-	 * the store hasn't been seeded yet (first connect), seed it from the login-time
-	 * props (token + refresh token + expiry) so the DO alarm can keep it fresh, and
-	 * use the props token for this request. The store (alarm-refreshed) is the
-	 * source of truth thereafter, so the token survives the ~24h expiry across an
-	 * absence.
+	 * Load the keep-warm global token from the per-user token store into memory.
+	 * Re-seed from the login-time props (token + refresh token + expiry) when the
+	 * store is either:
+	 *   - not yet seeded (first connect), or
+	 *   - holding an EXPIRED token — i.e. the alarm refresh chain has died (e.g.
+	 *     consecutive transient failures). In that case the stale stored token must
+	 *     not be trusted; this connect's props carry a freshly-issued token from the
+	 *     current grant, so we re-seed and heal the chain. (Previously we only
+	 *     re-seeded when the stored token was ABSENT, so an expired-but-present
+	 *     token stranded the user until full re-auth.)
+	 * The store (alarm-refreshed) is the source of truth otherwise, so the token
+	 * survives the ~24h expiry across an absence.
 	 */
 	private async loadOrSeedWarmToken(): Promise<void> {
 		const storage = await this.getStorageService();
 		const store = await storage.getTokenStore();
-		if (store.accessToken) {
+		const storedExpired =
+			typeof store.expiresAt === "number" && store.expiresAt <= Date.now();
+		if (store.accessToken && !storedExpired) {
 			this.warmGlobalToken = store.accessToken;
 			return;
 		}
-		// Not seeded yet — seed from props if we have both tokens.
+		// Not seeded, or the stored token has expired — (re)seed from props if we
+		// have both tokens. seedTokenStore is idempotent and arms the alarm if it
+		// isn't already armed.
 		const { accessToken, refreshToken, tokenExpiryDuration, instanceUrl } =
 			this.ctx.props;
 		if (accessToken && refreshToken) {
@@ -348,8 +370,12 @@ export class MCPServer extends BaseMCPServer {
 						? tokenExpiryDuration
 						: undefined,
 			});
+			this.warmGlobalToken = accessToken;
+			return;
 		}
-		this.warmGlobalToken = accessToken;
+		// No props refresh token to re-seed with: fall back to whatever we have
+		// (the stored token if present, else the props access token).
+		this.warmGlobalToken = store.accessToken ?? accessToken;
 	}
 
 	/**
@@ -1061,16 +1087,17 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		// Set the active org first (clears any prior org's token), then mint the new
 		// org's token and persist it to the shared store. Minting also validates
 		// access: no pre-validation against list_orgs — if the user can't access the
-		// org, the mint returns 401, surfaced as "org not accessible".
+		// org, the mint returns 401 (token rejected) or 403 (no access), surfaced as
+		// "org not accessible".
 		await this.setActiveOrg(orgId);
 		try {
 			await this.ensureOrgToken(orgId, recorder);
 		} catch (error) {
 			const message = (error as Error)?.message ?? "";
-			if (message.includes("401")) {
+			if (this.isOrgAccessDeniedError(message)) {
 				return this.createErrorResponse(
 					`You do not have access to org "${orgId}", or it does not exist. Call list_orgs to see the orgs you can access.`,
-					"Switch org failed: org not accessible (401)",
+					"Switch org failed: org not accessible (401/403)",
 				);
 			}
 			return this.createErrorResponse(

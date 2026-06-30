@@ -78,21 +78,28 @@ export class UserTokenStoreSQLite {
 					});
 				}
 
-				// Set the active org. Changing the org always invalidates the stored
-				// org token (it belongs to the previous org) unless an explicit
-				// orgToken is provided in the same write.
+				// Set the active org. An explicit orgToken in the body is stored as-is.
+				// Otherwise the stored token is invalidated ONLY when the org id is
+				// actually changing — a token belongs to a specific org. We must NOT
+				// clear it when re-setting the SAME org id (which happens on every cold
+				// connect, where postInit defaults the active org to the current org):
+				// doing so would race the fan-out, deleting a token another session just
+				// minted and forcing a re-mint storm.
 				case "POST /active-org": {
 					const body = (await request.json()) as {
 						activeOrgId: string;
 						orgToken?: string | null;
 					};
+					const previousOrgId =
+						await this.state.storage.get<string>(ACTIVE_ORG_KEY);
 					await this.state.storage.put<string>(
 						ACTIVE_ORG_KEY,
 						body.activeOrgId,
 					);
 					if (body.orgToken) {
 						await this.state.storage.put<string>(ORG_TOKEN_KEY, body.orgToken);
-					} else {
+					} else if (previousOrgId !== body.activeOrgId) {
+						// Org actually changed — the old token no longer applies.
 						await this.state.storage.delete(ORG_TOKEN_KEY);
 					}
 					return Response.json({ ok: true });

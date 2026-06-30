@@ -408,6 +408,25 @@ describe("MCP Server org tools", () => {
 			expect(res.isError).toBe(true);
 			expect(res.content[0].text).toMatch(/do not have access/i);
 		});
+
+		it("returns 'not accessible' when minting the org token 403s (no access)", async () => {
+			// Org access-denied commonly surfaces as 403, not 401 — must give the
+			// same accurate "no access" guidance, not a generic "try again".
+			const { server } = makeServer({
+				authMode: "oauth",
+				session: { orgsEnabled: true },
+				fetchOrgBearerToken: vi
+					.fn()
+					.mockRejectedValue(
+						new Error("fetchOrgBearerToken failed with status 403: forbidden"),
+					),
+			});
+			await server.init();
+			const { callTool } = connect(server);
+			const res = await callTool("switch_org", { org_id: 999 });
+			expect(res.isError).toBe(true);
+			expect(res.content[0].text).toMatch(/do not have access/i);
+		});
 	});
 
 	describe("shared active-org store persists across server instances", () => {
@@ -513,6 +532,34 @@ describe("MCP Server org tools", () => {
 			});
 			await b.server.init();
 			expect(tokenStore.get(key).accessToken).toBe("refreshed-token");
+		});
+
+		it("re-seeds from props when the stored token has EXPIRED (refresh chain died)", async () => {
+			const tokenStore = new Map<string, any>();
+			const a = makeServer({
+				authMode: "oauth",
+				session: { orgsEnabled: true },
+				tokenStore,
+			});
+			await a.server.init();
+			// Simulate the refresh chain having died: the stored token is now stale
+			// (expiresAt in the past), not merely absent.
+			const key = [...tokenStore.keys()][0];
+			tokenStore.set(key, {
+				...tokenStore.get(key),
+				accessToken: "expired-token",
+				expiresAt: Date.now() - 60_000,
+			});
+
+			// A new connect carries a fresh props token; it must re-seed (heal the
+			// chain) rather than trust the expired stored token.
+			const b = makeServer({
+				authMode: "oauth",
+				session: { orgsEnabled: true },
+				tokenStore,
+			});
+			await b.server.init();
+			expect(tokenStore.get(key).accessToken).toBe("global-token");
 		});
 	});
 
@@ -795,6 +842,32 @@ describe("MCP Server org tools", () => {
 			expect(result).toEqual({ rows: [{ value: "401 Main St" }] });
 			expect(calls).toBe(1);
 			expect(mint.mock.calls.length).toBe(mintsBefore);
+		});
+
+		it("does not re-mint on a thrown error whose message contains 401 outside the status form", async () => {
+			const store = new Map<
+				string,
+				{ activeOrgId?: string; orgToken?: string }
+			>();
+			let mintN = 0;
+			const mint = vi
+				.fn()
+				.mockImplementation(async () => `org-token-${++mintN}`);
+			const server = await makeServerWithActiveOrg({ store, mint });
+			const mintsBefore = mint.mock.calls.length;
+
+			// "401" appears (e.g. a datasource id / title), but NOT as "status 401".
+			// This must NOT be misread as an auth failure — no re-mint, error passes
+			// through. (Guards against the old over-broad \b401\b match.)
+			let calls = 0;
+			await expect(
+				server.withOrgTokenRetry(undefined, async () => {
+					calls++;
+					throw new Error("datasource 401 not found (status 404)");
+				}),
+			).rejects.toThrow(/401 not found/);
+			expect(calls).toBe(1); // no retry
+			expect(mint.mock.calls.length).toBe(mintsBefore); // no re-mint
 		});
 	});
 
