@@ -62,7 +62,6 @@ export const getThoughtSpotClient = (
 		bearerToken,
 		orgId,
 	);
-	addGetRefreshedToken(client, instanceUrl);
 	addFetchOrgBearerToken(client, instanceUrl);
 	addListOrgs(client, instanceUrl, bearerToken);
 	return client;
@@ -351,56 +350,6 @@ function addSendAgentConversationMessageStreaming(
 		}
 
 		return response;
-	};
-}
-
-export interface RefreshedTokens {
-	accessToken: string;
-	refreshToken?: string;
-}
-
-/*
- * Fetches a fresh (cluster-wide) access token via the session gettoken endpoint
- * with refresh=true, authenticated with the caller's current bearer token.
- * Returns both tokens so they can be stored together. The returned token is not
- * pinned to a single org; use fetchOrgBearerToken to mint an org-scoped one.
- */
-function addGetRefreshedToken(client: any, instanceUrl: string) {
-	(client as any).getRefreshedToken = async ({
-		bearerToken,
-		refreshToken,
-	}: {
-		bearerToken: string;
-		refreshToken?: string;
-	}): Promise<RefreshedTokens> => {
-		const endpoint = "/callosum/v1/session/v2/gettoken?refresh=true";
-		const headers = buildHeaders(bearerToken);
-		if (refreshToken) {
-			headers["X-Refresh-Token"] = refreshToken;
-		}
-		const response = await fetch(`${instanceUrl}${endpoint}`, {
-			method: "GET",
-			headers,
-		});
-
-		if (!response.ok) {
-			const errorText = await response.text();
-			throw new Error(
-				`getRefreshedToken failed with status ${response.status}: ${errorText}`,
-			);
-		}
-
-		const data = (await response.json()) as any;
-		const accessToken = data?.token ?? data?.data?.token;
-		if (!accessToken || typeof accessToken !== "string") {
-			throw new Error("getRefreshedToken: no token in response");
-		}
-		const newRefreshToken = data?.refreshToken ?? data?.data?.refreshToken;
-		return {
-			accessToken,
-			refreshToken:
-				typeof newRefreshToken === "string" ? newRefreshToken : undefined,
-		};
 	};
 }
 

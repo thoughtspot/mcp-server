@@ -28,6 +28,7 @@ import {
 } from "../metrics/runtime/tool-metrics";
 import { getActiveSpan, withSpan } from "../metrics/tracing/tracing-utils";
 import { StorageServiceClient } from "../storage-service/storage-service";
+import { OrgService } from "../thoughtspot/org-service";
 import { getThoughtSpotClient } from "../thoughtspot/thoughtspot-client";
 import { ThoughtSpotService } from "../thoughtspot/thoughtspot-service";
 import type { Props } from "../utils";
@@ -272,6 +273,22 @@ export abstract class BaseMCPServer extends Server {
 				),
 				eventIdentity: this.getMetricEventIdentity(),
 			},
+		);
+	}
+
+	/**
+	 * Build an OrgService bound to an explicit bearer token (and optional org) for
+	 * org listing / org-token minting. Authenticated with the given token, so
+	 * callers pass the cluster-wide token here.
+	 */
+	protected getOrgService(
+		bearerToken: string,
+		orgId?: string,
+		recorder?: MetricsRecorder,
+	) {
+		return new OrgService(
+			getThoughtSpotClient(this.ctx.props.instanceUrl, bearerToken, orgId),
+			recorder,
 		);
 	}
 

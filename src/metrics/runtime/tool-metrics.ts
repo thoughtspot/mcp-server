@@ -21,10 +21,8 @@ export const UPSTREAM_OPERATION_NAMES = {
 		"send_agent_conversation_message_streaming",
 	importMetadataTml: "import_metadata_tml",
 	searchMetadata: "search_metadata",
-	searchOrgs: "search_orgs",
 	listOrgs: "list_orgs",
 	fetchOrgBearerToken: "fetch_org_bearer_token",
-	getRefreshedToken: "get_refreshed_token",
 } as const;
 
 export type UpstreamOperation =
@@ -132,6 +130,33 @@ export function recordUpstreamCallMetrics(
 
 	recorder.count(METRIC_NAMES.upstreamCallsTotal, 1, labels);
 	recorder.histogram(METRIC_NAMES.upstreamDurationMs, durationMs, labels);
+}
+
+/**
+ * Run an upstream call, recording success/error + duration metrics for it.
+ * Shared by the service classes so they don't each reimplement the timing +
+ * outcome bookkeeping.
+ */
+export async function observeUpstreamCall<T>(
+	recorder: MetricsRecorder | undefined,
+	operation: UpstreamOperation,
+	call: () => Promise<T>,
+): Promise<T> {
+	const startedAt = Date.now();
+	let outcome: MetricOutcome = "success";
+	try {
+		return await call();
+	} catch (error) {
+		outcome = "upstream_error";
+		throw error;
+	} finally {
+		recordUpstreamCallMetrics(
+			recorder,
+			operation,
+			outcome,
+			Date.now() - startedAt,
+		);
+	}
 }
 
 export function recordUpstreamStreamStartedMetric(

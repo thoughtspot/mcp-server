@@ -90,25 +90,15 @@ export class MCPServer extends BaseMCPServer {
 
 	/**
 	 * Load the active org (id + org token) from the shared per-user store into the
-	 * in-memory mirrors. Keyed by the storage-key hash (refresh-token based), so a
-	 * switch made in any of the user's MCP sessions is visible here.
+	 * in-memory mirrors. Keyed by the storage-key hash, so a switch made in any of
+	 * the user's (possibly fanned-out) MCP sessions is reflected. Re-read on each
+	 * org-aware call rather than trusting a stale mirror.
 	 */
 	private async loadActiveOrg(): Promise<void> {
 		const storage = await this.getStorageService();
 		const stored = await storage.getActiveOrg();
-		// Always reflect the store (including back to undefined if cleared), since
-		// the value may have changed in another of the user's sessions/DOs.
 		this.activeOrgId = stored.activeOrgId ?? undefined;
 		this.activeOrgToken = stored.orgToken ?? undefined;
-	}
-
-	/**
-	 * Re-read the active org from the shared store. Because the MCP client may
-	 * fan requests across multiple DOs, we re-read on each org-aware tool call so
-	 * a switch made elsewhere is reflected, rather than trusting a stale mirror.
-	 */
-	private async ensureActiveOrgLoaded(): Promise<void> {
-		await this.loadActiveOrg();
 	}
 
 	/**
@@ -143,7 +133,7 @@ export class MCPServer extends BaseMCPServer {
 		// Mint from the keep-warm global token so it works even after the login-time
 		// token would have expired.
 		const globalToken = this.getGlobalToken();
-		const orgToken = await this.getThoughtSpotServiceWithToken(
+		const orgToken = await this.getOrgService(
 			globalToken,
 			undefined,
 			recorder,
@@ -174,15 +164,6 @@ export class MCPServer extends BaseMCPServer {
 					? (value as { error: { message: string } }).error.message
 					: "";
 		return /\bstatus 401\b/.test(message);
-	}
-
-	/**
-	 * Whether an error message indicates the user cannot access the target org:
-	 * the mint endpoint returns 401 (token rejected) or 403 (no access to that
-	 * org) in that case. Matches the structured "status 401/403" form only.
-	 */
-	private isOrgAccessDeniedError(message: string): boolean {
-		return /\bstatus 40[13]\b/.test(message);
 	}
 
 	/**
@@ -597,7 +578,7 @@ export class MCPServer extends BaseMCPServer {
 		switch (name) {
 			case ToolName.Ping: {
 				if (this.ctx.props.accessToken && this.ctx.props.instanceUrl) {
-					if (!(await this.validateConnectionWithOrgRetry(recorder))) {
+					if (!this.getThoughtSpotService(recorder).validateConnection()) {
 						return this.createErrorResponse(
 							"Failed to validate connection",
 							"Ping failed",
@@ -703,9 +684,9 @@ export class MCPServer extends BaseMCPServer {
 			sourceIds,
 		);
 
-		const relevantQuestions = await this.withOrgTokenRetry(recorder, (svc) =>
-			svc.getRelevantQuestions(query, sourceIds!, additionalContext ?? ""),
-		);
+		const relevantQuestions = await this.getThoughtSpotService(
+			recorder,
+		).getRelevantQuestions(query, sourceIds!, additionalContext ?? "");
 
 		if (relevantQuestions.error) {
 			console.error(
@@ -753,9 +734,9 @@ export class MCPServer extends BaseMCPServer {
 			request.params.arguments,
 		);
 
-		const answer = await this.withOrgTokenRetry(recorder, (svc) =>
-			svc.getAnswerForQuestion(question, sourceId, false),
-		);
+		const answer = await this.getThoughtSpotService(
+			recorder,
+		).getAnswerForQuestion(question, sourceId, false);
 
 		if (answer.error) {
 			return this.createErrorResponse(
@@ -791,9 +772,9 @@ export class MCPServer extends BaseMCPServer {
 			session_identifier: answer.session_identifier,
 			generation_number: answer.generation_number,
 		}));
-		const liveboard = await this.withOrgTokenRetry(recorder, (svc) =>
-			svc.fetchTMLAndCreateLiveboard(name, transformedAnswers, noteTile),
-		);
+		const liveboard = await this.getThoughtSpotService(
+			recorder,
+		).fetchTMLAndCreateLiveboard(name, transformedAnswers, noteTile);
 
 		if (liveboard.error) {
 			return this.createErrorResponse(
@@ -1017,9 +998,10 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		const { query } = GetDataSourceSuggestionsSchema.parse(
 			request.params.arguments,
 		);
-		const dataSources = await this.withOrgTokenRetry(recorder, (svc) =>
-			svc.getDataSourceSuggestions(query),
-		);
+		const dataSources =
+			await this.getThoughtSpotService(recorder).getDataSourceSuggestions(
+				query,
+			);
 
 		if (!dataSources || dataSources.length === 0) {
 			return this.createErrorResponse(
@@ -1045,21 +1027,18 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 	async callListOrgs(recorder: MetricsRecorder) {
 		const span = trace.getSpan(context.active());
 
-		// List the user's own orgs via the user-scoped v1 session/orgs endpoint
-		// (NOT the admin orgs/search, which 403s for non-admins). It is authenticated
-		// with the global/cluster-wide token and sends no org header, so it does not
-		// go through withOrgTokenRetry — there is no org token in play to re-mint.
-		const orgs = await this.getThoughtSpotServiceWithToken(
+		// List the user's own orgs (user-scoped v1 session/orgs endpoint), using the
+		// global/cluster-wide token — no org header, no org-token retry needed.
+		const orgs = await this.getOrgService(
 			this.getGlobalToken(),
 			undefined,
 			recorder,
 		).listOrgs();
 		span?.setAttribute("total_orgs", orgs.length);
 
-		// Read the active org from the shared per-user store (the single source of
-		// truth). Ensure it's loaded first — this request may run on a different DO
-		// than the one that handled postInit/switch_org.
-		await this.ensureActiveOrgLoaded();
+		// Re-read the active org from the shared store (this request may run on a
+		// different DO than the one that handled postInit/switch_org).
+		await this.loadActiveOrg();
 		const activeOrgId = this.getActiveOrgId();
 
 		return this.createStructuredContentSuccessResponse(
@@ -1094,7 +1073,9 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			await this.ensureOrgToken(orgId, recorder);
 		} catch (error) {
 			const message = (error as Error)?.message ?? "";
-			if (this.isOrgAccessDeniedError(message)) {
+			// The mint returns 401 (token rejected) or 403 (no access) when the user
+			// can't access the org.
+			if (/\bstatus 40[13]\b/.test(message)) {
 				return this.createErrorResponse(
 					`You do not have access to org "${orgId}", or it does not exist. Call list_orgs to see the orgs you can access.`,
 					"Switch org failed: org not accessible (401/403)",
@@ -1128,9 +1109,7 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			return this._sources;
 		}
 
-		const sources = await this.withOrgTokenRetry(recorder, (svc) =>
-			svc.getDataSources(),
-		);
+		const sources = await this.getThoughtSpotService(recorder).getDataSources();
 		this._sources = {
 			list: sources,
 			map: new Map(sources.map((s) => [s.id, s])),

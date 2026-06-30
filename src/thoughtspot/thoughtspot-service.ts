@@ -16,18 +16,16 @@ import type { MetricsEnvLike } from "../metrics/runtime/runtime-config";
 import {
 	UPSTREAM_OPERATION_NAMES,
 	type UpstreamOperation,
-	recordUpstreamCallMetrics,
+	observeUpstreamCall,
 	recordUpstreamStreamStartedMetric,
 } from "../metrics/runtime/tool-metrics";
 import { WithSpan, getActiveSpan } from "../metrics/tracing/tracing-utils";
 import { processSendAgentConversationMessageStreamingResponse } from "../streaming-utils";
-import type { RefreshedTokens } from "./thoughtspot-client";
 import type {
 	Answer,
 	DataSource,
 	DataSourceSuggestion,
 	Message,
-	Org,
 	SessionInfo,
 } from "./types";
 
@@ -48,26 +46,11 @@ export class ThoughtSpotService {
 		private readonly metrics: ThoughtSpotServiceMetricsOptions = {},
 	) {}
 
-	private async observeUpstreamCall<T>(
+	private observeUpstreamCall<T>(
 		operation: UpstreamOperation,
 		call: () => Promise<T>,
 	): Promise<T> {
-		const startedAt = Date.now();
-		let outcome: "success" | "upstream_error" = "success";
-
-		try {
-			return await call();
-		} catch (error) {
-			outcome = "upstream_error";
-			throw error;
-		} finally {
-			recordUpstreamCallMetrics(
-				this.metrics.recorder,
-				operation,
-				outcome,
-				Date.now() - startedAt,
-			);
-		}
+		return observeUpstreamCall(this.metrics.recorder, operation, call);
 	}
 
 	private createStreamMetricsRecorder(): MetricsRecorder {
@@ -718,87 +701,6 @@ export class ThoughtSpotService {
 				info.configInfo?.enableSpotterDataSourceDiscovery,
 			orgsEnabled: info.configInfo?.orgsConfiguration?.enabled,
 		};
-	}
-
-	/**
-	 * List the Orgs configured on the ThoughtSpot instance.
-	 *
-	 * Uses the public POST /api/rest/2.0/orgs/search endpoint. Requires Org
-	 * administration privileges; callers without them will receive an upstream
-	 * 401/403, which is surfaced to the tool layer.
-	 */
-	@WithSpan("search-orgs")
-	async searchOrgs(): Promise<Org[]> {
-		const span = getActiveSpan();
-
-		const orgs = await this.observeUpstreamCall(
-			UPSTREAM_OPERATION_NAMES.searchOrgs,
-			() => this.client.searchOrgs({ status: "ACTIVE" }),
-		);
-
-		const results: Org[] = (orgs ?? [])
-			.filter(
-				(org): org is typeof org & { id: number } =>
-					typeof org.id === "number" && org.status === "ACTIVE",
-			)
-			.map((org) => ({
-				id: org.id,
-				name: org.name ?? "",
-				description: org.description ?? undefined,
-				status: org.status ?? undefined,
-			}));
-
-		span?.setAttribute("results_count", results.length);
-
-		return results;
-	}
-
-	/**
-	 * List the orgs the authenticated user is a member of, via the user-scoped v1
-	 * session orgs endpoint. Unlike searchOrgs (admin-only orgs/search, 403 for
-	 * regular users), this works for any user, so it is what list_orgs uses.
-	 */
-	async listOrgs(): Promise<Org[]> {
-		const span = getActiveSpan();
-		const orgs = (await this.observeUpstreamCall(
-			UPSTREAM_OPERATION_NAMES.listOrgs,
-			() => (this.client as any).listOrgs(),
-		)) as Org[] | undefined;
-		const results: Org[] = orgs ?? [];
-		span?.setAttribute("results_count", results.length);
-		return results;
-	}
-
-	/**
-	 * Fetch a fresh (cluster-wide) access token via gettoken with refresh=true,
-	 * authenticated with the given bearer token.
-	 */
-	@WithSpan("get-refreshed-token")
-	async getRefreshedToken(
-		bearerToken: string,
-		refreshToken?: string,
-	): Promise<RefreshedTokens> {
-		return (await this.observeUpstreamCall(
-			UPSTREAM_OPERATION_NAMES.getRefreshedToken,
-			() =>
-				(this.client as any).getRefreshedToken({ bearerToken, refreshToken }),
-		)) as RefreshedTokens;
-	}
-
-	/**
-	 * Mint an org-scoped bearer token for `orgId`, authenticated with the given
-	 * (cluster-wide) access token.
-	 */
-	@WithSpan("fetch-org-bearer-token")
-	async fetchOrgBearerToken(
-		accessToken: string,
-		orgId: string,
-	): Promise<string> {
-		getActiveSpan()?.setAttribute("org_id", orgId);
-		return (await this.observeUpstreamCall(
-			UPSTREAM_OPERATION_NAMES.fetchOrgBearerToken,
-			() => (this.client as any).fetchOrgBearerToken({ accessToken, orgId }),
-		)) as string;
 	}
 
 	/**

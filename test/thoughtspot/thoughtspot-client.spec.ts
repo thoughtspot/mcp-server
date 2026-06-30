@@ -931,67 +931,6 @@ mutation GetUnsavedAnswerTML($session: BachSessionIdInput!, $exportDependencies:
 		});
 	});
 
-	describe("getRefreshedToken (keep-warm refresh)", () => {
-		function makeClient() {
-			return getThoughtSpotClient(mockInstanceUrl, mockBearerToken) as any;
-		}
-
-		it("calls gettoken?refresh=true with the access token and X-Refresh-Token header", async () => {
-			(global.fetch as any).mockResolvedValue(
-				new Response(
-					JSON.stringify({ token: "new-access", refreshToken: "new-refresh" }),
-					{ status: 200 },
-				),
-			);
-			const client = makeClient();
-			const result = await client.getRefreshedToken({
-				bearerToken: "old-access",
-				refreshToken: "the-refresh",
-			});
-
-			expect(result).toEqual({
-				accessToken: "new-access",
-				refreshToken: "new-refresh",
-			});
-			const [url, init] = (global.fetch as any).mock.calls[0];
-			expect(url).toContain("/callosum/v1/session/v2/gettoken?refresh=true");
-			expect(init.headers.Authorization).toBe("Bearer old-access");
-			expect(init.headers["X-Refresh-Token"]).toBe("the-refresh");
-		});
-
-		it("omits the X-Refresh-Token header when no refresh token is given", async () => {
-			(global.fetch as any).mockResolvedValue(
-				new Response(JSON.stringify({ token: "new-access" }), { status: 200 }),
-			);
-			const client = makeClient();
-			const result = await client.getRefreshedToken({ bearerToken: "old" });
-			expect(result.accessToken).toBe("new-access");
-			expect(result.refreshToken).toBeUndefined();
-			const [, init] = (global.fetch as any).mock.calls[0];
-			expect(init.headers["X-Refresh-Token"]).toBeUndefined();
-		});
-
-		it("throws on a non-OK response, including the status", async () => {
-			(global.fetch as any).mockResolvedValue(
-				new Response("bad", { status: 401 }),
-			);
-			const client = makeClient();
-			await expect(
-				client.getRefreshedToken({ bearerToken: "x", refreshToken: "y" }),
-			).rejects.toThrow(/status 401/);
-		});
-
-		it("throws when the refresh response has no token", async () => {
-			(global.fetch as any).mockResolvedValue(
-				new Response(JSON.stringify({}), { status: 200 }),
-			);
-			const client = makeClient();
-			await expect(
-				client.getRefreshedToken({ bearerToken: "x", refreshToken: "y" }),
-			).rejects.toThrow(/no token/);
-		});
-	});
-
 	describe("listOrgs (user-scoped org membership)", () => {
 		function makeClient() {
 			return getThoughtSpotClient(mockInstanceUrl, mockBearerToken) as any;
