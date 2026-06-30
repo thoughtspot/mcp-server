@@ -92,14 +92,16 @@ export class StorageServiceClient {
 	 * active org clears any stored org token (it belonged to the prior org); the
 	 * token is re-minted lazily on next use.
 	 */
-	async setActiveOrg(activeOrgId: string): Promise<void> {
+	async setActiveOrg(activeOrgId: string, orgToken?: string): Promise<void> {
 		const id = StorageServiceClient.ACTIVE_ORG_ID;
 		const response = await this.userStubFor(id).fetch(
 			this.url(id, "active-org"),
 			{
 				method: "POST",
 				headers: this.headers(),
-				body: JSON.stringify({ activeOrgId }),
+				// Persist the token atomically with the id when provided (on a
+				// validated switch); omit it for the postInit default path.
+				body: JSON.stringify({ activeOrgId, orgToken: orgToken ?? null }),
 			},
 		);
 		if (!response.ok) {

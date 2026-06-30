@@ -428,6 +428,40 @@ describe("MCP Server org tools", () => {
 			expect(res.isError).toBe(true);
 			expect(res.content[0].text).toMatch(/do not have access/i);
 		});
+
+		it("a wrong/invalid org_id (400) is a NO-OP: active org is unchanged", async () => {
+			// mint-first: a bad org_id fails the mint (400) BEFORE we commit, so the
+			// shared active org must NOT move to the bogus org (important for fan-out:
+			// one session's bad switch must not corrupt every session's active org).
+			const store = new Map<
+				string,
+				{ activeOrgId?: string; orgToken?: string }
+			>();
+			// First mint (postInit default → org 0) succeeds; the switch mint 400s.
+			const mint = vi
+				.fn()
+				.mockResolvedValueOnce("org-0-token")
+				.mockRejectedValue(
+					new ThoughtSpotApiError(400, "fetchOrgBearerToken", "bad org"),
+				);
+			const { server } = makeServer({
+				authMode: "oauth",
+				session: { orgsEnabled: true, currentOrgId: "0" },
+				store,
+				fetchOrgBearerToken: mint,
+			});
+			await server.init();
+			const before = { ...[...store.values()][0] };
+			expect(before.activeOrgId).toBe("0");
+
+			const res = await connect(server).callTool("switch_org", { org_id: 999 });
+			expect(res.isError).toBe(true);
+			expect(res.content[0].text).toMatch(/do not have access|does not exist/i);
+			// Active org untouched — still org 0 with its token.
+			const after = [...store.values()][0];
+			expect(after.activeOrgId).toBe("0");
+			expect(after.orgToken).toBe(before.orgToken);
+		});
 	});
 
 	describe("shared active-org store persists across server instances", () => {

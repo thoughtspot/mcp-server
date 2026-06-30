@@ -82,11 +82,13 @@ export class MCPServer extends BaseMCPServer {
 		this.activeOrgToken = stored.orgToken ?? undefined;
 	}
 
-	private async setActiveOrg(orgId: string): Promise<void> {
+	// Persist the active org. An orgToken may be passed to commit it atomically
+	// (a validated switch); otherwise the prior token is cleared and re-minted lazily.
+	private async setActiveOrg(orgId: string, orgToken?: string): Promise<void> {
 		this.activeOrgId = orgId;
-		this.activeOrgToken = undefined; // belongs to the prior org; re-minted lazily
+		this.activeOrgToken = orgToken;
 		const storage = await this.getStorageService();
-		await storage.setActiveOrg(orgId);
+		await storage.setActiveOrg(orgId, orgToken);
 	}
 
 	// Return the active org's token, reusing the shared-store one if present, else
@@ -951,16 +953,25 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		const orgId = String(org_id);
 		span?.setAttribute("requested_org_id", orgId);
 
-		// The mint validates access — 401/403 means the user can't reach the org.
-		await this.setActiveOrg(orgId);
+		// Mint first — this validates the org. Only commit the active org on success,
+		// so a wrong or inaccessible org_id leaves the active org unchanged (no-op)
+		// rather than switching the session to an org it can't use.
+		let orgToken: string;
 		try {
-			await this.ensureOrgToken(orgId, recorder);
+			const globalToken = this.getGlobalToken();
+			orgToken = await this.getOrgService(
+				globalToken,
+				undefined,
+				recorder,
+			).fetchOrgBearerToken(globalToken, orgId);
 		} catch (error) {
 			const status = this.apiErrorStatus(error);
-			if (status === 401 || status === 403) {
+			// Any 4xx means the org is invalid or inaccessible (wrong id → 400,
+			// token rejected → 401, no access → 403).
+			if (status !== undefined && status >= 400 && status < 500) {
 				return this.createErrorResponse(
 					`You do not have access to org "${orgId}", or it does not exist. Call list_orgs to see the orgs you can access.`,
-					"Switch org failed: org not accessible (401/403)",
+					`Switch org failed: org not accessible (status ${status})`,
 				);
 			}
 			return this.createErrorResponse(
@@ -969,6 +980,8 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			);
 		}
 
+		// Validated — commit the active org + its token atomically.
+		await this.setActiveOrg(orgId, orgToken);
 		// Data sources are org-specific; drop the cached set so the next lookup
 		// reflects the newly selected org.
 		this._sources = null;
