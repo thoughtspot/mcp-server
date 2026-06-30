@@ -145,7 +145,6 @@ export type MetricOutcome =
 
 export type RouteGroup =
 	| "root"
-	| "hello"
 	| "authorize"
 	| "callback"
 	| "store_token"
