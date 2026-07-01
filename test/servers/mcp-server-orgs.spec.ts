@@ -43,11 +43,20 @@ function makeStorageNamespace(
 						activeOrgId: string;
 						orgToken?: string | null;
 					};
-					// Setting the active org clears the token unless one is provided.
-					store.set(id.name, {
-						activeOrgId: body.activeOrgId,
-						orgToken: body.orgToken ?? undefined,
-					});
+					// Mirror the real DO (F3): commit id+token atomically when a token
+					// is given; otherwise clear the token ONLY on an actual org change.
+					if (body.orgToken) {
+						store.set(id.name, {
+							activeOrgId: body.activeOrgId,
+							orgToken: body.orgToken,
+						});
+					} else {
+						const changed = rec.activeOrgId !== body.activeOrgId;
+						store.set(id.name, {
+							activeOrgId: body.activeOrgId,
+							orgToken: changed ? undefined : rec.orgToken,
+						});
+					}
 					return Response.json({ ok: true });
 				}
 				if (op === "active-org-token" && init?.method === "POST") {
@@ -935,6 +944,284 @@ describe("MCP Server org tools", () => {
 			await connect(server).callTool("ping", {});
 			await flush();
 			expect(touchLog.length).toBe(0);
+		});
+	});
+
+	// Org isolation on data calls: an active org must always use its org-scoped
+	// token + header; the global token must never authenticate a data call.
+	describe("data-call org isolation (never the global token)", () => {
+		// Build an OAuth+orgs server already switched into org 101, returning the
+		// server plus the getThoughtSpotClient spy for asserting outbound (bearer,
+		// orgId) pairs.
+		async function serverInOrg(
+			store = new Map<string, { activeOrgId?: string; orgToken?: string }>(),
+			mint = vi.fn().mockResolvedValue("org-101-token"),
+		) {
+			const { server } = makeServer({
+				authMode: "oauth",
+				session: { orgsEnabled: true, currentOrgId: "0" },
+				store,
+				fetchOrgBearerToken: mint,
+			});
+			await server.init();
+			await connect(server).callTool("switch_org", { org_id: 101 });
+			const spy = vi.mocked(thoughtspotClient.getThoughtSpotClient);
+			return { server: server as any, store, mint, spy };
+		}
+
+		// A1: an org-active data path builds its client with the org token + header.
+		it("uses the org-scoped token and org id (header) on a data call", async () => {
+			const { server, spy } = await serverInOrg();
+			spy.mockClear();
+			await server.withOrgTokenRetry(undefined, async () => ["ok"]);
+			// Every client built for the data call carried the org token + org id.
+			expect(spy.mock.calls.length).toBeGreaterThan(0);
+			for (const call of spy.mock.calls) {
+				expect(call[1]).toBe("org-101-token"); // bearer = org token, not global
+				expect(call[2]).toBe("101"); // x-thoughtspot-orgs header value
+			}
+		});
+
+		// A2: fail-closed — org active but no token cached => throw, never global.
+		it("throws (never falls back to global) if the org token is missing", async () => {
+			const { server } = await serverInOrg();
+			// Simulate the token being gone from memory (e.g. mid-remint window)
+			// while the active org id remains set.
+			server.activeOrgToken = undefined;
+			expect(() => server.getActiveBearerToken()).toThrow(
+				/token is not minted/,
+			);
+		});
+
+		// A_new: callTool mints the org token up front so unwrapped data paths have
+		// it — verified by the store holding a token before any data tool runs.
+		it("mints the org token up front on a data tool call", async () => {
+			const store = new Map<
+				string,
+				{ activeOrgId?: string; orgToken?: string }
+			>();
+			// Fresh instance sharing the store, but with no in-memory token yet.
+			const { server } = makeServer({
+				authMode: "oauth",
+				session: { orgsEnabled: true, currentOrgId: "0" },
+				store,
+				fetchOrgBearerToken: vi.fn().mockResolvedValue("org-101-token"),
+			});
+			await server.init();
+			// Seed only the active org id (no token) into the shared store.
+			store.set([...store.keys()][0] ?? "x", {});
+			const s = server as any;
+			s.activeOrgId = "101";
+			s.activeOrgToken = undefined;
+			expect(s.getActiveOrgId()).toBe("101");
+			// Ensuring the token is what callTool does before dispatching a data tool.
+			await s.ensureOrgToken("101", undefined);
+			expect(s.activeOrgToken).toBe("org-101-token");
+			expect(() => s.getActiveBearerToken()).not.toThrow();
+		});
+
+		// list_orgs / mint still use the global token, header-less.
+		it("switch_org mint uses the global token with no org header", async () => {
+			const store = new Map<
+				string,
+				{ activeOrgId?: string; orgToken?: string }
+			>();
+			const { server } = makeServer({
+				authMode: "oauth",
+				session: { orgsEnabled: true, currentOrgId: "0" },
+				store,
+			});
+			await server.init();
+			const spy = vi.mocked(thoughtspotClient.getThoughtSpotClient);
+			spy.mockClear();
+			await connect(server).callTool("switch_org", { org_id: 101 });
+			// The mint client is built global-token + no org id.
+			const mintClient = spy.mock.calls.find((c) => c[1] === "global-token");
+			expect(mintClient).toBeDefined();
+			expect(mintClient?.[2]).toBeUndefined();
+		});
+	});
+
+	// F2(a): re-mint mints first, then overwrites atomically — the shared store is
+	// never observed without a token, so concurrent siblings can't read a
+	// tokenless active org.
+	describe("re-mint is mint-first (store never tokenless)", () => {
+		it("keeps the old token in the store until the new one replaces it", async () => {
+			const store = new Map<
+				string,
+				{ activeOrgId?: string; orgToken?: string }
+			>();
+			let mintN = 0;
+			let assertStoreHasToken = false;
+			const mint = vi.fn().mockImplementation(async () => {
+				// On the RE-mint (not the initial switch) the store must still hold the
+				// previous token when the new one is being minted — never empty.
+				if (assertStoreHasToken) {
+					const rec = [...store.values()].find((r) => r.activeOrgId === "101");
+					expect(rec?.orgToken).toBeTruthy();
+				}
+				return `org-token-${++mintN}`;
+			});
+			const { server } = makeServer({
+				authMode: "oauth",
+				session: { orgsEnabled: true, currentOrgId: "0" },
+				store,
+				fetchOrgBearerToken: mint,
+			});
+			await server.init();
+			await connect(server).callTool("switch_org", { org_id: 101 });
+			const rec101 = () =>
+				[...store.values()].find((r) => r.activeOrgId === "101");
+			const before = rec101()?.orgToken;
+			expect(before).toBeTruthy();
+			assertStoreHasToken = true;
+			await (server as any).forceRemintOrgToken("101", undefined);
+			const after = rec101()?.orgToken;
+			expect(after).toBeTruthy();
+			expect(after).not.toBe(before);
+		});
+
+		it("leaves the old token intact if the re-mint throws", async () => {
+			const store = new Map<
+				string,
+				{ activeOrgId?: string; orgToken?: string }
+			>();
+			let failNext = false;
+			const mint = vi.fn().mockImplementation(async () => {
+				if (failNext) throw new Error("mint failed with status 500");
+				return "org-101-token";
+			});
+			const { server } = makeServer({
+				authMode: "oauth",
+				session: { orgsEnabled: true, currentOrgId: "0" },
+				store,
+				fetchOrgBearerToken: mint,
+			});
+			await server.init();
+			await connect(server).callTool("switch_org", { org_id: 101 });
+			const rec101 = () =>
+				[...store.values()].find((r) => r.activeOrgId === "101");
+			const before = rec101()?.orgToken;
+			expect(before).toBeTruthy();
+			failNext = true; // the re-mint will throw
+			await expect(
+				(server as any).forceRemintOrgToken("101", undefined),
+			).rejects.toThrow();
+			// The store still holds the prior valid token — not cleared.
+			expect(rec101()?.orgToken).toBe(before);
+		});
+	});
+
+	// Fan-out consistency across separate server instances sharing one store.
+	describe("fan-out consistency", () => {
+		// F1: a switch in instance A is seen by instance B's next call.
+		it("B sees A's switch on its next tool call (per-request reload)", async () => {
+			const store = new Map<
+				string,
+				{ activeOrgId?: string; orgToken?: string }
+			>();
+			const a = makeServer({
+				authMode: "oauth",
+				session: { orgsEnabled: true, currentOrgId: "0" },
+				store,
+			});
+			const b = makeServer({
+				authMode: "oauth",
+				session: { orgsEnabled: true, currentOrgId: "0" },
+				store,
+			});
+			await a.server.init();
+			await b.server.init();
+			await connect(a.server).callTool("switch_org", { org_id: 101 });
+			const listRes = await connect(b.server).callTool("list_orgs", {});
+			const parsed = JSON.parse((listRes as any).content[0].text);
+			const active = parsed.orgs.find((o: any) => o.is_active);
+			expect(String(active.id)).toBe("101");
+		});
+
+		// E13: two sequential switches to different orgs — last write wins.
+		it("last-write-wins across concurrent switches to different orgs", async () => {
+			const store = new Map<
+				string,
+				{ activeOrgId?: string; orgToken?: string }
+			>();
+			const a = makeServer({
+				authMode: "oauth",
+				session: { orgsEnabled: true, currentOrgId: "0" },
+				store,
+			});
+			const b = makeServer({
+				authMode: "oauth",
+				session: { orgsEnabled: true, currentOrgId: "0" },
+				store,
+			});
+			await a.server.init();
+			await b.server.init();
+			await connect(a.server).callTool("switch_org", { org_id: 101 });
+			await connect(b.server).callTool("switch_org", { org_id: 0 });
+			// B committed last → the shared store reflects org 0.
+			expect([...store.values()][0].activeOrgId).toBe("0");
+		});
+
+		// F4: datasource cache refetches after the active org changes.
+		it("refetches datasources after an org switch (org-tagged cache)", async () => {
+			const store = new Map<
+				string,
+				{ activeOrgId?: string; orgToken?: string }
+			>();
+			const { server } = makeServer({
+				authMode: "oauth",
+				session: { orgsEnabled: true, currentOrgId: "0" },
+				store,
+			});
+			await server.init();
+			const s = server as any;
+			let fetches = 0;
+			s.getThoughtSpotService = () => ({
+				getDataSources: async () => {
+					fetches++;
+					return [{ id: `ds-${s.getActiveOrgId()}`, name: "x" }];
+				},
+			});
+			s.activeOrgId = "0";
+			await s.getDatasources();
+			await s.getDatasources(); // same org → cached
+			expect(fetches).toBe(1);
+			s.activeOrgId = "101"; // org changed
+			await s.getDatasources(); // must refetch
+			expect(fetches).toBe(2);
+		});
+	});
+
+	// T3: the global token is re-read from the store before minting/listing, so a
+	// long-lived instance picks up an alarm-rotated token.
+	describe("global token freshness (T3)", () => {
+		it("re-reads the store's refreshed token before minting", async () => {
+			const store = new Map<
+				string,
+				{ activeOrgId?: string; orgToken?: string }
+			>();
+			const tokenStore = new Map<string, any>();
+			const mint = vi.fn().mockResolvedValue("org-101-token");
+			const { server } = makeServer({
+				authMode: "oauth",
+				session: { orgsEnabled: true, currentOrgId: "0" },
+				store,
+				tokenStore,
+				fetchOrgBearerToken: mint,
+			});
+			await server.init();
+			// The alarm rotated the store's global token after connect.
+			const key = [...tokenStore.keys()][0];
+			tokenStore.set(key, {
+				accessToken: "rotated-global",
+				expiresAt: 1893456000000,
+			});
+			await connect(server).callTool("switch_org", { org_id: 101 });
+			// The mint used the rotated token, not the connect-time "global-token".
+			const spy = vi.mocked(thoughtspotClient.getThoughtSpotClient);
+			const mintClient = spy.mock.calls.find((c) => c[1] === "rotated-global");
+			expect(mintClient).toBeDefined();
 		});
 	});
 });

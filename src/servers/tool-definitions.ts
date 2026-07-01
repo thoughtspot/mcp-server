@@ -269,7 +269,7 @@ export const ListOrgsOutputSchema = z.object({
 				is_active: z
 					.boolean()
 					.describe(
-						"Whether this is the Org currently active for the session. Tool calls operate against the active Org.",
+						"Whether this is the Org currently active for your account. Tool calls operate against the active Org.",
 					),
 			}),
 		)
@@ -437,7 +437,7 @@ export const toolDefinitionsV2 = [
 	{
 		name: ToolName.ListOrgs,
 		description:
-			"List the Orgs the authenticated user can access on the ThoughtSpot instance, including the ID, name, and description of each Org. The Org marked `is_active: true` is the one currently active for this session, which all tool calls operate against. Use this to tell the user which Org they are in. Only available when authenticated via OAuth.",
+			"List the Orgs the authenticated user can access on the ThoughtSpot instance, including the ID, name, and description of each Org. The Org marked `is_active: true` is the one currently active for your account, which all tool calls operate against. Use this to tell the user which Org they are in. Only available when authenticated via OAuth.",
 		inputSchema: z.toJSONSchema(ListOrgsInputSchema),
 		outputSchema: z.toJSONSchema(ListOrgsOutputSchema),
 		annotations: {
@@ -450,7 +450,7 @@ export const toolDefinitionsV2 = [
 	{
 		name: ToolName.SwitchOrg,
 		description:
-			"Switch the active Org for this session. After switching, all subsequent tool calls (analysis sessions, answers, data sources, dashboards) operate against the selected Org. Pass an `org_id` returned by `list_orgs`. If you do not have access to the Org, the switch fails. The active Org is per-session and resets if the connection is re-established. Only available when authenticated via OAuth.",
+			"Switch the active Org. After switching, all subsequent tool calls (analysis sessions, answers, data sources, dashboards) operate against the selected Org. Pass an `org_id` returned by `list_orgs`. If you do not have access to the Org, the switch fails and the active Org is unchanged. The selection is durable and shared across all of your sessions — it persists across reconnects and applies to your other active conversations; it resets only on re-authentication or after prolonged inactivity. Only available when authenticated via OAuth.",
 		inputSchema: z.toJSONSchema(SwitchOrgInputSchema),
 		outputSchema: z.toJSONSchema(SwitchOrgOutputSchema),
 		annotations: {
