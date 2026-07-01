@@ -1,24 +1,32 @@
-import OAuthProvider from "@cloudflare/workers-oauth-provider";
 import {
 	type ResolveConfigFn,
 	type TraceConfig,
 	instrument,
 } from "@microlabs/otel-cf-workers";
 import { trace } from "@opentelemetry/api";
+import { type AuthHooks, createOAuthHandler } from "@thoughtspot/mcp-auth";
 
-import { withBearerHandler } from "./bearer";
 import { instrumentedMCPServer } from "./cloudflare-utils";
-import handler from "./handlers";
-import type { ApiVersionMode } from "./metrics/runtime/metric-types";
 import {
+	getStatusClass,
+	resolveRequestMetricContext,
+} from "./metrics/runtime/metric-context";
+import {
+	type ApiVersionMode,
+	METRIC_NAMES,
+} from "./metrics/runtime/metric-types";
+import {
+	getMetricsRecorderFromExecutionContext,
 	normalizeRequestedApiVersionForAnalytics,
+	recordBearerAuthRequestMetric,
 	recordHttpRequestMetrics,
+	recordStatusMetric,
 	resolveRequestedApiVersionMode,
 	withRequestMetrics,
 } from "./metrics/runtime/request-metrics";
-import { PUBLIC_ROUTES } from "./routes";
 import { ConversationStorageServerSQLite } from "./servers/conversation-storage-server";
 import { MCPServer } from "./servers/mcp-server";
+import { type Props, normalizeClientName } from "./utils";
 
 export { ConversationStorageServerSQLite };
 
@@ -36,78 +44,129 @@ const config: ResolveConfigFn = (env: Env, _trigger) => {
 // Create the instrumented ThoughtSpotMCP for the main export
 export const ThoughtSpotMCP = instrumentedMCPServer(MCPServer, config);
 
-// Router function to handle query params and inject apiVersion into props
-function createMCPRouter(
-	path: string,
-	serverClass: typeof ThoughtSpotMCP,
-	serveMethod: "serve" | "serveSSE",
-	options?: { binding?: string },
-) {
-	return {
-		async fetch(
-			request: Request,
-			env: Env,
-			ctx: ExecutionContext,
-		): Promise<Response> {
-			const url = new URL(request.url);
-			const requestedApiVersion = url.searchParams.get("api-version");
-			let apiVersion = requestedApiVersion;
-			let apiVersionMode: ApiVersionMode;
+const METRIC_NAME_MAP = {
+	oauth_authorize_requests_total: METRIC_NAMES.oauthAuthorizeRequestsTotal,
+	oauth_authorize_submit_total: METRIC_NAMES.oauthAuthorizeSubmitTotal,
+	oauth_callback_total: METRIC_NAMES.oauthCallbackTotal,
+	oauth_store_token_total: METRIC_NAMES.oauthStoreTokenTotal,
+} as const;
 
-			// TODO(Rifdhan): this is a temporary backwards compatibility measure. In the future
-			// we will use latest by default.
-			if (!apiVersion) {
-				apiVersion = "backwards-compatibility-default";
-				apiVersionMode = "implicit_legacy";
-			} else {
-				apiVersionMode = resolveRequestedApiVersionMode(apiVersion);
-			}
-
-			// Inject apiVersion into props
-			const originalProps = (ctx as any).props || {};
-			(ctx as any).props = {
-				...originalProps,
-				apiVersion,
-				apiRequestedVersion: requestedApiVersion
-					? normalizeRequestedApiVersionForAnalytics(requestedApiVersion)
-					: undefined,
-				apiVersionMode,
-			};
-
-			// Route to the appropriate serve method
-			return serverClass[serveMethod](path, options).fetch(request, env, ctx);
-		},
-	};
-}
-
-// Create the OAuth provider instance
-const oauthProvider = new OAuthProvider({
-	apiHandlers: {
-		[PUBLIC_ROUTES.mcp]: createMCPRouter(
-			PUBLIC_ROUTES.mcp,
-			ThoughtSpotMCP,
-			"serve",
-		) as any,
-		[PUBLIC_ROUTES.sse]: createMCPRouter(
-			PUBLIC_ROUTES.sse,
-			ThoughtSpotMCP,
-			"serveSSE",
-		) as any,
+const hooks: AuthHooks<Props> = {
+	onAuthMetric(name, status, ctx, req) {
+		const requestContext = resolveRequestMetricContext(req);
+		recordStatusMetric(
+			getMetricsRecorderFromExecutionContext(ctx),
+			METRIC_NAME_MAP[name],
+			status,
+			{
+				route_group: requestContext.routeGroup,
+				transport: requestContext.transport,
+				auth_mode: requestContext.authMode,
+				api_surface: requestContext.apiSurface,
+				status_class: getStatusClass(status),
+			},
+		);
 	},
-	defaultHandler: withBearerHandler(handler, ThoughtSpotMCP) as any, // TODO: Remove 'any'
-	authorizeEndpoint: PUBLIC_ROUTES.authorize,
-	tokenEndpoint: PUBLIC_ROUTES.oauthToken,
-	clientRegistrationEndpoint: PUBLIC_ROUTES.register,
+	onBearerMetric(status, ctx, req, group) {
+		recordBearerAuthRequestMetric(
+			getMetricsRecorderFromExecutionContext(ctx),
+			req,
+			status,
+			group,
+		);
+	},
+	extendProps(req, base): Props {
+		// Bearer/token flow: stamp api-version metadata from query params.
+		// /bearer/* path family uses backwards-compat default; /token/* uses requested/latest.
+		const url = new URL(req.url);
+		const requestedApiVersion = url.searchParams.get("api-version");
+		const isBearerLegacy = url.pathname.includes("/bearer/");
+
+		const props: Props = {
+			...base,
+			clientName: normalizeClientName(base.clientName),
+		};
+
+		let apiVersion: string | undefined;
+		let apiVersionMode: ApiVersionMode | undefined;
+
+		if (isBearerLegacy) {
+			apiVersion = "backwards-compatibility-default";
+			apiVersionMode = "implicit_legacy";
+		} else if (requestedApiVersion) {
+			apiVersion = requestedApiVersion;
+			apiVersionMode = resolveRequestedApiVersionMode(requestedApiVersion);
+		} else {
+			apiVersion = "latest";
+			apiVersionMode = "implicit_latest";
+		}
+
+		if (requestedApiVersion) {
+			props.apiRequestedVersion =
+				normalizeRequestedApiVersionForAnalytics(requestedApiVersion);
+		}
+		props.apiVersion = apiVersion;
+		props.apiVersionMode = apiVersionMode;
+
+		return props;
+	},
+};
+
+const oauthFetchHandler = createOAuthHandler<Props>({
+	serverInfo: {
+		name: "ThoughtSpot Spotter",
+		logo: "https://avatars.githubusercontent.com/u/8906680?s=200&v=4",
+		description: "MCP Server for ThoughtSpot Agent",
+	},
+	mcpServerClass: ThoughtSpotMCP,
+	hooks,
+	enrichMcpRequestProps(request, _ctx, baseProps): Props {
+		// OAuth-authenticated /mcp + /sse: derive apiVersion from query params,
+		// defaulting to legacy for backwards compatibility (matches prior behaviour).
+		const url = new URL(request.url);
+		const requestedApiVersion = url.searchParams.get("api-version");
+		let apiVersion = requestedApiVersion;
+		let apiVersionMode: ApiVersionMode;
+
+		if (!apiVersion) {
+			apiVersion = "backwards-compatibility-default";
+			apiVersionMode = "implicit_legacy";
+		} else {
+			apiVersionMode = resolveRequestedApiVersionMode(apiVersion);
+		}
+
+		return {
+			...(baseProps as Props),
+			clientName: normalizeClientName(baseProps.clientName),
+			apiVersion,
+			apiRequestedVersion: requestedApiVersion
+				? normalizeRequestedApiVersionForAnalytics(requestedApiVersion)
+				: undefined,
+			apiVersionMode,
+		};
+	},
+	// Extra routes mounted on the default handler app (consumer-specific).
+	extraRoutes(app) {
+		app.get("/", async (c) => {
+			if (!c.env.ASSETS) {
+				console.error("ASSETS binding is not configured");
+				return c.text("Internal Server Error", 500);
+			}
+			return c.env.ASSETS.fetch("/index.html");
+		});
+		app.get("/.well-known/openai-apps-challenge", (c) => {
+			return c.text(c.env.OPEN_AI_TOKEN as string);
+		});
+	},
 });
 
-// Wrap the OAuth provider with a handler that includes tracing
+// Wrap with OTel + tracing attributes.
 const oauthHandler = {
 	async fetch(
 		request: Request,
 		env: Env,
 		ctx: ExecutionContext,
 	): Promise<Response> {
-		// Add OpenTelemetry tracing attributes
 		const span = trace.getActiveSpan();
 		if (span) {
 			span.setAttributes({
@@ -117,8 +176,7 @@ const oauthHandler = {
 				request_method: request.method,
 			});
 		}
-
-		return oauthProvider.fetch(request, env, ctx);
+		return oauthFetchHandler.fetch!(request as any, env, ctx);
 	},
 };
 
