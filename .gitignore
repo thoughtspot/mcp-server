@@ -144,7 +144,3 @@ key.pem
 
 # MacOS metadata
 .DS_Store
-
-# Local-only multi-org test harnesses (not for the repo)
-scripts/smoke-multi-org.mjs
-scripts/e2e-multi-org.sh
