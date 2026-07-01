@@ -1,5 +1,5 @@
+import { type ResolveConfigFn, instrumentDO } from "@microlabs/otel-cf-workers";
 import { McpAgent } from "agents/mcp";
-import { instrumentDO, type ResolveConfigFn } from "@microlabs/otel-cf-workers";
 import type { BaseMCPServer, Context } from "./servers/mcp-server-base";
 import type { Props } from "./utils";
 

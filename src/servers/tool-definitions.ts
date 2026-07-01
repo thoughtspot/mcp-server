@@ -263,6 +263,40 @@ export const CreateDashboardOutputSchema = z.object({
 		),
 });
 
+export const ListOrgsInputSchema = z.object({});
+
+export const ListOrgsOutputSchema = z.object({
+	orgs: z
+		.array(
+			z.object({
+				id: z.number().describe("Unique identifier of the Org."),
+				name: z.string().describe("Name of the Org."),
+				description: z.string().optional().describe("Description of the Org."),
+				is_active: z
+					.boolean()
+					.describe(
+						"Whether this is the Org currently active for your account. Tool calls operate against the active Org.",
+					),
+			}),
+		)
+		.describe("The list of Orgs the user can access."),
+});
+
+export const SwitchOrgInputSchema = z.object({
+	org_id: z
+		.number()
+		.describe(
+			"The id of the Org to switch to. Use an `id` returned by `list_orgs`. Subsequent tool calls in this session operate against this Org.",
+		),
+});
+
+export const SwitchOrgOutputSchema = z.object({
+	success: z.boolean().describe("Whether the Org switch was successful."),
+	active_org_id: z
+		.number()
+		.describe("The id of the Org now active for the session."),
+});
+
 export enum ToolName {
 	// V1
 	Ping = "ping",
@@ -276,6 +310,8 @@ export enum ToolName {
 	SendSessionMessage = "send_session_message",
 	GetSessionUpdates = "get_session_updates",
 	CreateDashboard = "create_dashboard",
+	ListOrgs = "list_orgs",
+	SwitchOrg = "switch_org",
 }
 
 export const toolDefinitionsV1 = [
@@ -381,7 +417,7 @@ export const toolDefinitionsV2 = [
 	{
 		name: ToolName.GetSessionUpdates,
 		description:
-			"Get the latest updates from the Analytics Agent. You can call this after `send_session_message` to retrieve the Agent's response. If `is_done` is false, you can call this tool again to continue polling, as the Agent is still generating a response. Even if `is_done` is false, you can use the updates to show status updates or progress to the user, so that they are informed about the ongoing process. An empty `session_updates` list while `is_done` is false is normal; it means the Agent is still thinking. When `is_done` is true, the Agent has finished and the results in `session_updates` are complete, so you can present them to the user. You can also send a follow-up message in the same session after `is_done` is true.",
+			"Get the latest updates from the Analytics Agent. You can call this after `send_session_message` to retrieve the Agent's response. If `is_done` is false, you can call this tool again to continue polling, as the Agent is still generating a response. Even if `is_done` is false, you can use the updates to show status updates or progress to the user, so that they are informed about the ongoing process. An empty `session_updates` list while `is_done` is false is normal; it means the Agent is still thinking. When `is_done` is true, the Agent has finished and the results in `session_updates` are complete, so you can present them to the user. You can also send a follow-up message in the same session after `is_done` is true. If the completed response indicates that no data or no results were found, AND the `list_orgs` tool is available to you, the requested data may live in a different org: tell the user this and that they can call `list_orgs` to see their orgs (the active one is marked `is_active`) and `switch_org` to switch to another org, then retry. If `list_orgs` is not available, do not mention orgs.",
 		inputSchema: z.toJSONSchema(GetSessionUpdatesInputSchema),
 		outputSchema: z.toJSONSchema(GetSessionUpdatesOutputSchema),
 		annotations: {
@@ -399,6 +435,32 @@ export const toolDefinitionsV2 = [
 		outputSchema: z.toJSONSchema(CreateDashboardOutputSchema),
 		annotations: {
 			title: "Create Dashboard",
+			readOnlyHint: false,
+			destructiveHint: false,
+			openWorldHint: false,
+		},
+	},
+	{
+		name: ToolName.ListOrgs,
+		description:
+			"List the Orgs the authenticated user can access on the ThoughtSpot instance, including the ID, name, and description of each Org. The Org marked `is_active: true` is the one currently active for your account, which all tool calls operate against. Use this to tell the user which Org they are in. Only available when authenticated via OAuth.",
+		inputSchema: z.toJSONSchema(ListOrgsInputSchema),
+		outputSchema: z.toJSONSchema(ListOrgsOutputSchema),
+		annotations: {
+			title: "List Orgs",
+			readOnlyHint: true,
+			destructiveHint: false,
+			openWorldHint: false,
+		},
+	},
+	{
+		name: ToolName.SwitchOrg,
+		description:
+			"Switch the active Org. After switching, all subsequent tool calls (analysis sessions, answers, data sources, dashboards) operate against the selected Org. Pass an `org_id` returned by `list_orgs`. If you do not have access to the Org, the switch fails and the active Org is unchanged. The selection is durable and shared across all of your sessions — it persists across reconnects and applies to your other active conversations; it resets only on re-authentication or after prolonged inactivity. Only available when authenticated via OAuth.",
+		inputSchema: z.toJSONSchema(SwitchOrgInputSchema),
+		outputSchema: z.toJSONSchema(SwitchOrgOutputSchema),
+		annotations: {
+			title: "Switch Org",
 			readOnlyHint: false,
 			destructiveHint: false,
 			openWorldHint: false,

@@ -18,7 +18,7 @@
         if (!base.pathname.endsWith('/')) {
             base.pathname += '/';
         }
-        const tokenUrl = new URL('callosum/v1/v2/auth/token/fetch?validity_time_in_sec=2592000', base.toString());
+        const tokenUrl = new URL('callosum/v1/session/v2/gettoken?refresh=true', base.toString());
         
         document.getElementById('status').textContent = 'Retrieving authentication token...';
         
@@ -76,11 +76,21 @@
                             // Case 1: tokenText is a quoted string
                             tokenData = { data: { token: parsed } };
                         } else if (parsed.data && parsed.data.token) {
-                            // Case 2: { data: { token: ... } }
-                            tokenData = { data: { token: parsed.data.token } };
+                            // Case 2: { data: { token, refreshToken?, ... } }
+                            tokenData = { data: {
+                                token: parsed.data.token,
+                                refreshToken: parsed.data.refreshToken,
+                                tokenCreatedTime: parsed.data.tokenCreatedTime,
+                                tokenExpiryDuration: parsed.data.tokenExpiryDuration,
+                            } };
                         } else if (parsed.token) {
-                            // Case 3: { token: ... }
-                            tokenData = { data: { token: parsed.token } };
+                            // Case 3: { token, refreshToken?, ... }
+                            tokenData = { data: {
+                                token: parsed.token,
+                                refreshToken: parsed.refreshToken,
+                                tokenCreatedTime: parsed.tokenCreatedTime,
+                                tokenExpiryDuration: parsed.tokenExpiryDuration,
+                            } };
                         } else {
                             throw new Error('Unrecognized token format.');
                         }
@@ -130,7 +140,23 @@
             }
         }
         
-        const data = await response.json();
+        const raw = await response.json();
+        // gettoken returns the access token + refreshToken + timestamps. Normalize
+        // to the { data: { token, ... } } shape /store-token expects.
+        const src = (raw && raw.data) ? raw.data : raw;
+        if (!src || !src.token) {
+            // Fail loudly at login rather than storing an undefined token and
+            // failing opaquely on the first tool call.
+            throw new Error('Authentication response did not contain a token.');
+        }
+        const data = {
+            data: {
+                token: src.token,
+                refreshToken: src.refreshToken,
+                tokenCreatedTime: src.tokenCreatedTime,
+                tokenExpiryDuration: src.tokenExpiryDuration,
+            },
+        };
         document.getElementById('status').textContent = 'Authentication successful. Securing your session...';
 
         // Send the token to the server

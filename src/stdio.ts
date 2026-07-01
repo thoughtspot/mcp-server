@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { validateAndSanitizeUrl } from "./oauth-manager/oauth-utils.js";
 import { MCPServer } from "./servers/mcp-server.js";
 import type { Props } from "./utils.js";
-import { validateAndSanitizeUrl } from "./oauth-manager/oauth-utils.js";
 
 async function main() {
 	const instanceUrl = process.env.TS_INSTANCE;

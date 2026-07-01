@@ -184,6 +184,7 @@ describe("Bearer Handler", () => {
 				clientName: "Custom Test Client",
 				apiVersion: "backwards-compatibility-default",
 				apiVersionMode: "implicit_legacy",
+				authMode: "bearer",
 			});
 
 			// Verify the response
@@ -210,6 +211,7 @@ describe("Bearer Handler", () => {
 				clientName: "Bearer Token client",
 				apiVersion: "backwards-compatibility-default",
 				apiVersionMode: "implicit_legacy",
+				authMode: "bearer",
 			});
 
 			// Verify the response

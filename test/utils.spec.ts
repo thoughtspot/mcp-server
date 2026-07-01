@@ -1,8 +1,8 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { SpanStatusCode } from "@opentelemetry/api";
-import { McpServerError, type Props, putInKV, getFromKV } from "../src/utils";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { instrumentedMCPServer } from "../src/cloudflare-utils";
 import { getActiveSpan } from "../src/metrics/tracing/tracing-utils";
+import { McpServerError, type Props, getFromKV, putInKV } from "../src/utils";
 
 // Mock the tracing utils
 vi.mock("../src/metrics/tracing/tracing-utils", () => ({

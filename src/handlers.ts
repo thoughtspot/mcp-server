@@ -260,6 +260,9 @@ class Handler {
 			scope: oauthReqInfo.scope,
 			props: {
 				accessToken: token.data.token,
+				refreshToken: token.data.refreshToken,
+				tokenCreatedTime: token.data.tokenCreatedTime,
+				tokenExpiryDuration: token.data.tokenExpiryDuration,
 				instanceUrl: instanceUrl,
 				clientName: clientName,
 			} as Props,

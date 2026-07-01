@@ -1,23 +1,27 @@
 import {
-	createBearerAuthenticationConfig,
 	ThoughtSpotRestApi,
+	createBearerAuthenticationConfig,
 } from "@thoughtspot/rest-api-sdk";
 import type {
 	AgentConversation,
 	RequestContext,
 	ResponseContext,
 } from "@thoughtspot/rest-api-sdk";
-import YAML from "yaml";
-import { of } from "rxjs";
-import type { SessionInfo } from "./types";
 import { customAlphabet } from "nanoid";
+import { of } from "rxjs";
+import YAML from "yaml";
+import { type Org, type SessionInfo, ThoughtSpotApiError } from "./types";
 
 /*
  * Inject custom handlers into the ThoughtSpot client
  */
+// Per-request org selector; the access token works across all the user's orgs.
+const ORG_HEADER = "x-thoughtspot-orgs";
+
 export const getThoughtSpotClient = (
 	instanceUrl: string,
 	bearerToken: string,
+	orgId?: string,
 ) => {
 	const config = createBearerAuthenticationConfig(instanceUrl, () =>
 		Promise.resolve(bearerToken),
@@ -29,6 +33,10 @@ export const getThoughtSpotClient = (
 			if (!headers || !headers["Accept-Language"]) {
 				context.setHeaderParam("Accept-Language", "en-US");
 			}
+			// Scope every SDK call to the active org, if one is set.
+			if (orgId) {
+				context.setHeaderParam(ORG_HEADER, orgId);
+			}
 			return of(context) as any;
 		},
 		post: (context: ResponseContext) => {
@@ -37,13 +45,43 @@ export const getThoughtSpotClient = (
 	});
 	const client = new ThoughtSpotRestApi(config);
 	(client as any).instanceUrl = instanceUrl;
-	addExportUnsavedAnswerTML(client, instanceUrl, bearerToken);
-	addGetSessionInfo(client, instanceUrl, bearerToken);
-	addGetAnswerSession(client, instanceUrl, bearerToken);
-	addCreateAgentConversationWithAutoMode(client, instanceUrl, bearerToken);
-	addSendAgentConversationMessageStreaming(client, instanceUrl, bearerToken);
+	addExportUnsavedAnswerTML(client, instanceUrl, bearerToken, orgId);
+	addGetSessionInfo(client, instanceUrl, bearerToken, orgId);
+	addGetAnswerSession(client, instanceUrl, bearerToken, orgId);
+	addCreateAgentConversationWithAutoMode(
+		client,
+		instanceUrl,
+		bearerToken,
+		orgId,
+	);
+	addSendAgentConversationMessageStreaming(
+		client,
+		instanceUrl,
+		bearerToken,
+		orgId,
+	);
+	addFetchOrgBearerToken(client, instanceUrl);
+	addListOrgs(client, instanceUrl, bearerToken);
 	return client;
 };
+
+// Auth/content headers for the raw-fetch handlers, incl. the org header if set.
+function buildHeaders(
+	token: string,
+	orgId?: string,
+	accept = "application/json",
+): Record<string, string> {
+	const headers: Record<string, string> = {
+		"Content-Type": "application/json",
+		Accept: accept,
+		"user-agent": "ThoughtSpot-ts-client",
+		Authorization: `Bearer ${token}`,
+	};
+	if (orgId) {
+		headers[ORG_HEADER] = orgId;
+	}
+	return headers;
+}
 
 const getAnswerTML = `
 mutation GetUnsavedAnswerTML($session: BachSessionIdInput!, $exportDependencies: Boolean, $formatType:  EDocFormatType, $exportPermissions: Boolean, $exportFqn: Boolean) {
@@ -72,6 +110,7 @@ function addExportUnsavedAnswerTML(
 	client: any,
 	instanceUrl: string,
 	token: string,
+	orgId?: string,
 ) {
 	(client as any).exportUnsavedAnswerTML = async ({
 		session_identifier,
@@ -81,12 +120,7 @@ function addExportUnsavedAnswerTML(
 		// make a graphql request to `ThoughtspotHost/prism endpoint.
 		const response = await fetch(`${instanceUrl}${endpoint}`, {
 			method: "POST",
-			headers: {
-				"Content-Type": "application/json",
-				Accept: "application/json",
-				"user-agent": "ThoughtSpot-ts-client",
-				Authorization: `Bearer ${token}`,
-			},
+			headers: buildHeaders(token, orgId),
 			body: JSON.stringify({
 				operationName: "GetUnsavedAnswerTML",
 				query: getAnswerTML,
@@ -112,18 +146,14 @@ async function addGetSessionInfo(
 	client: any,
 	instanceUrl: string,
 	token: string,
+	orgId?: string,
 ) {
 	(client as any).getSessionInfo = async (): Promise<SessionInfo> => {
 		const endpoint = "/prism/preauth/info";
 		// make a graphql request to `ThoughtspotHost/prism endpoint.
 		const response = await fetch(`${instanceUrl}${endpoint}`, {
 			method: "GET",
-			headers: {
-				"Content-Type": "application/json",
-				Accept: "application/json",
-				"user-agent": "ThoughtSpot-ts-client",
-				Authorization: `Bearer ${token}`,
-			},
+			headers: buildHeaders(token, orgId),
 		});
 
 		const data: any = await response.json();
@@ -158,7 +188,12 @@ export interface AnswerSession {
 /*
  * Using custom handler because we don't have a public API for this
  */
-function addGetAnswerSession(client: any, instanceUrl: string, token: string) {
+function addGetAnswerSession(
+	client: any,
+	instanceUrl: string,
+	token: string,
+	orgId?: string,
+) {
 	(client as any).getAnswerSession = async ({
 		session_identifier,
 		generation_number,
@@ -170,12 +205,7 @@ function addGetAnswerSession(client: any, instanceUrl: string, token: string) {
 		const operationName = "Answer__updateTokens";
 		const fetchOptions = {
 			method: "POST",
-			headers: {
-				"Content-Type": "application/json",
-				Accept: "application/json",
-				"user-agent": "ThoughtSpot-ts-client",
-				Authorization: `Bearer ${token}`,
-			},
+			headers: buildHeaders(token, orgId),
 			body: JSON.stringify({
 				operationName,
 				query: getAnswerSessionQuery,
@@ -191,8 +221,10 @@ function addGetAnswerSession(client: any, instanceUrl: string, token: string) {
 
 		if (!response.ok) {
 			const errorText = await response.text();
-			throw new Error(
-				`getAnswerSession failed with status ${response.status}: ${errorText}`,
+			throw new ThoughtSpotApiError(
+				response.status,
+				"getAnswerSession",
+				errorText,
 			);
 		}
 		const data = (await response.json()) as any;
@@ -211,6 +243,7 @@ function addCreateAgentConversationWithAutoMode(
 	client: any,
 	instanceUrl: string,
 	token: string,
+	orgId?: string,
 ) {
 	(client as any).createAgentConversationWithAutoMode = async ({
 		dataSourceId,
@@ -220,12 +253,7 @@ function addCreateAgentConversationWithAutoMode(
 		const endpoint = "/conversation/v2/";
 		const fetchOptions = {
 			method: "POST",
-			headers: {
-				"Content-Type": "application/json",
-				Accept: "application/json",
-				"user-agent": "ThoughtSpot-ts-client",
-				Authorization: `Bearer ${token}`,
-			},
+			headers: buildHeaders(token, orgId),
 			body: JSON.stringify({
 				context: dataSourceId
 					? {
@@ -251,8 +279,10 @@ function addCreateAgentConversationWithAutoMode(
 
 		if (!response.ok) {
 			const errorText = await response.text();
-			throw new Error(
-				`createAgentConversationWithAutoMode failed with status ${response.status}: ${errorText}`,
+			throw new ThoughtSpotApiError(
+				response.status,
+				"createAgentConversationWithAutoMode",
+				errorText,
 			);
 		}
 
@@ -282,6 +312,7 @@ function addSendAgentConversationMessageStreaming(
 	client: any,
 	instanceUrl: string,
 	token: string,
+	orgId?: string,
 ) {
 	(client as any).sendAgentConversationMessageStreaming = async ({
 		conversation_identifier,
@@ -294,12 +325,7 @@ function addSendAgentConversationMessageStreaming(
 		const endpoint = `/conversation/v2/${encodeURIComponent(conversation_identifier)}/query`;
 		const fetchOptions = {
 			method: "POST",
-			headers: {
-				"Content-Type": "application/json",
-				Accept: "text/event-stream",
-				"user-agent": "ThoughtSpot-ts-client",
-				Authorization: `Bearer ${token}`,
-			},
+			headers: buildHeaders(token, orgId, "text/event-stream"),
 			body: JSON.stringify({
 				mode: "spotter", // TODO(Rifdhan) support deep analysis mode
 				id: generateNanoID(),
@@ -317,11 +343,84 @@ function addSendAgentConversationMessageStreaming(
 
 		if (!response.ok) {
 			const errorText = await response.text();
-			throw new Error(
-				`sendAgentConversationMessageStreaming failed with status ${response.status}: ${errorText}`,
+			throw new ThoughtSpotApiError(
+				response.status,
+				"sendAgentConversationMessageStreaming",
+				errorText,
 			);
 		}
 
 		return response;
+	};
+}
+
+// Lists the user's orgs via the user-scoped v1 session/orgs endpoint. We avoid
+// the v2 orgs/search REST endpoint because it needs ORG_ADMINISTRATION and 403s
+// for regular users.
+function addListOrgs(client: any, instanceUrl: string, token: string) {
+	(client as any).listOrgs = async (): Promise<Org[]> => {
+		const endpoint = "/callosum/v1/session/orgs?batchsize=-1&offset=-1";
+		const response = await fetch(`${instanceUrl}${endpoint}`, {
+			method: "GET",
+			headers: buildHeaders(token),
+		});
+
+		if (!response.ok) {
+			const errorText = await response.text();
+			throw new ThoughtSpotApiError(response.status, "listOrgs", errorText);
+		}
+
+		const data = (await response.json()) as any;
+		const orgs: any[] = Array.isArray(data?.orgs) ? data.orgs : [];
+		return orgs.map((org) => ({
+			id: Number(org.orgId ?? org.id),
+			name: org.orgName ?? org.name ?? String(org.orgId ?? org.id),
+			description: org.description || undefined,
+		}));
+	};
+}
+
+// Org-scoped token validity (30 days), matching the connector's login validity.
+const ORG_TOKEN_VALIDITY_SEC = 30 * 24 * 60 * 60;
+
+// Mint an org-scoped token via auth/token/fetch?org_identifier=... The working
+// path is /callosum/v1/v2/auth/token/fetch (the /callosum/v2/... path 404s);
+// token is nested under data.token.
+function addFetchOrgBearerToken(client: any, instanceUrl: string) {
+	(client as any).fetchOrgBearerToken = async ({
+		accessToken,
+		orgId,
+		validityTimeInSec = ORG_TOKEN_VALIDITY_SEC,
+	}: {
+		accessToken: string;
+		orgId: string;
+		validityTimeInSec?: number;
+	}): Promise<string> => {
+		const params = new URLSearchParams({
+			validity_time_in_sec: String(validityTimeInSec),
+			org_identifier: orgId,
+		});
+		const endpoint = `/callosum/v1/v2/auth/token/fetch?${params.toString()}`;
+		const response = await fetch(`${instanceUrl}${endpoint}`, {
+			method: "GET",
+			// No org header — the org is selected via org_identifier.
+			headers: buildHeaders(accessToken),
+		});
+
+		if (!response.ok) {
+			const errorText = await response.text();
+			throw new ThoughtSpotApiError(
+				response.status,
+				"fetchOrgBearerToken",
+				errorText,
+			);
+		}
+
+		const data = (await response.json()) as any;
+		const token = data?.data?.token ?? data?.token;
+		if (!token || typeof token !== "string") {
+			throw new Error("fetchOrgBearerToken: no token in response");
+		}
+		return token;
 	};
 }
