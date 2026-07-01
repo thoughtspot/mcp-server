@@ -63,8 +63,18 @@ export class MCPServer extends BaseMCPServer {
 	}
 
 	protected getActiveBearerToken(): string {
-		const orgToken = this.activeOrgId ? this.activeOrgToken : undefined;
-		return orgToken ?? this.getGlobalToken();
+		// An active org must use its org-scoped token — never the global token, which
+		// would break org isolation. ensureActiveOrgToken guarantees it is minted
+		// before any data call, so a missing token here is a bug, not a fallback.
+		if (this.activeOrgId) {
+			if (!this.activeOrgToken) {
+				throw new Error(
+					`Org ${this.activeOrgId} is active but its token is not minted`,
+				);
+			}
+			return this.activeOrgToken;
+		}
+		return this.getGlobalToken();
 	}
 
 	// Re-read on each org-aware call so a switch in another session is reflected.
@@ -124,8 +134,10 @@ export class MCPServer extends BaseMCPServer {
 		return match ? Number(match[1]) : undefined;
 	}
 
-	// Evict the active org's token and re-mint, recovering from a stale token. Abort
-	// if a sibling switched org meanwhile, so we don't clobber the new org's token.
+	// Re-mint the active org's token, recovering from a stale one. Mint first, then
+	// overwrite atomically — the store never goes tokenless, so a concurrent session
+	// never sees an active org without its token. Abort if a sibling switched org
+	// meanwhile, so we don't clobber the new org's token.
 	private async forceRemintOrgToken(
 		orgId: string,
 		recorder?: MetricsRecorder,
@@ -134,14 +146,15 @@ export class MCPServer extends BaseMCPServer {
 		if (this.activeOrgId !== orgId) {
 			return;
 		}
-		this.activeOrgToken = undefined;
-		try {
-			const storage = await this.getStorageService();
-			await storage.setActiveOrgToken("");
-		} catch (error) {
-			console.error("Failed to clear stale org token in store:", error);
-		}
-		await this.ensureOrgToken(orgId, recorder);
+		await this.loadOrSeedWarmToken();
+		const globalToken = this.getGlobalToken();
+		const orgToken = await this.getOrgService(
+			globalToken,
+			undefined,
+			recorder,
+		).fetchOrgBearerToken(globalToken, orgId);
+		this.activeOrgToken = orgToken;
+		await this.setActiveOrg(orgId, orgToken);
 	}
 
 	// Single re-mint+retry on a 401, only when an org token is in use (a global-token
@@ -152,13 +165,18 @@ export class MCPServer extends BaseMCPServer {
 		analyticsContextOverride?: MetricAnalyticsContext,
 	): Promise<T> {
 		const orgId = this.activeOrgId;
-		const usedOrgToken = Boolean(orgId && this.activeOrgToken);
 
 		const attempt = () =>
 			fn(this.getThoughtSpotService(recorder, analyticsContextOverride));
 
-		if (!usedOrgToken || !orgId) {
+		if (!orgId) {
 			return attempt();
+		}
+
+		// Org active → the call must use the org-scoped token, never the global one
+		// (a global-token data call would break org isolation). Mint if not cached.
+		if (!this.activeOrgToken) {
+			await this.ensureOrgToken(orgId, recorder);
 		}
 
 		try {
@@ -449,6 +467,17 @@ export class MCPServer extends BaseMCPServer {
 
 		if (this.areOrgToolsAvailable()) {
 			await this.loadActiveOrg();
+			// Mint the org token up front so every data path uses it; no call falls
+			// back to the global token while an org is active. list_orgs/switch_org
+			// use the global token on their own (listing / minting) paths.
+			if (
+				this.activeOrgId &&
+				!this.activeOrgToken &&
+				name !== ToolName.ListOrgs &&
+				name !== ToolName.SwitchOrg
+			) {
+				await this.ensureOrgToken(this.activeOrgId, recorder);
+			}
 		}
 
 		switch (name) {
