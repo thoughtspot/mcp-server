@@ -20,6 +20,7 @@
  *     Verifies that SSE bytes produce the correct DO state end-to-end.
  */
 
+import { connect } from "mcp-testing-kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ConversationStorageServerSQLite } from "../../src";
 import { MCPServer } from "../../src/servers/mcp-server";
@@ -538,5 +539,131 @@ describe("V2 Streaming Parser + Real Storage Integration", () => {
 			text: "Here is your answer.",
 			is_thinking: false,
 		});
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Group 4 — create_analysis_session end-to-end (real service + real client)
+//
+// Unlike Group 2, this does NOT mock getThoughtSpotClient or getThoughtSpotService.
+// It exercises the real chain:
+//   callCreateAnalysisSession (sessionInfo flags)
+//     → ThoughtSpotService.createAgentConversation (validation + opts)
+//     → real client.createAgentConversationWithAutoMode (conv_settings body)
+// Only `fetch` (the network boundary) is mocked. This is the only place that would
+// catch flag/param drift across the real service↔client seam.
+// ---------------------------------------------------------------------------
+
+describe("V2 create_analysis_session end-to-end (real service + real client, fetch mocked)", () => {
+	let originalFetch: typeof global.fetch;
+
+	beforeEach(() => {
+		vi.clearAllMocks();
+		originalFetch = global.fetch;
+	});
+
+	afterEach(() => {
+		global.fetch = originalFetch;
+		vi.restoreAllMocks();
+	});
+
+	/**
+	 * Routes fetch by URL:
+	 *   /prism/preauth/info  → session info (init), with the given configInfo overrides
+	 *   /conversation/v2/    → conversation creation
+	 * Returns the recorded call list so tests can inspect the outbound body.
+	 */
+	function installFetch(
+		configInfoOverrides: Record<string, unknown>,
+		conversationResponse: unknown = { conversation_id: "conv-int-4" },
+	) {
+		const calls: Array<{ url: string; init?: RequestInit }> = [];
+		global.fetch = vi.fn(async (url: any, init?: RequestInit) => {
+			const u = String(url);
+			calls.push({ url: u, init });
+			if (u.endsWith("/prism/preauth/info")) {
+				return {
+					ok: true,
+					json: async () => ({
+						info: {
+							userGUID: "user-int",
+							userName: "user-int",
+							releaseVersion: "10.13.0.cl-110",
+							currentOrgId: "org-int",
+							privileges: [],
+							configInfo: {
+								mixpanelConfig: {
+									production: false,
+									devSdkKey: "dev-key",
+									prodSdkKey: "prod-key",
+								},
+								selfClusterName: "cluster-int",
+								selfClusterId: "cluster-int-id",
+								...configInfoOverrides,
+							},
+						},
+					}),
+				} as unknown as Response;
+			}
+			if (u.endsWith("/conversation/v2/")) {
+				return {
+					ok: true,
+					json: async () => conversationResponse,
+				} as unknown as Response;
+			}
+			return {
+				ok: false,
+				status: 404,
+				text: async () => `unexpected url ${u}`,
+			} as unknown as Response;
+		}) as unknown as typeof global.fetch;
+		return calls;
+	}
+
+	it("threads tenant flags through the real service→client seam into the conv_settings body", async () => {
+		const calls = installFetch({
+			enableSpotterDataSourceDiscovery: true,
+			showSpotterPastConversations: true,
+		});
+
+		const server = new MCPServer({ props: mockProps, env: {} } as any);
+		await server.init();
+		const { callTool } = connect(server);
+
+		const result = await callTool("create_analysis_session", {});
+
+		expect(result.isError).toBeUndefined();
+		expect((result.structuredContent as any).analytical_session_id).toBe(
+			"conv-int-4",
+		);
+
+		const convCall = calls.find((c) => c.url.endsWith("/conversation/v2/"));
+		expect(convCall).toBeDefined();
+		const body = JSON.parse(convCall?.init?.body as string);
+		expect(body.context).toEqual({ type: "empty" });
+		// No data source + discovery enabled → dataset discovery on
+		expect(body.conv_settings.enable_search_datasets).toBe(true);
+		expect(body.conv_settings.enable_auto_select_dataset).toBe(true);
+		// Tenant flag → save_chat_enabled
+		expect(body.conv_settings.save_chat_enabled).toBe(true);
+	});
+
+	it("returns a clean error and fires no conversation request when auto mode is disabled and no data source is given", async () => {
+		const calls = installFetch({
+			enableSpotterDataSourceDiscovery: false,
+		});
+
+		const server = new MCPServer({ props: mockProps, env: {} } as any);
+		await server.init();
+		const { callTool } = connect(server);
+
+		const result = await callTool("create_analysis_session", {});
+
+		expect(result.isError).toBe(true);
+		expect((result.content as any[])[0].text).toContain(
+			"Auto mode needs to be enabled",
+		);
+		// Validation short-circuits before any upstream conversation call
+		expect(calls.some((c) => c.url.endsWith("/conversation/v2/"))).toBe(false);
 	});
 });

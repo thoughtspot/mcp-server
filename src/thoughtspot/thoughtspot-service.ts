@@ -311,9 +311,21 @@ export class ThoughtSpotService {
 	@WithSpan("create-agent-conversation")
 	async createAgentConversation(
 		dataSourceId?: string,
+		opts?: {
+			enableSpotterDataSourceDiscovery: boolean;
+			showSpotterPastConversations: boolean;
+		},
 	): Promise<AgentConversation> {
 		const span = trace.getSpan(context.active());
 		span?.setAttribute("data_source_id", dataSourceId ?? "(none)");
+
+		// Without an explicit data source, Spotter relies on auto mode (data source discovery) to
+		// find the relevant data model. If that is disabled for the tenant, we cannot proceed.
+		if (!dataSourceId && !opts?.enableSpotterDataSourceDiscovery) {
+			throw new Error(
+				"Auto mode needs to be enabled for Spotter to find the relevant data model to answer the user question",
+			);
+		}
 
 		try {
 			// Use auto mode by default, but support passing an explicit data source context
@@ -322,6 +334,9 @@ export class ThoughtSpotService {
 				() =>
 					(this.client as any).createAgentConversationWithAutoMode({
 						dataSourceId,
+						enableSpotterDataSourceDiscovery:
+							opts?.enableSpotterDataSourceDiscovery,
+						showSpotterPastConversations: opts?.showSpotterPastConversations,
 					}),
 			);
 
@@ -714,6 +729,8 @@ export class ThoughtSpotService {
 			privileges: info.privileges,
 			enableSpotterDataSourceDiscovery:
 				info.configInfo?.enableSpotterDataSourceDiscovery,
+			showSpotterPastConversations:
+				info.configInfo?.showSpotterPastConversations,
 		};
 	}
 

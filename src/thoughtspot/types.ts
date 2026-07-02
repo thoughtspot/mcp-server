@@ -28,6 +28,7 @@ export interface SessionInfo {
 	currentOrgId: string;
 	privileges: any;
 	enableSpotterDataSourceDiscovery?: boolean;
+	showSpotterPastConversations?: boolean;
 }
 
 export interface BaseMessage {

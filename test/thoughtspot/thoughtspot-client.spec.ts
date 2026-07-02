@@ -1,11 +1,11 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { getThoughtSpotClient } from "../../src/thoughtspot/thoughtspot-client";
 import {
-	createBearerAuthenticationConfig,
 	ThoughtSpotRestApi,
+	createBearerAuthenticationConfig,
 } from "@thoughtspot/rest-api-sdk";
 import type { ResponseContext } from "@thoughtspot/rest-api-sdk";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import YAML from "yaml";
+import { getThoughtSpotClient } from "../../src/thoughtspot/thoughtspot-client";
 
 // Mock the ThoughtSpot REST API SDK
 vi.mock("@thoughtspot/rest-api-sdk", () => ({
@@ -559,7 +559,9 @@ describe("ThoughtSpot Client", () => {
 				json: vi.fn().mockResolvedValue(mockConversation),
 			});
 
-			const result = await client.createAgentConversationWithAutoMode({});
+			const result = await client.createAgentConversationWithAutoMode({
+				enableSpotterDataSourceDiscovery: true,
+			});
 
 			expect(fetch).toHaveBeenCalledWith(
 				`${mockInstanceUrl}/conversation/v2/`,
@@ -596,6 +598,7 @@ describe("ThoughtSpot Client", () => {
 
 			const result = await client.createAgentConversationWithAutoMode({
 				dataSourceId,
+				enableSpotterDataSourceDiscovery: true,
 			});
 
 			const fetchCall = (fetch as any).mock.calls[0];
@@ -617,7 +620,9 @@ describe("ThoughtSpot Client", () => {
 				json: vi.fn().mockResolvedValue({ conversation_id: "conv-789" }),
 			});
 
-			await client.createAgentConversationWithAutoMode({});
+			await client.createAgentConversationWithAutoMode({
+				enableSpotterDataSourceDiscovery: true,
+			});
 
 			const fetchCall = (fetch as any).mock.calls[0];
 			const body = JSON.parse(fetchCall[1].body);
@@ -629,6 +634,38 @@ describe("ThoughtSpot Client", () => {
 				enable_search_datasets: true,
 				enable_auto_select_dataset: true,
 			});
+		});
+
+		it("should disable dataset search and auto-select when discovery is disabled", async () => {
+			(fetch as any).mockResolvedValue({
+				ok: true,
+				json: vi.fn().mockResolvedValue({ conversation_id: "conv-nods" }),
+			});
+
+			await client.createAgentConversationWithAutoMode({
+				enableSpotterDataSourceDiscovery: false,
+			});
+
+			const fetchCall = (fetch as any).mock.calls[0];
+			const body = JSON.parse(fetchCall[1].body);
+			expect(body.conv_settings.enable_search_datasets).toBe(false);
+			expect(body.conv_settings.enable_auto_select_dataset).toBe(false);
+		});
+
+		it("should set save_chat_enabled from showSpotterPastConversations", async () => {
+			(fetch as any).mockResolvedValue({
+				ok: true,
+				json: vi.fn().mockResolvedValue({ conversation_id: "conv-chat" }),
+			});
+
+			await client.createAgentConversationWithAutoMode({
+				dataSourceId: "worksheet-1",
+				showSpotterPastConversations: true,
+			});
+
+			const fetchCall = (fetch as any).mock.calls[0];
+			const body = JSON.parse(fetchCall[1].body);
+			expect(body.conv_settings.save_chat_enabled).toBe(true);
 		});
 
 		it("should handle HTTP error responses", async () => {

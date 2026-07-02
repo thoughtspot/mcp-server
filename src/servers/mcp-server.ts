@@ -192,7 +192,7 @@ export class MCPServer extends BaseMCPServer {
 		switch (name) {
 			case ToolName.Ping: {
 				if (this.ctx.props.accessToken && this.ctx.props.instanceUrl) {
-						if (!this.getThoughtSpotService(recorder).validateConnection()) {
+					if (!this.getThoughtSpotService(recorder).validateConnection()) {
 						return this.createErrorResponse(
 							"Failed to validate connection",
 							"Ping failed",
@@ -396,12 +396,24 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 
 		let response: AgentConversation;
 		try {
-			response =
-				await this.getThoughtSpotService(recorder).createAgentConversation(
-					data_source_id,
-				);
+			response = await this.getThoughtSpotService(
+				recorder,
+			).createAgentConversation(data_source_id, {
+				enableSpotterDataSourceDiscovery: this.isDatasourceDiscoveryAvailable(),
+				showSpotterPastConversations:
+					String(this.sessionInfo?.showSpotterPastConversations) === "true",
+			});
 		} catch (error) {
-			if (!(error as any)?.message?.includes("failed with status 401")) {
+			const message = (error as any)?.message ?? "";
+
+			if (message.includes("Auto mode needs to be enabled")) {
+				return this.createErrorResponse(
+					message,
+					"Auto mode is disabled and no data source was provided",
+				);
+			}
+
+			if (!message.includes("failed with status 401")) {
 				throw error;
 			}
 
