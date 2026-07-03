@@ -49,6 +49,10 @@ export class MCPServer extends BaseMCPServer {
 	private activeOrgId: string | undefined;
 	private activeOrgToken: string | undefined;
 	private warmGlobalToken: string | undefined;
+	// Decided once in postInit: does this connection's grant carry a refresh token?
+	// A pre-multi-org grant does not, so it keeps the old (no-org) behavior until the
+	// user re-authenticates. Everything multi-org keys off this flag.
+	private grantHasRefreshToken = false;
 
 	constructor(ctx: Context) {
 		super(ctx, "ThoughtSpot", "2.0.0");
@@ -217,6 +221,9 @@ export class MCPServer extends BaseMCPServer {
 		if (!this.isOAuthAuth()) {
 			return;
 		}
+		// Single source of truth for multi-org eligibility: only a grant minted by
+		// the multi-org login path carries a refresh token.
+		this.grantHasRefreshToken = typeof this.ctx.props.refreshToken === "string";
 		try {
 			await this.loadOrSeedWarmToken();
 		} catch (error) {
@@ -293,11 +300,11 @@ export class MCPServer extends BaseMCPServer {
 		return this.ctx.props.authMode === "oauth";
 	}
 
-	// A grant minted before multi-org shipped has no refresh token in its props
-	// (extendGrantProps adds it at login). Such sessions keep the pre-multi-org
-	// behavior — no org tools, no overlay — until the user re-authenticates.
+	// A grant minted before multi-org shipped has no refresh token (extendGrantProps
+	// adds it at login). Such sessions keep the pre-multi-org behavior — no org
+	// tools, no overlay — until the user re-authenticates. Decided in postInit.
 	protected hasMultiOrgGrant(): boolean {
-		return typeof this.ctx.props.refreshToken === "string";
+		return this.grantHasRefreshToken;
 	}
 
 	// Org behavior requires OAuth + orgs enabled + the v2 surface (inferred from the
