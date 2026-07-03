@@ -161,6 +161,7 @@ function makeServer(opts: {
 	validateConnection?: ReturnType<typeof vi.fn>;
 	touchLog?: string[];
 	apiVersion?: string;
+	noRefreshToken?: boolean;
 }) {
 	vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue(
 		makeClientMock(opts),
@@ -180,7 +181,8 @@ function makeServer(opts: {
 	const props = {
 		instanceUrl: "https://test.thoughtspot.cloud",
 		accessToken: "global-token",
-		refreshToken: "refresh-token",
+		// Old (pre-multi-org) grants have no refresh token; noRefreshToken emulates one.
+		refreshToken: opts.noRefreshToken ? undefined : "refresh-token",
 		tokenExpiryDuration: 1893456000000,
 		authMode: opts.authMode,
 		apiVersion: opts.apiVersion ?? "latest",
@@ -277,6 +279,40 @@ describe("MCP Server org tools", () => {
 			const names = (await listTools()).tools?.map((t) => t.name) ?? [];
 			expect(names).not.toContain("list_orgs");
 			expect(names).not.toContain("switch_org");
+		});
+
+		// Backward compatibility: a grant minted before multi-org shipped has no
+		// refresh token. Such sessions must NOT see org tools until they re-auth.
+		it("hides org tools for a pre-multi-org grant (no refresh token) even with OAuth + orgs enabled", async () => {
+			const { server } = makeServer({
+				authMode: "oauth",
+				session: { orgsEnabled: true },
+				noRefreshToken: true,
+			});
+			await server.init();
+			const { listTools } = connect(server);
+			const names = (await listTools()).tools?.map((t) => t.name) ?? [];
+			expect(names).not.toContain("list_orgs");
+			expect(names).not.toContain("switch_org");
+		});
+
+		it("applies NO org overlay (no active org / no mint) for a pre-multi-org grant", async () => {
+			const mint = vi.fn().mockResolvedValue("org-scoped-token");
+			const store = new Map<
+				string,
+				{ activeOrgId?: string; orgToken?: string }
+			>();
+			const { server } = makeServer({
+				authMode: "oauth",
+				session: { orgsEnabled: true, currentOrgId: "0" },
+				noRefreshToken: true,
+				fetchOrgBearerToken: mint,
+				store,
+			});
+			await server.init();
+			// Old grant: no active org defaulted, no org token minted → old behavior.
+			expect(mint).not.toHaveBeenCalled();
+			expect([...store.values()].some((r) => r.activeOrgId)).toBe(false);
 		});
 	});
 

@@ -293,10 +293,21 @@ export class MCPServer extends BaseMCPServer {
 		return this.ctx.props.authMode === "oauth";
 	}
 
+	// A grant minted before multi-org shipped has no refresh token in its props
+	// (extendGrantProps adds it at login). Such sessions keep the pre-multi-org
+	// behavior — no org tools, no overlay — until the user re-authenticates.
+	protected hasMultiOrgGrant(): boolean {
+		return typeof this.ctx.props.refreshToken === "string";
+	}
+
 	// Org behavior requires OAuth + orgs enabled + the v2 surface (inferred from the
-	// resolved tool set, not a label). Fails closed.
+	// resolved tool set, not a label) + a multi-org grant. Fails closed.
 	protected areOrgToolsAvailable(): boolean {
-		if (!this.isOAuthAuth() || !this.isOrgsEnabled()) {
+		if (
+			!this.isOAuthAuth() ||
+			!this.isOrgsEnabled() ||
+			!this.hasMultiOrgGrant()
+		) {
 			return false;
 		}
 		try {
