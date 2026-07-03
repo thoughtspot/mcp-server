@@ -11,10 +11,18 @@ import {
 	type MetricsRecorder,
 	NOOP_METRICS_RECORDER,
 } from "../metrics/runtime/metrics-recorder";
+import type { MetricAnalyticsContext } from "../metrics/runtime/metrics-sink";
 import type { ToolMetricApiSurface } from "../metrics/runtime/tool-metrics";
 import { WithSpan } from "../metrics/tracing/tracing-utils";
-import type { DataSource } from "../thoughtspot/thoughtspot-service";
-import type { Answer, StreamingMessagesState } from "../thoughtspot/types";
+import type {
+	DataSource,
+	ThoughtSpotService,
+} from "../thoughtspot/thoughtspot-service";
+import {
+	type Answer,
+	type StreamingMessagesState,
+	ThoughtSpotApiError,
+} from "../thoughtspot/types";
 import { McpServerError } from "../utils";
 import { BaseMCPServer, type Context } from "./mcp-server-base";
 import {
@@ -26,6 +34,7 @@ import {
 	GetRelevantQuestionsSchema,
 	GetSessionUpdatesInputSchema,
 	SendSessionMessageInputSchema,
+	SwitchOrgInputSchema,
 	ToolName,
 } from "./tool-definitions";
 import {
@@ -35,12 +44,268 @@ import {
 } from "./version-registry";
 
 export class MCPServer extends BaseMCPServer {
+	// Mirrors of the shared per-user store (the durable source of truth, shared so
+	// the token is minted once across the user's fanned-out sessions).
+	private activeOrgId: string | undefined;
+	private activeOrgToken: string | undefined;
+	private warmGlobalToken: string | undefined;
+
 	constructor(ctx: Context) {
 		super(ctx, "ThoughtSpot", "2.0.0");
 	}
 
+	private getGlobalToken(): string {
+		return this.warmGlobalToken ?? this.ctx.props.accessToken;
+	}
+
+	protected getActiveOrgId(): string | undefined {
+		return this.activeOrgId;
+	}
+
+	protected getActiveBearerToken(): string {
+		// An active org must use its org-scoped token — never the global token, which
+		// would break org isolation. ensureActiveOrgToken guarantees it is minted
+		// before any data call, so a missing token here is a bug, not a fallback.
+		if (this.activeOrgId) {
+			if (!this.activeOrgToken) {
+				throw new Error(
+					`Org ${this.activeOrgId} is active but its token is not minted`,
+				);
+			}
+			return this.activeOrgToken;
+		}
+		return this.getGlobalToken();
+	}
+
+	// Re-read on each org-aware call so a switch in another session is reflected.
+	private async loadActiveOrg(): Promise<void> {
+		const storage = await this.getStorageService();
+		const stored = await storage.getActiveOrg();
+		this.activeOrgId = stored.activeOrgId ?? undefined;
+		this.activeOrgToken = stored.orgToken ?? undefined;
+	}
+
+	// Pass orgToken to commit id+token atomically (validated switch); else the
+	// prior token is cleared and re-minted lazily.
+	private async setActiveOrg(orgId: string, orgToken?: string): Promise<void> {
+		this.activeOrgId = orgId;
+		this.activeOrgToken = orgToken;
+		const storage = await this.getStorageService();
+		await storage.setActiveOrg(orgId, orgToken);
+	}
+
+	// Reuse the shared-store token if held, else mint from the global token and
+	// persist it (so the fan-out mints once).
+	private async ensureOrgToken(
+		orgId: string,
+		recorder?: MetricsRecorder,
+	): Promise<string> {
+		if (this.activeOrgId === orgId && this.activeOrgToken) {
+			return this.activeOrgToken;
+		}
+		await this.loadOrSeedWarmToken();
+		const globalToken = this.getGlobalToken();
+		const orgToken = await this.getOrgService(
+			globalToken,
+			undefined,
+			recorder,
+		).fetchOrgBearerToken(globalToken, orgId);
+		this.activeOrgToken = orgToken;
+		const storage = await this.getStorageService();
+		await storage.setActiveOrgToken(orgToken);
+		return orgToken;
+	}
+
+	// HTTP status from a thrown error or `{ error }` result: typed
+	// ThoughtSpotApiError, else parsed from a "status NNN" message.
+	private apiErrorStatus(value: unknown): number | undefined {
+		const err =
+			value instanceof Error
+				? value
+				: ((value as { error?: unknown } | null)?.error ?? value);
+		if (err instanceof ThoughtSpotApiError) {
+			return err.status;
+		}
+		const message =
+			typeof (err as { message?: unknown })?.message === "string"
+				? (err as { message: string }).message
+				: "";
+		const match = message.match(/\bstatus (\d{3})\b/);
+		return match ? Number(match[1]) : undefined;
+	}
+
+	// Re-mint the active org's token, recovering from a stale one. Mint first, then
+	// overwrite atomically — the store never goes tokenless, so a concurrent session
+	// never sees an active org without its token. Abort if a sibling switched org
+	// meanwhile, so we don't clobber the new org's token.
+	private async forceRemintOrgToken(
+		orgId: string,
+		recorder?: MetricsRecorder,
+	): Promise<void> {
+		await this.loadActiveOrg();
+		if (this.activeOrgId !== orgId) {
+			return;
+		}
+		await this.loadOrSeedWarmToken();
+		const globalToken = this.getGlobalToken();
+		const orgToken = await this.getOrgService(
+			globalToken,
+			undefined,
+			recorder,
+		).fetchOrgBearerToken(globalToken, orgId);
+		this.activeOrgToken = orgToken;
+		await this.setActiveOrg(orgId, orgToken);
+	}
+
+	// Single re-mint+retry on a 401, only when an org token is in use (a global-token
+	// 401 passes through). Handles both thrown and `{ error }`-result 401s.
+	protected async withOrgTokenRetry<T>(
+		recorder: MetricsRecorder | undefined,
+		fn: (service: ThoughtSpotService) => Promise<T>,
+		analyticsContextOverride?: MetricAnalyticsContext,
+	): Promise<T> {
+		const orgId = this.activeOrgId;
+
+		const attempt = () =>
+			fn(this.getThoughtSpotService(recorder, analyticsContextOverride));
+
+		if (!orgId) {
+			return attempt();
+		}
+
+		// Org active → the call must use the org-scoped token, never the global one
+		// (a global-token data call would break org isolation). Mint if not cached.
+		if (!this.activeOrgToken) {
+			await this.ensureOrgToken(orgId, recorder);
+		}
+
+		try {
+			const result = await attempt();
+			if (this.apiErrorStatus(result) === 401) {
+				await this.forceRemintOrgToken(orgId, recorder);
+				return attempt();
+			}
+			return result;
+		} catch (error) {
+			if (this.apiErrorStatus(error) === 401) {
+				await this.forceRemintOrgToken(orgId, recorder);
+				return attempt();
+			}
+			throw error;
+		}
+	}
+
+	// validateConnection maps a 401 to `false` (no throw), so withOrgTokenRetry can't
+	// see it. If it fails with an org token in use, re-mint and re-validate.
+	private async validateConnectionWithOrgRetry(
+		recorder?: MetricsRecorder,
+	): Promise<boolean> {
+		const orgId = this.activeOrgId;
+		const usedOrgToken = Boolean(orgId && this.activeOrgToken);
+		const ok = await this.getThoughtSpotService(recorder).validateConnection();
+		if (ok || !usedOrgToken || !orgId) {
+			return ok;
+		}
+		await this.forceRemintOrgToken(orgId, recorder);
+		return this.getThoughtSpotService(recorder).validateConnection();
+	}
+
+	// On connect (OAuth only): keep the cluster token warm, then — when org tools are
+	// available — establish the active org (prior switch wins, else session current)
+	// and mint its token. Best-effort: never break connect.
+	protected async postInit(): Promise<void> {
+		if (!this.isOAuthAuth()) {
+			return;
+		}
+		try {
+			await this.loadOrSeedWarmToken();
+		} catch (error) {
+			console.error("Failed to load/seed keep-warm token on connect:", error);
+		}
+
+		if (!this.areOrgToolsAvailable()) {
+			return;
+		}
+		try {
+			await this.loadActiveOrg();
+			if (!this.activeOrgId) {
+				const currentOrgId =
+					this.sessionInfo?.currentOrgId != null
+						? String(this.sessionInfo.currentOrgId)
+						: undefined;
+				if (currentOrgId) {
+					await this.setActiveOrg(currentOrgId);
+				}
+			}
+			if (this.activeOrgId) {
+				await this.ensureOrgToken(this.activeOrgId);
+			}
+		} catch (error) {
+			console.error("Failed to set/mint active org on connect:", error);
+		}
+	}
+
+	// Load the keep-warm token into memory. Re-seed from props' fresh grant when the
+	// store is unseeded or expired (the refresh chain died); else the store wins.
+	private async loadOrSeedWarmToken(): Promise<void> {
+		const storage = await this.getStorageService();
+		const store = await storage.getTokenStore();
+		const storedExpired =
+			typeof store.expiresAt === "number" && store.expiresAt <= Date.now();
+		if (store.accessToken && !storedExpired) {
+			this.warmGlobalToken = store.accessToken;
+			return;
+		}
+		const { accessToken, refreshToken, tokenExpiryDuration, instanceUrl } =
+			this.ctx.props;
+		if (accessToken && refreshToken) {
+			await storage.seedTokenStore({
+				accessToken,
+				refreshToken,
+				instanceUrl,
+				expiresAt:
+					typeof tokenExpiryDuration === "number"
+						? tokenExpiryDuration
+						: undefined,
+			});
+			this.warmGlobalToken = accessToken;
+			return;
+		}
+		// No refresh token to re-seed with: use whatever we have.
+		this.warmGlobalToken = store.accessToken ?? accessToken;
+	}
+
+	// Fire-and-forget; throttle + idle-delete live in the DO.
+	private touchLastSeen(): void {
+		this.getStorageService()
+			.then((storage) => storage.touchLastSeen())
+			.catch((error) => {
+				console.error("Failed to record last-seen activity:", error);
+			});
+	}
+
 	protected getToolMetricApiSurface(): ToolMetricApiSurface {
 		return "mcp";
+	}
+
+	// Gates OAuth-only tools such as `list_orgs`.
+	protected isOAuthAuth(): boolean {
+		return this.ctx.props.authMode === "oauth";
+	}
+
+	// Org behavior requires OAuth + orgs enabled + the v2 surface (inferred from the
+	// resolved tool set, not a label). Fails closed.
+	protected areOrgToolsAvailable(): boolean {
+		if (!this.isOAuthAuth() || !this.isOrgsEnabled()) {
+			return false;
+		}
+		try {
+			return resolveApiVersion(this.ctx.props.apiVersion).tools.some(
+				(tool) => tool?.name === ToolName.ListOrgs,
+			);
+		} catch {
+			return false;
+		}
 	}
 
 	protected getToolMetricApiVersionLabel(): string | undefined {
@@ -136,6 +401,13 @@ export class MCPServer extends BaseMCPServer {
 			);
 		}
 
+		if (!this.areOrgToolsAvailable()) {
+			tools = tools.filter(
+				(tool) =>
+					tool.name !== ToolName.ListOrgs && tool.name !== ToolName.SwitchOrg,
+			);
+		}
+
 		return { tools };
 	}
 
@@ -189,10 +461,29 @@ export class MCPServer extends BaseMCPServer {
 		const { name } = request.params;
 		this.trackers.track(TrackEvent.CallTool, { toolName: name });
 
+		if (this.isOAuthAuth()) {
+			this.touchLastSeen();
+		}
+
+		if (this.areOrgToolsAvailable()) {
+			await this.loadActiveOrg();
+			// Mint the org token up front so every data path uses it; no call falls
+			// back to the global token while an org is active. list_orgs/switch_org
+			// use the global token on their own (listing / minting) paths.
+			if (
+				this.activeOrgId &&
+				!this.activeOrgToken &&
+				name !== ToolName.ListOrgs &&
+				name !== ToolName.SwitchOrg
+			) {
+				await this.ensureOrgToken(this.activeOrgId, recorder);
+			}
+		}
+
 		switch (name) {
 			case ToolName.Ping: {
 				if (this.ctx.props.accessToken && this.ctx.props.instanceUrl) {
-						if (!this.getThoughtSpotService(recorder).validateConnection()) {
+					if (!this.getThoughtSpotService(recorder).validateConnection()) {
 						return this.createErrorResponse(
 							"Failed to validate connection",
 							"Ping failed",
@@ -226,7 +517,7 @@ export class MCPServer extends BaseMCPServer {
 						"Check connectivity failed",
 					);
 				}
-				if (!this.getThoughtSpotService(recorder).validateConnection()) {
+				if (!(await this.validateConnectionWithOrgRetry(recorder))) {
 					return this.createErrorResponse(
 						"Failed to validate connection",
 						"Check connectivity failed",
@@ -252,6 +543,27 @@ export class MCPServer extends BaseMCPServer {
 
 			case ToolName.CreateDashboard: {
 				return this.callCreateDashboard(request, recorder);
+			}
+
+			case ToolName.ListOrgs: {
+				// Defense in depth: also reject direct invocation when unavailable.
+				if (!this.areOrgToolsAvailable()) {
+					return this.createErrorResponse(
+						"The list_orgs tool is only available when authenticated via OAuth on a cluster with Orgs enabled.",
+						"List orgs rejected: org tools unavailable",
+					);
+				}
+				return this.callListOrgs(recorder);
+			}
+
+			case ToolName.SwitchOrg: {
+				if (!this.areOrgToolsAvailable()) {
+					return this.createErrorResponse(
+						"The switch_org tool is only available when authenticated via OAuth on a cluster with Orgs enabled.",
+						"Switch org rejected: org tools unavailable",
+					);
+				}
+				return this.callSwitchOrg(request, recorder);
 			}
 
 			default:
@@ -396,12 +708,11 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 
 		let response: AgentConversation;
 		try {
-			response =
-				await this.getThoughtSpotService(recorder).createAgentConversation(
-					data_source_id,
-				);
+			response = await this.withOrgTokenRetry(recorder, (svc) =>
+				svc.createAgentConversation(data_source_id),
+			);
 		} catch (error) {
-			if (!(error as any)?.message?.includes("failed with status 401")) {
+			if (this.apiErrorStatus(error) !== 401) {
 				throw error;
 			}
 
@@ -454,13 +765,16 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			);
 		}
 
-		await this.getThoughtSpotService(recorder, {
-			analyticalSessionId: analytical_session_id,
-		}).sendAgentConversationMessageStreaming(
-			analytical_session_id,
-			message,
-			storageService.appendMessages.bind(storageService),
-			additional_context,
+		await this.withOrgTokenRetry(
+			recorder,
+			(svc) =>
+				svc.sendAgentConversationMessageStreaming(
+					analytical_session_id,
+					message,
+					storageService.appendMessages.bind(storageService),
+					additional_context,
+				),
+			{ analyticalSessionId: analytical_session_id },
 		);
 
 		return this.createStructuredContentSuccessResponse(
@@ -519,7 +833,6 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			total_session_updates: messagesState.messages.length,
 			is_done: messagesState.isDone,
 		});
-
 		return this.createStructuredContentSuccessResponse(
 			{
 				session_updates: messagesState.messages,
@@ -560,9 +873,9 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			);
 		}
 
-		const liveboard = await this.getThoughtSpotService(
-			recorder,
-		).fetchTMLAndCreateLiveboard(title, transformedAnswers, note_tile);
+		const liveboard = await this.withOrgTokenRetry(recorder, (svc) =>
+			svc.fetchTMLAndCreateLiveboard(title, transformedAnswers, note_tile),
+		);
 
 		if (liveboard.error) {
 			return this.createErrorResponse(
@@ -612,19 +925,95 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		);
 	}
 
+	@WithSpan("call-list-orgs")
+	async callListOrgs(recorder: MetricsRecorder) {
+		const span = trace.getSpan(context.active());
+
+		await this.loadOrSeedWarmToken();
+		const orgs = await this.getOrgService(
+			this.getGlobalToken(),
+			undefined,
+			recorder,
+		).listOrgs();
+		span?.setAttribute("total_orgs", orgs.length);
+
+		// May run on a different DO than the switch — re-read the shared store.
+		await this.loadActiveOrg();
+		const activeOrgId = this.getActiveOrgId();
+
+		return this.createStructuredContentSuccessResponse(
+			{
+				orgs: orgs.map((org) => ({
+					...org,
+					is_active:
+						activeOrgId !== undefined && String(org.id) === activeOrgId,
+				})),
+			},
+			`${orgs.length} org(s) found`,
+		);
+	}
+
+	@WithSpan("call-switch-org")
+	async callSwitchOrg(
+		request: z.infer<typeof CallToolRequestSchema>,
+		recorder: MetricsRecorder,
+	) {
+		const span = trace.getSpan(context.active());
+		const { org_id } = SwitchOrgInputSchema.parse(request.params.arguments);
+		const orgId = String(org_id);
+		span?.setAttribute("requested_org_id", orgId);
+
+		// Mint first to validate; commit only on success, so a bad org_id is a no-op.
+		let orgToken: string;
+		try {
+			await this.loadOrSeedWarmToken();
+			const globalToken = this.getGlobalToken();
+			orgToken = await this.getOrgService(
+				globalToken,
+				undefined,
+				recorder,
+			).fetchOrgBearerToken(globalToken, orgId);
+		} catch (error) {
+			const status = this.apiErrorStatus(error);
+			// Any 4xx = org invalid or inaccessible.
+			if (status !== undefined && status >= 400 && status < 500) {
+				return this.createErrorResponse(
+					`You do not have access to org "${orgId}", or it does not exist. Call list_orgs to see the orgs you can access.`,
+					`Switch org failed: org not accessible (status ${status})`,
+				);
+			}
+			return this.createErrorResponse(
+				`Failed to switch to org "${orgId}". Please try again.`,
+				`Error switching org ${(error as Error)?.message ?? ""}`,
+			);
+		}
+
+		await this.setActiveOrg(orgId, orgToken);
+		this._sources = null;
+		span?.setAttribute("active_org_id", orgId);
+
+		return this.createStructuredContentSuccessResponse(
+			{ success: true, active_org_id: org_id },
+			`Switched to org ${orgId}`,
+		);
+	}
+
 	private _sources: {
+		orgId: string | undefined;
 		list: DataSource[];
 		map: Map<string, DataSource>;
 	} | null = null;
 
 	@WithSpan("get-datasources")
 	async getDatasources(recorder?: MetricsRecorder) {
-		if (this._sources) {
+		const orgId = this.getActiveOrgId();
+		if (this._sources && this._sources.orgId === orgId) {
 			return this._sources;
 		}
 
 		const sources = await this.getThoughtSpotService(recorder).getDataSources();
 		this._sources = {
+			orgId,
 			list: sources,
 			map: new Map(sources.map((s) => [s.id, s])),
 		};

@@ -3,11 +3,16 @@ import {
 	type BaseProps,
 	McpServerError as PkgMcpServerError,
 } from "@thoughtspot/mcp-auth";
-import type { ApiVersionMode } from "./metrics/runtime/metric-types";
+import type { ApiVersionMode, AuthMode } from "./metrics/runtime/metric-types";
 import { getActiveSpan } from "./metrics/tracing/tracing-utils";
 
 export type Props = {
 	accessToken: string;
+	// From gettoken, for keep-warm refresh.
+	refreshToken?: string;
+	tokenCreatedTime?: number;
+	// Absolute epoch-ms expiry (despite the name).
+	tokenExpiryDuration?: number;
 	instanceUrl: string;
 	clientName: {
 		clientId: string;
@@ -17,6 +22,8 @@ export type Props = {
 	apiVersion?: string;
 	apiVersionMode?: ApiVersionMode;
 	apiRequestedVersion?: string;
+	// Auth method ("oauth" vs "bearer"/"token"); gates OAuth-only tools.
+	authMode?: AuthMode;
 };
 
 const DEFAULT_CLIENT_NAME = "Bearer Token client";
