@@ -559,9 +559,7 @@ describe("ThoughtSpot Client", () => {
 				json: vi.fn().mockResolvedValue(mockConversation),
 			});
 
-			const result = await client.createAgentConversationWithAutoMode({
-				enableSpotterDataSourceDiscovery: true,
-			});
+			const result = await client.createAgentConversationWithAutoMode({});
 
 			expect(fetch).toHaveBeenCalledWith(
 				`${mockInstanceUrl}/conversation/v2/`,
@@ -598,7 +596,6 @@ describe("ThoughtSpot Client", () => {
 
 			const result = await client.createAgentConversationWithAutoMode({
 				dataSourceId,
-				enableSpotterDataSourceDiscovery: true,
 			});
 
 			const fetchCall = (fetch as any).mock.calls[0];
@@ -620,9 +617,7 @@ describe("ThoughtSpot Client", () => {
 				json: vi.fn().mockResolvedValue({ conversation_id: "conv-789" }),
 			});
 
-			await client.createAgentConversationWithAutoMode({
-				enableSpotterDataSourceDiscovery: true,
-			});
+			await client.createAgentConversationWithAutoMode({});
 
 			const fetchCall = (fetch as any).mock.calls[0];
 			const body = JSON.parse(fetchCall[1].body);
@@ -636,30 +631,13 @@ describe("ThoughtSpot Client", () => {
 			});
 		});
 
-		it("should disable dataset search and auto-select when discovery is disabled", async () => {
-			(fetch as any).mockResolvedValue({
-				ok: true,
-				json: vi.fn().mockResolvedValue({ conversation_id: "conv-nods" }),
-			});
-
-			await client.createAgentConversationWithAutoMode({
-				enableSpotterDataSourceDiscovery: false,
-			});
-
-			const fetchCall = (fetch as any).mock.calls[0];
-			const body = JSON.parse(fetchCall[1].body);
-			expect(body.conv_settings.enable_search_datasets).toBe(false);
-			expect(body.conv_settings.enable_auto_select_dataset).toBe(false);
-		});
-
-		it("should set save_chat_enabled from showSpotterPastConversations", async () => {
+		it("sets save_chat_enabled from showSpotterPastConversations", async () => {
 			(fetch as any).mockResolvedValue({
 				ok: true,
 				json: vi.fn().mockResolvedValue({ conversation_id: "conv-chat" }),
 			});
 
 			await client.createAgentConversationWithAutoMode({
-				dataSourceId: "worksheet-1",
 				showSpotterPastConversations: true,
 			});
 

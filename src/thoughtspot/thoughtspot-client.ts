@@ -214,17 +214,11 @@ function addCreateAgentConversationWithAutoMode(
 ) {
 	(client as any).createAgentConversationWithAutoMode = async ({
 		dataSourceId,
-		enableSpotterDataSourceDiscovery,
 		showSpotterPastConversations,
 	}: {
 		dataSourceId?: string;
-		enableSpotterDataSourceDiscovery?: boolean;
 		showSpotterPastConversations?: boolean;
 	}): Promise<AgentConversation> => {
-		// Dataset discovery (search + auto-select) only applies when no explicit data source is
-		// provided and the tenant has Spotter data source discovery (auto mode) enabled.
-		const useDatasetDiscovery =
-			!dataSourceId && !!enableSpotterDataSourceDiscovery;
 		const endpoint = "/conversation/v2/";
 		const fetchOptions = {
 			method: "POST",
@@ -250,8 +244,8 @@ function addCreateAgentConversationWithAutoMode(
 					enable_why: true,
 					save_chat_enabled: !!showSpotterPastConversations,
 					enable_tool_permissions: false,
-					enable_search_datasets: useDatasetDiscovery,
-					enable_auto_select_dataset: useDatasetDiscovery,
+					enable_search_datasets: !dataSourceId,
+					enable_auto_select_dataset: !dataSourceId,
 				},
 			}),
 		};

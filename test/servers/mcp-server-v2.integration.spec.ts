@@ -543,18 +543,15 @@ describe("V2 Streaming Parser + Real Storage Integration", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Group 4 — create_analysis_session end-to-end (real service + real client)
+// Group 4 — create_analysis_session chat-history end-to-end
 //
-// Unlike Group 2, this does NOT mock getThoughtSpotClient or getThoughtSpotService.
-// It exercises the real chain:
-//   callCreateAnalysisSession (sessionInfo flags)
-//     → ThoughtSpotService.createAgentConversation (validation + opts)
+// Real service + real client (only `fetch` mocked). Exercises the chain:
+//   callCreateAnalysisSession → ThoughtSpotService.createAgentConversation
 //     → real client.createAgentConversationWithAutoMode (conv_settings body)
-// Only `fetch` (the network boundary) is mocked. This is the only place that would
-// catch flag/param drift across the real service↔client seam.
+// so a break in threading the tenant chat-history flag would be caught here.
 // ---------------------------------------------------------------------------
 
-describe("V2 create_analysis_session end-to-end (real service + real client, fetch mocked)", () => {
+describe("V2 create_analysis_session chat history (real service + real client, fetch mocked)", () => {
 	let originalFetch: typeof global.fetch;
 
 	beforeEach(() => {
@@ -567,16 +564,7 @@ describe("V2 create_analysis_session end-to-end (real service + real client, fet
 		vi.restoreAllMocks();
 	});
 
-	/**
-	 * Routes fetch by URL:
-	 *   /prism/preauth/info  → session info (init), with the given configInfo overrides
-	 *   /conversation/v2/    → conversation creation
-	 * Returns the recorded call list so tests can inspect the outbound body.
-	 */
-	function installFetch(
-		configInfoOverrides: Record<string, unknown>,
-		conversationResponse: unknown = { conversation_id: "conv-int-4" },
-	) {
+	function installFetch(configInfoOverrides: Record<string, unknown>) {
 		const calls: Array<{ url: string; init?: RequestInit }> = [];
 		global.fetch = vi.fn(async (url: any, init?: RequestInit) => {
 			const u = String(url);
@@ -608,7 +596,7 @@ describe("V2 create_analysis_session end-to-end (real service + real client, fet
 			if (u.endsWith("/conversation/v2/")) {
 				return {
 					ok: true,
-					json: async () => conversationResponse,
+					json: async () => ({ conversation_id: "conv-int-4" }),
 				} as unknown as Response;
 			}
 			return {
@@ -620,13 +608,14 @@ describe("V2 create_analysis_session end-to-end (real service + real client, fet
 		return calls;
 	}
 
-	it("threads tenant flags through the real service→client seam into the conv_settings body", async () => {
-		const calls = installFetch({
-			enableSpotterDataSourceDiscovery: true,
-			showSpotterPastConversations: true,
-		});
+	it("threads showSpotterPastConversations into save_chat_enabled across the real service→client seam", async () => {
+		const calls = installFetch({ showSpotterPastConversations: true });
 
-		const server = new MCPServer({ props: mockProps, env: {} } as any);
+		const server = new MCPServer({
+			props: mockProps,
+			// selfClusterId in installFetch is "cluster-int-id" — allowlist it so the gate opens
+			env: { SPOTTER_CHAT_HISTORY_CLUSTER_IDS: "cluster-int-id" },
+		} as any);
 		await server.init();
 		const { callTool } = connect(server);
 
@@ -640,30 +629,25 @@ describe("V2 create_analysis_session end-to-end (real service + real client, fet
 		const convCall = calls.find((c) => c.url.endsWith("/conversation/v2/"));
 		expect(convCall).toBeDefined();
 		const body = JSON.parse(convCall?.init?.body as string);
-		expect(body.context).toEqual({ type: "empty" });
-		// No data source + discovery enabled → dataset discovery on
-		expect(body.conv_settings.enable_search_datasets).toBe(true);
-		expect(body.conv_settings.enable_auto_select_dataset).toBe(true);
-		// Tenant flag → save_chat_enabled
 		expect(body.conv_settings.save_chat_enabled).toBe(true);
 	});
 
-	it("returns a clean error and fires no conversation request when auto mode is disabled and no data source is given", async () => {
-		const calls = installFetch({
-			enableSpotterDataSourceDiscovery: false,
-		});
+	it("keeps save_chat_enabled false when the tenant flag is on but the cluster is not allowlisted", async () => {
+		const calls = installFetch({ showSpotterPastConversations: true });
 
-		const server = new MCPServer({ props: mockProps, env: {} } as any);
+		const server = new MCPServer({
+			props: mockProps,
+			// installFetch cluster is "cluster-int-id" — allowlist a different one
+			env: { SPOTTER_CHAT_HISTORY_CLUSTER_IDS: "some-other-cluster" },
+		} as any);
 		await server.init();
 		const { callTool } = connect(server);
 
 		const result = await callTool("create_analysis_session", {});
 
-		expect(result.isError).toBe(true);
-		expect((result.content as any[])[0].text).toContain(
-			"Auto mode needs to be enabled",
-		);
-		// Validation short-circuits before any upstream conversation call
-		expect(calls.some((c) => c.url.endsWith("/conversation/v2/"))).toBe(false);
+		expect(result.isError).toBeUndefined();
+		const convCall = calls.find((c) => c.url.endsWith("/conversation/v2/"));
+		const body = JSON.parse(convCall?.init?.body as string);
+		expect(body.conv_settings.save_chat_enabled).toBe(false);
 	});
 });

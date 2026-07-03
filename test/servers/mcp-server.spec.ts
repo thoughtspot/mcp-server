@@ -201,61 +201,6 @@ describe("MCP Server", () => {
 			);
 		});
 
-		it("drops getDataSourceSuggestions on V1 when data source discovery is disabled", async () => {
-			vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
-				getSessionInfo: vi.fn().mockResolvedValue({
-					clusterId: "test-cluster-123",
-					clusterName: "test-cluster",
-					releaseVersion: "10.13.0.cl-110",
-					userGUID: "test-user-123",
-					configInfo: {
-						mixpanelConfig: {
-							devSdkKey: "test-dev-token",
-							prodSdkKey: "test-prod-token",
-							production: false,
-						},
-						selfClusterName: "test-cluster",
-						selfClusterId: "test-cluster-123",
-						enableSpotterDataSourceDiscovery: false,
-					},
-					userName: "test-user",
-					currentOrgId: "test-org",
-					privileges: [],
-				}),
-				searchMetadata: vi.fn().mockResolvedValue([]),
-				instanceUrl: "https://test.thoughtspot.cloud",
-			} as any);
-
-			const testServer = new MCPServer({
-				props: { ...mockProps, apiVersion: "backwards-compatibility-default" },
-				env: {} as any,
-			});
-			await testServer.init();
-			const { listTools } = connect(testServer);
-
-			const result = await listTools();
-
-			expect(result.tools?.map((t) => t.name)).not.toContain(
-				"getDataSourceSuggestions",
-			);
-		});
-
-		it("keeps getDataSourceSuggestions on V1 when data source discovery is enabled", async () => {
-			// beforeEach mock already has enableSpotterDataSourceDiscovery: true
-			const testServer = new MCPServer({
-				props: { ...mockProps, apiVersion: "backwards-compatibility-default" },
-				env: {} as any,
-			});
-			await testServer.init();
-			const { listTools } = connect(testServer);
-
-			const result = await listTools();
-
-			expect(result.tools?.map((t) => t.name)).toContain(
-				"getDataSourceSuggestions",
-			);
-		});
-
 		it("should return 5 tools regardless of enableSpotterDataSourceDiscovery when using latest (V2)", async () => {
 			// Mock getThoughtSpotClient with enableSpotterDataSourceDiscovery set to false
 			vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
@@ -1294,126 +1239,109 @@ describe("MCP Server", () => {
 			);
 			expect(mockCreateAgentConversationWithAutoMode).toHaveBeenCalledWith({
 				dataSourceId: "ds-123",
-				enableSpotterDataSourceDiscovery: true,
 				showSpotterPastConversations: false,
 			});
 		});
 
-		it("should pass showSpotterPastConversations=true through to the client when the tenant flag is enabled", async () => {
-			const mockCreateAgentConversationWithAutoMode = vi
-				.fn()
-				.mockResolvedValue({ conversation_id: "conv-chat-on" });
-
-			vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
-				getSessionInfo: vi.fn().mockResolvedValue({
-					clusterId: "test-cluster-123",
-					clusterName: "test-cluster",
-					releaseVersion: "10.13.0.cl-110",
-					userGUID: "test-user-123",
-					configInfo: {
-						mixpanelConfig: {
-							devSdkKey: "test-dev-token",
-							prodSdkKey: "test-prod-token",
-							production: false,
-						},
-						selfClusterName: "test-cluster",
-						selfClusterId: "test-cluster-123",
-						enableSpotterDataSourceDiscovery: true,
-						showSpotterPastConversations: true,
-					},
-					userName: "test-user",
-					currentOrgId: "test-org",
-					privileges: [],
-				}),
-				createAgentConversationWithAutoMode:
-					mockCreateAgentConversationWithAutoMode,
-				instanceUrl: "https://test.thoughtspot.cloud",
-			} as any);
-
-			await server.init();
-			const { callTool } = connect(server);
-
-			const result = await callTool("create_analysis_session", {
-				data_source_id: "ds-777",
-			});
-
-			expect(result.isError).toBeUndefined();
-			expect(mockCreateAgentConversationWithAutoMode).toHaveBeenCalledWith({
-				dataSourceId: "ds-777",
-				enableSpotterDataSourceDiscovery: true,
-				showSpotterPastConversations: true,
-			});
-		});
-
-		it("degrades safely to a clean error when session info failed to load and no data source is given", async () => {
-			// getSessionInfo rejects during init → initializeService swallows it → sessionInfo undefined
-			const mockCreateAgentConversationWithAutoMode = vi.fn();
-			vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
-				getSessionInfo: vi
+		describe("chat history clusterId gating", () => {
+			// Builds a server whose session has the given tenant flag + selfClusterId,
+			// constructed with the given allowlist env var, then invokes the tool and
+			// returns the flag value passed to the client.
+			async function runWithGate({
+				tenantFlag,
+				selfClusterId,
+				allowlistEnv,
+			}: {
+				tenantFlag: boolean;
+				selfClusterId: string;
+				allowlistEnv?: string;
+			}): Promise<boolean> {
+				const mockCreateAgentConversationWithAutoMode = vi
 					.fn()
-					.mockRejectedValue(new Error("session info unavailable")),
-				createAgentConversationWithAutoMode:
-					mockCreateAgentConversationWithAutoMode,
-				instanceUrl: "https://test.thoughtspot.cloud",
-			} as any);
+					.mockResolvedValue({ conversation_id: "conv-chat" });
 
-			// init must not throw despite the failed session info
-			await expect(server.init()).resolves.not.toThrow();
-
-			const result = await server.callCreateAnalysisSession({
-				method: "tools/call",
-				params: { name: "create_analysis_session", arguments: {} },
-			});
-
-			// Discovery availability defaults to false when sessionInfo is undefined →
-			// auto-mode validation trips before any upstream call.
-			expect(result.isError).toBe(true);
-			expect((result.content[0] as any).text).toContain(
-				"Auto mode needs to be enabled",
-			);
-			expect(mockCreateAgentConversationWithAutoMode).not.toHaveBeenCalled();
-		});
-
-		it("should return a clean error when auto mode is unavailable and no data source is given", async () => {
-			const mockCreateAgentConversationWithAutoMode = vi.fn();
-
-			vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
-				getSessionInfo: vi.fn().mockResolvedValue({
-					clusterId: "test-cluster-123",
-					clusterName: "test-cluster",
-					releaseVersion: "10.13.0.cl-110",
-					userGUID: "test-user-123",
-					configInfo: {
-						mixpanelConfig: {
-							devSdkKey: "test-dev-token",
-							prodSdkKey: "test-prod-token",
-							production: false,
+				vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
+					getSessionInfo: vi.fn().mockResolvedValue({
+						userGUID: "test-user-123",
+						userName: "test-user",
+						releaseVersion: "10.13.0.cl-110",
+						currentOrgId: "test-org",
+						privileges: [],
+						configInfo: {
+							mixpanelConfig: {
+								devSdkKey: "test-dev-token",
+								prodSdkKey: "test-prod-token",
+								production: false,
+							},
+							selfClusterName: "test-cluster",
+							selfClusterId,
+							showSpotterPastConversations: tenantFlag,
 						},
-						selfClusterName: "test-cluster",
-						selfClusterId: "test-cluster-123",
-						enableSpotterDataSourceDiscovery: false,
-					},
-					userName: "test-user",
-					currentOrgId: "test-org",
-					privileges: [],
-				}),
-				createAgentConversationWithAutoMode:
-					mockCreateAgentConversationWithAutoMode,
-				instanceUrl: "https://test.thoughtspot.cloud",
-			} as any);
+					}),
+					createAgentConversationWithAutoMode:
+						mockCreateAgentConversationWithAutoMode,
+					instanceUrl: "https://test.thoughtspot.cloud",
+				} as any);
 
-			await server.init();
+				const gatedServer = new MCPServer({
+					props: mockProps,
+					env: (allowlistEnv === undefined
+						? {}
+						: {
+								SPOTTER_CHAT_HISTORY_CLUSTER_IDS: allowlistEnv,
+							}) as any,
+				});
+				await gatedServer.init();
+				const { callTool } = connect(gatedServer);
 
-			const result = await server.callCreateAnalysisSession({
-				method: "tools/call",
-				params: { name: "create_analysis_session", arguments: {} },
+				const result = await callTool("create_analysis_session", {
+					data_source_id: "ds-777",
+				});
+				expect(result.isError).toBeUndefined();
+
+				const call = mockCreateAgentConversationWithAutoMode.mock.calls[0][0];
+				return call.showSpotterPastConversations;
+			}
+
+			it("enables save_chat when tenant flag is on AND clusterId is allowlisted", async () => {
+				expect(
+					await runWithGate({
+						tenantFlag: true,
+						selfClusterId: "cluster-allowed",
+						allowlistEnv: "other-1,cluster-allowed,other-2",
+					}),
+				).toBe(true);
 			});
 
-			expect(result.isError).toBe(true);
-			expect((result.content[0] as any).text).toContain(
-				"Auto mode needs to be enabled",
-			);
-			expect(mockCreateAgentConversationWithAutoMode).not.toHaveBeenCalled();
+			it("defaults to false when clusterId is not in the allowlist", async () => {
+				expect(
+					await runWithGate({
+						tenantFlag: true,
+						selfClusterId: "cluster-not-listed",
+						allowlistEnv: "cluster-allowed",
+					}),
+				).toBe(false);
+			});
+
+			it("defaults to false when the allowlist env var is unset", async () => {
+				expect(
+					await runWithGate({
+						tenantFlag: true,
+						selfClusterId: "cluster-allowed",
+						allowlistEnv: undefined,
+					}),
+				).toBe(false);
+			});
+
+			it("stays false when clusterId is allowlisted but the tenant flag is off", async () => {
+				expect(
+					await runWithGate({
+						tenantFlag: false,
+						selfClusterId: "cluster-allowed",
+						allowlistEnv: "cluster-allowed",
+					}),
+				).toBe(false);
+			});
 		});
 
 		it("should handle error from service", async () => {

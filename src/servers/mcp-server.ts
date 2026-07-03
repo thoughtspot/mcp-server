@@ -383,6 +383,40 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		);
 	}
 
+	/**
+	 * Spotter chat history (save_chat_enabled) is gated on BOTH:
+	 *  - the tenant's configInfo.showSpotterPastConversations flag, AND
+	 *  - the cluster being in the SPOTTER_CHAT_HISTORY_CLUSTER_IDS allowlist
+	 *    (comma-separated clusterIds).
+	 * Defaults to false when the tenant flag is off, the allowlist is unset/empty,
+	 * or the cluster is not listed.
+	 */
+	private isSpotterChatHistoryEnabled(): boolean {
+		const tenantEnabled =
+			String(this.sessionInfo?.showSpotterPastConversations) === "true";
+		if (!tenantEnabled) {
+			return false;
+		}
+
+		const clusterId = this.sessionInfo?.clusterId;
+		if (!clusterId) {
+			return false;
+		}
+
+		const rawAllowlist = (this.ctx.env as Record<string, unknown> | undefined)
+			?.SPOTTER_CHAT_HISTORY_CLUSTER_IDS;
+		if (typeof rawAllowlist !== "string" || rawAllowlist.length === 0) {
+			return false;
+		}
+
+		const allowlist = rawAllowlist
+			.split(",")
+			.map((id) => id.trim())
+			.filter(Boolean);
+
+		return allowlist.includes(String(clusterId));
+	}
+
 	@WithSpan("call-create-analysis-session")
 	async callCreateAnalysisSession(
 		request: z.infer<typeof CallToolRequestSchema>,
@@ -399,21 +433,10 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			response = await this.getThoughtSpotService(
 				recorder,
 			).createAgentConversation(data_source_id, {
-				enableSpotterDataSourceDiscovery: this.isDatasourceDiscoveryAvailable(),
-				showSpotterPastConversations:
-					String(this.sessionInfo?.showSpotterPastConversations) === "true",
+				showSpotterPastConversations: this.isSpotterChatHistoryEnabled(),
 			});
 		} catch (error) {
-			const message = (error as any)?.message ?? "";
-
-			if (message.includes("Auto mode needs to be enabled")) {
-				return this.createErrorResponse(
-					message,
-					"Auto mode is disabled and no data source was provided",
-				);
-			}
-
-			if (!message.includes("failed with status 401")) {
+			if (!(error as any)?.message?.includes("failed with status 401")) {
 				throw error;
 			}
 

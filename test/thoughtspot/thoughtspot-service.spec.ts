@@ -192,17 +192,12 @@ describe("thoughtspot-service", () => {
 				.mockResolvedValue(mockResponse);
 
 			const service = new ThoughtSpotService(mockClient);
-			const result = await service.createAgentConversation(undefined, {
-				enableSpotterDataSourceDiscovery: true,
-				showSpotterPastConversations: false,
-			});
+			const result = await service.createAgentConversation();
 
 			expect(
 				mockClient.createAgentConversationWithAutoMode,
 			).toHaveBeenCalledWith({
 				dataSourceId: undefined,
-				enableSpotterDataSourceDiscovery: true,
-				showSpotterPastConversations: false,
 			});
 			expect(result).toEqual(mockResponse);
 		});
@@ -217,8 +212,22 @@ describe("thoughtspot-service", () => {
 				.mockResolvedValue(mockResponse);
 
 			const service = new ThoughtSpotService(mockClient);
+			await service.createAgentConversation("worksheet-123");
+
+			expect(
+				mockClient.createAgentConversationWithAutoMode,
+			).toHaveBeenCalledWith({
+				dataSourceId: "worksheet-123",
+			});
+		});
+
+		it("passes showSpotterPastConversations through to the client", async () => {
+			mockClient.createAgentConversationWithAutoMode = vi
+				.fn()
+				.mockResolvedValue({ conversation_id: "conv-chat" });
+
+			const service = new ThoughtSpotService(mockClient);
 			await service.createAgentConversation("worksheet-123", {
-				enableSpotterDataSourceDiscovery: false,
 				showSpotterPastConversations: true,
 			});
 
@@ -226,7 +235,6 @@ describe("thoughtspot-service", () => {
 				mockClient.createAgentConversationWithAutoMode,
 			).toHaveBeenCalledWith({
 				dataSourceId: "worksheet-123",
-				enableSpotterDataSourceDiscovery: false,
 				showSpotterPastConversations: true,
 			});
 		});
@@ -239,30 +247,9 @@ describe("thoughtspot-service", () => {
 
 			const service = new ThoughtSpotService(mockClient);
 
-			await expect(
-				service.createAgentConversation(undefined, {
-					enableSpotterDataSourceDiscovery: true,
-					showSpotterPastConversations: false,
-				}),
-			).rejects.toThrow("Conversation API Error");
-		});
-
-		it("should throw an auto-mode error when no data source and discovery disabled", async () => {
-			mockClient.createAgentConversationWithAutoMode = vi.fn();
-
-			const service = new ThoughtSpotService(mockClient);
-
-			await expect(
-				service.createAgentConversation(undefined, {
-					enableSpotterDataSourceDiscovery: false,
-					showSpotterPastConversations: false,
-				}),
-			).rejects.toThrow(
-				"Auto mode needs to be enabled for Spotter to find the relevant data model to answer the user question",
+			await expect(service.createAgentConversation()).rejects.toThrow(
+				"Conversation API Error",
 			);
-			expect(
-				mockClient.createAgentConversationWithAutoMode,
-			).not.toHaveBeenCalled();
 		});
 	});
 
@@ -1264,6 +1251,51 @@ describe("thoughtspot-service", () => {
 			});
 		});
 
+		it("maps showSpotterPastConversations from configInfo (true/false/absent)", async () => {
+			const base = {
+				mixpanelConfig: {
+					production: true,
+					devSdkKey: "dev-key",
+					prodSdkKey: "prod-key",
+				},
+				selfClusterName: "test-cluster",
+				selfClusterId: "cluster-123",
+			};
+			const wrap = (configInfo: any) => ({
+				configInfo,
+				userGUID: "user-123",
+				userName: "testuser",
+				releaseVersion: "8.0.0",
+				currentOrgId: "org-123",
+				privileges: [],
+			});
+
+			(mockClient as any).getSessionInfo = vi
+				.fn()
+				.mockResolvedValue(
+					wrap({ ...base, showSpotterPastConversations: true }),
+				);
+			expect(
+				(await getSessionInfo(mockClient)).showSpotterPastConversations,
+			).toBe(true);
+
+			(mockClient as any).getSessionInfo = vi
+				.fn()
+				.mockResolvedValue(
+					wrap({ ...base, showSpotterPastConversations: false }),
+				);
+			expect(
+				(await getSessionInfo(mockClient)).showSpotterPastConversations,
+			).toBe(false);
+
+			(mockClient as any).getSessionInfo = vi
+				.fn()
+				.mockResolvedValue(wrap({ ...base }));
+			expect(
+				(await getSessionInfo(mockClient)).showSpotterPastConversations,
+			).toBeUndefined();
+		});
+
 		it("should return session info with development mixpanel token", async () => {
 			const mockResponse = {
 				configInfo: {
@@ -1289,89 +1321,6 @@ describe("thoughtspot-service", () => {
 			const result = await getSessionInfo(mockClient);
 
 			expect(result.mixpanelToken).toBe("dev-key");
-		});
-
-		it("should map showSpotterPastConversations from configInfo", async () => {
-			const mockResponse = {
-				configInfo: {
-					mixpanelConfig: {
-						production: true,
-						devSdkKey: "dev-key",
-						prodSdkKey: "prod-key",
-					},
-					selfClusterName: "test-cluster",
-					selfClusterId: "cluster-123",
-					showSpotterPastConversations: true,
-				},
-				userGUID: "user-123",
-				userName: "testuser",
-				releaseVersion: "8.0.0",
-				currentOrgId: "org-123",
-				privileges: ["READ"],
-			};
-
-			(mockClient as any).getSessionInfo = vi
-				.fn()
-				.mockResolvedValue(mockResponse);
-
-			const result = await getSessionInfo(mockClient);
-
-			expect(result.showSpotterPastConversations).toBe(true);
-		});
-
-		it("should map showSpotterPastConversations as false when disabled", async () => {
-			const mockResponse = {
-				configInfo: {
-					mixpanelConfig: {
-						production: true,
-						devSdkKey: "dev-key",
-						prodSdkKey: "prod-key",
-					},
-					selfClusterName: "test-cluster",
-					selfClusterId: "cluster-123",
-					showSpotterPastConversations: false,
-				},
-				userGUID: "user-123",
-				userName: "testuser",
-				releaseVersion: "8.0.0",
-				currentOrgId: "org-123",
-				privileges: ["READ"],
-			};
-
-			(mockClient as any).getSessionInfo = vi
-				.fn()
-				.mockResolvedValue(mockResponse);
-
-			const result = await getSessionInfo(mockClient);
-
-			expect(result.showSpotterPastConversations).toBe(false);
-		});
-
-		it("should leave showSpotterPastConversations undefined when absent from configInfo", async () => {
-			const mockResponse = {
-				configInfo: {
-					mixpanelConfig: {
-						production: true,
-						devSdkKey: "dev-key",
-						prodSdkKey: "prod-key",
-					},
-					selfClusterName: "test-cluster",
-					selfClusterId: "cluster-123",
-				},
-				userGUID: "user-123",
-				userName: "testuser",
-				releaseVersion: "8.0.0",
-				currentOrgId: "org-123",
-				privileges: ["READ"],
-			};
-
-			(mockClient as any).getSessionInfo = vi
-				.fn()
-				.mockResolvedValue(mockResponse);
-
-			const result = await getSessionInfo(mockClient);
-
-			expect(result.showSpotterPastConversations).toBeUndefined();
 		});
 
 		it("should handle API errors", async () => {
