@@ -982,5 +982,43 @@ mutation GetUnsavedAnswerTML($session: BachSessionIdInput!, $exportDependencies:
 			const client = makeClient();
 			await expect(client.listOrgs()).rejects.toThrow(/status 403/);
 		});
+
+		it("falls back to id/name fields when orgId/orgName are absent", async () => {
+			(global.fetch as any).mockResolvedValue(
+				new Response(JSON.stringify({ orgs: [{ id: 7, name: "Alt" }] }), {
+					status: 200,
+				}),
+			);
+			const client = makeClient();
+			await expect(client.listOrgs()).resolves.toEqual([
+				{ id: 7, name: "Alt", description: undefined },
+			]);
+		});
+
+		it("uses the id as the name when neither orgName nor name is present", async () => {
+			(global.fetch as any).mockResolvedValue(
+				new Response(JSON.stringify({ orgs: [{ orgId: 42 }] }), {
+					status: 200,
+				}),
+			);
+			const client = makeClient();
+			await expect(client.listOrgs()).resolves.toEqual([
+				{ id: 42, name: "42", description: undefined },
+			]);
+		});
+
+		it("maps an empty-string description to undefined", async () => {
+			(global.fetch as any).mockResolvedValue(
+				new Response(
+					JSON.stringify({
+						orgs: [{ orgId: 1, orgName: "X", description: "" }],
+					}),
+					{ status: 200 },
+				),
+			);
+			const client = makeClient();
+			const [org] = await client.listOrgs();
+			expect(org.description).toBeUndefined();
+		});
 	});
 });

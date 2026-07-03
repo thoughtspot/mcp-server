@@ -545,6 +545,34 @@ describe("MCP Server org tools", () => {
 			expect(after.activeOrgId).toBe("0");
 			expect(after.orgToken).toBe(before.orgToken);
 		});
+
+		it("a non-4xx mint failure (5xx) returns a generic retry error, NOT 'no access', and is a no-op", async () => {
+			const store = new Map<
+				string,
+				{ activeOrgId?: string; orgToken?: string }
+			>();
+			const mint = vi
+				.fn()
+				.mockResolvedValueOnce("org-0-token")
+				.mockRejectedValue(
+					new ThoughtSpotApiError(500, "fetchOrgBearerToken", "server error"),
+				);
+			const { server } = makeServer({
+				authMode: "oauth",
+				session: { orgsEnabled: true, currentOrgId: "0" },
+				store,
+				fetchOrgBearerToken: mint,
+			});
+			await server.init();
+
+			const res = await connect(server).callTool("switch_org", { org_id: 101 });
+			expect(res.isError).toBe(true);
+			// Generic "try again" — must NOT claim the org is inaccessible on a 5xx.
+			expect(res.content[0].text).toMatch(/try again/i);
+			expect(res.content[0].text).not.toMatch(/do not have access/i);
+			// Still a no-op: active org unchanged.
+			expect([...store.values()][0].activeOrgId).toBe("0");
+		});
 	});
 
 	describe("shared active-org store persists across server instances", () => {
