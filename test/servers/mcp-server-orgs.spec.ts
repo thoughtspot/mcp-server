@@ -314,6 +314,44 @@ describe("MCP Server org tools", () => {
 			expect(mint).not.toHaveBeenCalled();
 			expect([...store.values()].some((r) => r.activeOrgId)).toBe(false);
 		});
+
+		// Org selection is user-aware (shared among re-authed sessions) but must NOT
+		// leak into a still-legacy session: an old grant keeps working as-is until it
+		// re-authenticates, regardless of a switch elsewhere.
+		it("an old-grant session ignores an org switch made by a new session (uses its login token)", async () => {
+			// A new session records a switch into the shared store.
+			const store = new Map<
+				string,
+				{ activeOrgId?: string; orgToken?: string }
+			>();
+			const neu = makeServer({
+				authMode: "oauth",
+				session: { orgsEnabled: true, currentOrgId: "0" },
+				store,
+				fetchOrgBearerToken: vi.fn().mockResolvedValue("org-101-token"),
+			});
+			await neu.server.init();
+			await connect(neu.server).callTool("switch_org", { org_id: 101 });
+			expect([...store.values()].some((r) => r.activeOrgId === "101")).toBe(
+				true,
+			);
+
+			// Old-grant session sharing the SAME store (worst case). It must not adopt
+			// the switch: no active org, and its bearer stays the login token.
+			const old = makeServer({
+				authMode: "oauth",
+				session: { orgsEnabled: true, currentOrgId: "0" },
+				store,
+				noRefreshToken: true,
+			});
+			await old.server.init();
+			const s = old.server as unknown as {
+				getActiveOrgId(): string | undefined;
+				getActiveBearerToken(): string;
+			};
+			expect(s.getActiveOrgId()).toBeUndefined();
+			expect(s.getActiveBearerToken()).toBe("global-token"); // login token, not the org token
+		});
 	});
 
 	describe("non-org cluster (orgs disabled): no org overlay on connect", () => {
