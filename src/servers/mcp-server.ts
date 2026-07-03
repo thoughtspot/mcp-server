@@ -392,8 +392,7 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 	 * or the cluster is not listed.
 	 */
 	private isSpotterChatHistoryEnabled(): boolean {
-		const tenantEnabled =
-			String(this.sessionInfo?.showSpotterPastConversations) === "true";
+		const tenantEnabled = !!this.sessionInfo?.showSpotterPastConversations;
 		if (!tenantEnabled) {
 			return false;
 		}
