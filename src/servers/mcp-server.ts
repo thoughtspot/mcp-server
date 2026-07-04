@@ -278,8 +278,10 @@ export class MCPServer extends BaseMCPServer {
 			this.warmGlobalToken = accessToken;
 			return;
 		}
-		// No refresh token to re-seed with: use whatever we have.
-		this.warmGlobalToken = store.accessToken ?? accessToken;
+		// No refresh token to re-seed with: prefer the stored token only if it isn't
+		// expired, else fall back to the (possibly fresher) props token.
+		this.warmGlobalToken =
+			store.accessToken && !storedExpired ? store.accessToken : accessToken;
 	}
 
 	// Fire-and-forget; throttle + idle-delete live in the DO.
