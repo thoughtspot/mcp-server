@@ -79,6 +79,12 @@ export const processSendAgentConversationMessageStreamingResponse = async (
 						// Loop through the items in the line and convert to messages if applicable
 						for (const item of data) {
 							if (item.type === "text") {
+								// Ignore non-markdown text messages
+								if (item.metadata?.format !== "markdown") {
+									nMessagesIgnored++;
+									continue;
+								}
+
 								nTextMessagesParsed++;
 								recordUpstreamStreamMessageMetric(
 									recorder,
@@ -92,6 +98,12 @@ export const processSendAgentConversationMessageStreamingResponse = async (
 									text: item.content,
 								});
 							} else if (item.type === "text-chunk") {
+								// Ignore non-markdown text-chunk messages
+								if (item.metadata?.format !== "markdown") {
+									nMessagesIgnored++;
+									continue;
+								}
+
 								nTextMessagesParsed++;
 								recordUpstreamStreamMessageMetric(
 									recorder,
@@ -121,6 +133,7 @@ export const processSendAgentConversationMessageStreamingResponse = async (
 										gen_no: item.metadata?.gen_no,
 									}),
 									answer_title: item.metadata?.title,
+									answer_data_source_id: item.metadata?.worksheet_id,
 									answer_query: item.metadata?.sage_query,
 									iframe_url: iframeUrl,
 								});

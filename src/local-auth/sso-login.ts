@@ -5,7 +5,7 @@ import {
 	createServer,
 } from "node:http";
 import type { AddressInfo } from "node:net";
-import { validateAndSanitizeUrl } from "../oauth-manager/oauth-utils";
+import { validateAndSanitizeUrl } from "@thoughtspot/mcp-auth";
 import {
 	buildSamlLoginUrl,
 	extractToken,

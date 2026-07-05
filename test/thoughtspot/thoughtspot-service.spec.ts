@@ -263,7 +263,7 @@ describe("thoughtspot-service", () => {
 					.mockResolvedValueOnce({
 						done: false,
 						value: encoder.encode(
-							'data: [{"type":"text","content":"Hello","metadata":{}}]\n',
+							'data: [{"type":"text","content":"Hello","metadata":{"format":"markdown"}}]\n',
 						),
 					})
 					.mockResolvedValueOnce({ done: true, value: undefined }),
@@ -521,7 +521,7 @@ describe("thoughtspot-service", () => {
 					.mockResolvedValueOnce({
 						done: false,
 						value: encoder.encode(
-							'data: [{"type":"text","content":"The revenue is $1M"}]\n',
+							'data: [{"type":"text","content":"The revenue is $1M","metadata":{"format":"markdown"}}]\n',
 						),
 					})
 					.mockResolvedValueOnce({ done: true, value: undefined }),
@@ -636,7 +636,7 @@ describe("thoughtspot-service", () => {
 					.mockResolvedValueOnce({
 						done: false,
 						value: encoder.encode(
-							': heartbeat\n\ndata: [{"type":"text","content":"Done"}]\n',
+							': heartbeat\n\ndata: [{"type":"text","content":"Done","metadata":{"format":"markdown"}}]\n',
 						),
 					})
 					.mockResolvedValueOnce({ done: true, value: undefined }),
@@ -679,7 +679,7 @@ describe("thoughtspot-service", () => {
 					.mockResolvedValueOnce({
 						done: false,
 						value: encoder.encode(
-							'data: [{"type":"text","content":"Thinking...","metadata":{"type":"thinking"}}]\n',
+							'data: [{"type":"text","content":"Thinking...","metadata":{"type":"thinking","format":"markdown"}}]\n',
 						),
 					})
 					.mockResolvedValueOnce({ done: true, value: undefined }),

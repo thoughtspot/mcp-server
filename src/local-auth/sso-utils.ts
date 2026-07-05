@@ -3,18 +3,23 @@
 // Workers test pool; the runtime wiring that needs those modules lives in
 // sso-login.ts.
 
-import { sanitizeHtml } from "../oauth-manager/oauth-utils";
-
 // How long the token ThoughtSpot mints for us stays valid (30 days, in seconds).
 // Mirrors the value the production OAuth callback uses.
 export const TOKEN_VALIDITY_SECONDS = 2_592_000;
 
 /**
  * Escapes a string for safe interpolation into HTML attribute/text content.
- * Re-exports the OAuth flow's `sanitizeHtml` so both login surfaces share one
- * escaping implementation and can't drift apart.
+ * Mirrors the OAuth flow's `sanitizeHtml`, which moved into
+ * `@thoughtspot/mcp-auth` without being exported.
  */
-export const escapeHtml = sanitizeHtml;
+export function escapeHtml(unsafe: string): string {
+	return unsafe
+		.replace(/&/g, "&amp;")
+		.replace(/</g, "&lt;")
+		.replace(/>/g, "&gt;")
+		.replace(/"/g, "&quot;")
+		.replace(/'/g, "&#039;");
+}
 
 /**
  * Browser-side script (shared between the manual and callback pages) that turns

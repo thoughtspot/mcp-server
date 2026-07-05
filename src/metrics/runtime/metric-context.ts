@@ -24,12 +24,6 @@ export const EXPLICIT_ROUTE_CONTEXTS = {
 		apiSurface: "static",
 		authMode: "none",
 	},
-	[PUBLIC_ROUTES.hello]: {
-		routeGroup: "hello",
-		transport: "http",
-		apiSurface: "static",
-		authMode: "none",
-	},
 	[PUBLIC_ROUTES.authorize]: {
 		routeGroup: "authorize",
 		transport: "http",
@@ -144,7 +138,6 @@ function inferApiSurface(pathname: string): ApiSurface {
 	}
 	if (
 		pathname === PUBLIC_ROUTES.root ||
-		pathname === PUBLIC_ROUTES.hello ||
 		pathname === PUBLIC_ROUTES.openaiAppsChallenge
 	) {
 		return "static";
@@ -173,7 +166,6 @@ function inferAuthMode(pathname: string): AuthMode {
 	}
 	if (
 		pathname === PUBLIC_ROUTES.root ||
-		pathname === PUBLIC_ROUTES.hello ||
 		pathname === PUBLIC_ROUTES.authorize ||
 		pathname === PUBLIC_ROUTES.callback ||
 		pathname === PUBLIC_ROUTES.storeToken ||

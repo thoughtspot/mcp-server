@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { validateAndSanitizeUrl } from "@thoughtspot/mcp-auth";
 import { loginWithSSO } from "./local-auth/sso-login.js";
-import { validateAndSanitizeUrl } from "./oauth-manager/oauth-utils.js";
 import { MCPServer } from "./servers/mcp-server.js";
 import type { Props } from "./utils.js";
 
