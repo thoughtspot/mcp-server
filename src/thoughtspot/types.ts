@@ -29,8 +29,9 @@ export interface SessionInfo {
 	privileges: any;
 	enableSpotterDataSourceDiscovery?: boolean;
 	// Gates the Eureka-backed object search tools (`search_objects`, `fetch_data`).
+	// Sourced from the cluster's `orion.useEurekaSearchMCPTools` configInfo key.
 	// When absent or not true, those tools are hidden and refused.
-	useEurekaSearchMCPTools?: boolean;
+	eurekaMCPToolsEnabled?: boolean;
 }
 
 export interface BaseMessage {

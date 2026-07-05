@@ -327,12 +327,21 @@ describe("MCP Server Base", () => {
 			expect(testServer.testIsEurekaSearchMCPToolsAvailable()).toBe(false);
 		});
 
-		// NOTE (temporary demo): the absent/undefined case is intentionally NOT
-		// asserted here. getSessionInfo currently defaults a missing flag to
-		// `true` (see thoughtspot-service.ts), so absent -> available; that
-		// mapping is covered by the service-level test "maps the feature flags".
-		// Restore an explicit undefined -> false case here once the default is
-		// reverted and the cluster surfaces `useEurekaSearchMCPTools`.
+		it("should return false when useEurekaSearchMCPTools is absent (fails closed)", async () => {
+			vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
+				getSessionInfo: vi.fn().mockResolvedValue(
+					makeSessionInfo({
+						configInfo: { useEurekaSearchMCPTools: undefined },
+					}),
+				),
+				searchMetadata: vi.fn().mockResolvedValue([]),
+				instanceUrl: "https://test.thoughtspot.cloud",
+			} as any);
+
+			const testServer = new TestMCPServer({ props: mockProps, env: mockEnv });
+			await testServer.init();
+			expect(testServer.testIsEurekaSearchMCPToolsAvailable()).toBe(false);
+		});
 	});
 
 	describe("Metric Identity", () => {

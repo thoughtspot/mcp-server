@@ -200,7 +200,7 @@ describe("MCP Server", () => {
 					currentOrgId: "test-org",
 					privileges: [],
 					enableSpotterDataSourceDiscovery: true,
-					useEurekaSearchMCPTools: true,
+					eurekaMCPToolsEnabled: true,
 				},
 				{
 					clientId: "test-client-id",

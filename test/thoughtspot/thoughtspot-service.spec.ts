@@ -1230,8 +1230,8 @@ describe("thoughtspot-service", () => {
 				releaseVersion: "8.0.0",
 				currentOrgId: "org-123",
 				privileges: ["READ", "WRITE"],
-				// TEMPORARY (demo): absent flag defaults to true in the mapping.
-				useEurekaSearchMCPTools: true,
+				// Absent cluster flag fails closed.
+				eurekaMCPToolsEnabled: false,
 			});
 		});
 
@@ -1288,7 +1288,7 @@ describe("thoughtspot-service", () => {
 			const result = await getSessionInfo(mockClient);
 
 			expect(result.enableSpotterDataSourceDiscovery).toBe(true);
-			expect(result.useEurekaSearchMCPTools).toBe(true);
+			expect(result.eurekaMCPToolsEnabled).toBe(true);
 		});
 
 		it("should handle API errors", async () => {

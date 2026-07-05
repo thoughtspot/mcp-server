@@ -740,13 +740,10 @@ export class ThoughtSpotService {
 			privileges: info.privileges,
 			enableSpotterDataSourceDiscovery:
 				info.configInfo?.enableSpotterDataSourceDiscovery,
-			// TEMPORARY (demo only): default to true when the cluster does not
-			// report the flag, so the Eureka search tools are available even on
-			// clusters that have not yet surfaced `useEurekaSearchMCPTools` in
-			// configInfo. An explicit `false` from the cluster is still honored.
-			// TODO: revert to `info.configInfo?.useEurekaSearchMCPTools` once the
-			// flag is propagated through /prism/preauth/info.
-			useEurekaSearchMCPTools: info.configInfo?.useEurekaSearchMCPTools ?? true,
+			// Fails closed: clusters that do not surface the
+			// `orion.useEurekaSearchMCPTools` override in configInfo get the
+			// Eureka search tools hidden.
+			eurekaMCPToolsEnabled: info.configInfo?.useEurekaSearchMCPTools ?? false,
 		};
 	}
 

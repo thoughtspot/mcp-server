@@ -139,7 +139,7 @@ export class MCPServer extends BaseMCPServer {
 		}
 
 		// Filter out the Eureka-backed object search tools when the cluster flag
-		// (useEurekaSearchMCPTools) is absent or disabled.
+		// (orion.useEurekaSearchMCPTools) is absent or disabled.
 		if (!this.isEurekaSearchMCPToolsAvailable()) {
 			tools = tools.filter(
 				(tool) =>
@@ -237,7 +237,7 @@ export class MCPServer extends BaseMCPServer {
 				if (!this.isEurekaSearchMCPToolsAvailable()) {
 					return this.createErrorResponse(
 						"This tool is not available on this ThoughtSpot cluster.",
-						"search_objects is disabled (useEurekaSearchMCPTools is not enabled)",
+						"search_objects is disabled (orion.useEurekaSearchMCPTools is not enabled on the cluster)",
 					);
 				}
 				return this.callSearchObjects(request, recorder);
@@ -247,7 +247,7 @@ export class MCPServer extends BaseMCPServer {
 				if (!this.isEurekaSearchMCPToolsAvailable()) {
 					return this.createErrorResponse(
 						"This tool is not available on this ThoughtSpot cluster.",
-						"fetch_data is disabled (useEurekaSearchMCPTools is not enabled)",
+						"fetch_data is disabled (orion.useEurekaSearchMCPTools is not enabled on the cluster)",
 					);
 				}
 				return this.callFetchData(request, recorder);

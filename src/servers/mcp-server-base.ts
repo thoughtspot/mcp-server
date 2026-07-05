@@ -105,7 +105,7 @@ export abstract class BaseMCPServer extends Server {
 			);
 			return false;
 		}
-		return String(this.sessionInfo.useEurekaSearchMCPTools) === "true";
+		return String(this.sessionInfo.eurekaMCPToolsEnabled) === "true";
 	}
 
 	/**
