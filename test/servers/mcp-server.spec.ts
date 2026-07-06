@@ -267,7 +267,7 @@ describe("MCP Server", () => {
 
 			expect(result.isError).toBe(true);
 			expect((result.content as any[])[0].text).toBe(
-				"ERROR: Not authenticated",
+				"ERROR: Not authenticated: your ThoughtSpot session is invalid or expired. Re-authenticate and try again.",
 			);
 		});
 
@@ -376,7 +376,7 @@ describe("MCP Server", () => {
 
 			expect(result.isError).toBe(true);
 			expect((result.content as any[])[0].text).toBe(
-				"ERROR: Access token or instance URL not valid",
+				"ERROR: Not authenticated: your ThoughtSpot session is invalid or expired. Re-authenticate and try again.",
 			);
 		});
 

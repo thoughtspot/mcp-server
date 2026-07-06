@@ -182,6 +182,13 @@ export class MCPServer extends BaseMCPServer {
 		};
 	}
 
+	// Auth failed against the cluster; tailor the fix to the deployment.
+	private authFailureMessage(): string {
+		return this.ctx.props.clientName?.clientId === "stdio-client"
+			? "Not authenticated: TS_AUTH_TOKEN is invalid or expired. Refresh it and restart the MCP server."
+			: "Not authenticated: your ThoughtSpot session is invalid or expired. Re-authenticate and try again.";
+	}
+
 	protected async callTool(
 		request: z.infer<typeof CallToolRequestSchema>,
 		recorder: MetricsRecorder,
@@ -192,15 +199,18 @@ export class MCPServer extends BaseMCPServer {
 		switch (name) {
 			case ToolName.Ping: {
 				if (this.ctx.props.accessToken && this.ctx.props.instanceUrl) {
-						if (!this.getThoughtSpotService(recorder).validateConnection()) {
+					if (!this.getThoughtSpotService(recorder).validateConnection()) {
 						return this.createErrorResponse(
-							"Failed to validate connection",
+							this.authFailureMessage(),
 							"Ping failed",
 						);
 					}
 					return this.createSuccessResponse("Pong", "Ping successful");
 				}
-				return this.createErrorResponse("Not authenticated", "Ping failed");
+				return this.createErrorResponse(
+					this.authFailureMessage(),
+					"Ping failed",
+				);
 			}
 
 			case ToolName.GetRelevantQuestions: {
@@ -222,13 +232,13 @@ export class MCPServer extends BaseMCPServer {
 			case ToolName.CheckConnectivity: {
 				if (!this.ctx.props.accessToken || !this.ctx.props.instanceUrl) {
 					return this.createErrorResponse(
-						"Access token or instance URL not valid",
+						this.authFailureMessage(),
 						"Check connectivity failed",
 					);
 				}
 				if (!this.getThoughtSpotService(recorder).validateConnection()) {
 					return this.createErrorResponse(
-						"Failed to validate connection",
+						this.authFailureMessage(),
 						"Check connectivity failed",
 					);
 				}

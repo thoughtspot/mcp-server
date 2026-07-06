@@ -763,11 +763,11 @@ export class ThoughtSpotService {
 	@WithSpan("validate-connection")
 	async validateConnection(): Promise<boolean> {
 		try {
-			await this.observeUpstreamCall(
+			const info = await this.observeUpstreamCall(
 				UPSTREAM_OPERATION_NAMES.getSessionInfo,
 				() => (this.client as any).getSessionInfo(),
 			);
-			return true;
+			return Boolean(info?.userGUID);
 		} catch (error) {
 			// The decorator will automatically record the exception
 			return false;

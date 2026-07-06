@@ -144,3 +144,6 @@ key.pem
 
 # MacOS metadata
 .DS_Store
+
+# JetBrains IDE
+.idea/
