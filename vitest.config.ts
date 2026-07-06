@@ -20,6 +20,15 @@ export default defineWorkersConfig({
             provider: "istanbul",
             enabled: true,
             include: ["src/**/*.ts"],
+            // Local-authentication / stdio deployment files only. They use
+            // Node-only APIs (http, child_process, fs) and never run in the
+            // Cloudflare Worker, so they can't execute in the workerd test pool
+            // and are excluded from coverage.
+            exclude: [
+                "src/stdio.ts",
+                "src/local-auth/browser-login.ts",
+                "src/local-auth/token-cache.ts",
+            ],
             reporter: ["text", "json", "html", "lcov"],
             thresholds: {
                 lines: 85,
