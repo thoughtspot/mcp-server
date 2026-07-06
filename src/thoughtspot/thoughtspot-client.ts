@@ -214,10 +214,10 @@ function addCreateAgentConversationWithAutoMode(
 ) {
 	(client as any).createAgentConversationWithAutoMode = async ({
 		dataSourceId,
-		showSpotterPastConversations,
+		saveChatEnabled,
 	}: {
 		dataSourceId?: string;
-		showSpotterPastConversations?: boolean;
+		saveChatEnabled?: boolean;
 	}): Promise<AgentConversation> => {
 		const endpoint = "/conversation/v2/";
 		const fetchOptions = {
@@ -242,7 +242,7 @@ function addCreateAgentConversationWithAutoMode(
 				conv_settings: {
 					enable_nls: true,
 					enable_why: true,
-					save_chat_enabled: !!showSpotterPastConversations,
+					save_chat_enabled: !!saveChatEnabled,
 					enable_tool_permissions: false,
 					enable_search_datasets: !dataSourceId,
 					enable_auto_select_dataset: !dataSourceId,

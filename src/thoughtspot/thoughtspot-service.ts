@@ -312,7 +312,7 @@ export class ThoughtSpotService {
 	async createAgentConversation(
 		dataSourceId?: string,
 		opts?: {
-			showSpotterPastConversations: boolean;
+			saveChatEnabled: boolean;
 		},
 	): Promise<AgentConversation> {
 		const span = trace.getSpan(context.active());
@@ -325,7 +325,7 @@ export class ThoughtSpotService {
 				() =>
 					(this.client as any).createAgentConversationWithAutoMode({
 						dataSourceId,
-						showSpotterPastConversations: opts?.showSpotterPastConversations,
+						saveChatEnabled: opts?.saveChatEnabled,
 					}),
 			);
 
@@ -718,7 +718,7 @@ export class ThoughtSpotService {
 			privileges: info.privileges,
 			enableSpotterDataSourceDiscovery:
 				info.configInfo?.enableSpotterDataSourceDiscovery,
-			showSpotterPastConversations:
+			saveChatEnabled:
 				info.configInfo?.showSpotterPastConversations,
 		};
 	}

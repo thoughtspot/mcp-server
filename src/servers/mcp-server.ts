@@ -385,14 +385,14 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 
 	/**
 	 * Spotter chat history (save_chat_enabled) is gated on BOTH:
-	 *  - the tenant's configInfo.showSpotterPastConversations flag, AND
+	 *  - the tenant's configInfo.saveChatEnabled flag, AND
 	 *  - the cluster being in the SPOTTER_CHAT_HISTORY_CLUSTER_IDS allowlist
 	 *    (comma-separated clusterIds).
 	 * Defaults to false when the tenant flag is off, the allowlist is unset/empty,
 	 * or the cluster is not listed.
 	 */
 	private isSpotterChatHistoryEnabled(): boolean {
-		const tenantEnabled = !!this.sessionInfo?.showSpotterPastConversations;
+		const tenantEnabled = !!this.sessionInfo?.saveChatEnabled;
 		if (!tenantEnabled) {
 			return false;
 		}
@@ -410,8 +410,7 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 
 		const allowlist = rawAllowlist
 			.split(",")
-			.map((id) => id.trim())
-			.filter(Boolean);
+			.map((id) => id.trim());
 
 		return allowlist.includes(String(clusterId));
 	}
@@ -432,7 +431,7 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			response = await this.getThoughtSpotService(
 				recorder,
 			).createAgentConversation(data_source_id, {
-				showSpotterPastConversations: this.isSpotterChatHistoryEnabled(),
+				saveChatEnabled: this.isSpotterChatHistoryEnabled(),
 			});
 		} catch (error) {
 			if (!(error as any)?.message?.includes("failed with status 401")) {
