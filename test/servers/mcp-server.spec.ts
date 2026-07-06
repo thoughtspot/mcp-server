@@ -1239,6 +1239,108 @@ describe("MCP Server", () => {
 			);
 			expect(mockCreateAgentConversationWithAutoMode).toHaveBeenCalledWith({
 				dataSourceId: "ds-123",
+				showSpotterPastConversations: false,
+			});
+		});
+
+		describe("chat history clusterId gating", () => {
+			// Builds a server whose session has the given tenant flag + selfClusterId,
+			// constructed with the given allowlist env var, then invokes the tool and
+			// returns the flag value passed to the client.
+			async function runWithGate({
+				tenantFlag,
+				selfClusterId,
+				allowlistEnv,
+			}: {
+				tenantFlag: boolean;
+				selfClusterId: string;
+				allowlistEnv?: string;
+			}): Promise<boolean> {
+				const mockCreateAgentConversationWithAutoMode = vi
+					.fn()
+					.mockResolvedValue({ conversation_id: "conv-chat" });
+
+				vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
+					getSessionInfo: vi.fn().mockResolvedValue({
+						userGUID: "test-user-123",
+						userName: "test-user",
+						releaseVersion: "10.13.0.cl-110",
+						currentOrgId: "test-org",
+						privileges: [],
+						configInfo: {
+							mixpanelConfig: {
+								devSdkKey: "test-dev-token",
+								prodSdkKey: "test-prod-token",
+								production: false,
+							},
+							selfClusterName: "test-cluster",
+							selfClusterId,
+							showSpotterPastConversations: tenantFlag,
+						},
+					}),
+					createAgentConversationWithAutoMode:
+						mockCreateAgentConversationWithAutoMode,
+					instanceUrl: "https://test.thoughtspot.cloud",
+				} as any);
+
+				const gatedServer = new MCPServer({
+					props: mockProps,
+					env: (allowlistEnv === undefined
+						? {}
+						: {
+								SPOTTER_CHAT_HISTORY_CLUSTER_IDS: allowlistEnv,
+							}) as any,
+				});
+				await gatedServer.init();
+				const { callTool } = connect(gatedServer);
+
+				const result = await callTool("create_analysis_session", {
+					data_source_id: "ds-777",
+				});
+				expect(result.isError).toBeUndefined();
+
+				const call = mockCreateAgentConversationWithAutoMode.mock.calls[0][0];
+				return call.showSpotterPastConversations;
+			}
+
+			it("enables save_chat when tenant flag is on AND clusterId is allowlisted", async () => {
+				expect(
+					await runWithGate({
+						tenantFlag: true,
+						selfClusterId: "cluster-allowed",
+						allowlistEnv: "other-1,cluster-allowed,other-2",
+					}),
+				).toBe(true);
+			});
+
+			it("defaults to false when clusterId is not in the allowlist", async () => {
+				expect(
+					await runWithGate({
+						tenantFlag: true,
+						selfClusterId: "cluster-not-listed",
+						allowlistEnv: "cluster-allowed",
+					}),
+				).toBe(false);
+			});
+
+			it("defaults to false when the allowlist env var is unset", async () => {
+				expect(
+					await runWithGate({
+						tenantFlag: true,
+						selfClusterId: "cluster-allowed",
+						allowlistEnv: undefined,
+					}),
+				).toBe(false);
+			});
+
+			it("stays false when clusterId is allowlisted but the tenant flag is off", async () => {
+				expect(
+					await runWithGate({
+						tenantFlag: false,
+						selfClusterId: "cluster-allowed",
+						allowlistEnv: "cluster-allowed",
+					}),
+				).toBe(false);
 			});
 		});
 

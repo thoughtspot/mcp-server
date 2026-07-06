@@ -3,74 +3,67 @@
  * https://developers.cloudflare.com/workers/wrangler/configuration/
  */
 {
-	"keep_vars": true,
-	"$schema": "node_modules/wrangler/config-schema.json",
-	"name": "thoughtspot-mcp-server",
-	"main": "src/index.ts",
-	"compatibility_date": "2025-04-17",
-	"compatibility_flags": [
-		"nodejs_compat"
-	],
-	"durable_objects": {
-		"bindings": [
-			{
-				"class_name": "ThoughtSpotMCP",
-				"name": "MCP_OBJECT"
-			},
-			{
-				"class_name": "ConversationStorageServerSQLite",
-				"name": "CONVERSATION_STORAGE_OBJECT"
-			}
-		]
-	},
-	"migrations": [
-		{
-			"tag": "v2",
-			"new_sqlite_classes": [
-				"ThoughtSpotMCP"
-			]
-		},
-		{
-			"tag": "v3",
-			"new_sqlite_classes": [
-				"ThoughtSpotOpenAIDeepResearchMCP"
-			]
-		},
-		{
-			"tag": "v4",
-			"new_classes": [
-				"ConversationStorageServer"
-			]
-		},
-		{
-			"tag": "v5",
-			"deleted_classes": [
-				"ThoughtSpotOpenAIDeepResearchMCP"
-			]
-		},
-		{
-			"tag": "v6",
-			"deleted_classes": [
-				"ConversationStorageServer"
-			]
-		},
-		{
-			"tag": "v7",
-			"new_sqlite_classes": [
-				"ConversationStorageServerSQLite"
-			]
-		}
-	],
-	"kv_namespaces": [{
-		"binding": "OAUTH_KV",
-		"id": "05ca6fed380e4fe48dbfc5c3d03b4070"
-	}],
-	"observability": {
-		"enabled": true,
-		"head_sampling_rate": 1
-	},
-	"analytics_engine_datasets": [
-        { "binding": "ANALYTICS", "dataset": "mcp_events_v2" }
+  "keep_vars": true,
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "thoughtspot-mcp-server",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-04-17",
+  "compatibility_flags": ["nodejs_compat"],
+  "durable_objects": {
+    "bindings": [
+      {
+        "class_name": "ThoughtSpotMCP",
+        "name": "MCP_OBJECT",
+      },
+      {
+        "class_name": "ConversationStorageServerSQLite",
+        "name": "CONVERSATION_STORAGE_OBJECT",
+      },
     ],
-	"assets": { "directory": "./static/", "binding": "ASSETS" },
+  },
+  "migrations": [
+    {
+      "tag": "v2",
+      "new_sqlite_classes": ["ThoughtSpotMCP"],
+    },
+    {
+      "tag": "v3",
+      "new_sqlite_classes": ["ThoughtSpotOpenAIDeepResearchMCP"],
+    },
+    {
+      "tag": "v4",
+      "new_classes": ["ConversationStorageServer"],
+    },
+    {
+      "tag": "v5",
+      "deleted_classes": ["ThoughtSpotOpenAIDeepResearchMCP"],
+    },
+    {
+      "tag": "v6",
+      "deleted_classes": ["ConversationStorageServer"],
+    },
+    {
+      "tag": "v7",
+      "new_sqlite_classes": ["ConversationStorageServerSQLite"],
+    },
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "OAUTH_KV",
+      "id": "05ca6fed380e4fe48dbfc5c3d03b4070",
+    },
+  ],
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1,
+  },
+  "analytics_engine_datasets": [
+    { "binding": "ANALYTICS", "dataset": "mcp_events_v2" },
+  ],
+  "assets": { "directory": "./static/", "binding": "ASSETS" },
+  // Comma-separated clusterIds allowed to use Spotter chat history (save_chat_enabled).
+  // Gated together with the tenant's configInfo.showSpotterPastConversations flag.
+  "vars": {
+    "SPOTTER_CHAT_HISTORY_CLUSTER_IDS": "672764c0-dc60-11ee-a6bf-13c83",
+  },
 }

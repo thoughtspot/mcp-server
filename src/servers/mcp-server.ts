@@ -192,7 +192,7 @@ export class MCPServer extends BaseMCPServer {
 		switch (name) {
 			case ToolName.Ping: {
 				if (this.ctx.props.accessToken && this.ctx.props.instanceUrl) {
-						if (!this.getThoughtSpotService(recorder).validateConnection()) {
+					if (!this.getThoughtSpotService(recorder).validateConnection()) {
 						return this.createErrorResponse(
 							"Failed to validate connection",
 							"Ping failed",
@@ -383,6 +383,38 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		);
 	}
 
+	/**
+	 * Spotter chat history (save_chat_enabled) is gated on BOTH:
+	 *  - the tenant's configInfo.saveChatEnabled flag, AND
+	 *  - the cluster being in the SPOTTER_CHAT_HISTORY_CLUSTER_IDS allowlist
+	 *    (comma-separated clusterIds).
+	 * Defaults to false when the tenant flag is off, the allowlist is unset/empty,
+	 * or the cluster is not listed.
+	 */
+	private isSpotterChatHistoryEnabled(): boolean {
+		const tenantEnabled = !!this.sessionInfo?.saveChatEnabled;
+		if (!tenantEnabled) {
+			return false;
+		}
+
+		const clusterId = this.sessionInfo?.clusterId;
+		if (!clusterId) {
+			return false;
+		}
+
+		const rawAllowlist = (this.ctx.env as Record<string, unknown> | undefined)
+			?.SPOTTER_CHAT_HISTORY_CLUSTER_IDS;
+		if (typeof rawAllowlist !== "string" || rawAllowlist.length === 0) {
+			return false;
+		}
+
+		const allowlist = rawAllowlist
+			.split(",")
+			.map((id) => id.trim());
+
+		return allowlist.includes(String(clusterId));
+	}
+
 	@WithSpan("call-create-analysis-session")
 	async callCreateAnalysisSession(
 		request: z.infer<typeof CallToolRequestSchema>,
@@ -396,10 +428,11 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 
 		let response: AgentConversation;
 		try {
-			response =
-				await this.getThoughtSpotService(recorder).createAgentConversation(
-					data_source_id,
-				);
+			response = await this.getThoughtSpotService(
+				recorder,
+			).createAgentConversation(data_source_id, {
+				saveChatEnabled: this.isSpotterChatHistoryEnabled(),
+			});
 		} catch (error) {
 			if (!(error as any)?.message?.includes("failed with status 401")) {
 				throw error;

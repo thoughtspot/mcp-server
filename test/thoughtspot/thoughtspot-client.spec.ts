@@ -1,11 +1,11 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { getThoughtSpotClient } from "../../src/thoughtspot/thoughtspot-client";
 import {
-	createBearerAuthenticationConfig,
 	ThoughtSpotRestApi,
+	createBearerAuthenticationConfig,
 } from "@thoughtspot/rest-api-sdk";
 import type { ResponseContext } from "@thoughtspot/rest-api-sdk";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import YAML from "yaml";
+import { getThoughtSpotClient } from "../../src/thoughtspot/thoughtspot-client";
 
 // Mock the ThoughtSpot REST API SDK
 vi.mock("@thoughtspot/rest-api-sdk", () => ({
@@ -629,6 +629,21 @@ describe("ThoughtSpot Client", () => {
 				enable_search_datasets: true,
 				enable_auto_select_dataset: true,
 			});
+		});
+
+		it("sets save_chat_enabled from showSpotterPastConversations", async () => {
+			(fetch as any).mockResolvedValue({
+				ok: true,
+				json: vi.fn().mockResolvedValue({ conversation_id: "conv-chat" }),
+			});
+
+			await client.createAgentConversationWithAutoMode({
+				showSpotterPastConversations: true,
+			});
+
+			const fetchCall = (fetch as any).mock.calls[0];
+			const body = JSON.parse(fetchCall[1].body);
+			expect(body.conv_settings.save_chat_enabled).toBe(true);
 		});
 
 		it("should handle HTTP error responses", async () => {

@@ -28,6 +28,7 @@ export interface SessionInfo {
 	currentOrgId: string;
 	privileges: any;
 	enableSpotterDataSourceDiscovery?: boolean;
+	saveChatEnabled?: boolean;
 }
 
 export interface BaseMessage {

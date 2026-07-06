@@ -221,6 +221,24 @@ describe("thoughtspot-service", () => {
 			});
 		});
 
+		it("passes showSpotterPastConversations through to the client", async () => {
+			mockClient.createAgentConversationWithAutoMode = vi
+				.fn()
+				.mockResolvedValue({ conversation_id: "conv-chat" });
+
+			const service = new ThoughtSpotService(mockClient);
+			await service.createAgentConversation("worksheet-123", {
+				showSpotterPastConversations: true,
+			});
+
+			expect(
+				mockClient.createAgentConversationWithAutoMode,
+			).toHaveBeenCalledWith({
+				dataSourceId: "worksheet-123",
+				showSpotterPastConversations: true,
+			});
+		});
+
 		it("should throw when agent conversation creation fails", async () => {
 			const error = new Error("Conversation API Error");
 			mockClient.createAgentConversationWithAutoMode = vi
@@ -1231,6 +1249,51 @@ describe("thoughtspot-service", () => {
 				currentOrgId: "org-123",
 				privileges: ["READ", "WRITE"],
 			});
+		});
+
+		it("maps showSpotterPastConversations from configInfo (true/false/absent)", async () => {
+			const base = {
+				mixpanelConfig: {
+					production: true,
+					devSdkKey: "dev-key",
+					prodSdkKey: "prod-key",
+				},
+				selfClusterName: "test-cluster",
+				selfClusterId: "cluster-123",
+			};
+			const wrap = (configInfo: any) => ({
+				configInfo,
+				userGUID: "user-123",
+				userName: "testuser",
+				releaseVersion: "8.0.0",
+				currentOrgId: "org-123",
+				privileges: [],
+			});
+
+			(mockClient as any).getSessionInfo = vi
+				.fn()
+				.mockResolvedValue(
+					wrap({ ...base, showSpotterPastConversations: true }),
+				);
+			expect(
+				(await getSessionInfo(mockClient)).showSpotterPastConversations,
+			).toBe(true);
+
+			(mockClient as any).getSessionInfo = vi
+				.fn()
+				.mockResolvedValue(
+					wrap({ ...base, showSpotterPastConversations: false }),
+				);
+			expect(
+				(await getSessionInfo(mockClient)).showSpotterPastConversations,
+			).toBe(false);
+
+			(mockClient as any).getSessionInfo = vi
+				.fn()
+				.mockResolvedValue(wrap({ ...base }));
+			expect(
+				(await getSessionInfo(mockClient)).showSpotterPastConversations,
+			).toBeUndefined();
 		});
 
 		it("should return session info with development mixpanel token", async () => {

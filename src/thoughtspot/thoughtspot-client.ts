@@ -1,16 +1,16 @@
 import {
-	createBearerAuthenticationConfig,
 	ThoughtSpotRestApi,
+	createBearerAuthenticationConfig,
 } from "@thoughtspot/rest-api-sdk";
 import type {
 	AgentConversation,
 	RequestContext,
 	ResponseContext,
 } from "@thoughtspot/rest-api-sdk";
-import YAML from "yaml";
-import { of } from "rxjs";
-import type { SessionInfo } from "./types";
 import { customAlphabet } from "nanoid";
+import { of } from "rxjs";
+import YAML from "yaml";
+import type { SessionInfo } from "./types";
 
 /*
  * Inject custom handlers into the ThoughtSpot client
@@ -214,8 +214,10 @@ function addCreateAgentConversationWithAutoMode(
 ) {
 	(client as any).createAgentConversationWithAutoMode = async ({
 		dataSourceId,
+		saveChatEnabled,
 	}: {
 		dataSourceId?: string;
+		saveChatEnabled?: boolean;
 	}): Promise<AgentConversation> => {
 		const endpoint = "/conversation/v2/";
 		const fetchOptions = {
@@ -240,7 +242,7 @@ function addCreateAgentConversationWithAutoMode(
 				conv_settings: {
 					enable_nls: true,
 					enable_why: true,
-					save_chat_enabled: false,
+					save_chat_enabled: !!saveChatEnabled,
 					enable_tool_permissions: false,
 					enable_search_datasets: !dataSourceId,
 					enable_auto_select_dataset: !dataSourceId,
