@@ -908,6 +908,7 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 					`Switch org failed: org not accessible (status ${status})`,
 				);
 			}
+			console.error("Error switching org:", error);
 			return this.createErrorResponse(
 				`Failed to switch to org "${orgId}". Please try again.`,
 				`Error switching org ${(error as Error)?.message ?? ""}`,
