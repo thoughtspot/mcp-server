@@ -1,13 +1,9 @@
 import type { Message, StreamingMessagesState } from "../thoughtspot/types";
 
-// Client for the conversation-storage and per-user token/org Durable Objects,
-// talking to their stubs directly (bypassing the OAuth layer). The storage id is
-// hash(user) + conversationId, so users can't reach each other's conversations.
 export class StorageServiceClient {
 	constructor(
 		private readonly namespace: DurableObjectNamespace,
 		private readonly accessTokenHashUrlSafe: string,
-		// Optional so non-token callers still compile.
 		private readonly userTokenNamespace?: DurableObjectNamespace,
 	) {}
 
@@ -36,7 +32,6 @@ export class StorageServiceClient {
 		return ns.get(doId);
 	}
 
-	// DO stubs ignore the hostname; a placeholder keeps the path parseable.
 	private url(conversationId: string, operation: string): string {
 		return `https://internal/storage/${encodeURIComponent(conversationId)}/${operation}`;
 	}
@@ -49,7 +44,7 @@ export class StorageServiceClient {
 	}> {
 		const id = StorageServiceClient.ACTIVE_ORG_ID;
 		const response = await this.userStubFor(id).fetch(
-			this.url(id, "active-org"),
+			this.url(id, "active-org-id-and-token"),
 			{
 				method: "GET",
 				headers: this.headers(),
@@ -69,12 +64,10 @@ export class StorageServiceClient {
 		};
 	}
 
-	// Pass orgToken to commit id+token atomically (validated switch); omit it on the
-	// postInit default path, where the prior token is cleared and re-minted lazily.
 	async setActiveOrg(activeOrgId: string, orgToken?: string): Promise<void> {
 		const id = StorageServiceClient.ACTIVE_ORG_ID;
 		const response = await this.userStubFor(id).fetch(
-			this.url(id, "active-org"),
+			this.url(id, "active-org-id-and-token"),
 			{
 				method: "POST",
 				headers: this.headers(),
@@ -87,7 +80,6 @@ export class StorageServiceClient {
 		}
 	}
 
-	// Empty string clears the token (to evict a stale one before re-minting).
 	async setActiveOrgToken(orgToken: string): Promise<void> {
 		const id = StorageServiceClient.ACTIVE_ORG_ID;
 		const response = await this.userStubFor(id).fetch(
@@ -106,14 +98,13 @@ export class StorageServiceClient {
 		}
 	}
 
-	// Read the keep-warm token (alarm-refreshed); accessToken is null if unseeded.
 	async getTokenStore(): Promise<{
-		accessToken: string | null;
+		globalToken: string | null;
 		expiresAt: number | null;
 	}> {
 		const id = StorageServiceClient.ACTIVE_ORG_ID;
 		const response = await this.userStubFor(id).fetch(
-			this.url(id, "token-store"),
+			this.url(id, "global-token-data"),
 			{
 				method: "GET",
 				headers: this.headers(),
@@ -122,25 +113,24 @@ export class StorageServiceClient {
 		if (!response.ok) {
 			const body = await response.text();
 			throw new Error(
-				`Failed to get token store (${response.status}): ${body}`,
+				`Failed to get global token data (${response.status}): ${body}`,
 			);
 		}
 		return (await response.json()) as {
-			accessToken: string | null;
+			globalToken: string | null;
 			expiresAt: number | null;
 		};
 	}
 
-	// Seed the keep-warm token store + arm the refresh alarm. Idempotent per connect.
 	async seedTokenStore(store: {
-		accessToken: string;
-		refreshToken: string;
+		globalToken: string;
+		globalRefreshToken: string;
 		instanceUrl: string;
 		expiresAt?: number;
 	}): Promise<void> {
 		const id = StorageServiceClient.ACTIVE_ORG_ID;
 		const response = await this.userStubFor(id).fetch(
-			this.url(id, "token-store"),
+			this.url(id, "global-token-data"),
 			{
 				method: "POST",
 				headers: this.headers(),
@@ -150,18 +140,20 @@ export class StorageServiceClient {
 		if (!response.ok) {
 			const body = await response.text();
 			throw new Error(
-				`Failed to seed token store (${response.status}): ${body}`,
+				`Failed to seed global token data (${response.status}): ${body}`,
 			);
 		}
 	}
 
-	// Record user activity for idle detection; throttled server-side.
 	async touchLastSeen(): Promise<void> {
 		const id = StorageServiceClient.ACTIVE_ORG_ID;
-		const response = await this.userStubFor(id).fetch(this.url(id, "touch"), {
-			method: "POST",
-			headers: this.headers(),
-		});
+		const response = await this.userStubFor(id).fetch(
+			this.url(id, "last-seen"),
+			{
+				method: "POST",
+				headers: this.headers(),
+			},
+		);
 		if (!response.ok) {
 			const body = await response.text();
 			throw new Error(

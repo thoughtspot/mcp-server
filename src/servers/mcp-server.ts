@@ -11,7 +11,6 @@ import {
 	type MetricsRecorder,
 	NOOP_METRICS_RECORDER,
 } from "../metrics/runtime/metrics-recorder";
-import type { MetricAnalyticsContext } from "../metrics/runtime/metrics-sink";
 import type { ToolMetricApiSurface } from "../metrics/runtime/tool-metrics";
 import { WithSpan } from "../metrics/tracing/tracing-utils";
 import type {
@@ -46,7 +45,7 @@ import {
 export class MCPServer extends BaseMCPServer {
 	private activeOrgId: string | undefined;
 	private activeOrgToken: string | undefined;
-	private warmGlobalToken: string | undefined;
+	private globalToken: string | undefined;
 	// False for pre-multi-org grants (no refresh token) — keeps old behavior until re-auth.
 	private grantHasRefreshToken = false;
 
@@ -54,15 +53,11 @@ export class MCPServer extends BaseMCPServer {
 		super(ctx, "ThoughtSpot", "2.0.0");
 	}
 
-	private getGlobalToken(): string {
-		return this.warmGlobalToken ?? this.ctx.props.accessToken;
-	}
-
 	protected getActiveOrgId(): string | undefined {
 		return this.activeOrgId;
 	}
 
-	protected getActiveBearerToken(): string {
+	protected getActiveOrgToken(): string {
 		if (this.activeOrgId) {
 			if (!this.activeOrgToken) {
 				throw new Error(
@@ -71,7 +66,7 @@ export class MCPServer extends BaseMCPServer {
 			}
 			return this.activeOrgToken;
 		}
-		return this.getGlobalToken();
+		return this.globalToken ?? this.ctx.props.accessToken;
 	}
 
 	private async loadActiveOrg(): Promise<void> {
@@ -88,7 +83,7 @@ export class MCPServer extends BaseMCPServer {
 		await storage.setActiveOrg(orgId, orgToken);
 	}
 
-	private async ensureOrgToken(
+	private async getOrRecreateActiveOrgToken(
 		orgId: string,
 		recorder?: MetricsRecorder,
 	): Promise<string> {
@@ -96,7 +91,7 @@ export class MCPServer extends BaseMCPServer {
 			return this.activeOrgToken;
 		}
 		await this.loadOrSeedWarmToken();
-		const globalToken = this.getGlobalToken();
+		const globalToken = this.globalToken ?? this.ctx.props.accessToken;
 		const orgToken = await this.getOrgService(
 			globalToken,
 			undefined,
@@ -104,7 +99,7 @@ export class MCPServer extends BaseMCPServer {
 		).fetchOrgBearerToken(globalToken, orgId);
 		this.activeOrgToken = orgToken;
 		const storage = await this.getStorageService();
-		await storage.setActiveOrgToken(orgToken);
+		await storage.setActiveOrg(orgId, orgToken);
 		return orgToken;
 	}
 
@@ -124,74 +119,38 @@ export class MCPServer extends BaseMCPServer {
 		return match ? Number(match[1]) : undefined;
 	}
 
-	private async forceRemintOrgToken(
-		orgId: string,
+	private async forceRecreateActiveOrgToken(
 		recorder?: MetricsRecorder,
 	): Promise<void> {
 		await this.loadActiveOrg();
-		if (this.activeOrgId !== orgId) {
+		if (!this.activeOrgId) {
 			return;
 		}
 		await this.loadOrSeedWarmToken();
-		const globalToken = this.getGlobalToken();
+		const globalToken = this.globalToken ?? this.ctx.props.accessToken;
 		const orgToken = await this.getOrgService(
 			globalToken,
 			undefined,
 			recorder,
-		).fetchOrgBearerToken(globalToken, orgId);
+		).fetchOrgBearerToken(globalToken, this.activeOrgId);
 		this.activeOrgToken = orgToken;
-		await this.setActiveOrg(orgId, orgToken);
-	}
-
-	protected async withOrgTokenRetry<T>(
-		recorder: MetricsRecorder | undefined,
-		fn: (service: ThoughtSpotService) => Promise<T>,
-		analyticsContextOverride?: MetricAnalyticsContext,
-	): Promise<T> {
-		const orgId = this.activeOrgId;
-
-		const attempt = () =>
-			fn(this.getThoughtSpotService(recorder, analyticsContextOverride));
-
-		if (!orgId) {
-			return attempt();
-		}
-
-		if (!this.activeOrgToken) {
-			await this.ensureOrgToken(orgId, recorder);
-		}
-
-		try {
-			const result = await attempt();
-			if (this.apiErrorStatus(result) === 401) {
-				await this.forceRemintOrgToken(orgId, recorder);
-				return attempt();
-			}
-			return result;
-		} catch (error) {
-			if (this.apiErrorStatus(error) === 401) {
-				await this.forceRemintOrgToken(orgId, recorder);
-				return attempt();
-			}
-			throw error;
-		}
+		await this.setActiveOrg(this.activeOrgId, orgToken);
 	}
 
 	private async validateConnectionWithOrgRetry(
 		recorder?: MetricsRecorder,
 	): Promise<boolean> {
-		const orgId = this.activeOrgId;
-		const usedOrgToken = Boolean(orgId && this.activeOrgToken);
+		const usedOrgToken = Boolean(this.activeOrgId && this.activeOrgToken);
 		const ok = await this.getThoughtSpotService(recorder).validateConnection();
-		if (ok || !usedOrgToken || !orgId) {
+		if (ok || !usedOrgToken) {
 			return ok;
 		}
-		await this.forceRemintOrgToken(orgId, recorder);
+		await this.forceRecreateActiveOrgToken(recorder);
 		return this.getThoughtSpotService(recorder).validateConnection();
 	}
 
 	protected async postInit(): Promise<void> {
-		if (!this.isOAuthAuth()) {
+		if (this.ctx.props.authMode !== "oauth") {
 			return;
 		}
 		this.grantHasRefreshToken = typeof this.ctx.props.refreshToken === "string";
@@ -216,7 +175,7 @@ export class MCPServer extends BaseMCPServer {
 				}
 			}
 			if (this.activeOrgId) {
-				await this.ensureOrgToken(this.activeOrgId);
+				await this.getOrRecreateActiveOrgToken(this.activeOrgId);
 			}
 		} catch (error) {
 			console.error("Failed to set/mint active org on connect:", error);
@@ -229,7 +188,7 @@ export class MCPServer extends BaseMCPServer {
 			this.ctx.props;
 
 		const existing = await storage.getTokenStore();
-		const storedToken = existing.accessToken ?? null;
+		const storedToken = existing.globalToken ?? null;
 		const storedExpiresAt = existing.expiresAt ?? null;
 		const storedExpired =
 			typeof storedExpiresAt === "number" && storedExpiresAt <= Date.now();
@@ -237,25 +196,25 @@ export class MCPServer extends BaseMCPServer {
 			storedToken && storedToken !== accessToken && !storedExpired;
 
 		if (storedIsNewer) {
-			this.warmGlobalToken = storedToken;
+			this.globalToken = storedToken;
 			return;
 		}
 
 		if (accessToken && refreshToken) {
 			await storage.seedTokenStore({
-				accessToken,
-				refreshToken,
+				globalToken: accessToken,
+				globalRefreshToken: refreshToken,
 				instanceUrl,
 				expiresAt:
 					typeof tokenExpiryDuration === "number"
 						? tokenExpiryDuration
 						: undefined,
 			});
-			this.warmGlobalToken = accessToken;
+			this.globalToken = accessToken;
 			return;
 		}
 
-		this.warmGlobalToken =
+		this.globalToken =
 			storedToken && !storedExpired ? storedToken : accessToken;
 	}
 
@@ -271,17 +230,13 @@ export class MCPServer extends BaseMCPServer {
 		return "mcp";
 	}
 
-	protected isOAuthAuth(): boolean {
-		return this.ctx.props.authMode === "oauth";
-	}
-
 	protected hasMultiOrgGrant(): boolean {
 		return this.grantHasRefreshToken;
 	}
 
 	protected areOrgToolsAvailable(): boolean {
 		if (
-			!this.isOAuthAuth() ||
+			this.ctx.props.authMode !== "oauth" ||
 			!this.isOrgsEnabled() ||
 			!this.hasMultiOrgGrant()
 		) {
@@ -449,20 +404,12 @@ export class MCPServer extends BaseMCPServer {
 		const { name } = request.params;
 		this.trackers.track(TrackEvent.CallTool, { toolName: name });
 
-		if (this.isOAuthAuth()) {
+		if (this.ctx.props.authMode === "oauth") {
 			this.touchLastSeen();
 		}
 
 		if (this.areOrgToolsAvailable()) {
 			await this.loadActiveOrg();
-			if (
-				this.activeOrgId &&
-				!this.activeOrgToken &&
-				name !== ToolName.ListOrgs &&
-				name !== ToolName.SwitchOrg
-			) {
-				await this.ensureOrgToken(this.activeOrgId, recorder);
-			}
 		}
 
 		switch (name) {
@@ -692,9 +639,10 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 
 		let response: AgentConversation;
 		try {
-			response = await this.withOrgTokenRetry(recorder, (svc) =>
-				svc.createAgentConversation(data_source_id),
-			);
+			response =
+				await this.getThoughtSpotService(recorder).createAgentConversation(
+					data_source_id,
+				);
 		} catch (error) {
 			if (this.apiErrorStatus(error) !== 401) {
 				throw error;
@@ -749,16 +697,13 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			);
 		}
 
-		await this.withOrgTokenRetry(
-			recorder,
-			(svc) =>
-				svc.sendAgentConversationMessageStreaming(
-					analytical_session_id,
-					message,
-					storageService.appendMessages.bind(storageService),
-					additional_context,
-				),
-			{ analyticalSessionId: analytical_session_id },
+		await this.getThoughtSpotService(recorder, {
+			analyticalSessionId: analytical_session_id,
+		}).sendAgentConversationMessageStreaming(
+			analytical_session_id,
+			message,
+			storageService.appendMessages.bind(storageService),
+			additional_context,
 		);
 
 		return this.createStructuredContentSuccessResponse(
@@ -857,9 +802,9 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			);
 		}
 
-		const liveboard = await this.withOrgTokenRetry(recorder, (svc) =>
-			svc.fetchTMLAndCreateLiveboard(title, transformedAnswers, note_tile),
-		);
+		const liveboard = await this.getThoughtSpotService(
+			recorder,
+		).fetchTMLAndCreateLiveboard(title, transformedAnswers, note_tile);
 
 		if (liveboard.error) {
 			return this.createErrorResponse(
@@ -915,7 +860,7 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 
 		await this.loadOrSeedWarmToken();
 		const orgs = await this.getOrgService(
-			this.getGlobalToken(),
+			this.globalToken ?? this.ctx.props.accessToken,
 			undefined,
 			recorder,
 		).listOrgs();
@@ -949,7 +894,7 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		let orgToken: string;
 		try {
 			await this.loadOrSeedWarmToken();
-			const globalToken = this.getGlobalToken();
+			const globalToken = this.globalToken ?? this.ctx.props.accessToken;
 			orgToken = await this.getOrgService(
 				globalToken,
 				undefined,

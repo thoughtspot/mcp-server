@@ -234,17 +234,8 @@ export abstract class BaseMCPServer extends Server {
 		);
 	}
 
-	// Active org for ThoughtSpot calls (x-thoughtspot-orgs header); none by default.
-	// Subclasses override to supply per-session org state.
-	protected getActiveOrgId(): string | undefined {
-		return undefined;
-	}
-
-	// Bearer token for ThoughtSpot calls; the session token by default. Subclasses
-	// override to return an org-scoped token.
-	protected getActiveBearerToken(): string {
-		return this.ctx.props.accessToken;
-	}
+	protected abstract getActiveOrgId(): string | undefined;
+	protected abstract getActiveOrgToken(): string;
 
 	// Build an OrgService bound to an explicit (cluster-wide) token for org listing
 	// / org-token minting.
@@ -266,7 +257,7 @@ export abstract class BaseMCPServer extends Server {
 		return new ThoughtSpotService(
 			getThoughtSpotClient(
 				this.ctx.props.instanceUrl,
-				this.getActiveBearerToken(),
+				this.getActiveOrgToken(),
 				this.getActiveOrgId(),
 			),
 			{

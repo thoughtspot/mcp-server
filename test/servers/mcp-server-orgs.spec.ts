@@ -32,13 +32,16 @@ function makeStorageNamespace(
 			fetch: async (url: string, init?: RequestInit) => {
 				const op = new URL(url).pathname.split("/").pop();
 				const rec = store.get(id.name) ?? {};
-				if (op === "active-org" && (init?.method ?? "GET") === "GET") {
+				if (
+					op === "active-org-id-and-token" &&
+					(init?.method ?? "GET") === "GET"
+				) {
 					return Response.json({
 						activeOrgId: rec.activeOrgId ?? null,
 						orgToken: rec.orgToken ?? null,
 					});
 				}
-				if (op === "active-org" && init?.method === "POST") {
+				if (op === "active-org-id-and-token" && init?.method === "POST") {
 					const body = JSON.parse(String(init?.body)) as {
 						activeOrgId: string;
 						orgToken?: string | null;
@@ -64,18 +67,18 @@ function makeStorageNamespace(
 					store.set(id.name, { ...rec, orgToken: body.orgToken });
 					return Response.json({ ok: true });
 				}
-				if (op === "token-store" && (init?.method ?? "GET") === "GET") {
+				if (op === "global-token-data" && (init?.method ?? "GET") === "GET") {
 					const s = tokenStore?.get(id.name);
 					return Response.json({
-						accessToken: s?.accessToken ?? null,
+						globalToken: s?.globalToken ?? null,
 						expiresAt: s?.expiresAt ?? null,
 					});
 				}
-				if (op === "token-store" && init?.method === "POST") {
+				if (op === "global-token-data" && init?.method === "POST") {
 					tokenStore?.set(id.name, JSON.parse(String(init?.body)));
 					return Response.json({ ok: true });
 				}
-				if (op === "touch" && init?.method === "POST") {
+				if (op === "last-seen" && init?.method === "POST") {
 					touchLog?.push(id.name);
 					return Response.json({ ok: true });
 				}
@@ -347,10 +350,10 @@ describe("MCP Server org tools", () => {
 			await old.server.init();
 			const s = old.server as unknown as {
 				getActiveOrgId(): string | undefined;
-				getActiveBearerToken(): string;
+				getActiveOrgToken(): string;
 			};
 			expect(s.getActiveOrgId()).toBeUndefined();
-			expect(s.getActiveBearerToken()).toBe("global-token"); // login token, not the org token
+			expect(s.getActiveOrgToken()).toBe("global-token"); // login token, not the org token
 		});
 	});
 
@@ -385,7 +388,33 @@ describe("MCP Server org tools", () => {
 			await server.init();
 			// The global token is org-agnostic and must still be seeded/kept warm.
 			const seeded = [...tokenStore.values()][0];
-			expect(seeded?.accessToken).toBe("global-token");
+			expect(seeded?.globalToken).toBe("global-token");
+		});
+
+		it("uses the warm global token (not props token) for tool calls when orgs are disabled", async () => {
+			const tokenStore = new Map<string, any>();
+			const { server } = makeServer({
+				authMode: "oauth",
+				session: { orgsEnabled: false },
+				tokenStore,
+			});
+			await server.init();
+			// Simulate an alarm refresh: stored token is now different from props token.
+			const key = [...tokenStore.keys()][0];
+			tokenStore.set(key, {
+				...tokenStore.get(key),
+				globalToken: "refreshed-token",
+			});
+
+			// A new connection should pick up the refreshed token.
+			const { server: server2 } = makeServer({
+				authMode: "oauth",
+				session: { orgsEnabled: false },
+				tokenStore,
+			});
+			await server2.init();
+			// getActiveOrgToken must return the warm token, not the props token.
+			expect((server2 as any).getActiveOrgToken()).toBe("refreshed-token");
 		});
 	});
 
@@ -423,12 +452,12 @@ describe("MCP Server org tools", () => {
 			await server.init();
 			const s = server as unknown as {
 				setActiveOrg: (orgId: string) => Promise<void>;
-				ensureOrgToken: (orgId: string) => Promise<string>;
+				getOrRecreateActiveOrgToken: (orgId: string) => Promise<string>;
 				callListOrgs: (recorder: any) => Promise<any>;
 			};
 			// Put an org token in play (the thing list_orgs must NOT use).
 			await s.setActiveOrg("101");
-			await s.ensureOrgToken("101");
+			await s.getOrRecreateActiveOrgToken("101");
 
 			const spy = vi.mocked(thoughtspotClient.getThoughtSpotClient);
 			spy.mockClear();
@@ -662,8 +691,8 @@ describe("MCP Server org tools", () => {
 			await server.init();
 			// The per-user instance now holds the seeded token + refresh token.
 			const seeded = [...tokenStore.values()][0];
-			expect(seeded.accessToken).toBe("global-token");
-			expect(seeded.refreshToken).toBe("refresh-token");
+			expect(seeded.globalToken).toBe("global-token");
+			expect(seeded.globalRefreshToken).toBe("refresh-token");
 			expect(seeded.expiresAt).toBe(1893456000000);
 		});
 
@@ -680,7 +709,7 @@ describe("MCP Server org tools", () => {
 			const key = [...tokenStore.keys()][0];
 			tokenStore.set(key, {
 				...tokenStore.get(key),
-				accessToken: "refreshed-token",
+				globalToken: "refreshed-token",
 			});
 
 			// A new connection should read the refreshed token, not overwrite it with
@@ -691,7 +720,7 @@ describe("MCP Server org tools", () => {
 				tokenStore,
 			});
 			await b.server.init();
-			expect(tokenStore.get(key).accessToken).toBe("refreshed-token");
+			expect(tokenStore.get(key).globalToken).toBe("refreshed-token");
 		});
 
 		it("re-seeds from props when the stored token has EXPIRED (refresh chain died)", async () => {
@@ -707,7 +736,7 @@ describe("MCP Server org tools", () => {
 			const key = [...tokenStore.keys()][0];
 			tokenStore.set(key, {
 				...tokenStore.get(key),
-				accessToken: "expired-token",
+				globalToken: "expired-token",
 				expiresAt: Date.now() - 60_000,
 			});
 
@@ -719,7 +748,7 @@ describe("MCP Server org tools", () => {
 				tokenStore,
 			});
 			await b.server.init();
-			expect(tokenStore.get(key).accessToken).toBe("global-token");
+			expect(tokenStore.get(key).globalToken).toBe("global-token");
 		});
 	});
 
@@ -746,105 +775,12 @@ describe("MCP Server org tools", () => {
 			await server.init();
 			await connect(server).callTool("switch_org", { org_id: 101 });
 			return server as unknown as {
-				withOrgTokenRetry: <T>(
-					recorder: undefined,
-					fn: (svc: any) => Promise<T>,
-				) => Promise<T>;
 				validateConnectionWithOrgRetry: (
 					recorder?: undefined,
 				) => Promise<boolean>;
 				getThoughtSpotService: (recorder?: undefined) => any;
 			};
 		}
-
-		it("re-mints the org token and retries when an org-scoped call 401s", async () => {
-			const store = new Map<
-				string,
-				{ activeOrgId?: string; orgToken?: string }
-			>();
-			// Each mint returns a uniquely-numbered token so we can identify the
-			// re-mint regardless of how many mints happened during connect/switch.
-			let mintN = 0;
-			const mint = vi
-				.fn()
-				.mockImplementation(async () => `org-token-${++mintN}`);
-			const server = await makeServerWithActiveOrg({ store, mint });
-			const tokenBefore = [...store.values()][0].orgToken;
-			const mintsBefore = mint.mock.calls.length;
-
-			// A call that 401s once then succeeds: the wrapper should clear+re-mint
-			// the org token and retry transparently.
-			let calls = 0;
-			const result = await server.withOrgTokenRetry(undefined, async () => {
-				calls++;
-				if (calls === 1) {
-					throw new Error("searchOrgs failed with status 401: token expired");
-				}
-				return ["recovered"];
-			});
-
-			expect(result).toEqual(["recovered"]);
-			expect(calls).toBe(2); // first 401, retry ok
-			expect(mint.mock.calls.length).toBe(mintsBefore + 1); // exactly one re-mint
-			// A fresh (different) token replaced the stale one in the shared store.
-			const tokenAfter = [...store.values()][0].orgToken;
-			expect(tokenAfter).not.toBe(tokenBefore);
-			expect(tokenAfter).toBe(`org-token-${mintN}`);
-		});
-
-		it("recovers when the 401 is swallowed into an { error } result", async () => {
-			const store = new Map<
-				string,
-				{ activeOrgId?: string; orgToken?: string }
-			>();
-			const mint = vi
-				.fn()
-				.mockResolvedValueOnce("org-token-stale")
-				.mockResolvedValue("org-token-fresh");
-			const server = await makeServerWithActiveOrg({ store, mint });
-			const mintsBefore = mint.mock.calls.length;
-
-			let calls = 0;
-			const result = await server.withOrgTokenRetry(undefined, async () => {
-				calls++;
-				if (calls === 1) {
-					// Service methods that catch and return the failure instead of throwing.
-					return { error: { message: "failed with status 401: expired" } };
-				}
-				return { data: "ok" };
-			});
-
-			expect(result).toEqual({ data: "ok" });
-			expect(calls).toBe(2);
-			expect(mint.mock.calls.length).toBe(mintsBefore + 1);
-		});
-
-		it("does NOT re-mint when no org token is active (global-token 401 passes through)", async () => {
-			// No switch -> withOrgTokenRetry sees no active org token, so a 401 is
-			// about the global token and must pass straight through with no re-mint.
-			const mint = vi.fn().mockResolvedValue("org-scoped-token");
-			const { server } = makeServer({
-				authMode: "oauth",
-				session: { orgsEnabled: false, currentOrgId: "0" },
-				fetchOrgBearerToken: mint,
-			});
-			await server.init();
-			const s = server as unknown as {
-				withOrgTokenRetry: <T>(
-					recorder: undefined,
-					fn: (svc: any) => Promise<T>,
-				) => Promise<T>;
-			};
-			const mintsBefore = mint.mock.calls.length;
-
-			await expect(
-				s.withOrgTokenRetry(undefined, async () => {
-					throw new Error("failed with status 401: token expired");
-				}),
-			).rejects.toThrow(/401/);
-			// No re-mint attempted.
-			expect(mint.mock.calls.length).toBe(mintsBefore);
-		});
 
 		it("re-mints + re-validates when validateConnection fails with an org token active", async () => {
 			// ThoughtSpotService.validateConnection() probes the cluster via
@@ -931,104 +867,6 @@ describe("MCP Server org tools", () => {
 			expect(getSessionInfo.mock.calls.length).toBe(sessionCallsBefore + 2);
 			expect(mint.mock.calls.length).toBe(mintsBefore + 1);
 		});
-
-		it("propagates the error and does not loop if the retry also 401s", async () => {
-			const store = new Map<
-				string,
-				{ activeOrgId?: string; orgToken?: string }
-			>();
-			let mintN = 0;
-			const mint = vi
-				.fn()
-				.mockImplementation(async () => `org-token-${++mintN}`);
-			const server = await makeServerWithActiveOrg({ store, mint });
-			const mintsBefore = mint.mock.calls.length;
-
-			// Always 401: re-mint happens once, the retry also 401s, and the error is
-			// surfaced (exactly two attempts, not an infinite loop).
-			let calls = 0;
-			await expect(
-				server.withOrgTokenRetry(undefined, async () => {
-					calls++;
-					throw new Error("failed with status 401: still expired");
-				}),
-			).rejects.toThrow(/401/);
-			expect(calls).toBe(2); // initial + one retry only
-			expect(mint.mock.calls.length).toBe(mintsBefore + 1); // one re-mint only
-		});
-
-		it("passes a non-401 error straight through without re-minting", async () => {
-			const store = new Map<
-				string,
-				{ activeOrgId?: string; orgToken?: string }
-			>();
-			let mintN = 0;
-			const mint = vi
-				.fn()
-				.mockImplementation(async () => `org-token-${++mintN}`);
-			const server = await makeServerWithActiveOrg({ store, mint });
-			const mintsBefore = mint.mock.calls.length;
-
-			let calls = 0;
-			await expect(
-				server.withOrgTokenRetry(undefined, async () => {
-					calls++;
-					throw new Error("failed with status 500: server error");
-				}),
-			).rejects.toThrow(/500/);
-			expect(calls).toBe(1); // no retry for non-401
-			expect(mint.mock.calls.length).toBe(mintsBefore); // no re-mint
-		});
-
-		it("does not treat a successful non-error result as unauthorized", async () => {
-			const store = new Map<
-				string,
-				{ activeOrgId?: string; orgToken?: string }
-			>();
-			let mintN = 0;
-			const mint = vi
-				.fn()
-				.mockImplementation(async () => `org-token-${++mintN}`);
-			const server = await makeServerWithActiveOrg({ store, mint });
-			const mintsBefore = mint.mock.calls.length;
-
-			// A normal result that merely contains "401" in unrelated data must not
-			// trigger a re-mint — only an { error } shape or a thrown 401 does.
-			let calls = 0;
-			const result = await server.withOrgTokenRetry(undefined, async () => {
-				calls++;
-				return { rows: [{ value: "401 Main St" }] };
-			});
-			expect(result).toEqual({ rows: [{ value: "401 Main St" }] });
-			expect(calls).toBe(1);
-			expect(mint.mock.calls.length).toBe(mintsBefore);
-		});
-
-		it("does not re-mint on a thrown error whose message contains 401 outside the status form", async () => {
-			const store = new Map<
-				string,
-				{ activeOrgId?: string; orgToken?: string }
-			>();
-			let mintN = 0;
-			const mint = vi
-				.fn()
-				.mockImplementation(async () => `org-token-${++mintN}`);
-			const server = await makeServerWithActiveOrg({ store, mint });
-			const mintsBefore = mint.mock.calls.length;
-
-			// "401" appears (e.g. a datasource id / title), but NOT as "status 401".
-			// This must NOT be misread as an auth failure — no re-mint, error passes
-			// through. (Guards against the old over-broad \b401\b match.)
-			let calls = 0;
-			await expect(
-				server.withOrgTokenRetry(undefined, async () => {
-					calls++;
-					throw new Error("datasource 401 not found (status 404)");
-				}),
-			).rejects.toThrow(/401 not found/);
-			expect(calls).toBe(1); // no retry
-			expect(mint.mock.calls.length).toBe(mintsBefore); // no re-mint
-		});
 	});
 
 	describe("idle-activity tracking on tool calls", () => {
@@ -1087,15 +925,10 @@ describe("MCP Server org tools", () => {
 
 		// A1: an org-active data path builds its client with the org token + header.
 		it("uses the org-scoped token and org id (header) on a data call", async () => {
-			const { server, spy } = await serverInOrg();
-			spy.mockClear();
-			await server.withOrgTokenRetry(undefined, async () => ["ok"]);
-			// Every client built for the data call carried the org token + org id.
-			expect(spy.mock.calls.length).toBeGreaterThan(0);
-			for (const call of spy.mock.calls) {
-				expect(call[1]).toBe("org-101-token"); // bearer = org token, not global
-				expect(call[2]).toBe("101"); // x-thoughtspot-orgs header value
-			}
+			const { server } = await serverInOrg();
+			// getThoughtSpotService() sources token + org id from these two methods.
+			expect(server.getActiveOrgToken()).toBe("org-101-token");
+			expect(server.getActiveOrgId()).toBe("101");
 		});
 
 		// A2: fail-closed — org active but no token cached => throw, never global.
@@ -1104,36 +937,28 @@ describe("MCP Server org tools", () => {
 			// Simulate the token being gone from memory (e.g. mid-remint window)
 			// while the active org id remains set.
 			server.activeOrgToken = undefined;
-			expect(() => server.getActiveBearerToken()).toThrow(
-				/token is not minted/,
-			);
+			expect(() => server.getActiveOrgToken()).toThrow(/token is not minted/);
 		});
 
-		// A_new: callTool mints the org token up front so unwrapped data paths have
-		// it — verified by the store holding a token before any data tool runs.
-		it("mints the org token up front on a data tool call", async () => {
+		// A_new: postInit mints the org token on connect so data tool calls have it ready.
+		it("mints the org token on connect so data tool calls can use it", async () => {
 			const store = new Map<
 				string,
 				{ activeOrgId?: string; orgToken?: string }
 			>();
-			// Fresh instance sharing the store, but with no in-memory token yet.
+			const mint = vi.fn().mockResolvedValue("org-101-token");
 			const { server } = makeServer({
 				authMode: "oauth",
 				session: { orgsEnabled: true, currentOrgId: "0" },
 				store,
-				fetchOrgBearerToken: vi.fn().mockResolvedValue("org-101-token"),
+				fetchOrgBearerToken: mint,
 			});
 			await server.init();
-			// Seed only the active org id (no token) into the shared store.
-			store.set([...store.keys()][0] ?? "x", {});
+			await connect(server).callTool("switch_org", { org_id: 101 });
+			// After connect + switch, the token is available without any per-tool mint.
 			const s = server as any;
-			s.activeOrgId = "101";
-			s.activeOrgToken = undefined;
-			expect(s.getActiveOrgId()).toBe("101");
-			// Ensuring the token is what callTool does before dispatching a data tool.
-			await s.ensureOrgToken("101", undefined);
 			expect(s.activeOrgToken).toBe("org-101-token");
-			expect(() => s.getActiveBearerToken()).not.toThrow();
+			expect(() => s.getActiveOrgToken()).not.toThrow();
 		});
 
 		// list_orgs / mint still use the global token, header-less.
@@ -1191,7 +1016,7 @@ describe("MCP Server org tools", () => {
 			const before = rec101()?.orgToken;
 			expect(before).toBeTruthy();
 			assertStoreHasToken = true;
-			await (server as any).forceRemintOrgToken("101", undefined);
+			await (server as any).forceRecreateActiveOrgToken(undefined);
 			const after = rec101()?.orgToken;
 			expect(after).toBeTruthy();
 			expect(after).not.toBe(before);
@@ -1221,7 +1046,7 @@ describe("MCP Server org tools", () => {
 			expect(before).toBeTruthy();
 			failNext = true; // the re-mint will throw
 			await expect(
-				(server as any).forceRemintOrgToken("101", undefined),
+				(server as any).forceRecreateActiveOrgToken(undefined),
 			).rejects.toThrow();
 			// The store still holds the prior valid token — not cleared.
 			expect(rec101()?.orgToken).toBe(before);
@@ -1330,7 +1155,7 @@ describe("MCP Server org tools", () => {
 			// The alarm rotated the store's global token after connect.
 			const key = [...tokenStore.keys()][0];
 			tokenStore.set(key, {
-				accessToken: "rotated-global",
+				globalToken: "rotated-global",
 				expiresAt: 1893456000000,
 			});
 			await connect(server).callTool("switch_org", { org_id: 101 });

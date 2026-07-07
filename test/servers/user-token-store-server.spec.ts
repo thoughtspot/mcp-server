@@ -104,25 +104,31 @@ describe("UserTokenStoreSQLite", () => {
 		});
 
 		it("returns 404 for a valid operation with the wrong HTTP method", async () => {
-			const res = await server.fetch(makeRequest("DELETE", "token-store"));
+			const res = await server.fetch(
+				makeRequest("DELETE", "global-token-data"),
+			);
 			expect(res.status).toBe(404);
 		});
 	});
 
-	describe("active-org", () => {
+	describe("active-org-id-and-token", () => {
 		it("returns nulls when nothing is set", async () => {
-			const res = await server.fetch(makeRequest("GET", "active-org"));
+			const res = await server.fetch(
+				makeRequest("GET", "active-org-id-and-token"),
+			);
 			expect(await res.json()).toEqual({ activeOrgId: null, orgToken: null });
 		});
 
 		it("sets the active org and (optional) token", async () => {
 			await server.fetch(
-				makeRequest("POST", "active-org", {
+				makeRequest("POST", "active-org-id-and-token", {
 					activeOrgId: "101",
 					orgToken: "org-tok",
 				}),
 			);
-			const res = await server.fetch(makeRequest("GET", "active-org"));
+			const res = await server.fetch(
+				makeRequest("GET", "active-org-id-and-token"),
+			);
 			expect(await res.json()).toEqual({
 				activeOrgId: "101",
 				orgToken: "org-tok",
@@ -131,22 +137,22 @@ describe("UserTokenStoreSQLite", () => {
 
 		it("clears the stored token when set without one (org change)", async () => {
 			await server.fetch(
-				makeRequest("POST", "active-org", {
+				makeRequest("POST", "active-org-id-and-token", {
 					activeOrgId: "101",
 					orgToken: "org-tok",
 				}),
 			);
 			// Re-set the active org with no token -> token must be cleared.
 			await server.fetch(
-				makeRequest("POST", "active-org", { activeOrgId: "202" }),
+				makeRequest("POST", "active-org-id-and-token", { activeOrgId: "202" }),
 			);
 			expect(mock.store.has("active-org-token")).toBe(false);
-			expect(mock.store.get("active-org")).toBe("202");
+			expect(mock.store.get("active-org-id")).toBe("202");
 		});
 
 		it("PRESERVES the stored token when re-setting the SAME org id (fan-out safety)", async () => {
 			await server.fetch(
-				makeRequest("POST", "active-org", {
+				makeRequest("POST", "active-org-id-and-token", {
 					activeOrgId: "101",
 					orgToken: "org-tok",
 				}),
@@ -155,17 +161,17 @@ describe("UserTokenStoreSQLite", () => {
 			// token (postInit default path). The token another session just minted
 			// must NOT be deleted, or the fan-out would thrash re-minting.
 			await server.fetch(
-				makeRequest("POST", "active-org", { activeOrgId: "101" }),
+				makeRequest("POST", "active-org-id-and-token", { activeOrgId: "101" }),
 			);
 			expect(mock.store.get("active-org-token")).toBe("org-tok");
-			expect(mock.store.get("active-org")).toBe("101");
+			expect(mock.store.get("active-org-id")).toBe("101");
 		});
 	});
 
 	describe("POST /active-org-token clear", () => {
 		it("deletes the stored org token when given an empty/null token", async () => {
 			await server.fetch(
-				makeRequest("POST", "active-org", {
+				makeRequest("POST", "active-org-id-and-token", {
 					activeOrgId: "101",
 					orgToken: "org-tok",
 				}),
@@ -177,7 +183,7 @@ describe("UserTokenStoreSQLite", () => {
 			);
 			expect(mock.store.has("active-org-token")).toBe(false);
 			// The active org id itself is untouched.
-			expect(mock.store.get("active-org")).toBe("101");
+			expect(mock.store.get("active-org-id")).toBe("101");
 		});
 
 		it("stores the org token when given a non-empty value", async () => {
@@ -194,8 +200,8 @@ describe("UserTokenStoreSQLite", () => {
 
 		function seedBody(overrides: Record<string, unknown> = {}) {
 			return {
-				accessToken: "access-1",
-				refreshToken: "refresh-1",
+				globalToken: "access-1",
+				globalRefreshToken: "refresh-1",
 				instanceUrl: "https://ts.cloud",
 				...overrides,
 			};
@@ -204,7 +210,7 @@ describe("UserTokenStoreSQLite", () => {
 		it("seeds the store and arms an ~11h refresh alarm", async () => {
 			const before = Date.now();
 			const res = await server.fetch(
-				makeRequest("POST", "token-store", seedBody()),
+				makeRequest("POST", "global-token-data", seedBody()),
 			);
 			expect(res.status).toBe(200);
 			expect(mock.alarm).not.toBeNull();
@@ -214,22 +220,29 @@ describe("UserTokenStoreSQLite", () => {
 		});
 
 		it("stamps lastSeenAt on first seed but preserves it on re-seeds", async () => {
-			await server.fetch(makeRequest("POST", "token-store", seedBody()));
-			const after1 = mock.store.get("token-store") as { lastSeenAt?: number };
+			await server.fetch(makeRequest("POST", "global-token-data", seedBody()));
+			const after1 = mock.store.get("global-token-details") as {
+				lastSeenAt?: number;
+			};
 			expect(typeof after1.lastSeenAt).toBe("number");
 			const first = after1.lastSeenAt;
-			await server.fetch(makeRequest("POST", "token-store", seedBody()));
-			const after2 = mock.store.get("token-store") as { lastSeenAt?: number };
+			await server.fetch(makeRequest("POST", "global-token-data", seedBody()));
+			const after2 = mock.store.get("global-token-details") as {
+				lastSeenAt?: number;
+			};
 			expect(after2.lastSeenAt).toBe(first);
 		});
 
 		it("refreshes the token and re-arms ~11h on success", async () => {
-			await server.fetch(makeRequest("POST", "token-store", seedBody()));
+			await server.fetch(makeRequest("POST", "global-token-data", seedBody()));
 			const fetchSpy = vi
 				.spyOn(globalThis, "fetch")
 				.mockResolvedValue(
 					new Response(
-						JSON.stringify({ token: "access-2", refreshToken: "refresh-1" }),
+						JSON.stringify({
+							token: "access-2",
+							globalRefreshToken: "refresh-1",
+						}),
 						{ status: 200 },
 					),
 				);
@@ -237,15 +250,17 @@ describe("UserTokenStoreSQLite", () => {
 			await server.alarm();
 			fetchSpy.mockRestore();
 
-			const stored = mock.store.get("token-store") as { accessToken: string };
-			expect(stored.accessToken).toBe("access-2");
+			const stored = mock.store.get("global-token-details") as {
+				globalToken: string;
+			};
+			expect(stored.globalToken).toBe("access-2");
 			const delay = (mock.alarm as number) - before;
 			expect(delay).toBeGreaterThan(ELEVEN_HOURS_MS - 60_000);
 			expect(delay).toBeLessThan(ELEVEN_HOURS_MS + 60_000);
 		});
 
 		it("re-arms (does NOT stop) when a refresh fails, leaving the old token", async () => {
-			await server.fetch(makeRequest("POST", "token-store", seedBody()));
+			await server.fetch(makeRequest("POST", "global-token-data", seedBody()));
 			const fetchSpy = vi
 				.spyOn(globalThis, "fetch")
 				.mockResolvedValue(new Response("nope", { status: 503 }));
@@ -255,8 +270,10 @@ describe("UserTokenStoreSQLite", () => {
 
 			// Old token kept (reads still work), and the alarm is re-armed for ~11h
 			// so the next regular tick (<24h) retries.
-			const stored = mock.store.get("token-store") as { accessToken: string };
-			expect(stored.accessToken).toBe("access-1");
+			const stored = mock.store.get("global-token-details") as {
+				globalToken: string;
+			};
+			expect(stored.globalToken).toBe("access-1");
 			expect(mock.alarm).not.toBeNull();
 			const delay = (mock.alarm as number) - before;
 			expect(delay).toBeGreaterThan(ELEVEN_HOURS_MS - 60_000);
@@ -265,15 +282,18 @@ describe("UserTokenStoreSQLite", () => {
 
 		it("abandons the session (deletes token + active-org, no re-arm) after 14 idle days", async () => {
 			// Seed, then also set active-org state and back-date lastSeenAt past the TTL.
-			await server.fetch(makeRequest("POST", "token-store", seedBody()));
+			await server.fetch(makeRequest("POST", "global-token-data", seedBody()));
 			await server.fetch(
-				makeRequest("POST", "active-org", {
+				makeRequest("POST", "active-org-id-and-token", {
 					activeOrgId: "101",
 					orgToken: "org-tok",
 				}),
 			);
-			const stored = mock.store.get("token-store") as Record<string, unknown>;
-			mock.store.set("token-store", {
+			const stored = mock.store.get("global-token-details") as Record<
+				string,
+				unknown
+			>;
+			mock.store.set("global-token-details", {
 				...stored,
 				lastSeenAt: Date.now() - FOURTEEN_DAYS_MS - 1000,
 			});
@@ -283,8 +303,8 @@ describe("UserTokenStoreSQLite", () => {
 			await server.alarm();
 
 			// Token + active-org state deleted; refresh NOT attempted; alarm NOT re-armed.
-			expect(mock.store.has("token-store")).toBe(false);
-			expect(mock.store.has("active-org")).toBe(false);
+			expect(mock.store.has("global-token-details")).toBe(false);
+			expect(mock.store.has("active-org-id")).toBe(false);
 			expect(mock.store.has("active-org-token")).toBe(false);
 			expect(fetchSpy).not.toHaveBeenCalled();
 			expect(mock.storage.setAlarm).not.toHaveBeenCalled();
@@ -292,50 +312,61 @@ describe("UserTokenStoreSQLite", () => {
 		});
 
 		it("POST /touch records activity, throttled to ~1/hour", async () => {
-			await server.fetch(makeRequest("POST", "token-store", seedBody()));
+			await server.fetch(makeRequest("POST", "global-token-data", seedBody()));
 			// Back-date lastSeenAt > 1h so the next touch writes.
-			const stored = mock.store.get("token-store") as Record<string, unknown>;
+			const stored = mock.store.get("global-token-details") as Record<
+				string,
+				unknown
+			>;
 			const oldSeen = Date.now() - 2 * 60 * 60 * 1000;
-			mock.store.set("token-store", { ...stored, lastSeenAt: oldSeen });
+			mock.store.set("global-token-details", {
+				...stored,
+				lastSeenAt: oldSeen,
+			});
 
-			await server.fetch(makeRequest("POST", "touch"));
+			await server.fetch(makeRequest("POST", "last-seen"));
 			const afterFirst = (
-				mock.store.get("token-store") as { lastSeenAt: number }
+				mock.store.get("global-token-details") as { lastSeenAt: number }
 			).lastSeenAt;
 			expect(afterFirst).toBeGreaterThan(oldSeen);
 
 			// A second immediate touch is within the throttle window -> no change.
-			await server.fetch(makeRequest("POST", "touch"));
+			await server.fetch(makeRequest("POST", "last-seen"));
 			const afterSecond = (
-				mock.store.get("token-store") as { lastSeenAt: number }
+				mock.store.get("global-token-details") as { lastSeenAt: number }
 			).lastSeenAt;
 			expect(afterSecond).toBe(afterFirst);
 		});
 
 		it("POST /touch is a no-op when no token store exists", async () => {
-			const res = await server.fetch(makeRequest("POST", "touch"));
+			const res = await server.fetch(makeRequest("POST", "last-seen"));
 			expect(res.status).toBe(200);
-			expect(mock.store.has("token-store")).toBe(false);
+			expect(mock.store.has("global-token-details")).toBe(false);
 		});
 
 		it("POST /touch writes immediately when there is no prior lastSeenAt", async () => {
 			// Write a token store WITHOUT lastSeenAt directly (legacy / never-touched).
-			mock.store.set("token-store", {
-				accessToken: "access-1",
-				refreshToken: "refresh-1",
+			mock.store.set("global-token-details", {
+				globalToken: "access-1",
+				globalRefreshToken: "refresh-1",
 				instanceUrl: "https://ts.cloud",
 			});
 
-			await server.fetch(makeRequest("POST", "touch"));
-			const after = mock.store.get("token-store") as { lastSeenAt?: number };
+			await server.fetch(makeRequest("POST", "last-seen"));
+			const after = mock.store.get("global-token-details") as {
+				lastSeenAt?: number;
+			};
 			expect(typeof after.lastSeenAt).toBe("number");
 		});
 
 		it("refreshes (does NOT abandon) when idle is just under the 14-day TTL", async () => {
-			await server.fetch(makeRequest("POST", "token-store", seedBody()));
-			const stored = mock.store.get("token-store") as Record<string, unknown>;
+			await server.fetch(makeRequest("POST", "global-token-data", seedBody()));
+			const stored = mock.store.get("global-token-details") as Record<
+				string,
+				unknown
+			>;
 			// One hour short of the TTL — must still refresh, not delete.
-			mock.store.set("token-store", {
+			mock.store.set("global-token-details", {
 				...stored,
 				lastSeenAt: Date.now() - (FOURTEEN_DAYS_MS - 60 * 60 * 1000),
 			});
@@ -348,14 +379,16 @@ describe("UserTokenStoreSQLite", () => {
 			await server.alarm();
 			fetchSpy.mockRestore();
 
-			expect(mock.store.has("token-store")).toBe(true);
-			const after = mock.store.get("token-store") as { accessToken: string };
-			expect(after.accessToken).toBe("access-2");
+			expect(mock.store.has("global-token-details")).toBe(true);
+			const after = mock.store.get("global-token-details") as {
+				globalToken: string;
+			};
+			expect(after.globalToken).toBe("access-2");
 			expect(mock.alarm).not.toBeNull();
 		});
 
 		it("recovers on the next interval: failure then success re-arms cleanly", async () => {
-			await server.fetch(makeRequest("POST", "token-store", seedBody()));
+			await server.fetch(makeRequest("POST", "global-token-data", seedBody()));
 
 			// First alarm: refresh fails -> old token kept, alarm re-armed.
 			const failSpy = vi
@@ -364,7 +397,8 @@ describe("UserTokenStoreSQLite", () => {
 			await server.alarm();
 			failSpy.mockRestore();
 			expect(
-				(mock.store.get("token-store") as { accessToken: string }).accessToken,
+				(mock.store.get("global-token-details") as { globalToken: string })
+					.globalToken,
 			).toBe("access-1");
 			expect(mock.alarm).not.toBeNull();
 
@@ -377,16 +411,20 @@ describe("UserTokenStoreSQLite", () => {
 			await server.alarm();
 			okSpy.mockRestore();
 			expect(
-				(mock.store.get("token-store") as { accessToken: string }).accessToken,
+				(mock.store.get("global-token-details") as { globalToken: string })
+					.globalToken,
 			).toBe("access-2");
 			expect(mock.alarm).not.toBeNull();
 		});
 
 		it("preserves lastSeenAt across a successful refresh", async () => {
-			await server.fetch(makeRequest("POST", "token-store", seedBody()));
+			await server.fetch(makeRequest("POST", "global-token-data", seedBody()));
 			const seen = Date.now() - 3 * 60 * 60 * 1000;
-			const stored = mock.store.get("token-store") as Record<string, unknown>;
-			mock.store.set("token-store", { ...stored, lastSeenAt: seen });
+			const stored = mock.store.get("global-token-details") as Record<
+				string,
+				unknown
+			>;
+			mock.store.set("global-token-details", { ...stored, lastSeenAt: seen });
 			const fetchSpy = vi
 				.spyOn(globalThis, "fetch")
 				.mockResolvedValue(
@@ -396,19 +434,25 @@ describe("UserTokenStoreSQLite", () => {
 			await server.alarm();
 			fetchSpy.mockRestore();
 
-			const after = mock.store.get("token-store") as {
-				accessToken: string;
+			const after = mock.store.get("global-token-details") as {
+				globalToken: string;
 				lastSeenAt: number;
 			};
-			expect(after.accessToken).toBe("access-2");
+			expect(after.globalToken).toBe("access-2");
 			expect(after.lastSeenAt).toBe(seen); // activity tracking survives refresh
 		});
 
 		it("keeps the prior expiresAt when the refresh response omits one", async () => {
-			await server.fetch(makeRequest("POST", "token-store", seedBody()));
+			await server.fetch(makeRequest("POST", "global-token-data", seedBody()));
 			const priorExpiry = Date.now() + 24 * 60 * 60 * 1000;
-			const stored = mock.store.get("token-store") as Record<string, unknown>;
-			mock.store.set("token-store", { ...stored, expiresAt: priorExpiry });
+			const stored = mock.store.get("global-token-details") as Record<
+				string,
+				unknown
+			>;
+			mock.store.set("global-token-details", {
+				...stored,
+				expiresAt: priorExpiry,
+			});
 			// Refresh response has a token but NO tokenExpiryDuration.
 			const fetchSpy = vi
 				.spyOn(globalThis, "fetch")
@@ -419,21 +463,21 @@ describe("UserTokenStoreSQLite", () => {
 			await server.alarm();
 			fetchSpy.mockRestore();
 
-			const after = mock.store.get("token-store") as {
-				accessToken: string;
+			const after = mock.store.get("global-token-details") as {
+				globalToken: string;
 				expiresAt?: number;
 			};
-			expect(after.accessToken).toBe("access-2");
+			expect(after.globalToken).toBe("access-2");
 			// Expiry tracking preserved (not dropped to undefined), so reconnect
 			// self-heal still works.
 			expect(after.expiresAt).toBe(priorExpiry);
 		});
 
 		it("seeding twice does not stack alarms (idempotent arm)", async () => {
-			await server.fetch(makeRequest("POST", "token-store", seedBody()));
+			await server.fetch(makeRequest("POST", "global-token-data", seedBody()));
 			mock.storage.setAlarm.mockClear();
 			// Re-seed (e.g. a later connect) — alarm already armed, must not re-arm.
-			await server.fetch(makeRequest("POST", "token-store", seedBody()));
+			await server.fetch(makeRequest("POST", "global-token-data", seedBody()));
 			expect(mock.storage.setAlarm).not.toHaveBeenCalled();
 		});
 	});

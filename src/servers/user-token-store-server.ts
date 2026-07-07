@@ -1,12 +1,12 @@
-const ACTIVE_ORG_KEY = "active-org";
+const ACTIVE_ORG_KEY = "active-org-id";
 const ORG_TOKEN_KEY = "active-org-token";
-const TOKEN_STORE_KEY = "token-store";
-const TOKEN_REFRESH_INTERVAL_MS = 11 * 60 * 60 * 1000;
+const GLOBAL_TOKEN_KEY = "global-token-details";
+const GLOBAL_TOKEN_REFRESH_INTERVAL_MS = 11 * 60 * 60 * 1000;
 const SESSION_IDLE_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 
-export type TokenStore = {
-	accessToken: string;
-	refreshToken: string;
+export type GlobalTokenData = {
+	globalToken: string;
+	globalRefreshToken: string;
 	instanceUrl: string;
 	expiresAt?: number;
 	lastSeenAt?: number;
@@ -28,7 +28,7 @@ export class UserTokenStoreSQLite {
 
 		try {
 			switch (`${request.method} /${operation}`) {
-				case "GET /active-org": {
+				case "GET /active-org-id-and-token": {
 					const [activeOrgId, orgToken] = await Promise.all([
 						this.state.storage.get<string>(ACTIVE_ORG_KEY),
 						this.state.storage.get<string>(ORG_TOKEN_KEY),
@@ -41,7 +41,7 @@ export class UserTokenStoreSQLite {
 
 				// Clear the token only on a real org change; re-setting the same org
 				// (every cold connect) must not delete a token a sibling just minted.
-				case "POST /active-org": {
+				case "POST /active-org-id-and-token": {
 					const body = (await request.json()) as {
 						activeOrgId: string;
 						orgToken?: string | null;
@@ -75,22 +75,23 @@ export class UserTokenStoreSQLite {
 					return Response.json({ ok: true });
 				}
 
-				case "GET /token-store": {
+				case "GET /global-token-data": {
 					const store =
-						(await this.state.storage.get<TokenStore>(TOKEN_STORE_KEY)) ?? null;
+						(await this.state.storage.get<GlobalTokenData>(GLOBAL_TOKEN_KEY)) ??
+						null;
 					return Response.json({
-						accessToken: store?.accessToken ?? null,
+						globalToken: store?.globalToken ?? null,
 						expiresAt: store?.expiresAt ?? null,
 					});
 				}
 
-				case "POST /token-store": {
-					const body = (await request.json()) as TokenStore;
-					await this.seedTokenStore(body);
+				case "POST /global-token-data": {
+					const body = (await request.json()) as GlobalTokenData;
+					await this.seedGlobalToken(body);
 					return Response.json({ ok: true });
 				}
 
-				case "POST /touch": {
+				case "POST /last-seen": {
 					await this.touchLastSeen();
 					return Response.json({ ok: true });
 				}
@@ -105,27 +106,33 @@ export class UserTokenStoreSQLite {
 		}
 	}
 
-	// Idempotent: re-seeding updates the stored token and arms the alarm once.
-	// lastSeenAt is set on first seed (starts the idle clock) and preserved on
-	// re-seeds; only touch() (tool calls) advances it.
-	// The caller (loadOrSeedWarmToken) already decided to use the props token
-	// over the stored one — just write it and arm the alarm.
-	private async seedTokenStore(store: TokenStore): Promise<void> {
-		const existing = await this.state.storage.get<TokenStore>(TOKEN_STORE_KEY);
-		const toStore: TokenStore = {
+	private async seedGlobalToken(store: GlobalTokenData): Promise<void> {
+		const existing =
+			await this.state.storage.get<GlobalTokenData>(GLOBAL_TOKEN_KEY);
+		const existingAlarm = await this.state.storage.getAlarm();
+		if (existing?.globalToken === store.globalToken) {
+			if (existingAlarm == null) {
+				await this.state.storage.setAlarm(
+					Date.now() + GLOBAL_TOKEN_REFRESH_INTERVAL_MS,
+				);
+			}
+			return;
+		}
+		const toStore: GlobalTokenData = {
 			...store,
 			lastSeenAt: existing?.lastSeenAt ?? Date.now(),
 		};
-		await this.state.storage.put<TokenStore>(TOKEN_STORE_KEY, toStore);
-		const existingAlarm = await this.state.storage.getAlarm();
+		await this.state.storage.put<GlobalTokenData>(GLOBAL_TOKEN_KEY, toStore);
 		if (existingAlarm == null) {
-			await this.state.storage.setAlarm(Date.now() + TOKEN_REFRESH_INTERVAL_MS);
+			await this.state.storage.setAlarm(
+				Date.now() + GLOBAL_TOKEN_REFRESH_INTERVAL_MS,
+			);
 		}
 	}
 
-	// Stamp last activity, throttled to ~1/hour so fanned-out calls don't each write.
 	private async touchLastSeen(): Promise<void> {
-		const store = await this.state.storage.get<TokenStore>(TOKEN_STORE_KEY);
+		const store =
+			await this.state.storage.get<GlobalTokenData>(GLOBAL_TOKEN_KEY);
 		if (!store) {
 			return;
 		}
@@ -134,15 +141,15 @@ export class UserTokenStoreSQLite {
 		if (store.lastSeenAt && now - store.lastSeenAt < THROTTLE_MS) {
 			return;
 		}
-		await this.state.storage.put<TokenStore>(TOKEN_STORE_KEY, {
+		await this.state.storage.put<GlobalTokenData>(GLOBAL_TOKEN_KEY, {
 			...store,
 			lastSeenAt: now,
 		});
 	}
 
-	// Refresh the keep-warm token and re-arm. Past the idle TTL, abandon instead.
-	private async refreshTokenStore(): Promise<void> {
-		const store = await this.state.storage.get<TokenStore>(TOKEN_STORE_KEY);
+	private async refreshGlobalToken(): Promise<void> {
+		const store =
+			await this.state.storage.get<GlobalTokenData>(GLOBAL_TOKEN_KEY);
 		if (!store) {
 			return;
 		}
@@ -153,7 +160,7 @@ export class UserTokenStoreSQLite {
 		) {
 			console.log("Keep-warm session idle past TTL; abandoning");
 			await this.state.storage.delete([
-				TOKEN_STORE_KEY,
+				GLOBAL_TOKEN_KEY,
 				ACTIVE_ORG_KEY,
 				ORG_TOKEN_KEY,
 			]);
@@ -169,8 +176,8 @@ export class UserTokenStoreSQLite {
 						"Content-Type": "application/json",
 						Accept: "application/json",
 						"user-agent": "ThoughtSpot-ts-client",
-						Authorization: `Bearer ${store.accessToken}`,
-						"X-Refresh-Token": store.refreshToken,
+						Authorization: `Bearer ${store.globalToken}`,
+						"X-Refresh-Token": store.globalRefreshToken,
 					},
 				},
 			);
@@ -179,35 +186,40 @@ export class UserTokenStoreSQLite {
 				throw new Error(`status ${response.status}: ${text}`);
 			}
 			const data = (await response.json()) as any;
-			const accessToken = data?.token ?? data?.data?.token;
-			if (!accessToken || typeof accessToken !== "string") {
+			const globalToken = data?.token ?? data?.data?.token;
+			if (!globalToken || typeof globalToken !== "string") {
 				throw new Error("no token in refresh response");
 			}
-			const refreshToken =
-				data?.refreshToken ?? data?.data?.refreshToken ?? store.refreshToken;
+			const globalRefreshToken =
+				data?.refreshToken ??
+				data?.data?.refreshToken ??
+				store.globalRefreshToken;
 			const newExpiresAt =
 				data?.tokenExpiryDuration ?? data?.data?.tokenExpiryDuration;
-			await this.state.storage.put<TokenStore>(TOKEN_STORE_KEY, {
-				accessToken,
-				refreshToken,
+			await this.state.storage.put<GlobalTokenData>(GLOBAL_TOKEN_KEY, {
+				globalToken,
+				globalRefreshToken,
 				instanceUrl: store.instanceUrl,
 				// Keep the prior expiry if the response omits one.
 				expiresAt:
 					typeof newExpiresAt === "number" ? newExpiresAt : store.expiresAt,
 				lastSeenAt: store.lastSeenAt,
 			});
-			await this.state.storage.setAlarm(Date.now() + TOKEN_REFRESH_INTERVAL_MS);
+			await this.state.storage.setAlarm(
+				Date.now() + GLOBAL_TOKEN_REFRESH_INTERVAL_MS,
+			);
 		} catch (error) {
 			console.error(
 				"Token keep-warm refresh failed; will retry on next interval:",
 				error instanceof Error ? error.message : String(error),
 			);
-			// Re-arm anyway; the stored token stays intact so reads work until then.
-			await this.state.storage.setAlarm(Date.now() + TOKEN_REFRESH_INTERVAL_MS);
+			await this.state.storage.setAlarm(
+				Date.now() + GLOBAL_TOKEN_REFRESH_INTERVAL_MS,
+			);
 		}
 	}
 
 	async alarm(): Promise<void> {
-		await this.refreshTokenStore();
+		await this.refreshGlobalToken();
 	}
 }
