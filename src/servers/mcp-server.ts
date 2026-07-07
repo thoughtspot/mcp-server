@@ -44,14 +44,10 @@ import {
 } from "./version-registry";
 
 export class MCPServer extends BaseMCPServer {
-	// Mirrors of the shared per-user store (the durable source of truth, shared so
-	// the token is minted once across the user's fanned-out sessions).
 	private activeOrgId: string | undefined;
 	private activeOrgToken: string | undefined;
 	private warmGlobalToken: string | undefined;
-	// Decided once in postInit: does this connection's grant carry a refresh token?
-	// A pre-multi-org grant does not, so it keeps the old (no-org) behavior until the
-	// user re-authenticates. Everything multi-org keys off this flag.
+	// False for pre-multi-org grants (no refresh token) — keeps old behavior until re-auth.
 	private grantHasRefreshToken = false;
 
 	constructor(ctx: Context) {
@@ -67,9 +63,6 @@ export class MCPServer extends BaseMCPServer {
 	}
 
 	protected getActiveBearerToken(): string {
-		// An active org must use its org-scoped token — never the global token, which
-		// would break org isolation. ensureActiveOrgToken guarantees it is minted
-		// before any data call, so a missing token here is a bug, not a fallback.
 		if (this.activeOrgId) {
 			if (!this.activeOrgToken) {
 				throw new Error(
@@ -81,7 +74,6 @@ export class MCPServer extends BaseMCPServer {
 		return this.getGlobalToken();
 	}
 
-	// Re-read on each org-aware call so a switch in another session is reflected.
 	private async loadActiveOrg(): Promise<void> {
 		const storage = await this.getStorageService();
 		const stored = await storage.getActiveOrg();
@@ -89,8 +81,6 @@ export class MCPServer extends BaseMCPServer {
 		this.activeOrgToken = stored.orgToken ?? undefined;
 	}
 
-	// Pass orgToken to commit id+token atomically (validated switch); else the
-	// prior token is cleared and re-minted lazily.
 	private async setActiveOrg(orgId: string, orgToken?: string): Promise<void> {
 		this.activeOrgId = orgId;
 		this.activeOrgToken = orgToken;
@@ -98,8 +88,6 @@ export class MCPServer extends BaseMCPServer {
 		await storage.setActiveOrg(orgId, orgToken);
 	}
 
-	// Reuse the shared-store token if held, else mint from the global token and
-	// persist it (so the fan-out mints once).
 	private async ensureOrgToken(
 		orgId: string,
 		recorder?: MetricsRecorder,
@@ -120,8 +108,6 @@ export class MCPServer extends BaseMCPServer {
 		return orgToken;
 	}
 
-	// HTTP status from a thrown error or `{ error }` result: typed
-	// ThoughtSpotApiError, else parsed from a "status NNN" message.
 	private apiErrorStatus(value: unknown): number | undefined {
 		const err =
 			value instanceof Error
@@ -138,10 +124,6 @@ export class MCPServer extends BaseMCPServer {
 		return match ? Number(match[1]) : undefined;
 	}
 
-	// Re-mint the active org's token, recovering from a stale one. Mint first, then
-	// overwrite atomically — the store never goes tokenless, so a concurrent session
-	// never sees an active org without its token. Abort if a sibling switched org
-	// meanwhile, so we don't clobber the new org's token.
 	private async forceRemintOrgToken(
 		orgId: string,
 		recorder?: MetricsRecorder,
@@ -161,8 +143,6 @@ export class MCPServer extends BaseMCPServer {
 		await this.setActiveOrg(orgId, orgToken);
 	}
 
-	// Single re-mint+retry on a 401, only when an org token is in use (a global-token
-	// 401 passes through). Handles both thrown and `{ error }`-result 401s.
 	protected async withOrgTokenRetry<T>(
 		recorder: MetricsRecorder | undefined,
 		fn: (service: ThoughtSpotService) => Promise<T>,
@@ -177,8 +157,6 @@ export class MCPServer extends BaseMCPServer {
 			return attempt();
 		}
 
-		// Org active → the call must use the org-scoped token, never the global one
-		// (a global-token data call would break org isolation). Mint if not cached.
 		if (!this.activeOrgToken) {
 			await this.ensureOrgToken(orgId, recorder);
 		}
@@ -199,8 +177,6 @@ export class MCPServer extends BaseMCPServer {
 		}
 	}
 
-	// validateConnection maps a 401 to `false` (no throw), so withOrgTokenRetry can't
-	// see it. If it fails with an org token in use, re-mint and re-validate.
 	private async validateConnectionWithOrgRetry(
 		recorder?: MetricsRecorder,
 	): Promise<boolean> {
@@ -214,15 +190,10 @@ export class MCPServer extends BaseMCPServer {
 		return this.getThoughtSpotService(recorder).validateConnection();
 	}
 
-	// On connect (OAuth only): keep the cluster token warm, then — when org tools are
-	// available — establish the active org (prior switch wins, else session current)
-	// and mint its token. Best-effort: never break connect.
 	protected async postInit(): Promise<void> {
 		if (!this.isOAuthAuth()) {
 			return;
 		}
-		// Single source of truth for multi-org eligibility: only a grant minted by
-		// the multi-org login path carries a refresh token.
 		this.grantHasRefreshToken = typeof this.ctx.props.refreshToken === "string";
 		try {
 			await this.loadOrSeedWarmToken();
@@ -252,20 +223,11 @@ export class MCPServer extends BaseMCPServer {
 		}
 	}
 
-	// Load the keep-warm token into memory.
-	// 1. Read the stored token first (the alarm may have refreshed it).
-	// 2. If the stored token is valid and newer than props (different string, not
-	//    expired), use it directly — no re-seed needed.
-	// 3. Otherwise seed from the fresh props grant (re-issued from the OAuth grant
-	//    on every request), then re-read to confirm what was stored.
-	// This read-before-write ensures the mock and DO agree: the stored token wins
-	// without the mock needing to replicate seedTokenStore's merge logic.
 	private async loadOrSeedWarmToken(): Promise<void> {
 		const storage = await this.getStorageService();
 		const { accessToken, refreshToken, tokenExpiryDuration, instanceUrl } =
 			this.ctx.props;
 
-		// Always read first — the alarm may have refreshed the stored token.
 		const existing = await storage.getTokenStore();
 		const storedToken = existing.accessToken ?? null;
 		const storedExpiresAt = existing.expiresAt ?? null;
@@ -275,13 +237,11 @@ export class MCPServer extends BaseMCPServer {
 			storedToken && storedToken !== accessToken && !storedExpired;
 
 		if (storedIsNewer) {
-			// Stored token was alarm-refreshed and is still valid — use it.
 			this.warmGlobalToken = storedToken;
 			return;
 		}
 
 		if (accessToken && refreshToken) {
-			// Seed/update the store with the fresh props token.
 			await storage.seedTokenStore({
 				accessToken,
 				refreshToken,
@@ -295,12 +255,10 @@ export class MCPServer extends BaseMCPServer {
 			return;
 		}
 
-		// No refresh token (legacy grant): prefer valid stored token, else props.
 		this.warmGlobalToken =
 			storedToken && !storedExpired ? storedToken : accessToken;
 	}
 
-	// Fire-and-forget; throttle + idle-delete live in the DO.
 	private touchLastSeen(): void {
 		this.getStorageService()
 			.then((storage) => storage.touchLastSeen())
@@ -313,20 +271,14 @@ export class MCPServer extends BaseMCPServer {
 		return "mcp";
 	}
 
-	// Gates OAuth-only tools such as `list_orgs`.
 	protected isOAuthAuth(): boolean {
 		return this.ctx.props.authMode === "oauth";
 	}
 
-	// A grant minted before multi-org shipped has no refresh token (extendGrantProps
-	// adds it at login). Such sessions keep the pre-multi-org behavior — no org
-	// tools, no overlay — until the user re-authenticates. Decided in postInit.
 	protected hasMultiOrgGrant(): boolean {
 		return this.grantHasRefreshToken;
 	}
 
-	// Org behavior requires OAuth + orgs enabled + the v2 surface (inferred from the
-	// resolved tool set, not a label) + a multi-org grant. Fails closed.
 	protected areOrgToolsAvailable(): boolean {
 		if (
 			!this.isOAuthAuth() ||
@@ -503,9 +455,6 @@ export class MCPServer extends BaseMCPServer {
 
 		if (this.areOrgToolsAvailable()) {
 			await this.loadActiveOrg();
-			// Mint the org token up front so every data path uses it; no call falls
-			// back to the global token while an org is active. list_orgs/switch_org
-			// use the global token on their own (listing / minting) paths.
 			if (
 				this.activeOrgId &&
 				!this.activeOrgToken &&
@@ -582,7 +531,6 @@ export class MCPServer extends BaseMCPServer {
 			}
 
 			case ToolName.ListOrgs: {
-				// Defense in depth: also reject direct invocation when unavailable.
 				if (!this.areOrgToolsAvailable()) {
 					return this.createErrorResponse(
 						"The list_orgs tool is only available when authenticated via OAuth on a cluster with Orgs enabled.",
@@ -973,7 +921,6 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		).listOrgs();
 		span?.setAttribute("total_orgs", orgs.length);
 
-		// May run on a different DO than the switch — re-read the shared store.
 		await this.loadActiveOrg();
 		const activeOrgId = this.getActiveOrgId();
 
@@ -999,7 +946,6 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		const orgId = String(org_id);
 		span?.setAttribute("requested_org_id", orgId);
 
-		// Mint first to validate; commit only on success, so a bad org_id is a no-op.
 		let orgToken: string;
 		try {
 			await this.loadOrSeedWarmToken();
@@ -1011,7 +957,6 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			).fetchOrgBearerToken(globalToken, orgId);
 		} catch (error) {
 			const status = this.apiErrorStatus(error);
-			// Any 4xx = org invalid or inaccessible.
 			if (status !== undefined && status >= 400 && status < 500) {
 				return this.createErrorResponse(
 					`You do not have access to org "${orgId}", or it does not exist. Call list_orgs to see the orgs you can access.`,
@@ -1028,14 +973,8 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		this._sources = null;
 		span?.setAttribute("active_org_id", orgId);
 
-		// Datasources are org-specific — tell the client to re-list resources so it
-		// drops the previous org's datasources. Best-effort: never fail the switch.
 		try {
 			await this.sendResourceListChanged();
-			// TEMP (testing): confirm the notification path fires on switch. Remove.
-			console.log(
-				`[RESOURCE-DEBUG] sendResourceListChanged sent after switch to org ${orgId}`,
-			);
 		} catch (error) {
 			console.error(
 				"Failed to send resource list changed notification:",
