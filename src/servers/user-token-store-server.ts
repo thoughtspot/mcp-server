@@ -55,11 +55,11 @@ export class UserTokenStoreSQLite {
 					}
 					const previousOrgId =
 						await this.state.storage.get<string>(ACTIVE_ORG_KEY);
-					await this.state.storage.put<string>(
-						ACTIVE_ORG_KEY,
-						body.activeOrgId,
-					);
 					if (previousOrgId !== body.activeOrgId) {
+						await this.state.storage.put<string>(
+							ACTIVE_ORG_KEY,
+							body.activeOrgId,
+						);
 						await this.state.storage.delete(ORG_TOKEN_KEY);
 					}
 					return Response.json({ ok: true });
