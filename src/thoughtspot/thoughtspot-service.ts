@@ -22,6 +22,10 @@ import {
 import { WithSpan, getActiveSpan } from "../metrics/tracing/tracing-utils";
 import { processSendAgentConversationMessageStreamingResponse } from "../streaming-utils";
 import type {
+	SearchObjectsParams,
+	SearchObjectsResult,
+} from "./thoughtspot-client";
+import type {
 	Answer,
 	DataSource,
 	DataSourceSuggestion,
@@ -692,6 +696,7 @@ export class ThoughtSpotService {
 			UPSTREAM_OPERATION_NAMES.getSessionInfo,
 			() => (this.client as any).getSessionInfo(),
 		);
+
 		const devMixpanelToken = info.configInfo.mixpanelConfig.devSdkKey;
 		const prodMixpanelToken = info.configInfo.mixpanelConfig.prodSdkKey;
 		const mixpanelToken = info.configInfo.mixpanelConfig.production
@@ -755,6 +760,29 @@ export class ThoughtSpotService {
 		span?.setAttribute("results_count", results.length);
 
 		return results;
+	}
+
+	/**
+	 * Search for objects (answers, liveboards, worksheets, etc.) by a search term
+	 */
+	@WithSpan("search-objects")
+	async searchObjects(
+		params: SearchObjectsParams,
+	): Promise<SearchObjectsResult> {
+		const span = getActiveSpan();
+		span?.setAttribute(
+			"query",
+			Array.isArray(params.query) ? params.query.join(", ") : params.query,
+		);
+		span?.setAttribute("limit", params.limit ?? 10);
+
+		const result = await this.observeUpstreamCall(
+			UPSTREAM_OPERATION_NAMES.searchObjects,
+			() => (this.client as any).searchObjects(params),
+		);
+
+		span?.setAttribute("results_count", result.objects.length);
+		return result;
 	}
 
 	/**

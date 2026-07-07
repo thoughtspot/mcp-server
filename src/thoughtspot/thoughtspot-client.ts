@@ -1,16 +1,24 @@
 import {
-	createBearerAuthenticationConfig,
 	ThoughtSpotRestApi,
+	createBearerAuthenticationConfig,
 } from "@thoughtspot/rest-api-sdk";
 import type {
 	AgentConversation,
 	RequestContext,
 	ResponseContext,
 } from "@thoughtspot/rest-api-sdk";
-import YAML from "yaml";
-import { of } from "rxjs";
-import type { SessionInfo } from "./types";
 import { customAlphabet } from "nanoid";
+import { of } from "rxjs";
+import YAML from "yaml";
+import { addSearchObjects } from "./grpc/search_objects/search-objects";
+import type { SessionInfo } from "./types";
+
+// Re-exported for existing importers; definitions live with the handlers.
+export type {
+	SearchObjectHeader,
+	SearchObjectsParams,
+	SearchObjectsResult,
+} from "./grpc/search_objects/search-objects-types";
 
 /*
  * Inject custom handlers into the ThoughtSpot client
@@ -42,6 +50,7 @@ export const getThoughtSpotClient = (
 	addGetAnswerSession(client, instanceUrl, bearerToken);
 	addCreateAgentConversationWithAutoMode(client, instanceUrl, bearerToken);
 	addSendAgentConversationMessageStreaming(client, instanceUrl, bearerToken);
+	addSearchObjects(client, instanceUrl, bearerToken);
 	return client;
 };
 

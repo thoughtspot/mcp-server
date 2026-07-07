@@ -1,11 +1,11 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { getThoughtSpotClient } from "../../src/thoughtspot/thoughtspot-client";
 import {
-	createBearerAuthenticationConfig,
 	ThoughtSpotRestApi,
+	createBearerAuthenticationConfig,
 } from "@thoughtspot/rest-api-sdk";
 import type { ResponseContext } from "@thoughtspot/rest-api-sdk";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import YAML from "yaml";
+import { getThoughtSpotClient } from "../../src/thoughtspot/thoughtspot-client";
 
 // Mock the ThoughtSpot REST API SDK
 vi.mock("@thoughtspot/rest-api-sdk", () => ({
@@ -824,6 +824,728 @@ describe("ThoughtSpot Client", () => {
 			const id1 = JSON.parse((fetch as any).mock.calls[0][1].body).id;
 			const id2 = JSON.parse((fetch as any).mock.calls[1][1].body).id;
 			expect(id1).not.toBe(id2);
+		});
+	});
+
+	describe("searchObjects", () => {
+		let client: any;
+
+		beforeEach(() => {
+			client = getThoughtSpotClient(mockInstanceUrl, mockBearerToken) as any;
+		});
+
+		it("should search objects and map the results", async () => {
+			const mockResponse = {
+				data: {
+					queryRequest: {
+						requestIdentifiers: { apiRequestId: "req-1" },
+						facets: [
+							{
+								facetType: "STICKERS",
+								facetValues: [{ id: "tag-1", name: "Finance" }],
+							},
+						],
+						results: [
+							{
+								objectSecurityInfo: {
+									objectType: "QUESTION_ANSWER_BOOK",
+									objectId: "answer-123",
+								},
+								searchAnswer: {
+									header: {
+										id: "answer-123",
+										title: "Sales by Region",
+										description: "Revenue by region",
+										authorName: "alice",
+										modifiedOn: 1700000000000,
+										isVerified: true,
+										tagIds: ["tag-1"],
+									},
+								},
+								snippetInfo: {
+									titleSnippet: { highlights: [{ start: 0, end: 5 }] },
+								},
+								resultType: "ANSWER_RESULT",
+								score: 0.9,
+							},
+							{
+								objectSecurityInfo: {
+									objectType: "PINBOARD_ANSWER_BOOK",
+									objectId: "lb-456",
+								},
+								searchPinboard: {
+									header: {
+										id: "lb-456",
+										title: "Sales Overview",
+										description: "Overview",
+										authorName: "bob",
+										modifiedOn: 1700000001000,
+										isVerified: false,
+									},
+								},
+								resultType: "PINBOARD_RESULT",
+								score: 0.8,
+							},
+						],
+						totalResults: 2,
+					},
+				},
+			};
+
+			(fetch as any).mockResolvedValue({
+				ok: true,
+				json: vi.fn().mockResolvedValue(mockResponse),
+			});
+
+			const result = await client.searchObjects({
+				query: "sales",
+				limit: 5,
+			});
+
+			const body = JSON.parse((fetch as any).mock.calls[0][1].body);
+			const headers = (fetch as any).mock.calls[0][1].headers;
+			expect(body.operationName).toBe("GetEurekaResults");
+			expect(body.variables.params.query).toBe("sales");
+			expect(body.variables.params.batchSize).toBe(5);
+
+			expect(result.objects).toEqual([
+				{
+					id: "answer-123",
+					name: "Sales by Region",
+					type: "QUESTION_ANSWER_BOOK",
+					owner: "alice",
+					description: "Revenue by region",
+					tags: ["Finance"],
+					last_modified: 1700000000000,
+					last_viewed: null,
+					verified: true,
+					frame_url: `${mockInstanceUrl}/#/saved-answer/answer-123`,
+					match_reason: "Matched in title",
+					confidence: 0.9,
+				},
+				{
+					id: "lb-456",
+					name: "Sales Overview",
+					type: "PINBOARD_ANSWER_BOOK",
+					owner: "bob",
+					description: "Overview",
+					tags: [],
+					last_modified: 1700000001000,
+					last_viewed: null,
+					verified: false,
+					frame_url: `${mockInstanceUrl}/#/insights/pinboard/lb-456`,
+					match_reason: "Matched search term",
+					confidence: 0.8,
+				},
+			]);
+			expect(result.next_cursor).toBeNull();
+			// request_id is generated client-side and echoed back.
+			expect(result.request_id).toBe(headers["x-request-id"]);
+		});
+
+		it("should generate and send the x-request-id header", async () => {
+			(fetch as any).mockResolvedValue({
+				ok: true,
+				json: vi
+					.fn()
+					.mockResolvedValue({ data: { queryRequest: { results: [] } } }),
+			});
+
+			const result = await client.searchObjects({ query: "sales" });
+
+			const headers = (fetch as any).mock.calls[0][1].headers;
+			const uuid =
+				/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+			expect(headers["x-request-id"]).toMatch(uuid);
+			// The same id the request was sent with is echoed back to the caller.
+			expect(result.request_id).toBe(headers["x-request-id"]);
+		});
+
+		it("should send server-side facet selections for types and verified_only", async () => {
+			(fetch as any).mockResolvedValue({
+				ok: true,
+				json: vi
+					.fn()
+					.mockResolvedValue({ data: { queryRequest: { results: [] } } }),
+			});
+
+			await client.searchObjects({
+				query: "sales",
+				types: ["liveboard", "answer"],
+				verifiedOnly: true,
+			});
+
+			const body = JSON.parse((fetch as any).mock.calls[0][1].body);
+			expect(body.variables.params.facetSelections).toEqual([
+				{ facetType: "OBJECT_TYPE_FACET", facetValue: ["pinboard", "answer"] },
+				{ facetType: "IS_VERIFIED", facetValue: ["true"] },
+			]);
+		});
+
+		it("should default limit to 10 and offset to 0 when not provided", async () => {
+			(fetch as any).mockResolvedValue({
+				ok: true,
+				json: vi
+					.fn()
+					.mockResolvedValue({ data: { queryRequest: { results: [] } } }),
+			});
+
+			const result = await client.searchObjects({ query: "sales" });
+
+			const body = JSON.parse((fetch as any).mock.calls[0][1].body);
+			expect(body.variables.params.batchSize).toBe(10);
+			expect(body.variables.params.offset).toBe(0);
+			expect(result.objects).toEqual([]);
+			expect(result.next_cursor).toBeNull();
+			expect(result.request_id).toBeTruthy();
+		});
+
+		it("should page using the cursor and emit next_cursor on a full page", async () => {
+			(fetch as any).mockResolvedValue({
+				ok: true,
+				json: vi.fn().mockResolvedValue({
+					data: {
+						queryRequest: {
+							results: [
+								{
+									objectSecurityInfo: { objectType: "X", objectId: "a" },
+									searchPinboard: { header: { id: "a", title: "A" } },
+									resultType: "PINBOARD_RESULT",
+								},
+								{
+									objectSecurityInfo: { objectType: "X", objectId: "b" },
+									searchPinboard: { header: { id: "b", title: "B" } },
+									resultType: "PINBOARD_RESULT",
+								},
+							],
+						},
+					},
+				}),
+			});
+
+			const result = await client.searchObjects({
+				query: "sales",
+				limit: 2,
+				cursor: "4",
+			});
+
+			const body = JSON.parse((fetch as any).mock.calls[0][1].body);
+			expect(body.variables.params.offset).toBe(4);
+			expect(result.next_cursor).toBe("6");
+		});
+
+		it("should apply modified_since as a client-side filter", async () => {
+			(fetch as any).mockResolvedValue({
+				ok: true,
+				json: vi.fn().mockResolvedValue({
+					data: {
+						queryRequest: {
+							results: [
+								{
+									objectSecurityInfo: { objectType: "X", objectId: "old" },
+									searchPinboard: {
+										header: { id: "old", title: "Old", modifiedOn: 1000 },
+									},
+									resultType: "PINBOARD_RESULT",
+								},
+								{
+									objectSecurityInfo: { objectType: "X", objectId: "new" },
+									searchPinboard: {
+										header: { id: "new", title: "New", modifiedOn: 5000 },
+									},
+									resultType: "PINBOARD_RESULT",
+								},
+							],
+						},
+					},
+				}),
+			});
+
+			const result = await client.searchObjects({
+				query: "sales",
+				modifiedSince: 3000,
+			});
+
+			expect(result.objects.map((o: any) => o.id)).toEqual(["new"]);
+		});
+
+		// Helper: a single raw Eureka result owned by `author`.
+		const ownedResult = (id: string, author: string) => ({
+			objectSecurityInfo: { objectType: "X", objectId: id },
+			searchPinboard: { header: { id, title: id, authorName: author } },
+			resultType: "PINBOARD_RESULT",
+		});
+		const pageResponse = (results: any[]) => ({
+			ok: true,
+			json: vi.fn().mockResolvedValue({ data: { queryRequest: { results } } }),
+		});
+
+		it("keeps fetching pages so a post-filter never returns a short page while matches remain", async () => {
+			// Each full page of `limit` raw rows contributes only one owner match,
+			// so a single fetch would return 1 object (and a misleading cursor).
+			(fetch as any)
+				.mockResolvedValueOnce(
+					pageResponse([ownedResult("a1", "alice"), ownedResult("b1", "bob")]),
+				)
+				.mockResolvedValueOnce(
+					pageResponse([ownedResult("a2", "alice"), ownedResult("b2", "bob")]),
+				);
+
+			const result = await client.searchObjects({
+				query: "sales",
+				owner: "alice",
+				limit: 2,
+			});
+
+			expect((fetch as any).mock.calls.length).toBe(2);
+			expect(
+				JSON.parse((fetch as any).mock.calls[0][1].body).variables.params
+					.offset,
+			).toBe(0);
+			expect(
+				JSON.parse((fetch as any).mock.calls[1][1].body).variables.params
+					.offset,
+			).toBe(2);
+			expect(result.objects.map((o: any) => o.id)).toEqual(["a1", "a2"]);
+			// A full final raw page means more may exist: resume past both pages.
+			expect(result.next_cursor).toBe("4");
+		});
+
+		it("stops paging and emits a null cursor once raw results are exhausted", async () => {
+			(fetch as any)
+				.mockResolvedValueOnce(
+					pageResponse([ownedResult("a1", "alice"), ownedResult("b1", "bob")]),
+				)
+				// Shorter-than-limit page => backend has nothing more to give.
+				.mockResolvedValueOnce(pageResponse([ownedResult("b2", "bob")]));
+
+			const result = await client.searchObjects({
+				query: "sales",
+				owner: "alice",
+				limit: 2,
+			});
+
+			expect((fetch as any).mock.calls.length).toBe(2);
+			expect(result.objects.map((o: any) => o.id)).toEqual(["a1"]);
+			expect(result.next_cursor).toBeNull();
+		});
+
+		it("realigns a cursor minted under a different limit to a page boundary", async () => {
+			(fetch as any).mockResolvedValue(pageResponse([]));
+
+			await client.searchObjects({ query: "sales", limit: 10, cursor: "25" });
+
+			const params = JSON.parse((fetch as any).mock.calls[0][1].body).variables
+				.params;
+			// 25 snaps down to 20 so offset and currentPageNumber stay consistent.
+			expect(params.offset).toBe(20);
+			expect(params.currentPageNumber).toBe(3);
+		});
+
+		it("should fall back to objectSecurityInfo.objectId when no header has an id", async () => {
+			(fetch as any).mockResolvedValue({
+				ok: true,
+				json: vi.fn().mockResolvedValue({
+					data: {
+						queryRequest: {
+							results: [
+								{ objectSecurityInfo: { objectType: "X", objectId: "y" } },
+							],
+						},
+					},
+				}),
+			});
+
+			const result = await client.searchObjects({ query: "sales" });
+			expect(result.objects).toEqual([
+				{
+					id: "y",
+					name: "",
+					type: "X",
+					owner: "",
+					description: "",
+					tags: [],
+					last_modified: undefined,
+					last_viewed: null,
+					verified: false,
+					frame_url: `${mockInstanceUrl}/#/insights/pinboard/y`,
+					match_reason: "Matched search term",
+					confidence: undefined,
+				},
+			]);
+		});
+
+		it("should skip results with neither a header id nor an objectId", async () => {
+			(fetch as any).mockResolvedValue({
+				ok: true,
+				json: vi.fn().mockResolvedValue({
+					data: {
+						queryRequest: {
+							results: [{ resultType: "PINBOARD_RESULT" }],
+						},
+					},
+				}),
+			});
+
+			const result = await client.searchObjects({ query: "sales" });
+			expect(result.objects).toEqual([]);
+		});
+
+		it("should throw when the response contains GraphQL errors", async () => {
+			(fetch as any).mockResolvedValue({
+				ok: true,
+				json: vi.fn().mockResolvedValue({
+					errors: [{ message: "Invalid locale format: *" }],
+					data: { queryRequest: null },
+				}),
+			});
+
+			await expect(client.searchObjects({ query: "sales" })).rejects.toThrow(
+				/searchObjects failed: Invalid locale format/,
+			);
+		});
+
+		it("should throw when the response is not ok", async () => {
+			(fetch as any).mockResolvedValue({
+				ok: false,
+				status: 401,
+				text: vi.fn().mockResolvedValue("unauthorized"),
+			});
+
+			await expect(client.searchObjects({ query: "sales" })).rejects.toThrow(
+				/searchObjects failed with status 401/,
+			);
+		});
+
+		it("resolves friendly/legacy type synonyms to Eureka facet values", async () => {
+			(fetch as any).mockResolvedValue({
+				ok: true,
+				json: vi
+					.fn()
+					.mockResolvedValue({ data: { queryRequest: { results: [] } } }),
+			});
+
+			await client.searchObjects({
+				query: "sales",
+				// dashboard -> pinboard; worksheet + logical table + data model ->
+				// worksheet (deduped).
+				types: ["dashboard", "worksheet", "logical table", "data model"],
+			});
+
+			const body = JSON.parse((fetch as any).mock.calls[0][1].body);
+			expect(body.variables.params.facetSelections).toEqual([
+				{
+					facetType: "OBJECT_TYPE_FACET",
+					facetValue: ["pinboard", "worksheet"],
+				},
+			]);
+		});
+
+		// A raw Eureka result with a given id and relevance score.
+		const scoredResult = (id: string, score: number) => ({
+			objectSecurityInfo: { objectType: "X", objectId: id },
+			searchPinboard: { header: { id, title: id } },
+			resultType: "PINBOARD_RESULT",
+			score,
+		});
+
+		it("fires a parallel search per term and merges the results", async () => {
+			(fetch as any)
+				.mockResolvedValueOnce(
+					pageResponse([scoredResult("a", 0.5), scoredResult("shared", 0.7)]),
+				)
+				.mockResolvedValueOnce(
+					pageResponse([scoredResult("b", 0.9), scoredResult("shared", 0.4)]),
+				);
+
+			const result = await client.searchObjects({
+				query: ["sales", "marketing"],
+			});
+
+			// One upstream call per term.
+			expect((fetch as any).mock.calls.length).toBe(2);
+			expect(
+				JSON.parse((fetch as any).mock.calls[0][1].body).variables.params.query,
+			).toBe("sales");
+			expect(
+				JSON.parse((fetch as any).mock.calls[1][1].body).variables.params.query,
+			).toBe("marketing");
+
+			// Deduped by id (the higher-confidence "shared" wins) and sorted by
+			// confidence descending.
+			expect(result.objects.map((o: any) => o.id)).toEqual([
+				"b",
+				"shared",
+				"a",
+			]);
+			expect(
+				result.objects.find((o: any) => o.id === "shared").confidence,
+			).toBe(0.7);
+			// Pagination is not supported across a multi-term fan-out.
+			expect(result.next_cursor).toBeNull();
+			// The per-term request ids are joined for tracing.
+			expect(result.request_id.split(",")).toHaveLength(2);
+		});
+
+		it("treats a single-element query array like a single-term search", async () => {
+			(fetch as any).mockResolvedValue(pageResponse([scoredResult("a", 0.5)]));
+
+			const result = await client.searchObjects({ query: ["sales"] });
+
+			expect((fetch as any).mock.calls.length).toBe(1);
+			expect(result.objects.map((o: any) => o.id)).toEqual(["a"]);
+		});
+
+		it("ignores blank and duplicate terms in a multi-term query", async () => {
+			(fetch as any).mockResolvedValue(pageResponse([scoredResult("a", 0.5)]));
+
+			await client.searchObjects({ query: ["sales", "  ", "sales"] });
+
+			// "sales" deduped, blank dropped -> a single search.
+			expect((fetch as any).mock.calls.length).toBe(1);
+			expect(
+				JSON.parse((fetch as any).mock.calls[0][1].body).variables.params.query,
+			).toBe("sales");
+		});
+
+		it("throws on a whitespace-only query instead of searching for ''", async () => {
+			(fetch as any).mockResolvedValue(pageResponse([]));
+
+			await expect(
+				client.searchObjects({ query: ["   ", ""] }),
+			).rejects.toThrow(/non-empty query/);
+			expect((fetch as any).mock.calls.length).toBe(0);
+		});
+
+		it("caps a merged multi-term result at limit", async () => {
+			(fetch as any)
+				.mockResolvedValueOnce(
+					pageResponse([scoredResult("a", 0.5), scoredResult("s", 0.7)]),
+				)
+				.mockResolvedValueOnce(
+					pageResponse([scoredResult("b", 0.9), scoredResult("c", 0.4)]),
+				);
+
+			const result = await client.searchObjects({
+				query: ["sales", "marketing"],
+				limit: 2,
+			});
+
+			// 4 distinct objects across both terms, capped to the 2 best.
+			expect(result.objects.map((o: any) => o.id)).toEqual(["b", "s"]);
+		});
+
+		it("clamps a negative cursor to offset 0", async () => {
+			(fetch as any).mockResolvedValue(pageResponse([]));
+
+			await client.searchObjects({ query: "sales", limit: 10, cursor: "-5" });
+
+			const params = JSON.parse((fetch as any).mock.calls[0][1].body).variables
+				.params;
+			expect(params.offset).toBe(0);
+			expect(params.currentPageNumber).toBe(1);
+		});
+
+		it("trusts the backend's isFinalPage over the full-page heuristic", async () => {
+			// A short page would normally mean "no more results", but the backend
+			// says otherwise (e.g. it trimmed rows for dedup/security reasons).
+			(fetch as any).mockResolvedValue({
+				ok: true,
+				json: vi.fn().mockResolvedValue({
+					data: {
+						queryRequest: {
+							results: [scoredResult("a", 0.5)],
+							isFinalPage: false,
+						},
+					},
+				}),
+			});
+
+			const result = await client.searchObjects({ query: "sales", limit: 2 });
+
+			expect(result.objects.map((o: any) => o.id)).toEqual(["a"]);
+			expect(result.next_cursor).toBe("2");
+		});
+
+		it("emits a null cursor when the backend marks a full page as final", async () => {
+			(fetch as any).mockResolvedValue({
+				ok: true,
+				json: vi.fn().mockResolvedValue({
+					data: {
+						queryRequest: {
+							results: [scoredResult("a", 0.5), scoredResult("b", 0.4)],
+							isFinalPage: true,
+						},
+					},
+				}),
+			});
+
+			const result = await client.searchObjects({ query: "sales", limit: 2 });
+
+			expect(result.objects).toHaveLength(2);
+			expect(result.next_cursor).toBeNull();
+		});
+
+		it("truncates post-filter overshoot to limit with a skip-free cursor", async () => {
+			// Page 1 contributes one owner match; page 2 contributes two, taking the
+			// accumulated total to 3 for limit=2.
+			(fetch as any)
+				.mockResolvedValueOnce(
+					pageResponse([ownedResult("a1", "alice"), ownedResult("b1", "bob")]),
+				)
+				.mockResolvedValueOnce(
+					pageResponse([
+						ownedResult("a2", "alice"),
+						ownedResult("a3", "alice"),
+					]),
+				);
+
+			const result = await client.searchObjects({
+				query: "sales",
+				owner: "alice",
+				limit: 2,
+			});
+
+			expect(result.objects.map((o: any) => o.id)).toEqual(["a1", "a2"]);
+			// The dropped match ("a3") came from the page at offset 2, so the cursor
+			// points back at it rather than past it.
+			expect(result.next_cursor).toBe("2");
+		});
+
+		it("throws when GraphQL errors carry no message", async () => {
+			(fetch as any).mockResolvedValue({
+				ok: true,
+				json: vi.fn().mockResolvedValue({ errors: [{}], data: null }),
+			});
+
+			await expect(client.searchObjects({ query: "sales" })).rejects.toThrow(
+				/searchObjects failed: unknown GraphQL error/,
+			);
+		});
+
+		it("throws when the queryRequest reports an errorCode", async () => {
+			(fetch as any).mockResolvedValue({
+				ok: true,
+				json: vi.fn().mockResolvedValue({
+					data: { queryRequest: { errorCode: 42, results: [] } },
+				}),
+			});
+
+			await expect(client.searchObjects({ query: "sales" })).rejects.toThrow(
+				/searchObjects failed: errorCode 42/,
+			);
+		});
+
+		it("applies tag as a client-side filter using resolved sticker names", async () => {
+			(fetch as any).mockResolvedValue({
+				ok: true,
+				json: vi.fn().mockResolvedValue({
+					data: {
+						queryRequest: {
+							facets: [
+								{
+									facetType: "STICKERS",
+									facetValues: [{ id: "tag-1", name: "Finance" }],
+								},
+							],
+							results: [
+								{
+									objectSecurityInfo: { objectType: "X", objectId: "a" },
+									searchPinboard: {
+										header: { id: "a", title: "A", tagIds: ["tag-1"] },
+									},
+									resultType: "PINBOARD_RESULT",
+								},
+								{
+									objectSecurityInfo: { objectType: "X", objectId: "b" },
+									searchPinboard: { header: { id: "b", title: "B" } },
+									resultType: "PINBOARD_RESULT",
+								},
+							],
+						},
+					},
+				}),
+			});
+
+			const result = await client.searchObjects({
+				query: "sales",
+				tag: "finance",
+			});
+
+			expect(result.objects.map((o: any) => o.id)).toEqual(["a"]);
+		});
+
+		it("derives the match reason from sage query tokens and descriptions", async () => {
+			(fetch as any).mockResolvedValue({
+				ok: true,
+				json: vi.fn().mockResolvedValue({
+					data: {
+						queryRequest: {
+							results: [
+								{
+									objectSecurityInfo: { objectType: "X", objectId: "a" },
+									searchPinboard: { header: { id: "a", title: "A" } },
+									resultType: "PINBOARD_RESULT",
+									snippetInfo: {
+										sageQuerySnippet: {
+											token: [{ token: "sales" }, { token: "region" }],
+										},
+									},
+								},
+								{
+									objectSecurityInfo: { objectType: "X", objectId: "b" },
+									searchPinboard: { header: { id: "b", title: "B" } },
+									resultType: "PINBOARD_RESULT",
+									// A list of snippet entries whose token is a single object,
+									// not a list — both shapes must be tolerated.
+									snippetInfo: {
+										sageQuerySnippet: [{ token: { token: "profit" } }],
+									},
+								},
+								{
+									objectSecurityInfo: { objectType: "X", objectId: "c" },
+									searchPinboard: { header: { id: "c", title: "C" } },
+									resultType: "PINBOARD_RESULT",
+									snippetInfo: {
+										descriptionSnippet: { highlights: [{ start: 0, end: 3 }] },
+									},
+								},
+							],
+						},
+					},
+				}),
+			});
+
+			const result = await client.searchObjects({ query: "sales" });
+
+			expect(result.objects.map((o: any) => o.match_reason)).toEqual([
+				"Matched query terms: sales, region",
+				"Matched query terms: profit",
+				"Matched in description",
+			]);
+		});
+
+		it("stops accumulating after the page cap and warns", async () => {
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+			// Every page is full of non-matching rows, so the post-filter loop runs
+			// to its page cap and reports that more results may remain.
+			(fetch as any).mockResolvedValue(
+				pageResponse([ownedResult("x1", "bob"), ownedResult("x2", "bob")]),
+			);
+
+			const result = await client.searchObjects({
+				query: "sales",
+				owner: "alice",
+				limit: 2,
+			});
+
+			expect((fetch as any).mock.calls.length).toBe(20);
+			expect(result.objects).toEqual([]);
+			expect(result.next_cursor).toBe("40");
+			expect(warnSpy).toHaveBeenCalledWith(
+				expect.stringContaining("stopped after 20 pages"),
+			);
+			warnSpy.mockRestore();
 		});
 	});
 
