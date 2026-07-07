@@ -214,22 +214,6 @@ export class MCPServer extends BaseMCPServer {
 		return this.getThoughtSpotService(recorder).validateConnection();
 	}
 
-	// Load warm token before initializeService so getSessionInfo uses it instead
-	// of the short-lived props access token.
-	protected async initializeService(): Promise<void> {
-		if (this.isOAuthAuth()) {
-			try {
-				await this.loadOrSeedWarmToken();
-			} catch (error) {
-				console.error(
-					"Failed to load warm token before initializeService:",
-					error,
-				);
-			}
-		}
-		await super.initializeService();
-	}
-
 	// On connect (OAuth only): keep the cluster token warm, then — when org tools are
 	// available — establish the active org (prior switch wins, else session current)
 	// and mint its token. Best-effort: never break connect.
@@ -240,13 +224,10 @@ export class MCPServer extends BaseMCPServer {
 		// Single source of truth for multi-org eligibility: only a grant minted by
 		// the multi-org login path carries a refresh token.
 		this.grantHasRefreshToken = typeof this.ctx.props.refreshToken === "string";
-		// Already loaded in initializeService; this is a no-op if the alarm is set.
-		if (!this.warmGlobalToken) {
-			try {
-				await this.loadOrSeedWarmToken();
-			} catch (error) {
-				console.error("Failed to load/seed keep-warm token on connect:", error);
-			}
+		try {
+			await this.loadOrSeedWarmToken();
+		} catch (error) {
+			console.error("Failed to load/seed keep-warm token on connect:", error);
 		}
 
 		if (!this.areOrgToolsAvailable()) {
