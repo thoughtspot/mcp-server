@@ -271,20 +271,36 @@ export class MCPServer extends BaseMCPServer {
 		}
 	}
 
-	// Load the keep-warm token into memory. Re-seed from props' fresh grant when the
-	// store is unseeded or expired (the refresh chain died); else the store wins.
+	// Load the keep-warm token into memory.
+	// 1. Read the stored token first (the alarm may have refreshed it).
+	// 2. If the stored token is valid and newer than props (different string, not
+	//    expired), use it directly — no re-seed needed.
+	// 3. Otherwise seed from the fresh props grant (re-issued from the OAuth grant
+	//    on every request), then re-read to confirm what was stored.
+	// This read-before-write ensures the mock and DO agree: the stored token wins
+	// without the mock needing to replicate seedTokenStore's merge logic.
 	private async loadOrSeedWarmToken(): Promise<void> {
 		const storage = await this.getStorageService();
-		const store = await storage.getTokenStore();
-		const storedExpired =
-			typeof store.expiresAt === "number" && store.expiresAt <= Date.now();
-		if (store.accessToken && !storedExpired) {
-			this.warmGlobalToken = store.accessToken;
-			return;
-		}
 		const { accessToken, refreshToken, tokenExpiryDuration, instanceUrl } =
 			this.ctx.props;
+
+		// Always read first — the alarm may have refreshed the stored token.
+		const existing = await storage.getTokenStore();
+		const storedToken = existing.accessToken ?? null;
+		const storedExpiresAt = existing.expiresAt ?? null;
+		const storedExpired =
+			typeof storedExpiresAt === "number" && storedExpiresAt <= Date.now();
+		const storedIsNewer =
+			storedToken && storedToken !== accessToken && !storedExpired;
+
+		if (storedIsNewer) {
+			// Stored token was alarm-refreshed and is still valid — use it.
+			this.warmGlobalToken = storedToken;
+			return;
+		}
+
 		if (accessToken && refreshToken) {
+			// Seed/update the store with the fresh props token.
 			await storage.seedTokenStore({
 				accessToken,
 				refreshToken,
@@ -297,10 +313,10 @@ export class MCPServer extends BaseMCPServer {
 			this.warmGlobalToken = accessToken;
 			return;
 		}
-		// No refresh token to re-seed with: prefer the stored token only if it isn't
-		// expired, else fall back to the (possibly fresher) props token.
+
+		// No refresh token (legacy grant): prefer valid stored token, else props.
 		this.warmGlobalToken =
-			store.accessToken && !storedExpired ? store.accessToken : accessToken;
+			storedToken && !storedExpired ? storedToken : accessToken;
 	}
 
 	// Fire-and-forget; throttle + idle-delete live in the DO.

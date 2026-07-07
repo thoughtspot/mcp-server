@@ -1,8 +1,6 @@
 const ACTIVE_ORG_KEY = "active-org";
 const ORG_TOKEN_KEY = "active-org-token";
 const TOKEN_STORE_KEY = "token-store";
-// 11h refresh on a ~24h token: a failed attempt re-arms at ~22h, still inside the
-// expiry window, giving a second chance before expiry.
 const TOKEN_REFRESH_INTERVAL_MS = 11 * 60 * 60 * 1000;
 const SESSION_IDLE_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 
@@ -107,9 +105,11 @@ export class UserTokenStoreSQLite {
 		}
 	}
 
-	// Idempotent: re-seeding updates tokens without stacking alarms.
+	// Idempotent: re-seeding updates the stored token and arms the alarm once.
 	// lastSeenAt is set on first seed (starts the idle clock) and preserved on
-	// re-seeds; only touch() (tool calls) resets it.
+	// re-seeds; only touch() (tool calls) advances it.
+	// The caller (loadOrSeedWarmToken) already decided to use the props token
+	// over the stored one — just write it and arm the alarm.
 	private async seedTokenStore(store: TokenStore): Promise<void> {
 		const existing = await this.state.storage.get<TokenStore>(TOKEN_STORE_KEY);
 		const toStore: TokenStore = {

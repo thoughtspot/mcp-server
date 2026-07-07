@@ -476,6 +476,20 @@ describe("MCP Server org tools", () => {
 			expect(rec.orgToken).toBe("org-scoped-token");
 		});
 
+		it("notifies the client to re-list resources on a successful switch (org-specific datasources)", async () => {
+			const { server } = makeServer({
+				authMode: "oauth",
+				session: { orgsEnabled: true, currentOrgId: "0" },
+			});
+			await server.init();
+			const notify = vi
+				.spyOn(server as any, "sendResourceListChanged")
+				.mockResolvedValue(undefined);
+
+			await connect(server).callTool("switch_org", { org_id: 101 });
+			expect(notify).toHaveBeenCalledTimes(1);
+		});
+
 		it("returns 'not accessible' when minting the org token 401s", async () => {
 			const { server } = makeServer({
 				authMode: "oauth",

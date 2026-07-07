@@ -75,7 +75,9 @@ export abstract class BaseMCPServer extends Server {
 				capabilities: {
 					tools: {},
 					completion: {},
-					resources: {},
+					// listChanged: the resource set (datasources) changes on switch_org,
+					// so we notify clients to re-list.
+					resources: { listChanged: true },
 				},
 			},
 		);
