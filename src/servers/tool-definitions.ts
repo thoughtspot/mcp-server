@@ -274,8 +274,9 @@ export const ListOrgsOutputSchema = z.object({
 				description: z.string().optional().describe("Description of the Org."),
 				is_active: z
 					.boolean()
+					.optional()
 					.describe(
-						"Whether this is the Org currently active for your account. Tool calls operate against the active Org.",
+						"Present and true only for the Org currently active for your account. Absent for all other Orgs. Tool calls operate against the active Org.",
 					),
 			}),
 		)
@@ -417,7 +418,7 @@ export const toolDefinitionsV2 = [
 	{
 		name: ToolName.GetSessionUpdates,
 		description:
-			"Get the latest updates from the Analytics Agent. You can call this after `send_session_message` to retrieve the Agent's response. If `is_done` is false, you can call this tool again to continue polling, as the Agent is still generating a response. Even if `is_done` is false, you can use the updates to show status updates or progress to the user, so that they are informed about the ongoing process. An empty `session_updates` list while `is_done` is false is normal; it means the Agent is still thinking. When `is_done` is true, the Agent has finished and the results in `session_updates` are complete, so you can present them to the user. You can also send a follow-up message in the same session after `is_done` is true. If the completed response indicates that no data or no results were found, AND the `list_orgs` tool is available to you, the requested data may live in a different org: tell the user this and that they can call `list_orgs` to see their orgs (the active one is marked `is_active`) and `switch_org` to switch to another org, then retry. If `list_orgs` is not available, do not mention orgs.",
+			"Get the latest updates from the Analytics Agent. You can call this after `send_session_message` to retrieve the Agent's response. If `is_done` is false, you can call this tool again to continue polling, as the Agent is still generating a response. Even if `is_done` is false, you can use the updates to show status updates or progress to the user, so that they are informed about the ongoing process. An empty `session_updates` list while `is_done` is false is normal; it means the Agent is still thinking. When `is_done` is true, the Agent has finished and the results in `session_updates` are complete, so you can present them to the user. You can also send a follow-up message in the same session after `is_done` is true. If the completed response indicates that no data or no results were found, AND the `list_orgs` tool is available to you, the requested data may live in a different org or the user may not have access to it in the current org: tell the user this and that they can call `list_orgs` to see their orgs (the active one is marked `is_active`) and `switch_org` to switch to another org, then retry. If `list_orgs` is not available, do not mention orgs.",
 		inputSchema: z.toJSONSchema(GetSessionUpdatesInputSchema),
 		outputSchema: z.toJSONSchema(GetSessionUpdatesOutputSchema),
 		annotations: {
@@ -443,7 +444,7 @@ export const toolDefinitionsV2 = [
 	{
 		name: ToolName.ListOrgs,
 		description:
-			"List the Orgs the authenticated user can access on the ThoughtSpot instance, including the ID, name, and description of each Org. The Org marked `is_active: true` is the one currently active for your account, which all tool calls operate against. Use this to tell the user which Org they are in. Only available when authenticated via OAuth.",
+			"List the Orgs the authenticated user can access on the ThoughtSpot instance, including the ID, name, and description of each Org. The Org marked `is_active: true` is the one currently active for your account, which all tool calls operate against. Use this to tell the user which Org they are in. Only available when authenticated via OAuth. If the list is large , summarize or show only the most relevant orgs (e.g. the active one and a few others) rather than listing all of them, unless the user explicitly asks to see all orgs.",
 		inputSchema: z.toJSONSchema(ListOrgsInputSchema),
 		outputSchema: z.toJSONSchema(ListOrgsOutputSchema),
 		annotations: {

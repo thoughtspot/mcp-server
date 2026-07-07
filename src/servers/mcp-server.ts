@@ -979,11 +979,11 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 
 		return this.createStructuredContentSuccessResponse(
 			{
-				orgs: orgs.map((org) => ({
-					...org,
-					is_active:
-						activeOrgId !== undefined && String(org.id) === activeOrgId,
-				})),
+				orgs: orgs.map((org) => {
+					const isActive =
+						activeOrgId !== undefined && String(org.id) === activeOrgId;
+					return isActive ? { ...org, is_active: true } : { ...org };
+				}),
 			},
 			`${orgs.length} org(s) found`,
 		);
