@@ -1,4 +1,5 @@
 import { resolveObjectTypeFacets } from "../../terminology";
+import { generateRequestId } from "../grpc-utils";
 import { searchObjectsQuery } from "./search-objects-query";
 import type {
 	SearchObjectHeader,
@@ -266,7 +267,7 @@ export function addSearchObjects(
 			const startOffset = Math.floor(rawOffset / limit) * limit;
 
 			// Minted per call, sent as x-request-id for cross-system tracing.
-			const requestId = globalThis.crypto.randomUUID();
+			const requestId = generateRequestId();
 
 			// Accumulate pages so post-filters can't return a short page while
 			// matches remain; the page cap bounds upstream calls.

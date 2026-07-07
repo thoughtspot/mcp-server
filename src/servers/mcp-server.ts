@@ -21,6 +21,7 @@ import {
 	CreateAnalysisSessionInputSchema,
 	CreateDashboardInputSchema,
 	CreateLiveboardSchema,
+	FetchDataInputSchema,
 	GetAnswerSchema,
 	GetDataSourceSuggestionsSchema,
 	GetRelevantQuestionsSchema,
@@ -234,6 +235,10 @@ export class MCPServer extends BaseMCPServer {
 
 			case ToolName.SearchObjects: {
 				return this.callSearchObjects(request, recorder);
+			}
+
+			case ToolName.FetchData: {
+				return this.callFetchData(request, recorder);
 			}
 
 			case ToolName.CheckConnectivity: {
@@ -667,6 +672,33 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			return this.createErrorResponse(
 				"Encountered an error while searching for objects. Please check your inputs and try again.",
 				`Error searching objects ${(error as Error).message}`,
+			);
+		}
+	}
+
+	@WithSpan("call-fetch-data")
+	async callFetchData(
+		request: z.infer<typeof CallToolRequestSchema>,
+		recorder: MetricsRecorder,
+	) {
+		const { object_id, visualization_ids, max_rows } =
+			FetchDataInputSchema.parse(request.params.arguments);
+
+		try {
+			const result = await this.getThoughtSpotService(recorder).fetchData({
+				objectId: object_id,
+				vizIds: visualization_ids,
+				maxRows: max_rows,
+			});
+
+			return this.createStructuredContentSuccessResponse(
+				result,
+				`Fetched data for ${result.type} ${object_id} (${result.data.length} result(s))`,
+			);
+		} catch (error) {
+			return this.createErrorResponse(
+				"Encountered an error while fetching object data. Please check the object id and try again.",
+				`Error fetching data ${(error as Error).message}`,
 			);
 		}
 	}

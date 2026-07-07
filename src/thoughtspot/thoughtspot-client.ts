@@ -10,6 +10,7 @@ import type {
 import { customAlphabet } from "nanoid";
 import { of } from "rxjs";
 import YAML from "yaml";
+import { addFetchData } from "./grpc/fetch_data/fetch-data";
 import { addSearchObjects } from "./grpc/search_objects/search-objects";
 import type { SessionInfo } from "./types";
 
@@ -19,6 +20,11 @@ export type {
 	SearchObjectsParams,
 	SearchObjectsResult,
 } from "./grpc/search_objects/search-objects-types";
+export type {
+	FetchDataParams,
+	FetchDataResult,
+	FetchDataViz,
+} from "./grpc/fetch_data/fetch-data-types";
 
 /*
  * Inject custom handlers into the ThoughtSpot client
@@ -51,6 +57,7 @@ export const getThoughtSpotClient = (
 	addCreateAgentConversationWithAutoMode(client, instanceUrl, bearerToken);
 	addSendAgentConversationMessageStreaming(client, instanceUrl, bearerToken);
 	addSearchObjects(client, instanceUrl, bearerToken);
+	addFetchData(client, instanceUrl, bearerToken);
 	return client;
 };
 
