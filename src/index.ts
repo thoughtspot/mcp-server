@@ -26,9 +26,10 @@ import {
 } from "./metrics/runtime/request-metrics";
 import { ConversationStorageServerSQLite } from "./servers/conversation-storage-server";
 import { MCPServer } from "./servers/mcp-server";
+import { UserTokenStoreSQLite } from "./servers/user-token-store-server";
 import { type Props, normalizeClientName } from "./utils";
 
-export { ConversationStorageServerSQLite };
+export { ConversationStorageServerSQLite, UserTokenStoreSQLite };
 
 // OTEL configuration function
 const config: ResolveConfigFn = (env: Env, _trigger) => {
@@ -75,6 +76,16 @@ const hooks: AuthHooks<Props> = {
 			group,
 		);
 	},
+	// Carry the gettoken fields the keep-warm refresh needs into the OAuth grant,
+	// so they're on every later request (only available at token-exchange time).
+	extendGrantProps(token, base): Props {
+		return {
+			...(base as Props),
+			refreshToken: token?.data?.refreshToken,
+			tokenCreatedTime: token?.data?.tokenCreatedTime,
+			tokenExpiryDuration: token?.data?.tokenExpiryDuration,
+		};
+	},
 	extendProps(req, base): Props {
 		// Bearer/token flow: stamp api-version metadata from query params.
 		// /bearer/* path family uses backwards-compat default; /token/* uses requested/latest.
@@ -85,6 +96,9 @@ const hooks: AuthHooks<Props> = {
 		const props: Props = {
 			...base,
 			clientName: normalizeClientName(base.clientName),
+			// Static-token auth. /bearer/* is legacy "bearer"; /token/* is "token".
+			// Gates OAuth-only tools (e.g. list_orgs) off for these.
+			authMode: isBearerLegacy ? "bearer" : "token",
 		};
 
 		let apiVersion: string | undefined;
@@ -143,6 +157,8 @@ const oauthFetchHandler = createOAuthHandler<Props>({
 				? normalizeRequestedApiVersionForAnalytics(requestedApiVersion)
 				: undefined,
 			apiVersionMode,
+			// OAuth-authenticated flow; enables the OAuth-only org tools.
+			authMode: "oauth",
 		};
 	},
 	// Extra routes mounted on the default handler app (consumer-specific).
