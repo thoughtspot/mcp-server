@@ -451,13 +451,11 @@ describe("MCP Server org tools", () => {
 			});
 			await server.init();
 			const s = server as unknown as {
-				setActiveOrg: (orgId: string) => Promise<void>;
-				getOrRecreateActiveOrgToken: (orgId: string) => Promise<string>;
+				setActiveOrg: (orgId: string, token: string) => Promise<void>;
 				callListOrgs: (recorder: any) => Promise<any>;
 			};
 			// Put an org token in play (the thing list_orgs must NOT use).
-			await s.setActiveOrg("101");
-			await s.getOrRecreateActiveOrgToken("101");
+			await s.setActiveOrg("101", "org-101-token");
 
 			const spy = vi.mocked(thoughtspotClient.getThoughtSpotClient);
 			spy.mockClear();

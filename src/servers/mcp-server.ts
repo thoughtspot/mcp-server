@@ -83,26 +83,6 @@ export class MCPServer extends BaseMCPServer {
 		await storage.setActiveOrg(orgId, orgToken);
 	}
 
-	private async getOrRecreateActiveOrgToken(
-		orgId: string,
-		recorder?: MetricsRecorder,
-	): Promise<string> {
-		if (this.activeOrgId === orgId && this.activeOrgToken) {
-			return this.activeOrgToken;
-		}
-		await this.loadOrSeedWarmToken();
-		const globalToken = this.globalToken ?? this.ctx.props.accessToken;
-		const orgToken = await this.getOrgService(
-			globalToken,
-			undefined,
-			recorder,
-		).fetchOrgBearerToken(globalToken, orgId);
-		this.activeOrgToken = orgToken;
-		const storage = await this.getStorageService();
-		await storage.setActiveOrg(orgId, orgToken);
-		return orgToken;
-	}
-
 	private apiErrorStatus(value: unknown): number | undefined {
 		const err =
 			value instanceof Error
@@ -174,11 +154,11 @@ export class MCPServer extends BaseMCPServer {
 					await this.setActiveOrg(currentOrgId);
 				}
 			}
-			if (this.activeOrgId) {
-				await this.getOrRecreateActiveOrgToken(this.activeOrgId);
+			if (this.activeOrgId && !this.activeOrgToken) {
+				await this.forceRecreateActiveOrgToken();
 			}
 		} catch (error) {
-			console.error("Failed to set/mint active org on connect:", error);
+			console.error("Failed to load active org on connect:", error);
 		}
 	}
 
