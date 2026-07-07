@@ -213,10 +213,14 @@ describe("UserTokenStoreSQLite", () => {
 			expect(delay).toBeLessThan(ELEVEN_HOURS_MS + 60_000);
 		});
 
-		it("stamps lastSeenAt when seeding", async () => {
+		it("stamps lastSeenAt on first seed but preserves it on re-seeds", async () => {
 			await server.fetch(makeRequest("POST", "token-store", seedBody()));
-			const stored = mock.store.get("token-store") as { lastSeenAt?: number };
-			expect(typeof stored.lastSeenAt).toBe("number");
+			const after1 = mock.store.get("token-store") as { lastSeenAt?: number };
+			expect(typeof after1.lastSeenAt).toBe("number");
+			const first = after1.lastSeenAt;
+			await server.fetch(makeRequest("POST", "token-store", seedBody()));
+			const after2 = mock.store.get("token-store") as { lastSeenAt?: number };
+			expect(after2.lastSeenAt).toBe(first);
 		});
 
 		it("refreshes the token and re-arms ~11h on success", async () => {

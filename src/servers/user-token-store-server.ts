@@ -108,10 +108,13 @@ export class UserTokenStoreSQLite {
 	}
 
 	// Idempotent: re-seeding updates tokens without stacking alarms.
+	// lastSeenAt is set on first seed (starts the idle clock) and preserved on
+	// re-seeds; only touch() (tool calls) resets it.
 	private async seedTokenStore(store: TokenStore): Promise<void> {
+		const existing = await this.state.storage.get<TokenStore>(TOKEN_STORE_KEY);
 		const toStore: TokenStore = {
 			...store,
-			lastSeenAt: store.lastSeenAt ?? Date.now(),
+			lastSeenAt: existing?.lastSeenAt ?? Date.now(),
 		};
 		await this.state.storage.put<TokenStore>(TOKEN_STORE_KEY, toStore);
 		const existingAlarm = await this.state.storage.getAlarm();
