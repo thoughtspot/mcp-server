@@ -1,16 +1,16 @@
 import {
-	createBearerAuthenticationConfig,
 	ThoughtSpotRestApi,
+	createBearerAuthenticationConfig,
 } from "@thoughtspot/rest-api-sdk";
 import type {
 	AgentConversation,
 	RequestContext,
 	ResponseContext,
 } from "@thoughtspot/rest-api-sdk";
-import YAML from "yaml";
-import { of } from "rxjs";
-import type { SessionInfo } from "./types";
 import { customAlphabet } from "nanoid";
+import { of } from "rxjs";
+import YAML from "yaml";
+import type { BachSession, SessionInfo } from "./types";
 
 /*
  * Inject custom handlers into the ThoughtSpot client
@@ -42,6 +42,8 @@ export const getThoughtSpotClient = (
 	addGetAnswerSession(client, instanceUrl, bearerToken);
 	addCreateAgentConversationWithAutoMode(client, instanceUrl, bearerToken);
 	addSendAgentConversationMessageStreaming(client, instanceUrl, bearerToken);
+	addCreateBachPinboardSession(client, instanceUrl, bearerToken);
+	addSaveBachPinboard(client, instanceUrl, bearerToken);
 	return client;
 };
 
@@ -258,6 +260,154 @@ function addCreateAgentConversationWithAutoMode(
 
 		const data = (await response.json()) as AgentConversation;
 		return data;
+	};
+}
+
+/*
+ * Initiate a new BACH pinboard session for a liveboard.
+ */
+function addCreateBachPinboardSession(
+	client: any,
+	instanceUrl: string,
+	token: string,
+) {
+	(client as any).createBachPinboardSession = async ({
+		liveboardId,
+	}: { liveboardId: string }): Promise<BachSession> => {
+		const endpoint = "/callosum/v1/bach/pinboard/";
+		// Java callers (e.g. BachPinboardRequestBuilder) seed the session with a fresh GUID rather
+		// than leaving the field empty; mirror that to avoid validation rejections.
+		const clientTransactionId = crypto.randomUUID();
+		const fetchOptions = {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json",
+				Accept: "application/json",
+				"user-agent": "ThoughtSpot-ts-client",
+				Authorization: `Bearer ${token}`,
+			},
+			body: JSON.stringify({
+				pinboardSession: { transactionId: clientTransactionId },
+				pinboardRequests: [
+					{
+						type: "LOAD_PINBOARD",
+						loadPinboard: { savedPinboardId: liveboardId },
+					},
+				],
+			}),
+		};
+		const response = await fetch(`${instanceUrl}${endpoint}`, fetchOptions);
+		if (!response.ok) {
+			const errorText = await response.text();
+			throw new Error(
+				`createBachPinboardSession failed with status ${response.status}: ${errorText}`,
+			);
+		}
+
+		const data = (await response.json()) as {
+			status?: {
+				statusCode?: string;
+				errorMessage?: string;
+				errorCode?: string;
+			};
+			pinboardSession?: {
+				transactionId?: string;
+				generationNumber?: string | number;
+			};
+			pinboardResponses?: Array<{
+				loadPinboard?: {
+					status?: { statusCode?: string; errorMessage?: string };
+				};
+				status?: { statusCode?: string; errorMessage?: string };
+			}>;
+		};
+
+		const statusCode = data?.status?.statusCode;
+		if (statusCode && statusCode !== "OK") {
+			const detail =
+				data.status?.errorMessage ||
+				data.pinboardResponses?.[0]?.loadPinboard?.status?.errorMessage ||
+				data.pinboardResponses?.[0]?.status?.errorMessage ||
+				JSON.stringify(data.status);
+			throw new Error(
+				`createBachPinboardSession returned non-OK status ${statusCode}: ${detail}`,
+			);
+		}
+
+		const transactionId = data?.pinboardSession?.transactionId;
+		const generationNumber = data?.pinboardSession?.generationNumber;
+		if (!transactionId || generationNumber === undefined) {
+			throw new Error(
+				`createBachPinboardSession: missing session ids in response: ${JSON.stringify(data)}`,
+			);
+		}
+		return { transactionId, generationNumber: String(generationNumber) };
+	};
+}
+
+/*
+ * Save the current state of the pinboard.
+ */
+function addSaveBachPinboard(client: any, instanceUrl: string, token: string) {
+	(client as any).saveBachPinboard = async ({
+		transactionId,
+		generationNumber,
+	}: {
+		transactionId: string;
+		generationNumber: string;
+	}): Promise<void> => {
+		const endpoint = "/callosum/v1/bach/pinboard/";
+		const fetchOptions = {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json",
+				Accept: "application/json",
+				"user-agent": "ThoughtSpot-ts-client",
+				Authorization: `Bearer ${token}`,
+			},
+			body: JSON.stringify({
+				pinboardSession: { transactionId, generationNumber },
+				pinboardRequests: [
+					{
+						type: "SAVE_PINBOARD",
+						savePinboard: {},
+					},
+				],
+			}),
+		};
+		const response = await fetch(`${instanceUrl}${endpoint}`, fetchOptions);
+		if (!response.ok) {
+			const errorText = await response.text();
+			throw new Error(
+				`saveBachPinboard failed with status ${response.status}: ${errorText}`,
+			);
+		}
+
+		const data = (await response.json()) as {
+			status?: {
+				statusCode?: string;
+				errorMessage?: string;
+				errorCode?: string;
+			};
+			pinboardResponses?: Array<{
+				savePinboard?: {
+					status?: { statusCode?: string; errorMessage?: string };
+				};
+				status?: { statusCode?: string; errorMessage?: string };
+			}>;
+		};
+
+		const statusCode = data?.status?.statusCode;
+		if (statusCode && statusCode !== "OK") {
+			const detail =
+				data.status?.errorMessage ||
+				data.pinboardResponses?.[0]?.savePinboard?.status?.errorMessage ||
+				data.pinboardResponses?.[0]?.status?.errorMessage ||
+				JSON.stringify(data.status);
+			throw new Error(
+				`saveBachPinboard returned non-OK status ${statusCode}: ${detail}`,
+			);
+		}
 	};
 }
 

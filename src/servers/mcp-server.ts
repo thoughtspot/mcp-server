@@ -26,6 +26,10 @@ import {
 	GetRelevantQuestionsSchema,
 	GetSessionUpdatesInputSchema,
 	SendSessionMessageInputSchema,
+	SpotterVizCreateSessionInputSchema,
+	SpotterVizGetUpdatesInputSchema,
+	SpotterVizSaveLiveboardInputSchema,
+	SpotterVizSubmitQueryInputSchema,
 	ToolName,
 } from "./tool-definitions";
 import {
@@ -252,6 +256,22 @@ export class MCPServer extends BaseMCPServer {
 
 			case ToolName.CreateDashboard: {
 				return this.callCreateDashboard(request, recorder);
+			}
+
+			case ToolName.SpotterVizCreateSession: {
+				return this.callSpotterVizCreateSession(request, recorder);
+			}
+
+			case ToolName.SpotterVizSubmitQuery: {
+				return this.callSpotterVizSubmitQuery(request, recorder);
+			}
+
+			case ToolName.SpotterVizGetUpdates: {
+				return this.callSpotterVizGetUpdates(request, recorder);
+			}
+
+			case ToolName.SpotterVizSaveLiveboard: {
+				return this.callSpotterVizSaveLiveboard(request, recorder);
 			}
 
 			default:
@@ -629,5 +649,139 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			map: new Map(sources.map((s) => [s.id, s])),
 		};
 		return this._sources;
+	}
+
+	@WithSpan("call-spotterviz-save-liveboard")
+	async callSpotterVizSaveLiveboard(
+		request: z.infer<typeof CallToolRequestSchema>,
+		recorder: MetricsRecorder,
+	) {
+		const { spotterviz_session_id } = SpotterVizSaveLiveboardInputSchema.parse(
+			request.params.arguments,
+		);
+
+		try {
+			const service = await this.getSpotterVizService(recorder);
+			const { liveboardId, liveboardUrl } = await service.saveLiveboard({
+				spotterVizSessionId: spotterviz_session_id,
+			});
+
+			return this.createStructuredContentSuccessResponse(
+				{ liveboard_id: liveboardId, liveboard_url: liveboardUrl },
+				"SpotterViz liveboard saved successfully",
+			);
+		} catch (error) {
+			console.error("Error saving SpotterViz liveboard:", error);
+			return this.createErrorResponse(
+				`Failed to save SpotterViz liveboard: ${(error as Error).message}`,
+				"SpotterViz save liveboard failed",
+			);
+		}
+	}
+
+	@WithSpan("call-spotterviz-get-updates")
+	async callSpotterVizGetUpdates(
+		request: z.infer<typeof CallToolRequestSchema>,
+		recorder: MetricsRecorder,
+	) {
+		const { spotterviz_session_id } = SpotterVizGetUpdatesInputSchema.parse(
+			request.params.arguments,
+		);
+
+		try {
+			const service = await this.getSpotterVizService(recorder);
+			const { updates, isDone } = await service.getUpdates({
+				spotterVizSessionId: spotterviz_session_id,
+			});
+
+			return this.createStructuredContentSuccessResponse(
+				{ updates, is_done: isDone },
+				"SpotterViz session updates retrieved successfully",
+			);
+		} catch (error) {
+			console.error("Error getting SpotterViz updates:", error);
+			return this.createErrorResponse(
+				`Failed to get SpotterViz updates: ${(error as Error).message}`,
+				"SpotterViz get updates failed",
+			);
+		}
+	}
+
+	@WithSpan("call-spotterviz-submit-query")
+	async callSpotterVizSubmitQuery(
+		request: z.infer<typeof CallToolRequestSchema>,
+		recorder: MetricsRecorder,
+	) {
+		const { spotterviz_session_id, message } =
+			SpotterVizSubmitQueryInputSchema.parse(request.params.arguments);
+
+		const storageService = await this.getStorageService();
+		try {
+			await storageService.initializeConversation(spotterviz_session_id);
+		} catch (error) {
+			console.error(
+				"Error initializing SpotterViz conversation in storage service:",
+				error,
+			);
+			return this.createErrorResponse(
+				"The SpotterViz session has an ongoing response to the previous message. Please continue to call `spotterviz_get_updates` until `is_done` is true before sending a followup message.",
+				`Error submitting SpotterViz query for session ${spotterviz_session_id}: ${error}`,
+			);
+		}
+
+		try {
+			const service = await this.getSpotterVizService(recorder);
+			const { streamPromise } = await service.submitQuery({
+				spotterVizSessionId: spotterviz_session_id,
+				message,
+			});
+
+			// Hand the stream-drain off to the Worker runtime so we can return immediately.
+			// Falls through harmlessly in tests / non-Worker runtimes where waitUntil is absent.
+			this.ctx.ctx?.waitUntil?.(streamPromise);
+
+			return this.createStructuredContentSuccessResponse(
+				{ success: true },
+				"SpotterViz query submitted successfully",
+			);
+		} catch (error) {
+			console.error("Error submitting SpotterViz query:", error);
+			return this.createErrorResponse(
+				`Failed to submit SpotterViz query: ${(error as Error).message}`,
+				"SpotterViz submit query failed",
+			);
+		}
+	}
+
+	@WithSpan("call-spotterviz-create-session")
+	async callSpotterVizCreateSession(
+		request: z.infer<typeof CallToolRequestSchema>,
+		recorder: MetricsRecorder,
+	) {
+		const { new_liveboard_name, existing_liveboard_id } =
+			SpotterVizCreateSessionInputSchema.parse(request.params.arguments);
+
+		try {
+			const service = await this.getSpotterVizService(recorder);
+			const result = await service.createSession({
+				newLiveboardName: new_liveboard_name,
+				existingLiveboardId: existing_liveboard_id,
+			});
+
+			return this.createStructuredContentSuccessResponse(
+				{
+					spotterviz_session_id: result.spotterVizSessionId,
+					liveboard_id: result.liveboardId,
+					liveboard_name: result.liveboardName,
+				},
+				"SpotterViz session created successfully",
+			);
+		} catch (error) {
+			console.error("Error creating SpotterViz session:", error);
+			return this.createErrorResponse(
+				`Failed to create SpotterViz session: ${(error as Error).message}`,
+				"SpotterViz session create failed",
+			);
+		}
 	}
 }
