@@ -865,7 +865,7 @@ mutation GetUnsavedAnswerTML($session: BachSessionIdInput!, $exportDependencies:
 			return getThoughtSpotClient(mockInstanceUrl, mockBearerToken) as any;
 		}
 
-		it("calls the v2 auth/token/fetch endpoint with org_identifier and a 30-day validity", async () => {
+		it("calls the v2 auth/token/fetch endpoint with org_identifier and a 24-hour validity", async () => {
 			(global.fetch as any).mockResolvedValue(
 				new Response(JSON.stringify({ data: { token: "org-tok" } }), {
 					status: 200,
@@ -881,8 +881,8 @@ mutation GetUnsavedAnswerTML($session: BachSessionIdInput!, $exportDependencies:
 			const [url, init] = (global.fetch as any).mock.calls[0];
 			expect(url).toContain("/callosum/v1/v2/auth/token/fetch");
 			expect(url).toContain("org_identifier=101");
-			// Default validity is 30 days in seconds.
-			expect(url).toContain(`validity_time_in_sec=${30 * 24 * 60 * 60}`);
+			// Default validity is 24 hours in seconds.
+			expect(url).toContain(`validity_time_in_sec=${24 * 60 * 60}`);
 			expect(init.method).toBe("GET");
 			// Authenticates with the (global) access token, no org header on the mint.
 			expect(init.headers.Authorization).toBe("Bearer global-tok");

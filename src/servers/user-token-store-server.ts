@@ -3,6 +3,8 @@ const ORG_TOKEN_KEY = "active-org-token";
 const GLOBAL_TOKEN_KEY = "global-token-details";
 const GLOBAL_TOKEN_REFRESH_INTERVAL_MS = 11 * 60 * 60 * 1000;
 const SESSION_IDLE_TTL_MS = 14 * 24 * 60 * 60 * 1000;
+// Org-token validity (24h); re-minted alongside the global token each refresh.
+const ORG_TOKEN_VALIDITY_SEC = 24 * 60 * 60;
 
 export type GlobalTokenData = {
 	globalToken: string;
@@ -205,6 +207,10 @@ export class UserTokenStoreSQLite {
 					typeof newExpiresAt === "number" ? newExpiresAt : store.expiresAt,
 				lastSeenAt: store.lastSeenAt,
 			});
+			// Keep the org token as warm as the global token: re-mint it from the
+			// fresh global token so an active session never hits an expired org
+			// token mid-conversation.
+			await this.refreshOrgToken(store.instanceUrl, globalToken);
 			await this.state.storage.setAlarm(
 				Date.now() + GLOBAL_TOKEN_REFRESH_INTERVAL_MS,
 			);
@@ -215,6 +221,55 @@ export class UserTokenStoreSQLite {
 			);
 			await this.state.storage.setAlarm(
 				Date.now() + GLOBAL_TOKEN_REFRESH_INTERVAL_MS,
+			);
+		}
+	}
+
+	// Re-mint the active org token from a freshly refreshed global token, so it
+	// stays as warm as the global token (both 24h). No-op if no org is active.
+	// On failure, keep the existing org token and let the next 11h alarm retry;
+	// never throws (the global refresh must still commit and the alarm re-arm).
+	// A token that is genuinely expired only surfaces after 14 idle days, as an
+	// expected 401 — there is deliberately no reactive re-mint / retry path.
+	private async refreshOrgToken(
+		instanceUrl: string,
+		globalToken: string,
+	): Promise<void> {
+		const activeOrgId = await this.state.storage.get<string>(ACTIVE_ORG_KEY);
+		if (!activeOrgId) {
+			return;
+		}
+		try {
+			const params = new URLSearchParams({
+				validity_time_in_sec: String(ORG_TOKEN_VALIDITY_SEC),
+				org_identifier: activeOrgId,
+			});
+			const response = await fetch(
+				`${instanceUrl}/callosum/v1/v2/auth/token/fetch?${params.toString()}`,
+				{
+					method: "GET",
+					headers: {
+						"Content-Type": "application/json",
+						Accept: "application/json",
+						"user-agent": "ThoughtSpot-ts-client",
+						Authorization: `Bearer ${globalToken}`,
+					},
+				},
+			);
+			if (!response.ok) {
+				const text = await response.text();
+				throw new Error(`status ${response.status}: ${text}`);
+			}
+			const data = (await response.json()) as any;
+			const orgToken = data?.data?.token ?? data?.token;
+			if (!orgToken || typeof orgToken !== "string") {
+				throw new Error("no token in org-token response");
+			}
+			await this.state.storage.put<string>(ORG_TOKEN_KEY, orgToken);
+		} catch (error) {
+			console.error(
+				"Keep-warm org-token re-mint failed; keeping existing token, will retry next interval:",
+				error instanceof Error ? error.message : String(error),
 			);
 		}
 	}

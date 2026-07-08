@@ -235,17 +235,15 @@ describe("UserTokenStoreSQLite", () => {
 
 		it("refreshes the token and re-arms ~11h on success", async () => {
 			await server.fetch(makeRequest("POST", "global-token-data", seedBody()));
-			const fetchSpy = vi
-				.spyOn(globalThis, "fetch")
-				.mockResolvedValue(
-					new Response(
-						JSON.stringify({
-							token: "access-2",
-							globalRefreshToken: "refresh-1",
-						}),
-						{ status: 200 },
-					),
-				);
+			const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+				new Response(
+					JSON.stringify({
+						token: "access-2",
+						globalRefreshToken: "refresh-1",
+					}),
+					{ status: 200 },
+				),
+			);
 			const before = Date.now();
 			await server.alarm();
 			fetchSpy.mockRestore();
@@ -479,6 +477,150 @@ describe("UserTokenStoreSQLite", () => {
 			// Re-seed (e.g. a later connect) — alarm already armed, must not re-arm.
 			await server.fetch(makeRequest("POST", "global-token-data", seedBody()));
 			expect(mock.storage.setAlarm).not.toHaveBeenCalled();
+		});
+
+		// Route a keep-warm fetch by URL: the org-token mint hits auth/token/fetch,
+		// everything else is the global gettoken?refresh refresh.
+		const routeKeepWarm = (opts: {
+			global: Response;
+			orgToken?: string;
+			orgStatus?: number;
+		}) =>
+			vi.spyOn(globalThis, "fetch").mockImplementation(async (input: any) => {
+				const url = typeof input === "string" ? input : input.url;
+				if (url.includes("auth/token/fetch")) {
+					if ((opts.orgStatus ?? 200) !== 200) {
+						return new Response("nope", { status: opts.orgStatus });
+					}
+					return new Response(
+						JSON.stringify({ data: { token: opts.orgToken ?? "org-2" } }),
+						{ status: 200 },
+					);
+				}
+				return opts.global.clone();
+			});
+
+		it("re-mints the active org token from the fresh global token on refresh", async () => {
+			await server.fetch(makeRequest("POST", "global-token-data", seedBody()));
+			await server.fetch(
+				makeRequest("POST", "active-org-id-and-token", {
+					activeOrgId: "101",
+					orgToken: "org-1",
+				}),
+			);
+			const spy = routeKeepWarm({
+				global: new Response(JSON.stringify({ token: "access-2" }), {
+					status: 200,
+				}),
+				orgToken: "org-2",
+			});
+			await server.alarm();
+
+			// Org token overwritten with the freshly minted one; mint used the new
+			// global token and the 24h validity, with no org header.
+			expect(mock.store.get("active-org-token")).toBe("org-2");
+			const mintCall = spy.mock.calls.find((c) =>
+				String(c[0]).includes("auth/token/fetch"),
+			);
+			expect(mintCall).toBeDefined();
+			const [mintUrl, mintInit] = mintCall as [string, any];
+			expect(mintUrl).toContain("org_identifier=101");
+			expect(mintUrl).toContain(`validity_time_in_sec=${24 * 60 * 60}`);
+			expect(mintInit.headers.Authorization).toBe("Bearer access-2");
+			spy.mockRestore();
+		});
+
+		it("does NOT mint an org token when no org is active", async () => {
+			await server.fetch(makeRequest("POST", "global-token-data", seedBody()));
+			const spy = routeKeepWarm({
+				global: new Response(JSON.stringify({ token: "access-2" }), {
+					status: 200,
+				}),
+			});
+			await server.alarm();
+
+			const minted = spy.mock.calls.some((c) =>
+				String(c[0]).includes("auth/token/fetch"),
+			);
+			expect(minted).toBe(false);
+			spy.mockRestore();
+		});
+
+		it("keeps the old global token when the refresh returns 200 but no token", async () => {
+			await server.fetch(makeRequest("POST", "global-token-data", seedBody()));
+			// 200 with an empty body — no token field — must be treated as a failure.
+			const spy = vi
+				.spyOn(globalThis, "fetch")
+				.mockResolvedValue(new Response(JSON.stringify({}), { status: 200 }));
+			await server.alarm();
+
+			expect(
+				(mock.store.get("global-token-details") as { globalToken: string })
+					.globalToken,
+			).toBe("access-1");
+			expect(mock.alarm).not.toBeNull();
+			spy.mockRestore();
+		});
+
+		it("keeps the existing org token when the mint returns 200 but no token", async () => {
+			await server.fetch(makeRequest("POST", "global-token-data", seedBody()));
+			await server.fetch(
+				makeRequest("POST", "active-org-id-and-token", {
+					activeOrgId: "101",
+					orgToken: "org-1",
+				}),
+			);
+			// Global refresh succeeds; the org mint returns 200 with an empty body
+			// (no token) — the re-mint must fail gracefully and leave the old token.
+			const spy = vi
+				.spyOn(globalThis, "fetch")
+				.mockImplementation(async (input: any) => {
+					const url = typeof input === "string" ? input : input.url;
+					if (url.includes("auth/token/fetch")) {
+						return new Response(JSON.stringify({ data: {} }), { status: 200 });
+					}
+					return new Response(JSON.stringify({ token: "access-2" }), {
+						status: 200,
+					});
+				});
+			await server.alarm();
+
+			expect(
+				(mock.store.get("global-token-details") as { globalToken: string })
+					.globalToken,
+			).toBe("access-2");
+			expect(mock.store.get("active-org-token")).toBe("org-1");
+			expect(mock.alarm).not.toBeNull();
+			spy.mockRestore();
+		});
+
+		it("keeps the existing org token (no reactive re-mint) when the mint fails", async () => {
+			await server.fetch(makeRequest("POST", "global-token-data", seedBody()));
+			await server.fetch(
+				makeRequest("POST", "active-org-id-and-token", {
+					activeOrgId: "101",
+					orgToken: "org-1",
+				}),
+			);
+			const spy = routeKeepWarm({
+				global: new Response(JSON.stringify({ token: "access-2" }), {
+					status: 200,
+				}),
+				orgStatus: 500,
+			});
+			await server.alarm();
+
+			// Global refresh still committed; the existing org token is left intact
+			// (the next 11h alarm retries the mint — no reactive re-mint path); the
+			// active org is unchanged and the alarm is re-armed.
+			expect(
+				(mock.store.get("global-token-details") as { globalToken: string })
+					.globalToken,
+			).toBe("access-2");
+			expect(mock.store.get("active-org-token")).toBe("org-1");
+			expect(mock.store.get("active-org-id")).toBe("101");
+			expect(mock.alarm).not.toBeNull();
+			spy.mockRestore();
 		});
 	});
 });

@@ -380,8 +380,9 @@ function addListOrgs(client: any, instanceUrl: string, token: string) {
 	};
 }
 
-// Org-scoped token validity (30 days), matching the connector's login validity.
-const ORG_TOKEN_VALIDITY_SEC = 30 * 24 * 60 * 60;
+// Org-scoped token validity (24 hours); the keep-warm alarm re-mints it
+// alongside the global token so it never expires under an active session.
+const ORG_TOKEN_VALIDITY_SEC = 24 * 60 * 60;
 
 // Mint an org-scoped token via auth/token/fetch?org_identifier=... The working
 // path is /callosum/v1/v2/auth/token/fetch (the /callosum/v2/... path 404s);
