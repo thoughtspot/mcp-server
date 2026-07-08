@@ -1,7 +1,5 @@
-// Central glossary of ThoughtSpot terminology: objects go by current, legacy,
-// and informal names (Liveboard/pinboard/dashboard, Worksheet/model, Tag/
-// sticker), so synonyms are resolved here before talking to the backend.
-// Source: https://developers.thoughtspot.com/docs/thoughtspot-objects
+// Glossary of ThoughtSpot object names (current, legacy, informal) so synonyms
+// like pinboard/dashboard or model resolve to canonical names before backend calls.
 
 // A single ThoughtSpot object concept and the various names it goes by.
 export interface TerminologyEntry {

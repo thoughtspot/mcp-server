@@ -211,7 +211,7 @@ const FetchDataVizSchema = z.object({
 	data_rows: z
 		.array(z.array(z.unknown()))
 		.describe(
-			"The data rows; each row is an array of cell values aligned to `columns`. Cells may be strings, numbers, booleans or null depending on the column type.",
+			"The data rows; each row is an array of cell values aligned to `columns`. Cells may be strings, numbers, booleans or null depending on the column type. Non-integer numeric cells are rounded to 2 decimal places (2 significant digits below 0.1) to trim payload size, so treat them as approximate.",
 		),
 	total_row_count: z
 		.number()

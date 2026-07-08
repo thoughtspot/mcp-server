@@ -1,4 +1,4 @@
-import { generateRequestId } from "../grpc-utils";
+import { buildTsHeaders, generateRequestId, postJson } from "../grpc-utils";
 import type {
 	FetchDataParams,
 	FetchDataResult,
@@ -6,7 +6,8 @@ import type {
 } from "./fetch-data-types";
 
 // Default row cap per visualization; unbounded results overwhelm LLM context.
-export const FETCH_DATA_DEFAULT_MAX_ROWS = 1000;
+// Keep in sync with the `max_rows` description in tool-definitions.ts.
+export const FETCH_DATA_DEFAULT_MAX_ROWS = 25;
 
 // Only Answers and Liveboards expose fetchable data.
 const ANSWER_TYPE = "ANSWER";
@@ -73,26 +74,14 @@ function normalizeRows(content: RawDataContent): {
 		};
 	}
 
-	// FULL: object rows; derive columns from row keys when not provided.
-	const columns = content.column_names ?? [];
-	if (columns.length === 0) {
-		for (const row of rawRows) {
-			if (isObjectRow(row)) {
-				for (const key of Object.keys(row)) {
-					if (!columns.includes(key)) {
-						columns.push(key);
-					}
-				}
-			}
-		}
-	}
+	// FULL: object rows are self-describing, so columns come from the row keys
+	// (stable across rows) rather than `column_names` — that way the projection
+	// can't disagree with the keys and silently emit all-null cells.
+	const columns = Object.keys(firstRow);
 	// Null/malformed entries are dropped.
-	const rows = rawRows.flatMap((row) => {
-		if (isObjectRow(row)) {
-			return [roundRow(columns.map((col) => row[col]))];
-		}
-		return Array.isArray(row) ? [roundRow(row)] : [];
-	});
+	const rows = rawRows.flatMap((row) =>
+		isObjectRow(row) ? [roundRow(columns.map((col) => row[col]))] : [],
+	);
 	return { columns, rows };
 }
 
@@ -121,32 +110,15 @@ export function addFetchData(client: any, instanceUrl: string, token: string) {
 	}: FetchDataParams): Promise<FetchDataResult> => {
 		// Shared x-request-id ties both upstream calls together for tracing.
 		const requestId = generateRequestId();
-
-		const headers = {
-			"Content-Type": "application/json",
-			Accept: "application/json",
-			"accept-language": "en-US",
-			"x-request-id": requestId,
-			"user-agent": "ThoughtSpot-ts-client",
-			Authorization: `Bearer ${token}`,
-		};
+		const headers = buildTsHeaders(token, { requestId });
 
 		// Step 1: resolve the object's type — it decides the data endpoint.
-		const metaResponse = await fetch(
+		const metaData = (await postJson(
 			`${instanceUrl}/api/rest/2.0/metadata/search`,
-			{
-				method: "POST",
-				headers,
-				body: JSON.stringify({ metadata: [{ identifier: objectId }] }),
-			},
-		);
-		if (!metaResponse.ok) {
-			const errorText = await metaResponse.text();
-			throw new Error(
-				`fetchData failed to resolve object with status ${metaResponse.status}: ${errorText}`,
-			);
-		}
-		const metaData = (await metaResponse.json()) as any[];
+			headers,
+			{ metadata: [{ identifier: objectId }] },
+			"fetchData failed to resolve object",
+		)) as any[];
 		const meta = metaData?.[0];
 		if (!meta) {
 			throw new Error(`fetchData found no object with id ${objectId}`);
@@ -177,18 +149,12 @@ export function addFetchData(client: any, instanceUrl: string, token: string) {
 			);
 		}
 
-		const dataResponse = await fetch(`${instanceUrl}${endpoint}`, {
-			method: "POST",
+		const data = (await postJson(
+			`${instanceUrl}${endpoint}`,
 			headers,
-			body: JSON.stringify(body),
-		});
-		if (!dataResponse.ok) {
-			const errorText = await dataResponse.text();
-			throw new Error(
-				`fetchData failed with status ${dataResponse.status}: ${errorText}`,
-			);
-		}
-		const data = (await dataResponse.json()) as any;
+			body,
+			"fetchData failed",
+		)) as any;
 		const contents: RawDataContent[] = data?.contents ?? [];
 
 		return {

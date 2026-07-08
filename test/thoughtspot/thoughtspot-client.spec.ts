@@ -185,6 +185,7 @@ describe("ThoughtSpot Client", () => {
 					headers: {
 						"Content-Type": "application/json",
 						Accept: "application/json",
+						"accept-language": "en-US",
 						"user-agent": "ThoughtSpot-ts-client",
 						Authorization: "Bearer test-token-123",
 					},
@@ -270,6 +271,7 @@ describe("ThoughtSpot Client", () => {
 					headers: {
 						"Content-Type": "application/json",
 						Accept: "application/json",
+						"accept-language": "en-US",
 						"user-agent": "ThoughtSpot-ts-client",
 						Authorization: `Bearer ${mockBearerToken}`,
 					},
@@ -428,6 +430,7 @@ describe("ThoughtSpot Client", () => {
 				headers: {
 					"Content-Type": "application/json",
 					Accept: "application/json",
+					"accept-language": "en-US",
 					"user-agent": "ThoughtSpot-ts-client",
 					Authorization: `Bearer ${mockBearerToken}`,
 				},
@@ -568,6 +571,7 @@ describe("ThoughtSpot Client", () => {
 					headers: {
 						"Content-Type": "application/json",
 						Accept: "application/json",
+						"accept-language": "en-US",
 						"user-agent": "ThoughtSpot-ts-client",
 						Authorization: `Bearer ${mockBearerToken}`,
 					},
@@ -701,6 +705,7 @@ describe("ThoughtSpot Client", () => {
 						headers: {
 							"Content-Type": "application/json",
 							Accept: "text/event-stream",
+							"accept-language": "en-US",
 							"user-agent": "ThoughtSpot-ts-client",
 							Authorization: `Bearer ${mockBearerToken}`,
 						},
@@ -1626,7 +1631,7 @@ describe("ThoughtSpot Client", () => {
 				metadata_identifier: "obj-1",
 				data_format: "FULL",
 				record_offset: 0,
-				record_size: 1000,
+				record_size: 25,
 			});
 
 			// FULL object rows are normalized into columns + positional rows.

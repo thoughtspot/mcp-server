@@ -4,11 +4,11 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { validateAndSanitizeUrl } from "@thoughtspot/mcp-auth";
 import { loginViaBrowser } from "./local-auth/browser-login.js";
 import {
+	type CachedCredentials,
 	loadCachedCredentials,
 	saveCachedCredentials,
 } from "./local-auth/token-cache.js";
 import { MCPServer } from "./servers/mcp-server.js";
-import { getThoughtSpotClient } from "./thoughtspot/thoughtspot-client.js";
 import type { Props } from "./utils.js";
 
 // stdout carries the JSON-RPC protocol; route all logging to stderr so it
@@ -17,24 +17,40 @@ console.log = (...args: unknown[]) => console.error(...args);
 console.info = (...args: unknown[]) => console.error(...args);
 console.debug = (...args: unknown[]) => console.error(...args);
 
-// True only if the cluster accepts the token.
-async function isTokenValid(url: string, token: string): Promise<boolean> {
+// "valid": cluster resolved a session. "invalid": cluster rejected the token.
+// "unreachable": network/5xx/non-JSON — a cluster problem, not the token, so
+// callers must not discard the token in favour of a browser popup.
+type TokenCheck = "valid" | "invalid" | "unreachable";
+
+async function checkToken(url: string, token: string): Promise<TokenCheck> {
+	let response: Response;
 	try {
-		const info = await (
-			getThoughtSpotClient(url, token) as unknown as {
-				getSessionInfo: () => Promise<{ userGUID?: string } | undefined>;
-			}
-		).getSessionInfo();
-		return Boolean(info?.userGUID);
+		response = await fetch(`${url}/prism/preauth/info`, {
+			method: "GET",
+			headers: {
+				Accept: "application/json",
+				"user-agent": "ThoughtSpot-ts-client",
+				Authorization: `Bearer ${token}`,
+			},
+		});
 	} catch {
-		return false;
+		return "unreachable";
+	}
+	if (response.status === 401 || response.status === 403) {
+		return "invalid";
+	}
+	if (!response.ok) {
+		return "unreachable";
+	}
+	try {
+		const data = (await response.json()) as { info?: { userGUID?: string } };
+		return data?.info?.userGUID ? "valid" : "invalid";
+	} catch {
+		return "unreachable";
 	}
 }
 
 async function main() {
-	let instanceUrl: string;
-	let accessToken: string;
-
 	const rawInstance = process.env.TS_INSTANCE;
 	const token = process.env.TS_AUTH_TOKEN;
 
@@ -49,33 +65,50 @@ async function main() {
 		}
 	}
 
-	// Try auth in order: valid env token, then valid cached token, then a
-	// browser sign-in (whose result we cache).
-	if (
-		defaultInstanceUrl &&
-		token &&
-		(await isTokenValid(defaultInstanceUrl, token))
-	) {
-		instanceUrl = defaultInstanceUrl;
-		accessToken = token;
-	} else {
-		const cached = loadCachedCredentials();
-		if (
-			cached &&
-			(await isTokenValid(cached.instanceUrl, cached.accessToken))
-		) {
-			({ instanceUrl, accessToken } = cached);
-		} else {
-			if (token) {
-				console.error(
-					"[ThoughtSpot MCP] TS_AUTH_TOKEN is missing or expired — opening browser sign-in.",
-				);
-			}
-			({ instanceUrl, accessToken } =
-				await loginViaBrowser(defaultInstanceUrl));
-			saveCachedCredentials({ instanceUrl, accessToken });
+	// Resolve credentials: a valid env token, then a valid cached token, then a
+	// browser sign-in (whose result we cache). A token that fails only because
+	// the cluster is unreachable is never discarded for a browser popup — the
+	// popup can't fix a down cluster and would hang headless hosts.
+	let resolved: CachedCredentials | undefined;
+	let sawUnreachable = false;
+
+	if (defaultInstanceUrl && token) {
+		const check = await checkToken(defaultInstanceUrl, token);
+		if (check === "valid") {
+			resolved = { instanceUrl: defaultInstanceUrl, accessToken: token };
+		} else if (check === "unreachable") {
+			sawUnreachable = true;
 		}
 	}
+
+	const cached = resolved ? null : loadCachedCredentials();
+	if (!resolved && cached) {
+		const check = await checkToken(cached.instanceUrl, cached.accessToken);
+		if (check === "valid") {
+			resolved = cached;
+		} else if (check === "unreachable") {
+			sawUnreachable = true;
+		}
+	}
+
+	if (!resolved) {
+		// We had a token but couldn't reach the cluster: fail fast instead of
+		// opening a browser that can't help.
+		if ((token || cached) && sawUnreachable) {
+			throw new Error(
+				"Could not reach the ThoughtSpot cluster to validate the existing token. Check connectivity / TS_INSTANCE and retry.",
+			);
+		}
+		if (token) {
+			console.error(
+				"[ThoughtSpot MCP] TS_AUTH_TOKEN is missing or expired — opening browser sign-in.",
+			);
+		}
+		resolved = await loginViaBrowser(defaultInstanceUrl);
+		saveCachedCredentials(resolved);
+	}
+
+	const { instanceUrl, accessToken } = resolved;
 
 	const props: Props = {
 		instanceUrl,

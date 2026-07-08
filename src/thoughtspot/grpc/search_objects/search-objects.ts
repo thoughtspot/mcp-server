@@ -1,5 +1,5 @@
 import { resolveObjectTypeFacets } from "../../terminology";
-import { generateRequestId } from "../grpc-utils";
+import { buildTsHeaders, generateRequestId, postJson } from "../grpc-utils";
 import { searchObjectsQuery } from "./search-objects-query";
 import type {
 	SearchObjectHeader,
@@ -102,18 +102,10 @@ export function addSearchObjects(
 			rawCount: number;
 			isFinalPage?: boolean;
 		}> => {
-			const fetchOptions = {
-				method: "POST",
-				headers: {
-					"Content-Type": "application/json",
-					Accept: "application/json",
-					// Without this the server falls back to locale "*" and 500s.
-					"accept-language": "en-US",
-					"x-request-id": requestId,
-					"user-agent": "ThoughtSpot-ts-client",
-					Authorization: `Bearer ${token}`,
-				},
-				body: JSON.stringify({
+			const data = (await postJson(
+				`${instanceUrl}${endpoint}`,
+				buildTsHeaders(token, { requestId }),
+				{
 					operationName: "GetEurekaResults",
 					query: searchObjectsQuery,
 					variables: {
@@ -133,18 +125,9 @@ export function addSearchObjects(
 							searchOption: "SEARCH_RESULTS",
 						},
 					},
-				}),
-			};
-			const response = await fetch(`${instanceUrl}${endpoint}`, fetchOptions);
-
-			if (!response.ok) {
-				const errorText = await response.text();
-				throw new Error(
-					`searchObjects failed with status ${response.status}: ${errorText}`,
-				);
-			}
-
-			const data = (await response.json()) as any;
+				},
+				"searchObjects failed",
+			)) as any;
 
 			// Eureka returns HTTP 200 on query-level failures; without this check
 			// they surface as a successful "0 objects found".
@@ -192,6 +175,8 @@ export function addSearchObjects(
 					if (!id) {
 						return null;
 					}
+					// Falls back to the raw id when the STICKERS facet carries no name;
+					// a `tag` filter then can't match by name (rare, cluster-dependent).
 					const tags = (header?.tagIds ?? []).map(
 						(tagId: string) => stickerNames[tagId] ?? tagId,
 					);

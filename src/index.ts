@@ -116,9 +116,8 @@ const hooks: AuthHooks<Props> = {
 	},
 };
 
-// Optional prefill for the OAuth sign-in page's instance URL field. Set
-// DEFAULT_INSTANCE_URL in .dev.vars for local testing; leave unset in prod.
-// Resolved lazily (per render) since env vars aren't populated at module load.
+// Optional prefill for the OAuth sign-in page's instance URL field, from
+// DEFAULT_INSTANCE_URL. Resolved lazily since env isn't ready at module load.
 function resolveDefaultInstanceUrl(): string | undefined {
 	const raw = process.env.DEFAULT_INSTANCE_URL;
 	if (!raw) return undefined;

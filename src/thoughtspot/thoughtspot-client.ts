@@ -11,6 +11,7 @@ import { customAlphabet } from "nanoid";
 import { of } from "rxjs";
 import YAML from "yaml";
 import { addFetchData } from "./grpc/fetch_data/fetch-data";
+import { buildTsHeaders } from "./grpc/grpc-utils";
 import { addSearchObjects } from "./grpc/search_objects/search-objects";
 import type { SessionInfo } from "./types";
 
@@ -97,12 +98,7 @@ function addExportUnsavedAnswerTML(
 		// make a graphql request to `ThoughtspotHost/prism endpoint.
 		const response = await fetch(`${instanceUrl}${endpoint}`, {
 			method: "POST",
-			headers: {
-				"Content-Type": "application/json",
-				Accept: "application/json",
-				"user-agent": "ThoughtSpot-ts-client",
-				Authorization: `Bearer ${token}`,
-			},
+			headers: buildTsHeaders(token),
 			body: JSON.stringify({
 				operationName: "GetUnsavedAnswerTML",
 				query: getAnswerTML,
@@ -134,12 +130,7 @@ async function addGetSessionInfo(
 		// make a graphql request to `ThoughtspotHost/prism endpoint.
 		const response = await fetch(`${instanceUrl}${endpoint}`, {
 			method: "GET",
-			headers: {
-				"Content-Type": "application/json",
-				Accept: "application/json",
-				"user-agent": "ThoughtSpot-ts-client",
-				Authorization: `Bearer ${token}`,
-			},
+			headers: buildTsHeaders(token),
 		});
 
 		const data: any = await response.json();
@@ -186,12 +177,7 @@ function addGetAnswerSession(client: any, instanceUrl: string, token: string) {
 		const operationName = "Answer__updateTokens";
 		const fetchOptions = {
 			method: "POST",
-			headers: {
-				"Content-Type": "application/json",
-				Accept: "application/json",
-				"user-agent": "ThoughtSpot-ts-client",
-				Authorization: `Bearer ${token}`,
-			},
+			headers: buildTsHeaders(token),
 			body: JSON.stringify({
 				operationName,
 				query: getAnswerSessionQuery,
@@ -236,12 +222,7 @@ function addCreateAgentConversationWithAutoMode(
 		const endpoint = "/conversation/v2/";
 		const fetchOptions = {
 			method: "POST",
-			headers: {
-				"Content-Type": "application/json",
-				Accept: "application/json",
-				"user-agent": "ThoughtSpot-ts-client",
-				Authorization: `Bearer ${token}`,
-			},
+			headers: buildTsHeaders(token),
 			body: JSON.stringify({
 				context: dataSourceId
 					? {
@@ -310,12 +291,7 @@ function addSendAgentConversationMessageStreaming(
 		const endpoint = `/conversation/v2/${encodeURIComponent(conversation_identifier)}/query`;
 		const fetchOptions = {
 			method: "POST",
-			headers: {
-				"Content-Type": "application/json",
-				Accept: "text/event-stream",
-				"user-agent": "ThoughtSpot-ts-client",
-				Authorization: `Bearer ${token}`,
-			},
+			headers: buildTsHeaders(token, { accept: "text/event-stream" }),
 			body: JSON.stringify({
 				mode: "spotter", // TODO(Rifdhan) support deep analysis mode
 				id: generateNanoID(),

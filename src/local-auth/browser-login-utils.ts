@@ -1,7 +1,5 @@
-// Pure helpers for the browser sign-in flow. Free of Node-only imports so they
-// stay unit-testable in the Workers test pool; runtime wiring lives in
-// browser-login.ts. The server itself never authenticates to the cluster — the
-// user's browser session mints the token, which they paste back here.
+// Pure helpers for the browser sign-in flow, free of Node-only imports so they
+// stay unit-testable; runtime wiring lives in browser-login.ts.
 
 // Token validity (30 days); mirrors the production OAuth callback.
 export const TOKEN_VALIDITY_SECONDS = 2_592_000;

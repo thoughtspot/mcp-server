@@ -148,10 +148,11 @@ async function handleRequest(
 
 	if (req.method === "POST" && url.pathname === "/store-token") {
 		// Origin + nonce checks: only our own pages may settle the flow, so no
-		// other local page can race with a forged token. Both loopback hostnames
-		// are allowed to match the Host guard above.
+		// other local page or non-browser client can race with a forged token.
+		// Origin is required (browsers always send it on this POST); a missing
+		// Origin is rejected. Both loopback hostnames match the Host guard above.
 		const origin = req.headers.origin;
-		if (origin && !isLoopbackOrigin(origin, ctx.loopbackOrigin)) {
+		if (!origin || !isLoopbackOrigin(origin, ctx.loopbackOrigin)) {
 			res.writeHead(403, { "Content-Type": "application/json" });
 			res.end(JSON.stringify({ ok: false, error: "Forbidden" }));
 			return;
