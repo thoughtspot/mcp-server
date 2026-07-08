@@ -8,6 +8,9 @@ const MESSAGE_KEY_PREFIX = "message-";
 const IS_DONE_KEY = "is-done";
 const WRITE_BOOKMARK_KEY = "write-bookmark";
 const READ_BOOKMARK_KEY = "read-bookmark";
+const METADATA_KEY = "metadata";
+
+export type ConversationMetadata = Record<string, unknown>;
 
 /**
  * A Durable Object that stores streaming conversation messages and exposes them over HTTP.
@@ -20,6 +23,8 @@ const READ_BOOKMARK_KEY = "read-bookmark";
  *   POST  /storage/<conversation-id>/initialize —> initializeConversation
  *   POST  /storage/<conversation-id>/append     —> appendMessagesAndRestartTtl
  *   GET   /storage/<conversation-id>/messages   —> getNewMessagesAndUpdateBookmark
+ *   GET   /storage/<conversation-id>/metadata   —> getMetadata
+ *   PATCH /storage/<conversation-id>/metadata   —> mergeMetadataAndRestartTtl
  */
 export class ConversationStorageServerSQLite {
 	private conversationId = "";
@@ -56,6 +61,21 @@ export class ConversationStorageServerSQLite {
 					return Response.json(state);
 				}
 
+				case "GET /metadata": {
+					const metadata =
+						await this.state.storage.get<ConversationMetadata>(METADATA_KEY);
+					if (metadata === undefined) {
+						return Response.json({ error: "Not found" }, { status: 404 });
+					}
+					return Response.json(metadata);
+				}
+
+				case "PATCH /metadata": {
+					const patch = (await request.json()) as ConversationMetadata;
+					const merged = await this.mergeMetadataAndRestartTtl(patch);
+					return Response.json(merged);
+				}
+
 				default:
 					return new Response("Not Found", { status: 404 });
 			}
@@ -84,6 +104,21 @@ export class ConversationStorageServerSQLite {
 
 		await this.state.storage.put<boolean>(IS_DONE_KEY, false);
 		await this.restartTtl();
+	}
+
+	/*
+	 * Shallow-merge `patch` into the existing metadata object. Top-level keys in `patch`
+	 * overwrite existing keys. And restarts the TTL.
+	 */
+	private async mergeMetadataAndRestartTtl(
+		patch: ConversationMetadata,
+	): Promise<ConversationMetadata> {
+		const existing =
+			(await this.state.storage.get<ConversationMetadata>(METADATA_KEY)) ?? {};
+		const merged = { ...existing, ...patch };
+		await this.state.storage.put<ConversationMetadata>(METADATA_KEY, merged);
+		await this.restartTtl();
+		return merged;
 	}
 
 	/*

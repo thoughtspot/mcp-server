@@ -21,6 +21,10 @@ export const UPSTREAM_OPERATION_NAMES = {
 		"send_agent_conversation_message_streaming",
 	importMetadataTml: "import_metadata_tml",
 	searchMetadata: "search_metadata",
+	createBachPinboardSession: "create_bach_pinboard_session",
+	saveBachPinboard: "save_bach_pinboard",
+	createAuroraSession: "create_aurora_session",
+	submitAuroraQuery: "submit_aurora_query",
 } as const;
 
 export type UpstreamOperation =
@@ -128,6 +132,32 @@ export function recordUpstreamCallMetrics(
 
 	recorder.count(METRIC_NAMES.upstreamCallsTotal, 1, labels);
 	recorder.histogram(METRIC_NAMES.upstreamDurationMs, durationMs, labels);
+}
+
+/**
+ * Run an upstream call and record its outcome + duration via `recordUpstreamCallMetrics`.
+ * Errors propagate to the caller — the metric is recorded as `upstream_error` first.
+ */
+export async function observeUpstreamCall<T>(
+	recorder: MetricsRecorder | undefined,
+	operation: UpstreamOperation,
+	call: () => Promise<T>,
+): Promise<T> {
+	const startedAt = Date.now();
+	let outcome: MetricOutcome = "success";
+	try {
+		return await call();
+	} catch (error) {
+		outcome = "upstream_error";
+		throw error;
+	} finally {
+		recordUpstreamCallMetrics(
+			recorder,
+			operation,
+			outcome,
+			Date.now() - startedAt,
+		);
+	}
 }
 
 export function recordUpstreamStreamStartedMetric(
