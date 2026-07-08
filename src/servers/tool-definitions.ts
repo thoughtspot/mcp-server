@@ -65,6 +65,191 @@ export const GetAnswerOutputSchema = z.object({
 		.describe("Information about the fields in the answer"),
 });
 
+export const SearchObjectsInputSchema = z.object({
+	query: z
+		.union([z.string().min(1), z.array(z.string().min(1)).nonempty()])
+		.describe(
+			"The search term(s) to find objects for, matched against object names or descriptions. Pass a single string for one search, or an array of distinct terms when the user's request covers several separate things. Each term is searched in parallel and the results are merged and de-duplicated. Note: pagination via `cursor` only applies to a single-term search.",
+		),
+	types: z
+		.array(z.string())
+		.optional()
+		.describe(
+			"Restrict results to these object types. Accepts friendly and legacy names: 'liveboard' (aliases 'pinboard', 'dashboard'), 'answer', and 'worksheet' (aliases 'logical table', 'data model', 'data source'). Omit to search all types.",
+		),
+	owner: z
+		.string()
+		.optional()
+		.describe(
+			"Restrict results to objects authored by this user, matched against the author's display name (case-insensitive).",
+		),
+	tag: z
+		.string()
+		.optional()
+		.describe(
+			"Restrict results to objects carrying this tag/sticker, matched by tag name (case-insensitive).",
+		),
+	modified_since: z
+		.number()
+		.int()
+		.optional()
+		.describe(
+			"Only return objects last modified on or after this epoch-millisecond timestamp.",
+		),
+	verified_only: z
+		.boolean()
+		.optional()
+		.describe("If true, only return objects marked as verified."),
+	limit: z
+		.number()
+		.int()
+		.positive()
+		.optional()
+		.describe("The maximum number of results to return. Defaults to 10."),
+	cursor: z
+		.string()
+		.optional()
+		.describe(
+			"Opaque pagination cursor returned as `next_cursor` by a previous call. Omit for the first page.",
+		),
+});
+
+const SearchObjectHeaderSchema = z.object({
+	id: z.string().describe("The GUID of the object."),
+	name: z.string().describe("The display name/title of the object."),
+	type: z
+		.string()
+		.describe(
+			"The type of the object, for example PINBOARD_ANSWER_BOOK (liveboard), ANSWER or WORKSHEET.",
+		),
+	owner: z
+		.string()
+		.describe("The display name of the user who authored the object."),
+	description: z.string().describe("The description of the object."),
+	tags: z
+		.array(z.string())
+		.describe("The names of the tags/stickers applied to the object."),
+	last_modified: z
+		.number()
+		.optional()
+		.describe("Epoch-millisecond timestamp of the last modification."),
+	last_viewed: z
+		.number()
+		.nullable()
+		.optional()
+		.describe(
+			"Epoch-millisecond timestamp the current user last viewed the object (viewedbymeTime). Null when the search backend does not expose it.",
+		),
+	verified: z.boolean().describe("Whether the object is marked as verified."),
+	frame_url: z
+		.string()
+		.describe("Deep link to open the object in the ThoughtSpot UI."),
+	match_reason: z
+		.string()
+		.describe(
+			"Human-readable explanation of why the object matched the query.",
+		),
+	confidence: z
+		.number()
+		.optional()
+		.describe("The relevance score of the result for the search term."),
+});
+
+export const SearchObjectsOutputSchema = z.object({
+	objects: z
+		.array(SearchObjectHeaderSchema)
+		.describe("Ranked object headers matching the search term."),
+	next_cursor: z
+		.string()
+		.nullable()
+		.describe(
+			"Cursor to pass back as `cursor` to fetch the next page, or null when there are no more results.",
+		),
+	request_id: z
+		.string()
+		.describe(
+			"Correlation id sent on the upstream call as x-request-id; trace this in ThoughtSpot's server logs.",
+		),
+});
+
+export const FetchDataInputSchema = z.object({
+	object_id: z
+		.string()
+		.describe(
+			"The GUID of the object to fetch data for, typically an `id` returned by a prior `search_objects` call. Supports saved Answers and Liveboards.",
+		),
+	visualization_ids: z
+		.array(z.string())
+		.optional()
+		.describe(
+			"When `object_id` corresponds to a Liveboard, restrict the fetch to these visualization GUIDs (use to pull a single visualization/answer pinned on a Liveboard). Omit to fetch every visualization on the Liveboard. Ignored for standalone Answers.",
+		),
+	max_rows: z
+		.number()
+		.int()
+		.positive()
+		.optional()
+		.describe(
+			"Maximum number of rows to return per visualization. Defaults to 25. Raise this only when you need the full result set and the object is known to be large.",
+		),
+});
+
+const FetchDataVizSchema = z.object({
+	viz_id: z
+		.string()
+		.optional()
+		.describe(
+			"The GUID of the visualization. Present for Liveboard visualizations; omitted for a standalone Answer.",
+		),
+	viz_name: z
+		.string()
+		.optional()
+		.describe(
+			"The name of the visualization. Present for Liveboard visualizations.",
+		),
+	columns: z.array(z.string()).describe("The column names, in order."),
+	data_rows: z
+		.array(z.array(z.unknown()))
+		.describe(
+			"The data rows; each row is an array of cell values aligned to `columns`. Cells may be strings, numbers, booleans or null depending on the column type. Non-integer numeric cells are rounded to 2 decimal places (2 significant digits below 0.1) to trim payload size, so treat them as approximate.",
+		),
+	total_row_count: z
+		.number()
+		.optional()
+		.describe(
+			"Total rows available upstream, which may exceed the rows returned when capped by `max_rows`.",
+		),
+	row_count: z
+		.number()
+		.optional()
+		.describe("Number of rows actually returned in `data_rows`."),
+	sampling_ratio: z
+		.number()
+		.optional()
+		.describe(
+			"Sampling ratio between 0 and 1; a value of 1 means the complete result set was returned (not sampled).",
+		),
+});
+
+export const FetchDataOutputSchema = z.object({
+	id: z.string().describe("The GUID of the fetched object."),
+	name: z.string().describe("The display name of the object."),
+	type: z
+		.string()
+		.describe("The resolved object type: either 'ANSWER' or 'LIVEBOARD'."),
+	description: z.string().describe("The description of the object."),
+	data: z
+		.array(FetchDataVizSchema)
+		.describe(
+			"The object's data. A single entry for an Answer; one entry per visualization for a Liveboard.",
+		),
+	request_id: z
+		.string()
+		.describe(
+			"Correlation id sent on the upstream calls as x-request-id; trace this in ThoughtSpot's server logs.",
+		),
+});
+
 export const CheckConnectivityInputSchema = z.object({});
 
 export const CheckConnectivityOutputSchema = z.object({
@@ -105,7 +290,7 @@ export const SendSessionMessageInputSchema = z.object({
 		.string()
 		.optional()
 		.describe(
-			'Extra information which the Analytics Agent should be aware of while interpreting the `message`. You can use this field to provide background or external information relevant to the request, which the Agent would not be aware of. For example, "The user\'s fiscal year starts in April", or "The user is a manager of the West region".',
+			"Extra information which the Analytics Agent should be aware of while interpreting the `message`. You can use this field to provide background or external information relevant to the request, which the Agent would not be aware of.",
 		),
 });
 
@@ -271,6 +456,8 @@ export enum ToolName {
 	CreateLiveboard = "createLiveboard",
 	GetDataSourceSuggestions = "getDataSourceSuggestions",
 	// V2 (Spotter 3)
+	SearchObjects = "search_objects",
+	FetchData = "fetch_data",
 	CheckConnectivity = "check_connectivity",
 	CreateAnalysisSession = "create_analysis_session",
 	SendSessionMessage = "send_session_message",
@@ -339,6 +526,32 @@ export const toolDefinitionsV1 = [
 ];
 
 export const toolDefinitionsV2 = [
+	{
+		name: ToolName.SearchObjects,
+		description:
+			"Search for objects (answers, liveboards, worksheets, and other metadata) in ThoughtSpot matching a given search term. Supports optional filters (types, owner, tag, modified_since, verified_only) and pagination (limit, cursor). Returns ranked object headers with id, name, type, owner, description, tags, last_modified, last_viewed, verified, frame_url, match_reason and confidence, plus next_cursor and request_id. Returns identifiers and metadata only.",
+		inputSchema: z.toJSONSchema(SearchObjectsInputSchema),
+		outputSchema: z.toJSONSchema(SearchObjectsOutputSchema),
+		annotations: {
+			title: "Search Objects",
+			readOnlyHint: true,
+			destructiveHint: false,
+			openWorldHint: false,
+		},
+	},
+	{
+		name: ToolName.FetchData,
+		description:
+			"Fetch the full data of a saved Answer or Liveboard given its GUID (for example an `id` returned by `search_objects`). This is the natural follow-on to `search_objects` once you want to analyze what was found. The result is shaped to the object's type: an Answer returns a single tabular result, a Liveboard returns one tabular result per visualization (each with its visualization id and name). To pull a single visualization pinned on a Liveboard, pass the Liveboard GUID as `object_id` and the visualization GUID in `visualization_ids`. Each result includes the column names and data rows. Use the optional `max_rows` to bound the rows returned per visualization (defaults to 25).",
+		inputSchema: z.toJSONSchema(FetchDataInputSchema),
+		outputSchema: z.toJSONSchema(FetchDataOutputSchema),
+		annotations: {
+			title: "Fetch Object Data",
+			readOnlyHint: true,
+			destructiveHint: false,
+			openWorldHint: false,
+		},
+	},
 	{
 		name: ToolName.CheckConnectivity,
 		description:

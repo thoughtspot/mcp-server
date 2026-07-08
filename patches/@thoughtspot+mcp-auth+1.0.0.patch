@@ -1,0 +1,78 @@
+diff --git a/node_modules/@thoughtspot/mcp-auth/dist/oauth-provider.js b/node_modules/@thoughtspot/mcp-auth/dist/oauth-provider.js
+index 1de0e54..ba2d788 100644
+--- a/node_modules/@thoughtspot/mcp-auth/dist/oauth-provider.js
++++ b/node_modules/@thoughtspot/mcp-auth/dist/oauth-provider.js
+@@ -1,4 +1,3 @@
+-import OAuthProvider from "@cloudflare/workers-oauth-provider";
+ import { createAuthApp } from "./handlers";
+ import { withBearerHandler } from "./bearer";
+ import { PUBLIC_ROUTES } from "./routes";
+@@ -37,19 +36,27 @@ export function createOAuthHandler(options) {
+             },
+         };
+     }
+-    const oauthProvider = new OAuthProvider({
+-        apiHandlers: {
+-            [mcpPath]: buildMcpRouter(mcpPath, "serve"),
+-            [ssePath]: buildMcpRouter(ssePath, "serveSSE"),
+-        },
+-        // biome-ignore lint/suspicious/noExplicitAny: OAuthProvider types are loose
+-        defaultHandler: honoApp,
+-        authorizeEndpoint,
+-        tokenEndpoint,
+-        clientRegistrationEndpoint: registerEndpoint,
+-    });
++    // Lazy-load so Node consumers (stdio) don't eagerly evaluate the
++    // Worker-only "cloudflare:workers" import at module load.
++    let oauthProviderPromise;
++    function getOAuthProvider() {
++        if (!oauthProviderPromise) {
++            oauthProviderPromise = import("@cloudflare/workers-oauth-provider").then(({ default: OAuthProvider }) => new OAuthProvider({
++                apiHandlers: {
++                    [mcpPath]: buildMcpRouter(mcpPath, "serve"),
++                    [ssePath]: buildMcpRouter(ssePath, "serveSSE"),
++                },
++                // biome-ignore lint/suspicious/noExplicitAny: OAuthProvider types are loose
++                defaultHandler: honoApp,
++                authorizeEndpoint,
++                tokenEndpoint,
++                clientRegistrationEndpoint: registerEndpoint,
++            }));
++        }
++        return oauthProviderPromise;
++    }
+     return {
+-        fetch: ((request, env, ctx) => oauthProvider.fetch(request, env, ctx)),
++        fetch: (async (request, env, ctx) => (await getOAuthProvider()).fetch(request, env, ctx)),
+     };
+ }
+ //# sourceMappingURL=oauth-provider.js.map
+\ No newline at end of file
+diff --git a/node_modules/@thoughtspot/mcp-auth/dist/oauth-utils.js b/node_modules/@thoughtspot/mcp-auth/dist/oauth-utils.js
+index a790211..d002aff 100644
+--- a/node_modules/@thoughtspot/mcp-auth/dist/oauth-utils.js
++++ b/node_modules/@thoughtspot/mcp-auth/dist/oauth-utils.js
+@@ -17,7 +17,9 @@ export function renderApprovalDialog(request, options) {
+         `${serverName} wants access<br>to your ThoughtSpot instance`;
+     const clientUrl = client?.clientUri;
+     const tsInstanceUrlMatch = clientUrl?.match(/x-ts-host:(.*)/);
+-    const tsInstanceUrl = tsInstanceUrlMatch ? tsInstanceUrlMatch[1].trim() : "";
++    const tsInstanceUrl = (tsInstanceUrlMatch ? tsInstanceUrlMatch[1].trim() : "") ||
++        serverInfo.defaultInstanceUrl ||
++        "";
+     const htmlContent = `
+       <!DOCTYPE html>
+       <html lang="en">
+diff --git a/node_modules/@thoughtspot/mcp-auth/dist/types.d.ts b/node_modules/@thoughtspot/mcp-auth/dist/types.d.ts
+index eee0d36..bf69fff 100644
+--- a/node_modules/@thoughtspot/mcp-auth/dist/types.d.ts
++++ b/node_modules/@thoughtspot/mcp-auth/dist/types.d.ts
+@@ -28,6 +28,8 @@ export interface ServerInfo {
+     signupUrl?: string;
+     /** Approval dialog title. Defaults to "<name> wants access to your ThoughtSpot instance". */
+     approvalTitle?: string;
++    /** Prefills the instance URL field on the approval dialog when no x-ts-host is present. */
++    defaultInstanceUrl?: string;
+ }
+ export type AuthMetricName = "oauth_authorize_requests_total" | "oauth_authorize_submit_total" | "oauth_callback_total" | "oauth_store_token_total";
+ export type BearerAuthRouteGroup = "bearer_mcp" | "bearer_sse" | "token_mcp" | "token_sse";

@@ -4,7 +4,11 @@ import {
 	instrument,
 } from "@microlabs/otel-cf-workers";
 import { trace } from "@opentelemetry/api";
-import { type AuthHooks, createOAuthHandler } from "@thoughtspot/mcp-auth";
+import {
+	type AuthHooks,
+	createOAuthHandler,
+	validateAndSanitizeUrl,
+} from "@thoughtspot/mcp-auth";
 
 import { instrumentedMCPServer } from "./cloudflare-utils";
 import {
@@ -112,11 +116,29 @@ const hooks: AuthHooks<Props> = {
 	},
 };
 
+// Optional prefill for the OAuth sign-in page's instance URL field, from
+// DEFAULT_INSTANCE_URL. Resolved lazily since env isn't ready at module load.
+function resolveDefaultInstanceUrl(): string | undefined {
+	const raw = process.env.DEFAULT_INSTANCE_URL;
+	if (!raw) return undefined;
+	try {
+		return validateAndSanitizeUrl(raw);
+	} catch (e) {
+		console.error(
+			`Ignoring invalid DEFAULT_INSTANCE_URL: ${(e as Error).message}`,
+		);
+		return undefined;
+	}
+}
+
 const oauthFetchHandler = createOAuthHandler<Props>({
 	serverInfo: {
 		name: "ThoughtSpot Spotter",
 		logo: "https://avatars.githubusercontent.com/u/8906680?s=200&v=4",
 		description: "MCP Server for ThoughtSpot Agent",
+		get defaultInstanceUrl() {
+			return resolveDefaultInstanceUrl();
+		},
 	},
 	mcpServerClass: ThoughtSpotMCP,
 	hooks,

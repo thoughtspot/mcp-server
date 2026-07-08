@@ -22,6 +22,12 @@ import {
 import { WithSpan, getActiveSpan } from "../metrics/tracing/tracing-utils";
 import { processSendAgentConversationMessageStreamingResponse } from "../streaming-utils";
 import type {
+	FetchDataParams,
+	FetchDataResult,
+	SearchObjectsParams,
+	SearchObjectsResult,
+} from "./thoughtspot-client";
+import type {
 	Answer,
 	DataSource,
 	DataSourceSuggestion,
@@ -692,6 +698,7 @@ export class ThoughtSpotService {
 			UPSTREAM_OPERATION_NAMES.getSessionInfo,
 			() => (this.client as any).getSessionInfo(),
 		);
+
 		const devMixpanelToken = info.configInfo.mixpanelConfig.devSdkKey;
 		const prodMixpanelToken = info.configInfo.mixpanelConfig.prodSdkKey;
 		const mixpanelToken = info.configInfo.mixpanelConfig.production
@@ -758,16 +765,58 @@ export class ThoughtSpotService {
 	}
 
 	/**
+	 * Search for objects (answers, liveboards, worksheets, etc.) by a search term
+	 */
+	@WithSpan("search-objects")
+	async searchObjects(
+		params: SearchObjectsParams,
+	): Promise<SearchObjectsResult> {
+		const span = getActiveSpan();
+		span?.setAttribute(
+			"query",
+			Array.isArray(params.query) ? params.query.join(", ") : params.query,
+		);
+		span?.setAttribute("limit", params.limit ?? 10);
+
+		const result = await this.observeUpstreamCall(
+			UPSTREAM_OPERATION_NAMES.searchObjects,
+			() => (this.client as any).searchObjects(params),
+		);
+
+		span?.setAttribute("results_count", result.objects.length);
+		return result;
+	}
+
+	/**
+	 * Fetch the full data of a saved Answer or Liveboard by its GUID, shaped to
+	 * its object type.
+	 */
+	@WithSpan("fetch-data")
+	async fetchData(params: FetchDataParams): Promise<FetchDataResult> {
+		const span = getActiveSpan();
+		span?.setAttribute("object_id", params.objectId);
+
+		const result = await this.observeUpstreamCall(
+			UPSTREAM_OPERATION_NAMES.fetchData,
+			() => (this.client as any).fetchData(params),
+		);
+
+		span?.setAttribute("object_type", result.type);
+		span?.setAttribute("viz_count", result.data.length);
+		return result;
+	}
+
+	/**
 	 * Validate connection to ThoughtSpot
 	 */
 	@WithSpan("validate-connection")
 	async validateConnection(): Promise<boolean> {
 		try {
-			await this.observeUpstreamCall(
+			const info = await this.observeUpstreamCall(
 				UPSTREAM_OPERATION_NAMES.getSessionInfo,
 				() => (this.client as any).getSessionInfo(),
 			);
-			return true;
+			return Boolean(info?.userGUID);
 		} catch (error) {
 			// The decorator will automatically record the exception
 			return false;

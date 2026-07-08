@@ -21,10 +21,12 @@ import {
 	CreateAnalysisSessionInputSchema,
 	CreateDashboardInputSchema,
 	CreateLiveboardSchema,
+	FetchDataInputSchema,
 	GetAnswerSchema,
 	GetDataSourceSuggestionsSchema,
 	GetRelevantQuestionsSchema,
 	GetSessionUpdatesInputSchema,
+	SearchObjectsInputSchema,
 	SendSessionMessageInputSchema,
 	ToolName,
 } from "./tool-definitions";
@@ -182,6 +184,13 @@ export class MCPServer extends BaseMCPServer {
 		};
 	}
 
+	// Auth failed against the cluster; tailor the fix to the deployment.
+	private authFailureMessage(): string {
+		return this.ctx.props.clientName?.clientId === "stdio-client"
+			? "Not authenticated: TS_AUTH_TOKEN is invalid or expired. Refresh it and restart the MCP server."
+			: "Not authenticated: your ThoughtSpot session is invalid or expired. Re-authenticate and try again.";
+	}
+
 	protected async callTool(
 		request: z.infer<typeof CallToolRequestSchema>,
 		recorder: MetricsRecorder,
@@ -192,15 +201,20 @@ export class MCPServer extends BaseMCPServer {
 		switch (name) {
 			case ToolName.Ping: {
 				if (this.ctx.props.accessToken && this.ctx.props.instanceUrl) {
-						if (!this.getThoughtSpotService(recorder).validateConnection()) {
+					if (
+						!(await this.getThoughtSpotService(recorder).validateConnection())
+					) {
 						return this.createErrorResponse(
-							"Failed to validate connection",
+							this.authFailureMessage(),
 							"Ping failed",
 						);
 					}
 					return this.createSuccessResponse("Pong", "Ping successful");
 				}
-				return this.createErrorResponse("Not authenticated", "Ping failed");
+				return this.createErrorResponse(
+					this.authFailureMessage(),
+					"Ping failed",
+				);
 			}
 
 			case ToolName.GetRelevantQuestions: {
@@ -219,16 +233,26 @@ export class MCPServer extends BaseMCPServer {
 				return this.callGetDataSourceSuggestions(request, recorder);
 			}
 
+			case ToolName.SearchObjects: {
+				return this.callSearchObjects(request, recorder);
+			}
+
+			case ToolName.FetchData: {
+				return this.callFetchData(request, recorder);
+			}
+
 			case ToolName.CheckConnectivity: {
 				if (!this.ctx.props.accessToken || !this.ctx.props.instanceUrl) {
 					return this.createErrorResponse(
-						"Access token or instance URL not valid",
+						this.authFailureMessage(),
 						"Check connectivity failed",
 					);
 				}
-				if (!this.getThoughtSpotService(recorder).validateConnection()) {
+				if (
+					!(await this.getThoughtSpotService(recorder).validateConnection())
+				) {
 					return this.createErrorResponse(
-						"Failed to validate connection",
+						this.authFailureMessage(),
 						"Check connectivity failed",
 					);
 				}
@@ -610,6 +634,73 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			JSON.stringify(dataSourcesInfo),
 			`${dataSources.length} data source suggestion(s) found`,
 		);
+	}
+
+	@WithSpan("call-search-objects")
+	async callSearchObjects(
+		request: z.infer<typeof CallToolRequestSchema>,
+		recorder: MetricsRecorder,
+	) {
+		const {
+			query,
+			types,
+			owner,
+			tag,
+			modified_since,
+			verified_only,
+			limit,
+			cursor,
+		} = SearchObjectsInputSchema.parse(request.params.arguments);
+
+		try {
+			const result = await this.getThoughtSpotService(recorder).searchObjects({
+				query,
+				types,
+				owner,
+				tag,
+				modifiedSince: modified_since,
+				verifiedOnly: verified_only,
+				limit,
+				cursor,
+			});
+
+			return this.createStructuredContentSuccessResponse(
+				result,
+				`${result.objects.length} object(s) found`,
+			);
+		} catch (error) {
+			return this.createErrorResponse(
+				"Encountered an error while searching for objects. Please check your inputs and try again.",
+				`Error searching objects ${(error as Error).message}`,
+			);
+		}
+	}
+
+	@WithSpan("call-fetch-data")
+	async callFetchData(
+		request: z.infer<typeof CallToolRequestSchema>,
+		recorder: MetricsRecorder,
+	) {
+		const { object_id, visualization_ids, max_rows } =
+			FetchDataInputSchema.parse(request.params.arguments);
+
+		try {
+			const result = await this.getThoughtSpotService(recorder).fetchData({
+				objectId: object_id,
+				vizIds: visualization_ids,
+				maxRows: max_rows,
+			});
+
+			return this.createStructuredContentSuccessResponse(
+				result,
+				`Fetched data for ${result.type} ${object_id} (${result.data.length} result(s))`,
+			);
+		} catch (error) {
+			return this.createErrorResponse(
+				"Encountered an error while fetching object data. Please check the object id and try again.",
+				`Error fetching data ${(error as Error).message}`,
+			);
+		}
 	}
 
 	private _sources: {

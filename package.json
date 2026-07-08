@@ -24,7 +24,8 @@
     "bin": "node --import tsx ./src/stdio.ts",
     "run:deploy": "tsx deploy/index.ts",
     "hooks:install": "node ./scripts/install-git-hooks.mjs",
-    "prepare": "node ./scripts/install-git-hooks.mjs"
+    "prepare": "node ./scripts/install-git-hooks.mjs",
+    "postinstall": "patch-package"
   },
   "keywords": [],
   "author": "",
@@ -46,6 +47,7 @@
     "@vitest/coverage-v8": "^3.1.2",
     "mcp-testing-kit": "^0.2.0",
     "node-fetch": "^2.6.0",
+    "patch-package": "^8.0.1",
     "tsx": "^4.7.1",
     "typescript": "^5.8.3",
     "vitest": "^3.1.2",
