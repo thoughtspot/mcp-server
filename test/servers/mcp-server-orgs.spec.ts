@@ -350,10 +350,10 @@ describe("MCP Server org tools", () => {
 			await old.server.init();
 			const s = old.server as unknown as {
 				getActiveOrgId(): string | undefined;
-				getActiveOrgToken(): string;
+				getActiveToken(): string;
 			};
 			expect(s.getActiveOrgId()).toBeUndefined();
-			expect(s.getActiveOrgToken()).toBe("global-token"); // login token, not the org token
+			expect(s.getActiveToken()).toBe("global-token"); // login token, not the org token
 		});
 	});
 
@@ -413,8 +413,8 @@ describe("MCP Server org tools", () => {
 				tokenStore,
 			});
 			await server2.init();
-			// getActiveOrgToken must return the warm token, not the props token.
-			expect((server2 as any).getActiveOrgToken()).toBe("refreshed-token");
+			// getActiveToken must return the warm token, not the props token.
+			expect((server2 as any).getActiveToken()).toBe("refreshed-token");
 		});
 	});
 
@@ -925,7 +925,7 @@ describe("MCP Server org tools", () => {
 		it("uses the org-scoped token and org id (header) on a data call", async () => {
 			const { server } = await serverInOrg();
 			// getThoughtSpotService() sources token + org id from these two methods.
-			expect(server.getActiveOrgToken()).toBe("org-101-token");
+			expect(server.getActiveToken()).toBe("org-101-token");
 			expect(server.getActiveOrgId()).toBe("101");
 		});
 
@@ -935,7 +935,7 @@ describe("MCP Server org tools", () => {
 			// Simulate the token being gone from memory (e.g. mid-remint window)
 			// while the active org id remains set.
 			server.activeOrgToken = undefined;
-			expect(() => server.getActiveOrgToken()).toThrow(/token is not minted/);
+			expect(() => server.getActiveToken()).toThrow(/token is not minted/);
 		});
 
 		// A_new: postInit mints the org token on connect so data tool calls have it ready.
@@ -956,7 +956,7 @@ describe("MCP Server org tools", () => {
 			// After connect + switch, the token is available without any per-tool mint.
 			const s = server as any;
 			expect(s.activeOrgToken).toBe("org-101-token");
-			expect(() => s.getActiveOrgToken()).not.toThrow();
+			expect(() => s.getActiveToken()).not.toThrow();
 		});
 
 		// list_orgs / mint still use the global token, header-less.

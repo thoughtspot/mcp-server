@@ -235,7 +235,9 @@ export abstract class BaseMCPServer extends Server {
 	}
 
 	protected abstract getActiveOrgId(): string | undefined;
-	protected abstract getActiveOrgToken(): string;
+	// The token to authenticate the current request: the org-scoped token when an
+	// org is active, otherwise the global/cluster token.
+	protected abstract getActiveToken(): string;
 
 	// Build an OrgService bound to an explicit (cluster-wide) token for org listing
 	// / org-token minting.
@@ -257,7 +259,7 @@ export abstract class BaseMCPServer extends Server {
 		return new ThoughtSpotService(
 			getThoughtSpotClient(
 				this.ctx.props.instanceUrl,
-				this.getActiveOrgToken(),
+				this.getActiveToken(),
 				this.getActiveOrgId(),
 			),
 			{

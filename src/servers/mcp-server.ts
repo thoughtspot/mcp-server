@@ -57,7 +57,7 @@ export class MCPServer extends BaseMCPServer {
 		return this.activeOrgId;
 	}
 
-	protected getActiveOrgToken(): string {
+	protected getActiveToken(): string {
 		if (this.activeOrgId) {
 			if (!this.activeOrgToken) {
 				throw new Error(
@@ -102,7 +102,6 @@ export class MCPServer extends BaseMCPServer {
 	private async forceRecreateActiveOrgToken(
 		recorder?: MetricsRecorder,
 	): Promise<void> {
-		await this.loadActiveOrg();
 		if (!this.activeOrgId) {
 			return;
 		}
@@ -210,15 +209,11 @@ export class MCPServer extends BaseMCPServer {
 		return "mcp";
 	}
 
-	protected hasMultiOrgGrant(): boolean {
-		return this.grantHasRefreshToken;
-	}
-
 	protected areOrgToolsAvailable(): boolean {
 		if (
 			this.ctx.props.authMode !== "oauth" ||
 			!this.isOrgsEnabled() ||
-			!this.hasMultiOrgGrant()
+			!this.grantHasRefreshToken
 		) {
 			return false;
 		}
