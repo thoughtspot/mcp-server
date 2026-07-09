@@ -82,7 +82,7 @@ export class UserTokenStoreSQLite {
 
 				case "POST /global-token-data": {
 					const body = (await request.json()) as GlobalTokenData;
-					await this.seedGlobalToken(body);
+					await this.storeGlobalTokenData(body);
 					return Response.json({ ok: true });
 				}
 
@@ -101,7 +101,7 @@ export class UserTokenStoreSQLite {
 		}
 	}
 
-	private async seedGlobalToken(store: GlobalTokenData): Promise<void> {
+	private async storeGlobalTokenData(store: GlobalTokenData): Promise<void> {
 		const existing =
 			await this.state.storage.get<GlobalTokenData>(GLOBAL_TOKEN_KEY);
 		// Same token already stored (every cold connect re-seeds): the refresh

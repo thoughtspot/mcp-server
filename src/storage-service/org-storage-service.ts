@@ -4,7 +4,7 @@
 // (StorageServiceClient) so the two surface areas stay isolated.
 export class OrgStorageServiceClient {
 	// Single per-user DO instance name; all org/token state lives under it.
-	private static readonly ACTIVE_ORG_ID = "__active_org__";
+	private static readonly STORAGE_STUB_ID = "__active_org__";
 
 	constructor(
 		private readonly namespace: DurableObjectNamespace,
@@ -29,11 +29,11 @@ export class OrgStorageServiceClient {
 		return `https://internal/storage/${encodeURIComponent(id)}/${operation}`;
 	}
 
-	async getActiveOrg(): Promise<{
+	async getActiveOrgIdAndToken(): Promise<{
 		activeOrgId: string | null;
 		activeOrgToken: string | null;
 	}> {
-		const id = OrgStorageServiceClient.ACTIVE_ORG_ID;
+		const id = OrgStorageServiceClient.STORAGE_STUB_ID;
 		const response = await this.stubFor(id).fetch(
 			this.url(id, "active-org-id-and-token"),
 			{
@@ -55,8 +55,11 @@ export class OrgStorageServiceClient {
 		};
 	}
 
-	async setActiveOrg(activeOrgId: string, orgToken?: string): Promise<void> {
-		const id = OrgStorageServiceClient.ACTIVE_ORG_ID;
+	async setActiveOrgIdAndToken(
+		activeOrgId: string,
+		orgToken?: string,
+	): Promise<void> {
+		const id = OrgStorageServiceClient.STORAGE_STUB_ID;
 		const response = await this.stubFor(id).fetch(
 			this.url(id, "active-org-id-and-token"),
 			{
@@ -71,11 +74,11 @@ export class OrgStorageServiceClient {
 		}
 	}
 
-	async getTokenStore(): Promise<{
+	async getGlobalTokenData(): Promise<{
 		globalToken: string | null;
 		globalTokenExpiresAt: number | null;
 	}> {
-		const id = OrgStorageServiceClient.ACTIVE_ORG_ID;
+		const id = OrgStorageServiceClient.STORAGE_STUB_ID;
 		const response = await this.stubFor(id).fetch(
 			this.url(id, "global-token-data"),
 			{
@@ -95,13 +98,13 @@ export class OrgStorageServiceClient {
 		};
 	}
 
-	async seedTokenStore(store: {
+	async setGlobalTokenData(store: {
 		globalToken: string;
 		globalRefreshToken: string;
 		instanceUrl: string;
 		globalTokenExpiresAt?: number;
 	}): Promise<void> {
-		const id = OrgStorageServiceClient.ACTIVE_ORG_ID;
+		const id = OrgStorageServiceClient.STORAGE_STUB_ID;
 		const response = await this.stubFor(id).fetch(
 			this.url(id, "global-token-data"),
 			{
@@ -118,8 +121,8 @@ export class OrgStorageServiceClient {
 		}
 	}
 
-	async touchLastSeen(): Promise<void> {
-		const id = OrgStorageServiceClient.ACTIVE_ORG_ID;
+	async setLastSeen(): Promise<void> {
+		const id = OrgStorageServiceClient.STORAGE_STUB_ID;
 		const response = await this.stubFor(id).fetch(this.url(id, "last-seen"), {
 			method: "POST",
 			headers: this.headers(),

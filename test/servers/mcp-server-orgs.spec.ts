@@ -167,6 +167,8 @@ function makeServer(opts: {
 	touchLog?: string[];
 	apiVersion?: string;
 	noRefreshToken?: boolean;
+	accessToken?: string;
+	globalTokenExpiresAt?: number;
 }) {
 	vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue(
 		makeClientMock(opts),
@@ -185,10 +187,12 @@ function makeServer(opts: {
 	} as any;
 	const props = {
 		instanceUrl: "https://test.thoughtspot.cloud",
-		accessToken: "global-token",
+		accessToken: opts.accessToken ?? "global-token",
 		// Old (pre-multi-org) grants have no refresh token; noRefreshToken emulates one.
 		globalRefreshToken: opts.noRefreshToken ? undefined : "refresh-token",
-		globalTokenExpiresAt: 1893456000000,
+		// Default far-future expiry; tests pass a past value to exercise the
+		// expired-grant-token fail-closed path.
+		globalTokenExpiresAt: opts.globalTokenExpiresAt ?? 1893456000000,
 		authMode: opts.authMode,
 		apiVersion: opts.apiVersion ?? "latest",
 		clientName: {
@@ -1136,6 +1140,113 @@ describe("MCP Server org tools", () => {
 			const spy = vi.mocked(thoughtspotClient.getThoughtSpotClient);
 			const mintClient = spy.mock.calls.find((c) => c[1] === "rotated-global");
 			expect(mintClient).toBeDefined();
+		});
+	});
+
+	// The grant's access token is frozen at login and never refreshed. When it is
+	// already expired and nothing fresher exists, we must not seed it or serve it —
+	// getActiveToken fails closed so the tool surfaces a reauth error.
+	describe("expired grant token: fail closed", () => {
+		const PAST = 1_000; // epoch-ms in 1970 → always expired
+
+		it("does NOT seed an expired grant token into the DO", async () => {
+			const tokenStore = new Map<string, any>();
+			const { server } = makeServer({
+				authMode: "oauth",
+				session: { orgsEnabled: false, currentOrgId: "0" },
+				tokenStore,
+				globalTokenExpiresAt: PAST,
+			});
+			await server.init();
+			// No token should have been written to the keep-warm store.
+			const seeded = [...tokenStore.values()][0];
+			expect(seeded?.globalToken ?? undefined).toBeUndefined();
+		});
+
+		it("getActiveToken throws 401 when only an expired grant token is available", async () => {
+			const { server } = makeServer({
+				authMode: "oauth",
+				session: { orgsEnabled: false, currentOrgId: "0" },
+				globalTokenExpiresAt: PAST,
+			});
+			await server.init();
+			const s = server as any;
+			expect(() => s.getActiveToken()).toThrow(/status 401/);
+		});
+
+		it("getActiveToken returns the grant token when it is NOT expired", async () => {
+			const { server } = makeServer({
+				authMode: "oauth",
+				session: { orgsEnabled: false, currentOrgId: "0" },
+				// default far-future expiry
+			});
+			await server.init();
+			const s = server as any;
+			expect(s.getActiveToken()).toBe("global-token");
+		});
+
+		it("bearer sessions (no expiry tracked) are never expiry-gated", async () => {
+			// Bearer props carry no globalTokenExpiresAt → isExpired(undefined) is
+			// false → the token is always returned, never gated.
+			const { server } = makeServer({
+				authMode: "bearer",
+				session: { orgsEnabled: false },
+				accessToken: "bearer-token",
+				globalTokenExpiresAt: undefined,
+			});
+			await server.init();
+			const s = server as any;
+			expect(s.getActiveToken()).toBe("bearer-token");
+		});
+
+		it("a tool call surfaces a graceful reauth error (not a raw throw) on an expired token", async () => {
+			const { server } = makeServer({
+				authMode: "oauth",
+				session: { orgsEnabled: false, currentOrgId: "0" },
+				globalTokenExpiresAt: PAST,
+			});
+			await server.init();
+			// check_connectivity builds the service (→ getActiveToken throws 401);
+			// callTool's central catch converts it to a graceful reauth response.
+			const res = await connect(server).callTool("check_connectivity", {});
+			expect(res.isError).toBe(true);
+			expect(res.content[0].text).toMatch(/reauthenticate/i);
+		});
+	});
+
+	// Non-orgs OAuth data tools authenticate with the global token directly. The
+	// org preamble (which would refresh it) doesn't run for them, so the global
+	// token is reconciled from the DO per call — an instance must pick up the
+	// keep-warm alarm's refreshed token rather than a stale in-memory copy.
+	describe("non-orgs OAuth: per-call global token reconcile", () => {
+		it("picks up a newer DO global token on the next tool call", async () => {
+			const store = new Map<
+				string,
+				{ activeOrgId?: string; orgToken?: string }
+			>();
+			const tokenStore = new Map<string, any>();
+			const { server } = makeServer({
+				authMode: "oauth",
+				session: { orgsEnabled: false, currentOrgId: "0" }, // non-orgs
+				store,
+				tokenStore,
+			});
+			await server.init();
+			const s = server as any;
+			// Connect-time global token.
+			expect(s.getActiveToken()).toBe("global-token");
+
+			// Simulate the keep-warm alarm rotating the DO's global token.
+			const key = [...tokenStore.keys()][0];
+			tokenStore.set(key, {
+				globalToken: "rotated-global",
+				globalTokenExpiresAt: 1893456000000,
+			});
+
+			// A subsequent tool call must reconcile from the DO and adopt the newer
+			// token (not keep serving the stale connect-time one).
+			await connect(server).callTool("check_connectivity", {});
+			expect(s.getActiveToken()).toBe("rotated-global");
 		});
 	});
 });

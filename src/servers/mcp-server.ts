@@ -66,12 +66,32 @@ export class MCPServer extends BaseMCPServer {
 			}
 			return this.activeOrgToken;
 		}
-		return this.globalToken ?? this.ctx.props.accessToken;
+		if (this.globalToken) {
+			return this.globalToken;
+		}
+		// No kept-warm token. Fall back to the grant's access token only if it has
+		// not expired — an expired grant token is frozen at login and would just
+		// 401 upstream, so fail closed here with a reauth-worthy error instead.
+		const { accessToken, globalTokenExpiresAt } = this.ctx.props;
+		if (accessToken && !MCPServer.isExpired(globalTokenExpiresAt)) {
+			return accessToken;
+		}
+		throw new ThoughtSpotApiError(
+			401,
+			"getActiveToken",
+			"No valid token available; the session token has expired. Please reauthenticate.",
+		);
+	}
+
+	// A token whose absolute epoch-ms expiry is in the past. Non-numeric (unknown)
+	// expiry is treated as NOT expired, matching the prior fallback behavior.
+	private static isExpired(expiresAt: number | null | undefined): boolean {
+		return typeof expiresAt === "number" && expiresAt <= Date.now();
 	}
 
 	private async loadActiveOrg(): Promise<void> {
 		const store = await this.getOrgStorageService();
-		const stored = await store.getActiveOrg();
+		const stored = await store.getActiveOrgIdAndToken();
 		this.activeOrgId = stored.activeOrgId ?? undefined;
 		this.activeOrgToken = stored.activeOrgToken ?? undefined;
 	}
@@ -80,7 +100,7 @@ export class MCPServer extends BaseMCPServer {
 		this.activeOrgId = orgId;
 		this.activeOrgToken = orgToken;
 		const store = await this.getOrgStorageService();
-		await store.setActiveOrg(orgId, orgToken);
+		await store.setActiveOrgIdAndToken(orgId, orgToken);
 	}
 
 	private apiErrorStatus(value: unknown): number | undefined {
@@ -169,11 +189,10 @@ export class MCPServer extends BaseMCPServer {
 			instanceUrl,
 		} = this.ctx.props;
 
-		const existing = await store.getTokenStore();
+		const existing = await store.getGlobalTokenData();
+
 		const storedToken = existing.globalToken ?? null;
-		const storedExpiresAt = existing.globalTokenExpiresAt ?? null;
-		const storedExpired =
-			typeof storedExpiresAt === "number" && storedExpiresAt <= Date.now();
+		const storedExpired = MCPServer.isExpired(existing.globalTokenExpiresAt);
 		const storedIsNewer =
 			storedToken && storedToken !== accessToken && !storedExpired;
 
@@ -182,8 +201,14 @@ export class MCPServer extends BaseMCPServer {
 			return;
 		}
 
-		if (accessToken && globalRefreshToken) {
-			await store.seedTokenStore({
+		// The grant's access token is frozen at login and never refreshed. If it's
+		// already past its expiry, do NOT seed it into the DO (it would just 401
+		// upstream). Leave this.globalToken unset; getActiveToken() then surfaces a
+		// clean reauth error instead of sending a dead token.
+		const propsTokenExpired = MCPServer.isExpired(globalTokenExpiresAt);
+
+		if (accessToken && globalRefreshToken && !propsTokenExpired) {
+			await store.setGlobalTokenData({
 				globalToken: accessToken,
 				globalRefreshToken,
 				instanceUrl,
@@ -196,13 +221,21 @@ export class MCPServer extends BaseMCPServer {
 			return;
 		}
 
-		this.globalToken =
-			storedToken && !storedExpired ? storedToken : accessToken;
+		// Prefer a still-valid stored token; otherwise fall back to the grant token
+		// only if it hasn't expired. An expired grant token leaves this.globalToken
+		// unset so getActiveToken() fails closed.
+		if (storedToken && !storedExpired) {
+			this.globalToken = storedToken;
+		} else if (!propsTokenExpired) {
+			this.globalToken = accessToken;
+		} else {
+			this.globalToken = undefined;
+		}
 	}
 
 	private touchLastSeen(): void {
 		this.getOrgStorageService()
-			.then((store) => store.touchLastSeen())
+			.then((store) => store.setLastSeen())
 			.catch((error) => {
 				console.error("Failed to record last-seen activity:", error);
 			});
@@ -405,8 +438,31 @@ export class MCPServer extends BaseMCPServer {
 					);
 				}
 			}
+		} else if (this.ctx.props.authMode === "oauth") {
+			await this.initGlobalTokenAndReconcileWithStorage();
 		}
 
+		try {
+			return await this.dispatchTool(name, request, recorder);
+		} catch (error) {
+			// A 401 anywhere in a tool (incl. getActiveToken refusing an expired
+			// token) surfaces as a graceful reauth message rather than a raw
+			// JSON-RPC error.
+			if (this.apiErrorStatus(error) !== 401) {
+				throw error;
+			}
+			return this.createErrorResponse(
+				"Your authentication has expired, please reauthenticate and try again. You may need to disconnect and reconnect the MCP Server if you don't have any other way to reauthenticate.",
+				"User authentication has expired, prompting them to reauthenticate",
+			);
+		}
+	}
+
+	private async dispatchTool(
+		name: string,
+		request: z.infer<typeof CallToolRequestSchema>,
+		recorder: MetricsRecorder,
+	) {
 		switch (name) {
 			case ToolName.Ping: {
 				if (this.ctx.props.accessToken && this.ctx.props.instanceUrl) {
