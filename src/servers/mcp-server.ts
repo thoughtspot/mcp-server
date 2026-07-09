@@ -125,8 +125,7 @@ export class MCPServer extends BaseMCPServer {
 		if (!this.activeOrgId) {
 			return;
 		}
-		await this.initGlobalTokenAndReconcileWithStorage();
-		const globalToken = this.globalToken ?? this.ctx.props.accessToken;
+		const globalToken = await this.initGlobalTokenAndReconcileWithStorage();
 		const orgToken = await this.getOrgService(
 			globalToken,
 			undefined,
@@ -180,7 +179,12 @@ export class MCPServer extends BaseMCPServer {
 		}
 	}
 
-	private async initGlobalTokenAndReconcileWithStorage(): Promise<void> {
+	// Resolves the global cluster token: prefers a still-valid stored (keep-warm)
+	// token, else seeds the grant's access token and reconciles the DO. Sets and
+	// returns this.globalToken. Throws 401 when no valid token exists so callers
+	// never seed/mint/list with a dead token — no fallback to the frozen grant
+	// token is needed at the call sites.
+	private async initGlobalTokenAndReconcileWithStorage(): Promise<string> {
 		const store = await this.getOrgStorageService();
 		const {
 			accessToken,
@@ -198,13 +202,12 @@ export class MCPServer extends BaseMCPServer {
 
 		if (storedIsNewer) {
 			this.globalToken = storedToken;
-			return;
+			return storedToken;
 		}
 
 		// The grant's access token is frozen at login and never refreshed. If it's
 		// already past its expiry, do NOT seed it into the DO (it would just 401
-		// upstream). Leave this.globalToken unset; getActiveToken() then surfaces a
-		// clean reauth error instead of sending a dead token.
+		// upstream).
 		const propsTokenExpired = MCPServer.isExpired(globalTokenExpiresAt);
 
 		if (accessToken && globalRefreshToken && !propsTokenExpired) {
@@ -218,19 +221,29 @@ export class MCPServer extends BaseMCPServer {
 						: undefined,
 			});
 			this.globalToken = accessToken;
-			return;
+			return accessToken;
 		}
 
-		// Prefer a still-valid stored token; otherwise fall back to the grant token
-		// only if it hasn't expired. An expired grant token leaves this.globalToken
-		// unset so getActiveToken() fails closed.
+		// Prefer a still-valid stored token; otherwise the grant token if it hasn't
+		// expired.
 		if (storedToken && !storedExpired) {
 			this.globalToken = storedToken;
-		} else if (!propsTokenExpired) {
-			this.globalToken = accessToken;
-		} else {
-			this.globalToken = undefined;
+			return storedToken;
 		}
+		if (accessToken && !propsTokenExpired) {
+			this.globalToken = accessToken;
+			return accessToken;
+		}
+
+		// Nothing valid: the stored token (if any) is expired and the grant's frozen
+		// access token is expired/absent. Fail closed so callers never send a dead
+		// token; surfaces as a graceful reauth via the central 401 handler.
+		this.globalToken = undefined;
+		throw new ThoughtSpotApiError(
+			401,
+			"initGlobalTokenAndReconcileWithStorage",
+			"No valid global token available; the session token has expired. Please reauthenticate.",
+		);
 	}
 
 	private touchLastSeen(): void {
@@ -438,11 +451,16 @@ export class MCPServer extends BaseMCPServer {
 					);
 				}
 			}
-		} else if (this.ctx.props.authMode === "oauth") {
-			await this.initGlobalTokenAndReconcileWithStorage();
 		}
 
 		try {
+			// Non-orgs OAuth data tools authenticate with the global token directly
+			// (no org preamble above refreshed it), so reconcile it from the DO per
+			// call. Kept inside this try so its fail-closed 401 (expired token) is
+			// caught by the central handler below rather than escaping raw.
+			if (!this.areOrgToolsAvailable() && this.ctx.props.authMode === "oauth") {
+				await this.initGlobalTokenAndReconcileWithStorage();
+			}
 			return await this.dispatchTool(name, request, recorder);
 		} catch (error) {
 			// A 401 anywhere in a tool (incl. getActiveToken refusing an expired
@@ -913,9 +931,9 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 	async callListOrgs(recorder: MetricsRecorder) {
 		const span = trace.getSpan(context.active());
 
-		await this.initGlobalTokenAndReconcileWithStorage();
+		const globalToken = await this.initGlobalTokenAndReconcileWithStorage();
 		const orgs = await this.getOrgService(
-			this.globalToken ?? this.ctx.props.accessToken,
+			globalToken,
 			undefined,
 			recorder,
 		).listOrgs();
@@ -948,8 +966,7 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 
 		let orgToken: string;
 		try {
-			await this.initGlobalTokenAndReconcileWithStorage();
-			const globalToken = this.globalToken ?? this.ctx.props.accessToken;
+			const globalToken = await this.initGlobalTokenAndReconcileWithStorage();
 			orgToken = await this.getOrgService(
 				globalToken,
 				undefined,
