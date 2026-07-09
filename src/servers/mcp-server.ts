@@ -25,6 +25,7 @@ import {
 	GetDataSourceSuggestionsSchema,
 	GetRelevantQuestionsSchema,
 	GetSessionUpdatesInputSchema,
+	SearchObjectsInputSchema,
 	SendSessionMessageInputSchema,
 	ToolName,
 } from "./tool-definitions";
@@ -192,7 +193,7 @@ export class MCPServer extends BaseMCPServer {
 		switch (name) {
 			case ToolName.Ping: {
 				if (this.ctx.props.accessToken && this.ctx.props.instanceUrl) {
-						if (!this.getThoughtSpotService(recorder).validateConnection()) {
+					if (!this.getThoughtSpotService(recorder).validateConnection()) {
 						return this.createErrorResponse(
 							"Failed to validate connection",
 							"Ping failed",
@@ -217,6 +218,10 @@ export class MCPServer extends BaseMCPServer {
 
 			case ToolName.GetDataSourceSuggestions: {
 				return this.callGetDataSourceSuggestions(request, recorder);
+			}
+
+			case ToolName.SearchObjects: {
+				return this.callSearchObjects(request, recorder);
 			}
 
 			case ToolName.CheckConnectivity: {
@@ -610,6 +615,48 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			JSON.stringify(dataSourcesInfo),
 			`${dataSources.length} data source suggestion(s) found`,
 		);
+	}
+
+	@WithSpan("call-search-objects")
+	async callSearchObjects(
+		request: z.infer<typeof CallToolRequestSchema>,
+		recorder: MetricsRecorder,
+	) {
+		const {
+			query,
+			types,
+			owner,
+			tag,
+			modified_since,
+			verified_only,
+			limit,
+			cursor,
+		} = SearchObjectsInputSchema.parse(request.params.arguments);
+
+		try {
+			const result = await this.getThoughtSpotService(recorder).searchObjects({
+				query,
+				types,
+				owner,
+				tag,
+				modifiedSince: modified_since,
+				verifiedOnly: verified_only,
+				limit,
+				cursor,
+			});
+
+			return this.createStructuredContentSuccessResponse(
+				result,
+				`${result.objects.length} object(s) found`,
+			);
+		} catch (error) {
+			// Surface the upstream message (e.g. status 401/500) so the failure is
+			// actionable rather than a generic "check your inputs".
+			return this.createErrorResponse(
+				`Failed to search objects: ${(error as Error).message}`,
+				"search_objects failed",
+			);
+		}
 	}
 
 	private _sources: {
