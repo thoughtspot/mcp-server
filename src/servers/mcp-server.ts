@@ -70,17 +70,17 @@ export class MCPServer extends BaseMCPServer {
 	}
 
 	private async loadActiveOrg(): Promise<void> {
-		const storage = await this.getStorageService();
-		const stored = await storage.getActiveOrg();
+		const store = await this.getOrgStorageService();
+		const stored = await store.getActiveOrg();
 		this.activeOrgId = stored.activeOrgId ?? undefined;
-		this.activeOrgToken = stored.orgToken ?? undefined;
+		this.activeOrgToken = stored.activeOrgToken ?? undefined;
 	}
 
 	private async setActiveOrg(orgId: string, orgToken?: string): Promise<void> {
 		this.activeOrgId = orgId;
 		this.activeOrgToken = orgToken;
-		const storage = await this.getStorageService();
-		await storage.setActiveOrg(orgId, orgToken);
+		const store = await this.getOrgStorageService();
+		await store.setActiveOrg(orgId, orgToken);
 	}
 
 	private apiErrorStatus(value: unknown): number | undefined {
@@ -105,7 +105,7 @@ export class MCPServer extends BaseMCPServer {
 		if (!this.activeOrgId) {
 			return;
 		}
-		await this.loadOrSeedWarmToken();
+		await this.initGlobalTokenAndReconcileWithStorage();
 		const globalToken = this.globalToken ?? this.ctx.props.accessToken;
 		const orgToken = await this.getOrgService(
 			globalToken,
@@ -116,25 +116,14 @@ export class MCPServer extends BaseMCPServer {
 		await this.setActiveOrg(this.activeOrgId, orgToken);
 	}
 
-	private async validateConnectionWithOrgRetry(
-		recorder?: MetricsRecorder,
-	): Promise<boolean> {
-		const usedOrgToken = Boolean(this.activeOrgId && this.activeOrgToken);
-		const ok = await this.getThoughtSpotService(recorder).validateConnection();
-		if (ok || !usedOrgToken) {
-			return ok;
-		}
-		await this.forceRecreateActiveOrgToken(recorder);
-		return this.getThoughtSpotService(recorder).validateConnection();
-	}
-
 	protected async postInit(): Promise<void> {
 		if (this.ctx.props.authMode !== "oauth") {
 			return;
 		}
-		this.grantHasRefreshToken = typeof this.ctx.props.refreshToken === "string";
+		this.grantHasRefreshToken =
+			typeof this.ctx.props.globalRefreshToken === "string";
 		try {
-			await this.loadOrSeedWarmToken();
+			await this.initGlobalTokenAndReconcileWithStorage();
 		} catch (error) {
 			console.error("Failed to load/seed keep-warm token on connect:", error);
 		}
@@ -150,7 +139,12 @@ export class MCPServer extends BaseMCPServer {
 						? String(this.sessionInfo.currentOrgId)
 						: undefined;
 				if (currentOrgId) {
-					await this.setActiveOrg(currentOrgId);
+					// Set only in memory; do NOT persist the id yet. If the mint below
+					// fails (e.g. a transient 5xx), persisting a tokenless active org
+					// would poison every later call — getActiveToken() throws on an
+					// active org with no token. forceRecreateActiveOrgToken persists the
+					// id and token together only once the mint succeeds.
+					this.activeOrgId = currentOrgId;
 				}
 			}
 			if (this.activeOrgId && !this.activeOrgToken) {
@@ -158,17 +152,26 @@ export class MCPServer extends BaseMCPServer {
 			}
 		} catch (error) {
 			console.error("Failed to load active org on connect:", error);
+			// A failed bootstrap must not leave the session with an active org but
+			// no token; fall back to the global token until the next connect or the
+			// keep-warm alarm re-mints.
+			this.activeOrgId = undefined;
+			this.activeOrgToken = undefined;
 		}
 	}
 
-	private async loadOrSeedWarmToken(): Promise<void> {
-		const storage = await this.getStorageService();
-		const { accessToken, refreshToken, tokenExpiryDuration, instanceUrl } =
-			this.ctx.props;
+	private async initGlobalTokenAndReconcileWithStorage(): Promise<void> {
+		const store = await this.getOrgStorageService();
+		const {
+			accessToken,
+			globalRefreshToken,
+			globalTokenExpiresAt,
+			instanceUrl,
+		} = this.ctx.props;
 
-		const existing = await storage.getTokenStore();
+		const existing = await store.getTokenStore();
 		const storedToken = existing.globalToken ?? null;
-		const storedExpiresAt = existing.expiresAt ?? null;
+		const storedExpiresAt = existing.globalTokenExpiresAt ?? null;
 		const storedExpired =
 			typeof storedExpiresAt === "number" && storedExpiresAt <= Date.now();
 		const storedIsNewer =
@@ -179,14 +182,14 @@ export class MCPServer extends BaseMCPServer {
 			return;
 		}
 
-		if (accessToken && refreshToken) {
-			await storage.seedTokenStore({
+		if (accessToken && globalRefreshToken) {
+			await store.seedTokenStore({
 				globalToken: accessToken,
-				globalRefreshToken: refreshToken,
+				globalRefreshToken,
 				instanceUrl,
-				expiresAt:
-					typeof tokenExpiryDuration === "number"
-						? tokenExpiryDuration
+				globalTokenExpiresAt:
+					typeof globalTokenExpiresAt === "number"
+						? globalTokenExpiresAt
 						: undefined,
 			});
 			this.globalToken = accessToken;
@@ -198,8 +201,8 @@ export class MCPServer extends BaseMCPServer {
 	}
 
 	private touchLastSeen(): void {
-		this.getStorageService()
-			.then((storage) => storage.touchLastSeen())
+		this.getOrgStorageService()
+			.then((store) => store.touchLastSeen())
 			.catch((error) => {
 				console.error("Failed to record last-seen activity:", error);
 			});
@@ -384,13 +387,32 @@ export class MCPServer extends BaseMCPServer {
 		}
 
 		if (this.areOrgToolsAvailable()) {
+			// The active org is shared across the user's sessions via the token DO,
+			// so reload per call — a switch_org in one session must be seen by the
+			// others on their next tool call (an instance-cached value would go stale).
 			await this.loadActiveOrg();
+			if (this.activeOrgId && !this.activeOrgToken) {
+				try {
+					await this.forceRecreateActiveOrgToken(recorder);
+				} catch (error) {
+					// The mint can fail if the user lost access to the active org
+					// (e.g. a 403). Return a graceful, actionable error instead of
+					// letting it propagate as a raw JSON-RPC error.
+					console.error("Failed to mint active org token on call:", error);
+					return this.createErrorResponse(
+						`Could not access the active org "${this.activeOrgId}"; it may no longer be available to you. Call list_orgs to see your orgs and switch_org to select a different one.`,
+						"Active org token mint failed",
+					);
+				}
+			}
 		}
 
 		switch (name) {
 			case ToolName.Ping: {
 				if (this.ctx.props.accessToken && this.ctx.props.instanceUrl) {
-					if (!this.getThoughtSpotService(recorder).validateConnection()) {
+					if (
+						!(await this.getThoughtSpotService(recorder).validateConnection())
+					) {
 						return this.createErrorResponse(
 							"Failed to validate connection",
 							"Ping failed",
@@ -424,7 +446,9 @@ export class MCPServer extends BaseMCPServer {
 						"Check connectivity failed",
 					);
 				}
-				if (!(await this.validateConnectionWithOrgRetry(recorder))) {
+				if (
+					!(await this.getThoughtSpotService(recorder).validateConnection())
+				) {
 					return this.createErrorResponse(
 						"Failed to validate connection",
 						"Check connectivity failed",
@@ -833,7 +857,7 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 	async callListOrgs(recorder: MetricsRecorder) {
 		const span = trace.getSpan(context.active());
 
-		await this.loadOrSeedWarmToken();
+		await this.initGlobalTokenAndReconcileWithStorage();
 		const orgs = await this.getOrgService(
 			this.globalToken ?? this.ctx.props.accessToken,
 			undefined,
@@ -868,7 +892,7 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 
 		let orgToken: string;
 		try {
-			await this.loadOrSeedWarmToken();
+			await this.initGlobalTokenAndReconcileWithStorage();
 			const globalToken = this.globalToken ?? this.ctx.props.accessToken;
 			orgToken = await this.getOrgService(
 				globalToken,

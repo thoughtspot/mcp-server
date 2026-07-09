@@ -116,14 +116,17 @@ describe("UserTokenStoreSQLite", () => {
 			const res = await server.fetch(
 				makeRequest("GET", "active-org-id-and-token"),
 			);
-			expect(await res.json()).toEqual({ activeOrgId: null, orgToken: null });
+			expect(await res.json()).toEqual({
+				activeOrgId: null,
+				activeOrgToken: null,
+			});
 		});
 
 		it("sets the active org and (optional) token", async () => {
 			await server.fetch(
 				makeRequest("POST", "active-org-id-and-token", {
 					activeOrgId: "101",
-					orgToken: "org-tok",
+					activeOrgToken: "org-tok",
 				}),
 			);
 			const res = await server.fetch(
@@ -131,7 +134,7 @@ describe("UserTokenStoreSQLite", () => {
 			);
 			expect(await res.json()).toEqual({
 				activeOrgId: "101",
-				orgToken: "org-tok",
+				activeOrgToken: "org-tok",
 			});
 		});
 
@@ -139,7 +142,7 @@ describe("UserTokenStoreSQLite", () => {
 			await server.fetch(
 				makeRequest("POST", "active-org-id-and-token", {
 					activeOrgId: "101",
-					orgToken: "org-tok",
+					activeOrgToken: "org-tok",
 				}),
 			);
 			// Re-set the active org with no token -> token must be cleared.
@@ -154,7 +157,7 @@ describe("UserTokenStoreSQLite", () => {
 			await server.fetch(
 				makeRequest("POST", "active-org-id-and-token", {
 					activeOrgId: "101",
-					orgToken: "org-tok",
+					activeOrgToken: "org-tok",
 				}),
 			);
 			// A concurrent/cold-start sibling re-asserts the same active org with no
@@ -165,32 +168,6 @@ describe("UserTokenStoreSQLite", () => {
 			);
 			expect(mock.store.get("active-org-token")).toBe("org-tok");
 			expect(mock.store.get("active-org-id")).toBe("101");
-		});
-	});
-
-	describe("POST /active-org-token clear", () => {
-		it("deletes the stored org token when given an empty/null token", async () => {
-			await server.fetch(
-				makeRequest("POST", "active-org-id-and-token", {
-					activeOrgId: "101",
-					orgToken: "org-tok",
-				}),
-			);
-			expect(mock.store.get("active-org-token")).toBe("org-tok");
-
-			await server.fetch(
-				makeRequest("POST", "active-org-token", { orgToken: null }),
-			);
-			expect(mock.store.has("active-org-token")).toBe(false);
-			// The active org id itself is untouched.
-			expect(mock.store.get("active-org-id")).toBe("101");
-		});
-
-		it("stores the org token when given a non-empty value", async () => {
-			await server.fetch(
-				makeRequest("POST", "active-org-token", { orgToken: "fresh-tok" }),
-			);
-			expect(mock.store.get("active-org-token")).toBe("fresh-tok");
 		});
 	});
 
@@ -284,7 +261,7 @@ describe("UserTokenStoreSQLite", () => {
 			await server.fetch(
 				makeRequest("POST", "active-org-id-and-token", {
 					activeOrgId: "101",
-					orgToken: "org-tok",
+					activeOrgToken: "org-tok",
 				}),
 			);
 			const stored = mock.store.get("global-token-details") as Record<
@@ -440,7 +417,7 @@ describe("UserTokenStoreSQLite", () => {
 			expect(after.lastSeenAt).toBe(seen); // activity tracking survives refresh
 		});
 
-		it("keeps the prior expiresAt when the refresh response omits one", async () => {
+		it("keeps the prior globalTokenExpiresAt when the refresh response omits one", async () => {
 			await server.fetch(makeRequest("POST", "global-token-data", seedBody()));
 			const priorExpiry = Date.now() + 24 * 60 * 60 * 1000;
 			const stored = mock.store.get("global-token-details") as Record<
@@ -449,7 +426,7 @@ describe("UserTokenStoreSQLite", () => {
 			>;
 			mock.store.set("global-token-details", {
 				...stored,
-				expiresAt: priorExpiry,
+				globalTokenExpiresAt: priorExpiry,
 			});
 			// Refresh response has a token but NO tokenExpiryDuration.
 			const fetchSpy = vi
@@ -463,12 +440,12 @@ describe("UserTokenStoreSQLite", () => {
 
 			const after = mock.store.get("global-token-details") as {
 				globalToken: string;
-				expiresAt?: number;
+				globalTokenExpiresAt?: number;
 			};
 			expect(after.globalToken).toBe("access-2");
 			// Expiry tracking preserved (not dropped to undefined), so reconnect
 			// self-heal still works.
-			expect(after.expiresAt).toBe(priorExpiry);
+			expect(after.globalTokenExpiresAt).toBe(priorExpiry);
 		});
 
 		it("seeding twice does not stack alarms (idempotent arm)", async () => {
@@ -505,7 +482,7 @@ describe("UserTokenStoreSQLite", () => {
 			await server.fetch(
 				makeRequest("POST", "active-org-id-and-token", {
 					activeOrgId: "101",
-					orgToken: "org-1",
+					activeOrgToken: "org-1",
 				}),
 			);
 			const spy = routeKeepWarm({
@@ -567,7 +544,7 @@ describe("UserTokenStoreSQLite", () => {
 			await server.fetch(
 				makeRequest("POST", "active-org-id-and-token", {
 					activeOrgId: "101",
-					orgToken: "org-1",
+					activeOrgToken: "org-1",
 				}),
 			);
 			// Global refresh succeeds; the org mint returns 200 with an empty body
@@ -599,7 +576,7 @@ describe("UserTokenStoreSQLite", () => {
 			await server.fetch(
 				makeRequest("POST", "active-org-id-and-token", {
 					activeOrgId: "101",
-					orgToken: "org-1",
+					activeOrgToken: "org-1",
 				}),
 			);
 			const spy = routeKeepWarm({

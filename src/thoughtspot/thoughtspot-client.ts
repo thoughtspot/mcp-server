@@ -10,6 +10,7 @@ import type {
 import { customAlphabet } from "nanoid";
 import { of } from "rxjs";
 import YAML from "yaml";
+import { ORG_TOKEN_VALIDITY_SEC, fetchOrgToken } from "./token-endpoints";
 import { type Org, type SessionInfo, ThoughtSpotApiError } from "./types";
 
 /*
@@ -380,13 +381,8 @@ function addListOrgs(client: any, instanceUrl: string, token: string) {
 	};
 }
 
-// Org-scoped token validity (24 hours); the keep-warm alarm re-mints it
-// alongside the global token so it never expires under an active session.
-const ORG_TOKEN_VALIDITY_SEC = 24 * 60 * 60;
-
-// Mint an org-scoped token via auth/token/fetch?org_identifier=... The working
-// path is /callosum/v1/v2/auth/token/fetch (the /callosum/v2/... path 404s);
-// token is nested under data.token.
+// Mint an org-scoped token. The endpoint path, headers, validity, and response
+// shape are owned by ./token-endpoints (shared with the keep-warm DO).
 function addFetchOrgBearerToken(client: any, instanceUrl: string) {
 	(client as any).fetchOrgBearerToken = async ({
 		accessToken,
@@ -397,31 +393,11 @@ function addFetchOrgBearerToken(client: any, instanceUrl: string) {
 		orgId: string;
 		validityTimeInSec?: number;
 	}): Promise<string> => {
-		const params = new URLSearchParams({
-			validity_time_in_sec: String(validityTimeInSec),
-			org_identifier: orgId,
+		return fetchOrgToken({
+			instanceUrl,
+			bearerToken: accessToken,
+			orgId,
+			validityTimeInSec,
 		});
-		const endpoint = `/callosum/v1/v2/auth/token/fetch?${params.toString()}`;
-		const response = await fetch(`${instanceUrl}${endpoint}`, {
-			method: "GET",
-			// No org header — the org is selected via org_identifier.
-			headers: buildHeaders(accessToken),
-		});
-
-		if (!response.ok) {
-			const errorText = await response.text();
-			throw new ThoughtSpotApiError(
-				response.status,
-				"fetchOrgBearerToken",
-				errorText,
-			);
-		}
-
-		const data = (await response.json()) as any;
-		const token = data?.data?.token ?? data?.token;
-		if (!token || typeof token !== "string") {
-			throw new Error("fetchOrgBearerToken: no token in response");
-		}
-		return token;
 	};
 }

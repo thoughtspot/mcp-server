@@ -1,16 +1,19 @@
+import {
+	fetchOrgToken,
+	refreshGlobalToken,
+} from "../thoughtspot/token-endpoints";
+
 const ACTIVE_ORG_KEY = "active-org-id";
 const ORG_TOKEN_KEY = "active-org-token";
 const GLOBAL_TOKEN_KEY = "global-token-details";
 const GLOBAL_TOKEN_REFRESH_INTERVAL_MS = 11 * 60 * 60 * 1000;
 const SESSION_IDLE_TTL_MS = 14 * 24 * 60 * 60 * 1000;
-// Org-token validity (24h); re-minted alongside the global token each refresh.
-const ORG_TOKEN_VALIDITY_SEC = 24 * 60 * 60;
 
 export type GlobalTokenData = {
 	globalToken: string;
 	globalRefreshToken: string;
 	instanceUrl: string;
-	expiresAt?: number;
+	globalTokenExpiresAt?: number;
 	lastSeenAt?: number;
 };
 
@@ -37,7 +40,7 @@ export class UserTokenStoreSQLite {
 					]);
 					return Response.json({
 						activeOrgId: activeOrgId ?? null,
-						orgToken: orgToken ?? null,
+						activeOrgToken: orgToken ?? null,
 					});
 				}
 
@@ -46,12 +49,12 @@ export class UserTokenStoreSQLite {
 				case "POST /active-org-id-and-token": {
 					const body = (await request.json()) as {
 						activeOrgId: string;
-						orgToken?: string | null;
+						activeOrgToken?: string | null;
 					};
-					if (body.orgToken) {
+					if (body.activeOrgToken) {
 						await this.state.storage.put({
 							[ACTIVE_ORG_KEY]: body.activeOrgId,
-							[ORG_TOKEN_KEY]: body.orgToken,
+							[ORG_TOKEN_KEY]: body.activeOrgToken,
 						});
 						return Response.json({ ok: true });
 					}
@@ -67,23 +70,13 @@ export class UserTokenStoreSQLite {
 					return Response.json({ ok: true });
 				}
 
-				case "POST /active-org-token": {
-					const body = (await request.json()) as { orgToken?: string | null };
-					if (body.orgToken) {
-						await this.state.storage.put<string>(ORG_TOKEN_KEY, body.orgToken);
-					} else {
-						await this.state.storage.delete(ORG_TOKEN_KEY);
-					}
-					return Response.json({ ok: true });
-				}
-
 				case "GET /global-token-data": {
 					const store =
 						(await this.state.storage.get<GlobalTokenData>(GLOBAL_TOKEN_KEY)) ??
 						null;
 					return Response.json({
 						globalToken: store?.globalToken ?? null,
-						expiresAt: store?.expiresAt ?? null,
+						globalTokenExpiresAt: store?.globalTokenExpiresAt ?? null,
 					});
 				}
 
@@ -111,25 +104,18 @@ export class UserTokenStoreSQLite {
 	private async seedGlobalToken(store: GlobalTokenData): Promise<void> {
 		const existing =
 			await this.state.storage.get<GlobalTokenData>(GLOBAL_TOKEN_KEY);
-		const existingAlarm = await this.state.storage.getAlarm();
+		// Same token already stored (every cold connect re-seeds): the refresh
+		// alarm was armed when it was first stored, so nothing to do.
 		if (existing?.globalToken === store.globalToken) {
-			if (existingAlarm == null) {
-				await this.state.storage.setAlarm(
-					Date.now() + GLOBAL_TOKEN_REFRESH_INTERVAL_MS,
-				);
-			}
 			return;
 		}
-		const toStore: GlobalTokenData = {
+		await this.state.storage.put<GlobalTokenData>(GLOBAL_TOKEN_KEY, {
 			...store,
 			lastSeenAt: existing?.lastSeenAt ?? Date.now(),
-		};
-		await this.state.storage.put<GlobalTokenData>(GLOBAL_TOKEN_KEY, toStore);
-		if (existingAlarm == null) {
-			await this.state.storage.setAlarm(
-				Date.now() + GLOBAL_TOKEN_REFRESH_INTERVAL_MS,
-			);
-		}
+		});
+		await this.state.storage.setAlarm(
+			Date.now() + GLOBAL_TOKEN_REFRESH_INTERVAL_MS,
+		);
 	}
 
 	private async touchLastSeen(): Promise<void> {
@@ -149,7 +135,7 @@ export class UserTokenStoreSQLite {
 		});
 	}
 
-	private async refreshGlobalToken(): Promise<void> {
+	private async refreshGlobalAndOrgTokens(): Promise<void> {
 		const store =
 			await this.state.storage.get<GlobalTokenData>(GLOBAL_TOKEN_KEY);
 		if (!store) {
@@ -170,47 +156,24 @@ export class UserTokenStoreSQLite {
 		}
 
 		try {
-			const response = await fetch(
-				`${store.instanceUrl}/callosum/v1/session/v2/gettoken?refresh=true`,
-				{
-					method: "GET",
-					headers: {
-						"Content-Type": "application/json",
-						Accept: "application/json",
-						"user-agent": "ThoughtSpot-ts-client",
-						Authorization: `Bearer ${store.globalToken}`,
-						"X-Refresh-Token": store.globalRefreshToken,
-					},
-				},
-			);
-			if (!response.ok) {
-				const text = await response.text();
-				throw new Error(`status ${response.status}: ${text}`);
-			}
-			const data = (await response.json()) as any;
-			const globalToken = data?.token ?? data?.data?.token;
-			if (!globalToken || typeof globalToken !== "string") {
-				throw new Error("no token in refresh response");
-			}
-			const globalRefreshToken =
-				data?.refreshToken ??
-				data?.data?.refreshToken ??
-				store.globalRefreshToken;
-			const newExpiresAt =
-				data?.tokenExpiryDuration ?? data?.data?.tokenExpiryDuration;
+			const refreshed = await refreshGlobalToken({
+				instanceUrl: store.instanceUrl,
+				globalToken: store.globalToken,
+				globalRefreshToken: store.globalRefreshToken,
+			});
 			await this.state.storage.put<GlobalTokenData>(GLOBAL_TOKEN_KEY, {
-				globalToken,
-				globalRefreshToken,
+				globalToken: refreshed.globalToken,
+				globalRefreshToken: refreshed.globalRefreshToken,
 				instanceUrl: store.instanceUrl,
 				// Keep the prior expiry if the response omits one.
-				expiresAt:
-					typeof newExpiresAt === "number" ? newExpiresAt : store.expiresAt,
+				globalTokenExpiresAt:
+					refreshed.globalTokenExpiresAt ?? store.globalTokenExpiresAt,
 				lastSeenAt: store.lastSeenAt,
 			});
 			// Keep the org token as warm as the global token: re-mint it from the
 			// fresh global token so an active session never hits an expired org
 			// token mid-conversation.
-			await this.refreshOrgToken(store.instanceUrl, globalToken);
+			await this.refreshOrgToken(store.instanceUrl, refreshed.globalToken);
 			await this.state.storage.setAlarm(
 				Date.now() + GLOBAL_TOKEN_REFRESH_INTERVAL_MS,
 			);
@@ -240,31 +203,11 @@ export class UserTokenStoreSQLite {
 			return;
 		}
 		try {
-			const params = new URLSearchParams({
-				validity_time_in_sec: String(ORG_TOKEN_VALIDITY_SEC),
-				org_identifier: activeOrgId,
+			const orgToken = await fetchOrgToken({
+				instanceUrl,
+				bearerToken: globalToken,
+				orgId: activeOrgId,
 			});
-			const response = await fetch(
-				`${instanceUrl}/callosum/v1/v2/auth/token/fetch?${params.toString()}`,
-				{
-					method: "GET",
-					headers: {
-						"Content-Type": "application/json",
-						Accept: "application/json",
-						"user-agent": "ThoughtSpot-ts-client",
-						Authorization: `Bearer ${globalToken}`,
-					},
-				},
-			);
-			if (!response.ok) {
-				const text = await response.text();
-				throw new Error(`status ${response.status}: ${text}`);
-			}
-			const data = (await response.json()) as any;
-			const orgToken = data?.data?.token ?? data?.token;
-			if (!orgToken || typeof orgToken !== "string") {
-				throw new Error("no token in org-token response");
-			}
 			await this.state.storage.put<string>(ORG_TOKEN_KEY, orgToken);
 		} catch (error) {
 			console.error(
@@ -275,6 +218,6 @@ export class UserTokenStoreSQLite {
 	}
 
 	async alarm(): Promise<void> {
-		await this.refreshGlobalToken();
+		await this.refreshGlobalAndOrgTokens();
 	}
 }

@@ -38,20 +38,20 @@ function makeStorageNamespace(
 				) {
 					return Response.json({
 						activeOrgId: rec.activeOrgId ?? null,
-						orgToken: rec.orgToken ?? null,
+						activeOrgToken: rec.orgToken ?? null,
 					});
 				}
 				if (op === "active-org-id-and-token" && init?.method === "POST") {
 					const body = JSON.parse(String(init?.body)) as {
 						activeOrgId: string;
-						orgToken?: string | null;
+						activeOrgToken?: string | null;
 					};
 					// Mirror the real DO (F3): commit id+token atomically when a token
 					// is given; otherwise clear the token ONLY on an actual org change.
-					if (body.orgToken) {
+					if (body.activeOrgToken) {
 						store.set(id.name, {
 							activeOrgId: body.activeOrgId,
-							orgToken: body.orgToken,
+							orgToken: body.activeOrgToken,
 						});
 					} else {
 						const changed = rec.activeOrgId !== body.activeOrgId;
@@ -63,15 +63,17 @@ function makeStorageNamespace(
 					return Response.json({ ok: true });
 				}
 				if (op === "active-org-token" && init?.method === "POST") {
-					const body = JSON.parse(String(init?.body)) as { orgToken: string };
-					store.set(id.name, { ...rec, orgToken: body.orgToken });
+					const body = JSON.parse(String(init?.body)) as {
+						activeOrgToken: string;
+					};
+					store.set(id.name, { ...rec, orgToken: body.activeOrgToken });
 					return Response.json({ ok: true });
 				}
 				if (op === "global-token-data" && (init?.method ?? "GET") === "GET") {
 					const s = tokenStore?.get(id.name);
 					return Response.json({
 						globalToken: s?.globalToken ?? null,
-						expiresAt: s?.expiresAt ?? null,
+						globalTokenExpiresAt: s?.globalTokenExpiresAt ?? null,
 					});
 				}
 				if (op === "global-token-data" && init?.method === "POST") {
@@ -185,8 +187,8 @@ function makeServer(opts: {
 		instanceUrl: "https://test.thoughtspot.cloud",
 		accessToken: "global-token",
 		// Old (pre-multi-org) grants have no refresh token; noRefreshToken emulates one.
-		refreshToken: opts.noRefreshToken ? undefined : "refresh-token",
-		tokenExpiryDuration: 1893456000000,
+		globalRefreshToken: opts.noRefreshToken ? undefined : "refresh-token",
+		globalTokenExpiresAt: 1893456000000,
 		authMode: opts.authMode,
 		apiVersion: opts.apiVersion ?? "latest",
 		clientName: {
@@ -691,7 +693,7 @@ describe("MCP Server org tools", () => {
 			const seeded = [...tokenStore.values()][0];
 			expect(seeded.globalToken).toBe("global-token");
 			expect(seeded.globalRefreshToken).toBe("refresh-token");
-			expect(seeded.expiresAt).toBe(1893456000000);
+			expect(seeded.globalTokenExpiresAt).toBe(1893456000000);
 		});
 
 		it("does not re-seed when the store already has a (refreshed) token", async () => {
@@ -730,12 +732,12 @@ describe("MCP Server org tools", () => {
 			});
 			await a.server.init();
 			// Simulate the refresh chain having died: the stored token is now stale
-			// (expiresAt in the past), not merely absent.
+			// (globalTokenExpiresAt in the past), not merely absent.
 			const key = [...tokenStore.keys()][0];
 			tokenStore.set(key, {
 				...tokenStore.get(key),
 				globalToken: "expired-token",
-				expiresAt: Date.now() - 60_000,
+				globalTokenExpiresAt: Date.now() - 60_000,
 			});
 
 			// A new connect carries a fresh props token; it must re-seed (heal the
@@ -747,123 +749,6 @@ describe("MCP Server org tools", () => {
 			});
 			await b.server.init();
 			expect(tokenStore.get(key).globalToken).toBe("global-token");
-		});
-	});
-
-	// These exercise withOrgTokenRetry / validateConnectionWithOrgRetry directly
-	// rather than through connect().callTool, which deadlocks in mcp-testing-kit
-	// when a tool handler throws-then-recovers within a single request. The retry
-	// machinery itself is server-internal, so driving it directly is both reliable
-	// and a tighter test of the recovery behavior.
-	describe("stale org token: reactive 401 re-mint", () => {
-		// Put the server into the "org 101 active with an org token" state by
-		// switching, then return the server cast to reach its protected helpers.
-		async function makeServerWithActiveOrg(opts: {
-			store: Map<string, { activeOrgId?: string; orgToken?: string }>;
-			mint: ReturnType<typeof vi.fn>;
-			validateConnection?: ReturnType<typeof vi.fn>;
-		}) {
-			const { server } = makeServer({
-				authMode: "oauth",
-				session: { orgsEnabled: true, currentOrgId: "0" },
-				store: opts.store,
-				fetchOrgBearerToken: opts.mint,
-				validateConnection: opts.validateConnection,
-			});
-			await server.init();
-			await connect(server).callTool("switch_org", { org_id: 101 });
-			return server as unknown as {
-				validateConnectionWithOrgRetry: (
-					recorder?: undefined,
-				) => Promise<boolean>;
-				getThoughtSpotService: (recorder?: undefined) => any;
-			};
-		}
-
-		it("re-mints + re-validates when validateConnection fails with an org token active", async () => {
-			// ThoughtSpotService.validateConnection() probes the cluster via
-			// getSessionInfo() and maps a throw -> false. So a stale-token failure
-			// surfaces as getSessionInfo throwing a 401. We let it succeed during
-			// connect/switch, then throw exactly once (the stale-token call), then
-			// succeed again after the re-mint.
-			const store = new Map<
-				string,
-				{ activeOrgId?: string; orgToken?: string }
-			>();
-			let mintN = 0;
-			const mint = vi
-				.fn()
-				.mockImplementation(async () => `org-token-${++mintN}`);
-
-			let failNextSessionInfo = false;
-			const sessionInfo = {
-				clusterId: "c",
-				clusterName: "c",
-				releaseVersion: "10.13.0",
-				userGUID: "u",
-				userName: "u",
-				currentOrgId: "0",
-				privileges: [],
-				configInfo: {
-					mixpanelConfig: {
-						devSdkKey: "k",
-						prodSdkKey: "k",
-						production: false,
-					},
-					selfClusterName: "c",
-					selfClusterId: "c",
-					enableSpotterDataSourceDiscovery: false,
-					orgsConfiguration: { enabled: true },
-				},
-			};
-			const getSessionInfo = vi.fn().mockImplementation(async () => {
-				if (failNextSessionInfo) {
-					failNextSessionInfo = false; // fail exactly once
-					throw new Error("getSessionInfo failed with status 401: expired");
-				}
-				return sessionInfo;
-			});
-
-			// Build a client mock with our custom getSessionInfo + mint.
-			const client = {
-				getSessionInfo,
-				searchOrgs: vi.fn().mockResolvedValue([]),
-				fetchOrgBearerToken: mint,
-				instanceUrl: "https://test.thoughtspot.cloud",
-			} as any;
-			vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue(
-				client,
-			);
-			const ns = makeStorageNamespace(store, new Map());
-			const env = {
-				CONVERSATION_STORAGE_OBJECT: ns,
-				USER_TOKEN_OBJECT: ns,
-			} as any;
-			const props = {
-				instanceUrl: "https://test.thoughtspot.cloud",
-				accessToken: "global-token",
-				refreshToken: "refresh-token",
-				authMode: "oauth",
-				apiVersion: "latest",
-				clientName: { clientId: "c", clientName: "c", registrationDate: 0 },
-			};
-			const server = new MCPServer({ props, env });
-			await server.init();
-			await connect(server).callTool("switch_org", { org_id: 101 });
-			const s = server as unknown as {
-				validateConnectionWithOrgRetry: () => Promise<boolean>;
-			};
-			const mintsBefore = mint.mock.calls.length;
-			const sessionCallsBefore = getSessionInfo.mock.calls.length;
-
-			// Now make the next probe (the stale-token attempt) fail once.
-			failNextSessionInfo = true;
-			const ok = await s.validateConnectionWithOrgRetry();
-
-			expect(ok).toBe(true);
-			// Two probes: the failing one, then the post-re-mint success.
-			expect(getSessionInfo.mock.calls.length).toBe(sessionCallsBefore + 2);
-			expect(mint.mock.calls.length).toBe(mintsBefore + 1);
 		});
 	});
 
@@ -957,6 +842,96 @@ describe("MCP Server org tools", () => {
 			const s = server as any;
 			expect(s.activeOrgToken).toBe("org-101-token");
 			expect(() => s.getActiveToken()).not.toThrow();
+		});
+
+		// A_new2: a failed bootstrap mint must NOT persist a tokenless active org
+		// (which would poison every later call via getActiveToken()'s throw).
+		it("does not persist a tokenless active org when the connect mint fails", async () => {
+			const store = new Map<
+				string,
+				{ activeOrgId?: string; orgToken?: string }
+			>();
+			// postInit seeds the active org from currentOrgId ("0") then mints; make
+			// that mint fail with a transient 5xx.
+			const mint = vi
+				.fn()
+				.mockRejectedValue(new Error("mint failed with status 503"));
+			const { server } = makeServer({
+				authMode: "oauth",
+				session: { orgsEnabled: true, currentOrgId: "0" },
+				store,
+				fetchOrgBearerToken: mint,
+			});
+			await server.init();
+
+			// Storage must hold NO tokenless active-org record, and in-memory state is
+			// cleared so getActiveToken() falls back to the global token, not a throw.
+			const rec = [...store.values()].find((r) => r.activeOrgId);
+			expect(rec?.orgToken ?? undefined).toBeUndefined();
+			const s = server as any;
+			expect(s.activeOrgId).toBeUndefined();
+			expect(() => s.getActiveToken()).not.toThrow();
+			expect(s.getActiveToken()).toBe("global-token");
+		});
+
+		// A_new3: a tokenless active-org record (e.g. persisted by an older build)
+		// is healed on the next tool call by re-minting, not left to throw.
+		it("re-mints a tokenless active org on the next tool call", async () => {
+			const store = new Map<
+				string,
+				{ activeOrgId?: string; orgToken?: string }
+			>();
+			const mint = vi.fn().mockResolvedValue("healed-org-token");
+			const { server } = makeServer({
+				authMode: "oauth",
+				session: { orgsEnabled: true, currentOrgId: "0" },
+				store,
+				fetchOrgBearerToken: mint,
+			});
+			await server.init();
+			// Poison the shared store with the correct DO key: active org id set,
+			// no token (this is what an interrupted mint / older build left behind).
+			const s = server as any;
+			await s.setActiveOrg("101");
+			expect(
+				[...store.values()].find((r) => r.activeOrgId === "101")?.orgToken,
+			).toBeUndefined();
+			mint.mockClear();
+
+			// check_connectivity reaches getActiveToken via the service. callTool
+			// reloads the poisoned record, then re-mints so the call can proceed.
+			await connect(server).callTool("check_connectivity", {});
+			expect(mint).toHaveBeenCalled();
+			expect(s.getActiveToken()).toBe("healed-org-token");
+		});
+
+		it("returns a graceful error (not a raw throw) when the preamble re-mint fails", async () => {
+			const store = new Map<
+				string,
+				{ activeOrgId?: string; orgToken?: string }
+			>();
+			// The user lost access to the active org: minting its token 403s.
+			const mint = vi
+				.fn()
+				.mockRejectedValue(new Error("mint failed with status 403"));
+			const { server } = makeServer({
+				authMode: "oauth",
+				session: { orgsEnabled: true, currentOrgId: "0" },
+				store,
+				fetchOrgBearerToken: mint,
+			});
+			await server.init();
+			// Poison the store: active org set, no token -> callTool preamble re-mints.
+			const s = server as any;
+			await s.setActiveOrg("101");
+			mint.mockClear();
+
+			// callTool's preamble re-mint throws; it must be caught and surfaced as a
+			// graceful error response, not propagate as a raw JSON-RPC error.
+			const res = await connect(server).callTool("check_connectivity", {});
+			expect(mint).toHaveBeenCalled();
+			expect(res.isError).toBe(true);
+			expect(res.content[0].text).toMatch(/could not access the active org/i);
 		});
 
 		// list_orgs / mint still use the global token, header-less.
@@ -1154,7 +1129,7 @@ describe("MCP Server org tools", () => {
 			const key = [...tokenStore.keys()][0];
 			tokenStore.set(key, {
 				globalToken: "rotated-global",
-				expiresAt: 1893456000000,
+				globalTokenExpiresAt: 1893456000000,
 			});
 			await connect(server).callTool("switch_org", { org_id: 101 });
 			// The mint used the rotated token, not the connect-time "global-token".

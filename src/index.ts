@@ -81,9 +81,9 @@ const hooks: AuthHooks<Props> = {
 	extendGrantProps(token, base): Props {
 		return {
 			...(base as Props),
-			refreshToken: token?.data?.refreshToken,
-			tokenCreatedTime: token?.data?.tokenCreatedTime,
-			tokenExpiryDuration: token?.data?.tokenExpiryDuration,
+			globalRefreshToken: token?.data?.refreshToken,
+			globalTokenCreatedAt: token?.data?.tokenCreatedTime,
+			globalTokenExpiresAt: token?.data?.tokenExpiryDuration,
 		};
 	},
 	extendProps(req, base): Props {

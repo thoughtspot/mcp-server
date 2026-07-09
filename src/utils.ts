@@ -9,10 +9,10 @@ import { getActiveSpan } from "./metrics/tracing/tracing-utils";
 export type Props = {
 	accessToken: string;
 	// From gettoken, for keep-warm refresh.
-	refreshToken?: string;
-	tokenCreatedTime?: number;
-	// Absolute epoch-ms expiry (despite the name).
-	tokenExpiryDuration?: number;
+	globalRefreshToken?: string;
+	globalTokenCreatedAt?: number;
+	// Absolute epoch-ms expiry.
+	globalTokenExpiresAt?: number;
 	instanceUrl: string;
 	clientName: {
 		clientId: string;

@@ -1,10 +1,12 @@
 import type { Message, StreamingMessagesState } from "../thoughtspot/types";
 
+// Client for the Spotter conversation storage Durable Object
+// (ConversationStorageServerSQLite, bound as CONVERSATION_STORAGE_OBJECT).
+// The org/token surface lives separately in OrgStorageServiceClient.
 export class StorageServiceClient {
 	constructor(
 		private readonly namespace: DurableObjectNamespace,
 		private readonly accessTokenHashUrlSafe: string,
-		private readonly userTokenNamespace?: DurableObjectNamespace,
 	) {}
 
 	private headers(): HeadersInit {
@@ -21,145 +23,8 @@ export class StorageServiceClient {
 		return this.namespace.get(id);
 	}
 
-	private userStubFor(id: string): DurableObjectStub {
-		const ns = this.userTokenNamespace;
-		if (!ns) {
-			throw new Error(
-				"StorageServiceClient: userTokenNamespace not configured for token/org operation",
-			);
-		}
-		const doId = ns.idFromName(`${this.accessTokenHashUrlSafe}:${id}`);
-		return ns.get(doId);
-	}
-
 	private url(conversationId: string, operation: string): string {
 		return `https://internal/storage/${encodeURIComponent(conversationId)}/${operation}`;
-	}
-
-	private static readonly ACTIVE_ORG_ID = "__active_org__";
-
-	async getActiveOrg(): Promise<{
-		activeOrgId: string | null;
-		orgToken: string | null;
-	}> {
-		const id = StorageServiceClient.ACTIVE_ORG_ID;
-		const response = await this.userStubFor(id).fetch(
-			this.url(id, "active-org-id-and-token"),
-			{
-				method: "GET",
-				headers: this.headers(),
-			},
-		);
-		if (!response.ok) {
-			const body = await response.text();
-			throw new Error(`Failed to get active org (${response.status}): ${body}`);
-		}
-		const data = (await response.json()) as {
-			activeOrgId: string | null;
-			orgToken: string | null;
-		};
-		return {
-			activeOrgId: data.activeOrgId ?? null,
-			orgToken: data.orgToken ?? null,
-		};
-	}
-
-	async setActiveOrg(activeOrgId: string, orgToken?: string): Promise<void> {
-		const id = StorageServiceClient.ACTIVE_ORG_ID;
-		const response = await this.userStubFor(id).fetch(
-			this.url(id, "active-org-id-and-token"),
-			{
-				method: "POST",
-				headers: this.headers(),
-				body: JSON.stringify({ activeOrgId, orgToken: orgToken ?? null }),
-			},
-		);
-		if (!response.ok) {
-			const body = await response.text();
-			throw new Error(`Failed to set active org (${response.status}): ${body}`);
-		}
-	}
-
-	async setActiveOrgToken(orgToken: string): Promise<void> {
-		const id = StorageServiceClient.ACTIVE_ORG_ID;
-		const response = await this.userStubFor(id).fetch(
-			this.url(id, "active-org-token"),
-			{
-				method: "POST",
-				headers: this.headers(),
-				body: JSON.stringify({ orgToken: orgToken || null }),
-			},
-		);
-		if (!response.ok) {
-			const body = await response.text();
-			throw new Error(
-				`Failed to set active org token (${response.status}): ${body}`,
-			);
-		}
-	}
-
-	async getTokenStore(): Promise<{
-		globalToken: string | null;
-		expiresAt: number | null;
-	}> {
-		const id = StorageServiceClient.ACTIVE_ORG_ID;
-		const response = await this.userStubFor(id).fetch(
-			this.url(id, "global-token-data"),
-			{
-				method: "GET",
-				headers: this.headers(),
-			},
-		);
-		if (!response.ok) {
-			const body = await response.text();
-			throw new Error(
-				`Failed to get global token data (${response.status}): ${body}`,
-			);
-		}
-		return (await response.json()) as {
-			globalToken: string | null;
-			expiresAt: number | null;
-		};
-	}
-
-	async seedTokenStore(store: {
-		globalToken: string;
-		globalRefreshToken: string;
-		instanceUrl: string;
-		expiresAt?: number;
-	}): Promise<void> {
-		const id = StorageServiceClient.ACTIVE_ORG_ID;
-		const response = await this.userStubFor(id).fetch(
-			this.url(id, "global-token-data"),
-			{
-				method: "POST",
-				headers: this.headers(),
-				body: JSON.stringify(store),
-			},
-		);
-		if (!response.ok) {
-			const body = await response.text();
-			throw new Error(
-				`Failed to seed global token data (${response.status}): ${body}`,
-			);
-		}
-	}
-
-	async touchLastSeen(): Promise<void> {
-		const id = StorageServiceClient.ACTIVE_ORG_ID;
-		const response = await this.userStubFor(id).fetch(
-			this.url(id, "last-seen"),
-			{
-				method: "POST",
-				headers: this.headers(),
-			},
-		);
-		if (!response.ok) {
-			const body = await response.text();
-			throw new Error(
-				`Failed to touch last-seen (${response.status}): ${body}`,
-			);
-		}
 	}
 
 	// Call before appending; also re-primes a done conversation for a follow-up.

@@ -27,6 +27,7 @@ import {
 	recordToolInvocationMetrics,
 } from "../metrics/runtime/tool-metrics";
 import { getActiveSpan, withSpan } from "../metrics/tracing/tracing-utils";
+import { OrgStorageServiceClient } from "../storage-service/org-storage-service";
 import { StorageServiceClient } from "../storage-service/storage-service";
 import { OrgService } from "../thoughtspot/org-service";
 import { getThoughtSpotClient } from "../thoughtspot/thoughtspot-client";
@@ -213,7 +214,8 @@ export abstract class BaseMCPServer extends Server {
 	 * token (their token is long-lived).
 	 */
 	protected async getStorageKeyHash(): Promise<string> {
-		const keyToken = this.ctx.props.refreshToken ?? this.ctx.props.accessToken;
+		const keyToken =
+			this.ctx.props.globalRefreshToken ?? this.ctx.props.accessToken;
 		if (!keyToken || keyToken.length === 0) {
 			throw new Error("A token is required to derive the storage key");
 		}
@@ -230,7 +232,14 @@ export abstract class BaseMCPServer extends Server {
 			this.ctx.env
 				.CONVERSATION_STORAGE_OBJECT as unknown as DurableObjectNamespace,
 			hashUrlSafe,
+		);
+	}
+
+	protected async getOrgStorageService(): Promise<OrgStorageServiceClient> {
+		const hashUrlSafe = await this.getStorageKeyHash();
+		return new OrgStorageServiceClient(
 			this.ctx.env.USER_TOKEN_OBJECT as unknown as DurableObjectNamespace,
+			hashUrlSafe,
 		);
 	}
 

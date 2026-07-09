@@ -72,10 +72,7 @@
                         const parsed = JSON.parse(jsonText);
                         
                         // Handle different token formats
-                        if (typeof parsed === 'string') {
-                            // Case 1: tokenText is a quoted string
-                            tokenData = { data: { token: parsed } };
-                        } else if (parsed.data && parsed.data.token) {
+                        if (parsed.data && parsed.data.token) {
                             // Case 2: { data: { token, refreshToken?, ... } }
                             tokenData = { data: {
                                 token: parsed.data.token,
@@ -95,18 +92,9 @@
                             throw new Error('Unrecognized token format.');
                         }
                     } catch (e) {
-                        // If JSON parsing fails, try to extract token from the string
-                        const tokenMatch = tokenText.match(/"token"\s*:\s*"([^"]+)"/);
-                        if (tokenMatch) {
-                            tokenData = { data: { token: tokenMatch[1] } };
-                        } else if (typeof tokenText === 'string' && tokenText.trim().length > 0) {
-                            // Case 4: raw token string
-                            tokenData = { data: { token: tokenText.trim() } };
-                        } else {
-                            document.getElementById('status').textContent = 'Invalid token format. Please paste the correct token.';
-                            document.getElementById('status').style.color = '#dc3545';
-                            return;
-                        }
+                        document.getElementById('status').textContent = 'Invalid token format. Please paste the correct token.';
+                        document.getElementById('status').style.color = '#dc3545';
+                        return;
                     }
                     document.getElementById('status').textContent = 'Submitting token...';
                     document.getElementById('status').style.color = '#495057';

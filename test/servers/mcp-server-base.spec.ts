@@ -534,7 +534,7 @@ describe("MCP Server Base", () => {
 				props: {
 					...mockProps,
 					accessToken: "access-A",
-					refreshToken: "refresh-X",
+					globalRefreshToken: "refresh-X",
 				},
 				env: mockEnv,
 			});
@@ -545,11 +545,19 @@ describe("MCP Server Base", () => {
 
 		it("is stable when the access token rotates but refresh token is unchanged", async () => {
 			const s1 = new TestMCPServer({
-				props: { ...mockProps, accessToken: "access-A", refreshToken: "r" },
+				props: {
+					...mockProps,
+					accessToken: "access-A",
+					globalRefreshToken: "r",
+				},
 				env: mockEnv,
 			});
 			const s2 = new TestMCPServer({
-				props: { ...mockProps, accessToken: "access-B", refreshToken: "r" },
+				props: {
+					...mockProps,
+					accessToken: "access-B",
+					globalRefreshToken: "r",
+				},
 				env: mockEnv,
 			});
 			expect(await s1.testGetStorageKeyHash()).toBe(
@@ -562,7 +570,7 @@ describe("MCP Server Base", () => {
 				props: {
 					...mockProps,
 					accessToken: "access-only",
-					refreshToken: undefined,
+					globalRefreshToken: undefined,
 				},
 				env: mockEnv,
 			});
@@ -573,7 +581,7 @@ describe("MCP Server Base", () => {
 
 		it("throws when neither token is present", async () => {
 			const s = new TestMCPServer({
-				props: { ...mockProps, accessToken: "", refreshToken: undefined },
+				props: { ...mockProps, accessToken: "", globalRefreshToken: undefined },
 				env: mockEnv,
 			});
 			await expect(s.testGetStorageKeyHash()).rejects.toThrow(
