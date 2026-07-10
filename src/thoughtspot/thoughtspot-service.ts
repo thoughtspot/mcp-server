@@ -16,7 +16,7 @@ import type { MetricsEnvLike } from "../metrics/runtime/runtime-config";
 import {
 	UPSTREAM_OPERATION_NAMES,
 	type UpstreamOperation,
-	observeUpstreamCall,
+	recordUpstreamCallMetrics,
 	recordUpstreamStreamStartedMetric,
 } from "../metrics/runtime/tool-metrics";
 import { WithSpan, getActiveSpan } from "../metrics/tracing/tracing-utils";
@@ -46,11 +46,26 @@ export class ThoughtSpotService {
 		private readonly metrics: ThoughtSpotServiceMetricsOptions = {},
 	) {}
 
-	private observeUpstreamCall<T>(
+	private async observeUpstreamCall<T>(
 		operation: UpstreamOperation,
 		call: () => Promise<T>,
 	): Promise<T> {
-		return observeUpstreamCall(this.metrics.recorder, operation, call);
+		const startedAt = Date.now();
+		let outcome: "success" | "upstream_error" = "success";
+
+		try {
+			return await call();
+		} catch (error) {
+			outcome = "upstream_error";
+			throw error;
+		} finally {
+			recordUpstreamCallMetrics(
+				this.metrics.recorder,
+				operation,
+				outcome,
+				Date.now() - startedAt,
+			);
+		}
 	}
 
 	private createStreamMetricsRecorder(): MetricsRecorder {
@@ -699,7 +714,6 @@ export class ThoughtSpotService {
 			privileges: info.privileges,
 			enableSpotterDataSourceDiscovery:
 				info.configInfo?.enableSpotterDataSourceDiscovery,
-			orgsEnabled: info.configInfo?.orgsConfiguration?.enabled,
 		};
 	}
 

@@ -20,10 +20,6 @@
 			{
 				"class_name": "ConversationStorageServerSQLite",
 				"name": "CONVERSATION_STORAGE_OBJECT"
-			},
-			{
-				"class_name": "UserTokenStoreSQLite",
-				"name": "USER_TOKEN_OBJECT"
 			}
 		]
 	},
@@ -67,6 +63,12 @@
 		{
 			"tag": "v8",
 			"new_sqlite_classes": [
+				"UserTokenStoreSQLite"
+			]
+		},
+		{
+			"tag": "v9",
+			"deleted_classes": [
 				"UserTokenStoreSQLite"
 			]
 		}

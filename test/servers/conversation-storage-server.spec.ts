@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ConversationStorageServerSQLite } from "../../src/servers/conversation-storage-server";
 import type {
 	Message,
@@ -49,13 +49,11 @@ function createMockStorage() {
 					}
 				},
 			),
-			delete: vi.fn(async (keyOrKeys: string | string[]): Promise<void> => {
-				const keys = Array.isArray(keyOrKeys) ? keyOrKeys : [keyOrKeys];
+			delete: vi.fn(async (keys: string[]): Promise<void> => {
 				for (const key of keys) {
 					store.delete(key);
 				}
 			}),
-			getAlarm: vi.fn(async (): Promise<number | null> => alarm),
 			setAlarm: vi.fn(async (scheduledTime: number): Promise<void> => {
 				alarm = scheduledTime;
 			}),

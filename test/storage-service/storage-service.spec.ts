@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { StorageServiceClient } from "../../src/storage-service/storage-service";
 import type {
 	Message,

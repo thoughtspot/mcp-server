@@ -4,13 +4,12 @@
 declare namespace Cloudflare {
 	interface GlobalProps {
 		mainModule: typeof import("./src/index");
-		durableNamespaces: "ThoughtSpotMCP" | "UserTokenStoreSQLite";
+		durableNamespaces: "ThoughtSpotMCP";
 	}
 	interface Env {
 		OAUTH_KV: KVNamespace;
 		MCP_OBJECT: DurableObjectNamespace<import("./src/index").ThoughtSpotMCP>;
 		CONVERSATION_STORAGE_OBJECT: DurableObjectNamespace<import("./src/index").ConversationStorageServerSQLite>;
-		USER_TOKEN_OBJECT: DurableObjectNamespace<import("./src/index").UserTokenStoreSQLite>;
 		ANALYTICS: AnalyticsEngineDataset;
 		ASSETS: Fetcher;
 	}
