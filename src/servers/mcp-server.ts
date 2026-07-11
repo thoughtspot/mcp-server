@@ -13,8 +13,15 @@ import {
 } from "../metrics/runtime/metrics-recorder";
 import type { ToolMetricApiSurface } from "../metrics/runtime/tool-metrics";
 import { WithSpan } from "../metrics/tracing/tracing-utils";
-import type { DataSource } from "../thoughtspot/thoughtspot-service";
-import type { Answer, StreamingMessagesState } from "../thoughtspot/types";
+import type {
+	DataSource,
+	ThoughtSpotService,
+} from "../thoughtspot/thoughtspot-service";
+import {
+	type Answer,
+	type StreamingMessagesState,
+	ThoughtSpotApiError,
+} from "../thoughtspot/types";
 import { McpServerError } from "../utils";
 import { BaseMCPServer, type Context } from "./mcp-server-base";
 import {
@@ -26,6 +33,7 @@ import {
 	GetRelevantQuestionsSchema,
 	GetSessionUpdatesInputSchema,
 	SendSessionMessageInputSchema,
+	SwitchOrgInputSchema,
 	ToolName,
 } from "./tool-definitions";
 import {
@@ -35,12 +43,236 @@ import {
 } from "./version-registry";
 
 export class MCPServer extends BaseMCPServer {
+	private activeOrgId: string | undefined;
+	private activeOrgToken: string | undefined;
+	private globalToken: string | undefined;
+	// False for pre-multi-org grants (no refresh token) — keeps old behavior until re-auth.
+	private grantHasRefreshToken = false;
+
 	constructor(ctx: Context) {
 		super(ctx, "ThoughtSpot", "2.0.0");
 	}
 
+	protected getActiveOrgId(): string | undefined {
+		return this.activeOrgId;
+	}
+
+	protected getActiveToken(): string {
+		if (this.activeOrgId) {
+			if (!this.activeOrgToken) {
+				throw new Error(
+					`Org ${this.activeOrgId} is active but its token is not minted`,
+				);
+			}
+			return this.activeOrgToken;
+		}
+		if (this.globalToken) {
+			return this.globalToken;
+		}
+		// No kept-warm token. Fall back to the grant's access token only if it has
+		// not expired — an expired grant token is frozen at login and would just
+		// 401 upstream, so fail closed here with a reauth-worthy error instead.
+		const { accessToken, globalTokenExpiresAt } = this.ctx.props;
+		if (accessToken && !MCPServer.isExpired(globalTokenExpiresAt)) {
+			return accessToken;
+		}
+		throw new ThoughtSpotApiError(
+			401,
+			"getActiveToken",
+			"No valid token available; the session token has expired. Please reauthenticate.",
+		);
+	}
+
+	// A token whose absolute epoch-ms expiry is in the past. Non-numeric (unknown)
+	// expiry is treated as NOT expired, matching the prior fallback behavior.
+	private static isExpired(expiresAt: number | null | undefined): boolean {
+		return typeof expiresAt === "number" && expiresAt <= Date.now();
+	}
+
+	private async loadActiveOrg(): Promise<void> {
+		const store = await this.getOrgStorageService();
+		const stored = await store.getActiveOrgIdAndToken();
+		this.activeOrgId = stored.activeOrgId ?? undefined;
+		this.activeOrgToken = stored.activeOrgToken ?? undefined;
+	}
+
+	private async setActiveOrg(orgId: string, orgToken?: string): Promise<void> {
+		this.activeOrgId = orgId;
+		this.activeOrgToken = orgToken;
+		const store = await this.getOrgStorageService();
+		await store.setActiveOrgIdAndToken(orgId, orgToken);
+	}
+
+	private apiErrorStatus(value: unknown): number | undefined {
+		const err =
+			value instanceof Error
+				? value
+				: ((value as { error?: unknown } | null)?.error ?? value);
+		if (err instanceof ThoughtSpotApiError) {
+			return err.status;
+		}
+		const message =
+			typeof (err as { message?: unknown })?.message === "string"
+				? (err as { message: string }).message
+				: "";
+		const match = message.match(/\bstatus (\d{3})\b/);
+		return match ? Number(match[1]) : undefined;
+	}
+
+	private async forceRecreateActiveOrgToken(
+		recorder?: MetricsRecorder,
+	): Promise<void> {
+		if (!this.activeOrgId) {
+			return;
+		}
+		const globalToken = await this.initGlobalTokenAndReconcileWithStorage();
+		const orgToken = await this.getOrgService(
+			globalToken,
+			undefined,
+			recorder,
+		).fetchOrgBearerToken(globalToken, this.activeOrgId);
+		this.activeOrgToken = orgToken;
+		await this.setActiveOrg(this.activeOrgId, orgToken);
+	}
+
+	protected async postInit(): Promise<void> {
+		if (this.ctx.props.authMode !== "oauth") {
+			return;
+		}
+		this.grantHasRefreshToken =
+			typeof this.ctx.props.globalRefreshToken === "string";
+		try {
+			await this.initGlobalTokenAndReconcileWithStorage();
+		} catch (error) {
+			console.error("Failed to load/seed keep-warm token on connect:", error);
+		}
+
+		if (!this.areOrgToolsAvailable()) {
+			return;
+		}
+		try {
+			await this.loadActiveOrg();
+			if (!this.activeOrgId) {
+				const currentOrgId =
+					this.sessionInfo?.currentOrgId != null
+						? String(this.sessionInfo.currentOrgId)
+						: undefined;
+				if (currentOrgId) {
+					// Set only in memory; do NOT persist the id yet. If the mint below
+					// fails (e.g. a transient 5xx), persisting a tokenless active org
+					// would poison every later call — getActiveToken() throws on an
+					// active org with no token. forceRecreateActiveOrgToken persists the
+					// id and token together only once the mint succeeds.
+					this.activeOrgId = currentOrgId;
+				}
+			}
+			if (this.activeOrgId && !this.activeOrgToken) {
+				await this.forceRecreateActiveOrgToken();
+			}
+		} catch (error) {
+			console.error("Failed to load active org on connect:", error);
+			// A failed bootstrap must not leave the session with an active org but
+			// no token; fall back to the global token until the next connect or the
+			// keep-warm alarm re-mints.
+			this.activeOrgId = undefined;
+			this.activeOrgToken = undefined;
+		}
+	}
+
+	// Resolves the global cluster token: prefers a still-valid stored (keep-warm)
+	// token, else seeds the grant's access token and reconciles the DO. Sets and
+	// returns this.globalToken. Throws 401 when no valid token exists so callers
+	// never seed/mint/list with a dead token — no fallback to the frozen grant
+	// token is needed at the call sites.
+	private async initGlobalTokenAndReconcileWithStorage(): Promise<string> {
+		const store = await this.getOrgStorageService();
+		const {
+			accessToken,
+			globalRefreshToken,
+			globalTokenExpiresAt,
+			instanceUrl,
+		} = this.ctx.props;
+
+		const existing = await store.getGlobalTokenData();
+
+		const storedToken = existing.globalToken ?? null;
+		const storedExpired = MCPServer.isExpired(existing.globalTokenExpiresAt);
+		const storedIsNewer =
+			storedToken && storedToken !== accessToken && !storedExpired;
+
+		if (storedIsNewer) {
+			this.globalToken = storedToken;
+			return storedToken;
+		}
+
+		// The grant's access token is frozen at login and never refreshed. If it's
+		// already past its expiry, do NOT seed it into the DO (it would just 401
+		// upstream).
+		const propsTokenExpired = MCPServer.isExpired(globalTokenExpiresAt);
+
+		if (accessToken && globalRefreshToken && !propsTokenExpired) {
+			await store.setGlobalTokenData({
+				globalToken: accessToken,
+				globalRefreshToken,
+				instanceUrl,
+				globalTokenExpiresAt:
+					typeof globalTokenExpiresAt === "number"
+						? globalTokenExpiresAt
+						: undefined,
+			});
+			this.globalToken = accessToken;
+			return accessToken;
+		}
+
+		// Prefer a still-valid stored token; otherwise the grant token if it hasn't
+		// expired.
+		if (storedToken && !storedExpired) {
+			this.globalToken = storedToken;
+			return storedToken;
+		}
+		if (accessToken && !propsTokenExpired) {
+			this.globalToken = accessToken;
+			return accessToken;
+		}
+
+		// Nothing valid: the stored token (if any) is expired and the grant's frozen
+		// access token is expired/absent. Fail closed so callers never send a dead
+		// token; surfaces as a graceful reauth via the central 401 handler.
+		this.globalToken = undefined;
+		throw new ThoughtSpotApiError(
+			401,
+			"initGlobalTokenAndReconcileWithStorage",
+			"No valid global token available; the session token has expired. Please reauthenticate.",
+		);
+	}
+
+	private touchLastSeen(): void {
+		this.getOrgStorageService()
+			.then((store) => store.setLastSeen())
+			.catch((error) => {
+				console.error("Failed to record last-seen activity:", error);
+			});
+	}
+
 	protected getToolMetricApiSurface(): ToolMetricApiSurface {
 		return "mcp";
+	}
+
+	protected areOrgToolsAvailable(): boolean {
+		if (
+			this.ctx.props.authMode !== "oauth" ||
+			!this.isOrgsEnabled() ||
+			!this.grantHasRefreshToken
+		) {
+			return false;
+		}
+		try {
+			return resolveApiVersion(this.ctx.props.apiVersion).tools.some(
+				(tool) => tool?.name === ToolName.ListOrgs,
+			);
+		} catch {
+			return false;
+		}
 	}
 
 	protected getToolMetricApiVersionLabel(): string | undefined {
@@ -136,6 +368,13 @@ export class MCPServer extends BaseMCPServer {
 			);
 		}
 
+		if (!this.areOrgToolsAvailable()) {
+			tools = tools.filter(
+				(tool) =>
+					tool.name !== ToolName.ListOrgs && tool.name !== ToolName.SwitchOrg,
+			);
+		}
+
 		return { tools };
 	}
 
@@ -189,10 +428,65 @@ export class MCPServer extends BaseMCPServer {
 		const { name } = request.params;
 		this.trackers.track(TrackEvent.CallTool, { toolName: name });
 
+		if (this.ctx.props.authMode === "oauth") {
+			this.touchLastSeen();
+		}
+
+		if (this.areOrgToolsAvailable()) {
+			// The active org is shared across the user's sessions via the token DO,
+			// so reload per call — a switch_org in one session must be seen by the
+			// others on their next tool call (an instance-cached value would go stale).
+			await this.loadActiveOrg();
+			if (this.activeOrgId && !this.activeOrgToken) {
+				try {
+					await this.forceRecreateActiveOrgToken(recorder);
+				} catch (error) {
+					// The mint can fail if the user lost access to the active org
+					// (e.g. a 403). Return a graceful, actionable error instead of
+					// letting it propagate as a raw JSON-RPC error.
+					console.error("Failed to mint active org token on call:", error);
+					return this.createErrorResponse(
+						`Could not access the active org "${this.activeOrgId}"; it may no longer be available to you. Call list_orgs to see your orgs and switch_org to select a different one.`,
+						"Active org token mint failed",
+					);
+				}
+			}
+		}
+
+		try {
+			// Non-orgs OAuth data tools authenticate with the global token directly
+			// (no org preamble above refreshed it), so reconcile it from the DO per
+			// call. Kept inside this try so its fail-closed 401 (expired token) is
+			// caught by the central handler below rather than escaping raw.
+			if (!this.areOrgToolsAvailable() && this.ctx.props.authMode === "oauth") {
+				await this.initGlobalTokenAndReconcileWithStorage();
+			}
+			return await this.dispatchTool(name, request, recorder);
+		} catch (error) {
+			// A 401 anywhere in a tool (incl. getActiveToken refusing an expired
+			// token) surfaces as a graceful reauth message rather than a raw
+			// JSON-RPC error.
+			if (this.apiErrorStatus(error) !== 401) {
+				throw error;
+			}
+			return this.createErrorResponse(
+				"Your authentication has expired, please reauthenticate and try again. You may need to disconnect and reconnect the MCP Server if you don't have any other way to reauthenticate.",
+				"User authentication has expired, prompting them to reauthenticate",
+			);
+		}
+	}
+
+	private async dispatchTool(
+		name: string,
+		request: z.infer<typeof CallToolRequestSchema>,
+		recorder: MetricsRecorder,
+	) {
 		switch (name) {
 			case ToolName.Ping: {
 				if (this.ctx.props.accessToken && this.ctx.props.instanceUrl) {
-						if (!this.getThoughtSpotService(recorder).validateConnection()) {
+					if (
+						!(await this.getThoughtSpotService(recorder).validateConnection())
+					) {
 						return this.createErrorResponse(
 							"Failed to validate connection",
 							"Ping failed",
@@ -226,7 +520,9 @@ export class MCPServer extends BaseMCPServer {
 						"Check connectivity failed",
 					);
 				}
-				if (!this.getThoughtSpotService(recorder).validateConnection()) {
+				if (
+					!(await this.getThoughtSpotService(recorder).validateConnection())
+				) {
 					return this.createErrorResponse(
 						"Failed to validate connection",
 						"Check connectivity failed",
@@ -252,6 +548,26 @@ export class MCPServer extends BaseMCPServer {
 
 			case ToolName.CreateDashboard: {
 				return this.callCreateDashboard(request, recorder);
+			}
+
+			case ToolName.ListOrgs: {
+				if (!this.areOrgToolsAvailable()) {
+					return this.createErrorResponse(
+						"The list_orgs tool is only available when authenticated via OAuth on a cluster with Orgs enabled.",
+						"List orgs rejected: org tools unavailable",
+					);
+				}
+				return this.callListOrgs(recorder);
+			}
+
+			case ToolName.SwitchOrg: {
+				if (!this.areOrgToolsAvailable()) {
+					return this.createErrorResponse(
+						"The switch_org tool is only available when authenticated via OAuth on a cluster with Orgs enabled.",
+						"Switch org rejected: org tools unavailable",
+					);
+				}
+				return this.callSwitchOrg(request, recorder);
 			}
 
 			default:
@@ -401,7 +717,7 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 					data_source_id,
 				);
 		} catch (error) {
-			if (!(error as any)?.message?.includes("failed with status 401")) {
+			if (this.apiErrorStatus(error) !== 401) {
 				throw error;
 			}
 
@@ -519,7 +835,6 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			total_session_updates: messagesState.messages.length,
 			is_done: messagesState.isDone,
 		});
-
 		return this.createStructuredContentSuccessResponse(
 			{
 				session_updates: messagesState.messages,
@@ -612,19 +927,101 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		);
 	}
 
+	@WithSpan("call-list-orgs")
+	async callListOrgs(recorder: MetricsRecorder) {
+		const span = trace.getSpan(context.active());
+
+		const globalToken = await this.initGlobalTokenAndReconcileWithStorage();
+		const orgs = await this.getOrgService(
+			globalToken,
+			undefined,
+			recorder,
+		).listOrgs();
+		span?.setAttribute("total_orgs", orgs.length);
+
+		await this.loadActiveOrg();
+		const activeOrgId = this.getActiveOrgId();
+
+		return this.createStructuredContentSuccessResponse(
+			{
+				orgs: orgs.map((org) => {
+					const isActive =
+						activeOrgId !== undefined && String(org.id) === activeOrgId;
+					return isActive ? { ...org, is_active: true } : { ...org };
+				}),
+			},
+			`${orgs.length} org(s) found`,
+		);
+	}
+
+	@WithSpan("call-switch-org")
+	async callSwitchOrg(
+		request: z.infer<typeof CallToolRequestSchema>,
+		recorder: MetricsRecorder,
+	) {
+		const span = trace.getSpan(context.active());
+		const { org_id } = SwitchOrgInputSchema.parse(request.params.arguments);
+		const orgId = String(org_id);
+		span?.setAttribute("requested_org_id", orgId);
+
+		let orgToken: string;
+		try {
+			const globalToken = await this.initGlobalTokenAndReconcileWithStorage();
+			orgToken = await this.getOrgService(
+				globalToken,
+				undefined,
+				recorder,
+			).fetchOrgBearerToken(globalToken, orgId);
+		} catch (error) {
+			const status = this.apiErrorStatus(error);
+			if (status !== undefined && status >= 400 && status < 500) {
+				return this.createErrorResponse(
+					`You do not have access to org "${orgId}", or it does not exist. Call list_orgs to see the orgs you can access.`,
+					`Switch org failed: org not accessible (status ${status})`,
+				);
+			}
+			console.error("Error switching org:", error);
+			return this.createErrorResponse(
+				`Failed to switch to org "${orgId}". Please try again.`,
+				`Error switching org ${(error as Error)?.message ?? ""}`,
+			);
+		}
+
+		await this.setActiveOrg(orgId, orgToken);
+		this._sources = null;
+		span?.setAttribute("active_org_id", orgId);
+
+		try {
+			await this.sendResourceListChanged();
+		} catch (error) {
+			console.error(
+				"Failed to send resource list changed notification:",
+				error,
+			);
+		}
+
+		return this.createStructuredContentSuccessResponse(
+			{ success: true, active_org_id: org_id },
+			`Switched to org ${orgId}`,
+		);
+	}
+
 	private _sources: {
+		orgId: string | undefined;
 		list: DataSource[];
 		map: Map<string, DataSource>;
 	} | null = null;
 
 	@WithSpan("get-datasources")
 	async getDatasources(recorder?: MetricsRecorder) {
-		if (this._sources) {
+		const orgId = this.getActiveOrgId();
+		if (this._sources && this._sources.orgId === orgId) {
 			return this._sources;
 		}
 
 		const sources = await this.getThoughtSpotService(recorder).getDataSources();
 		this._sources = {
+			orgId,
 			list: sources,
 			map: new Map(sources.map((s) => [s.id, s])),
 		};

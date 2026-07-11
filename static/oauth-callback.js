@@ -18,7 +18,7 @@
         if (!base.pathname.endsWith('/')) {
             base.pathname += '/';
         }
-        const tokenUrl = new URL('callosum/v1/v2/auth/token/fetch?validity_time_in_sec=2592000', base.toString());
+        const tokenUrl = new URL('callosum/v1/session/v2/gettoken?refresh=true', base.toString());
         
         document.getElementById('status').textContent = 'Retrieving authentication token...';
         
@@ -72,31 +72,29 @@
                         const parsed = JSON.parse(jsonText);
                         
                         // Handle different token formats
-                        if (typeof parsed === 'string') {
-                            // Case 1: tokenText is a quoted string
-                            tokenData = { data: { token: parsed } };
-                        } else if (parsed.data && parsed.data.token) {
-                            // Case 2: { data: { token: ... } }
-                            tokenData = { data: { token: parsed.data.token } };
+                        if (parsed.data && parsed.data.token) {
+                            // Case 2: { data: { token, refreshToken?, ... } }
+                            tokenData = { data: {
+                                token: parsed.data.token,
+                                refreshToken: parsed.data.refreshToken,
+                                tokenCreatedTime: parsed.data.tokenCreatedTime,
+                                tokenExpiryDuration: parsed.data.tokenExpiryDuration,
+                            } };
                         } else if (parsed.token) {
-                            // Case 3: { token: ... }
-                            tokenData = { data: { token: parsed.token } };
+                            // Case 3: { token, refreshToken?, ... }
+                            tokenData = { data: {
+                                token: parsed.token,
+                                refreshToken: parsed.refreshToken,
+                                tokenCreatedTime: parsed.tokenCreatedTime,
+                                tokenExpiryDuration: parsed.tokenExpiryDuration,
+                            } };
                         } else {
                             throw new Error('Unrecognized token format.');
                         }
                     } catch (e) {
-                        // If JSON parsing fails, try to extract token from the string
-                        const tokenMatch = tokenText.match(/"token"\s*:\s*"([^"]+)"/);
-                        if (tokenMatch) {
-                            tokenData = { data: { token: tokenMatch[1] } };
-                        } else if (typeof tokenText === 'string' && tokenText.trim().length > 0) {
-                            // Case 4: raw token string
-                            tokenData = { data: { token: tokenText.trim() } };
-                        } else {
-                            document.getElementById('status').textContent = 'Invalid token format. Please paste the correct token.';
-                            document.getElementById('status').style.color = '#dc3545';
-                            return;
-                        }
+                        document.getElementById('status').textContent = 'Invalid token format. Please paste the correct token.';
+                        document.getElementById('status').style.color = '#dc3545';
+                        return;
                     }
                     document.getElementById('status').textContent = 'Submitting token...';
                     document.getElementById('status').style.color = '#495057';
@@ -130,7 +128,23 @@
             }
         }
         
-        const data = await response.json();
+        const raw = await response.json();
+        // gettoken returns the access token + refreshToken + timestamps. Normalize
+        // to the { data: { token, ... } } shape /store-token expects.
+        const src = (raw && raw.data) ? raw.data : raw;
+        if (!src || !src.token) {
+            // Fail loudly at login rather than storing an undefined token and
+            // failing opaquely on the first tool call.
+            throw new Error('Authentication response did not contain a token.');
+        }
+        const data = {
+            data: {
+                token: src.token,
+                refreshToken: src.refreshToken,
+                tokenCreatedTime: src.tokenCreatedTime,
+                tokenExpiryDuration: src.tokenExpiryDuration,
+            },
+        };
         document.getElementById('status').textContent = 'Authentication successful. Securing your session...';
 
         // Send the token to the server
