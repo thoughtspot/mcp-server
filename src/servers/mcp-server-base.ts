@@ -115,28 +115,22 @@ export abstract class BaseMCPServer extends Server {
 
 	/**
 	 * Lazily (re)load session info when it's missing. The init-time getSessionInfo
-	 * runs before subclasses reconcile their auth token, so on a cold-start
+	 * runs before postInit has reconciled the auth token, so on a cold-start
 	 * reconnect after the frozen props token has expired it can fail and leave
 	 * sessionInfo null — which silently mis-gates org tools / datasource discovery.
 	 * Callers that read session-info-derived state (listTools, callTool) invoke
-	 * this first so the value is repaired on demand with a now-valid token. No-op
-	 * (no network call) once sessionInfo is populated, so the happy path is free.
-	 * Best-effort: a failure leaves sessionInfo null (→ fail-closed gates) rather
-	 * than throwing.
+	 * this first so the value is repaired on demand. By the time they run, postInit
+	 * has already loaded the kept-warm token, so the refetch authenticates with it
+	 * rather than the expired props token. No-op (no network call) once sessionInfo
+	 * is populated, so the happy path is free. Best-effort: a failure leaves
+	 * sessionInfo null (→ fail-closed gates) rather than throwing.
 	 */
 	protected async ensureSessionInfo(): Promise<void> {
 		if (this.sessionInfo) {
 			return;
 		}
-		await this.refreshTokenBeforeSessionInfo();
 		await this.initializeService();
 	}
-
-	/**
-	 * Hook for subclasses to ensure the token that getSessionInfo authenticates
-	 * with is valid/loaded before a (re)fetch. Default no-op.
-	 */
-	protected async refreshTokenBeforeSessionInfo(): Promise<void> {}
 
 	/**
 	 * Initialize span with common attributes (user_guid and instance_url)

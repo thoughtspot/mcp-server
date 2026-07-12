@@ -135,23 +135,6 @@ export class MCPServer extends BaseMCPServer {
 		await this.setActiveOrg(this.activeOrgId, orgToken);
 	}
 
-	// Before a (lazy) session-info fetch, make sure this.globalToken holds the live
-	// kept-warm token from the DO — otherwise getSessionInfo would authenticate
-	// with the frozen props token, which on a post-expiry reconnect is dead.
-	protected async refreshTokenBeforeSessionInfo(): Promise<void> {
-		if (this.ctx.props.authMode !== "oauth") {
-			return;
-		}
-		try {
-			await this.initGlobalTokenAndReconcileWithStorage();
-		} catch (error) {
-			console.error(
-				"Failed to reconcile keep-warm token before session info:",
-				error,
-			);
-		}
-	}
-
 	protected async postInit(): Promise<void> {
 		if (this.ctx.props.authMode !== "oauth") {
 			return;
