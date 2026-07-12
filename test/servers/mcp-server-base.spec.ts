@@ -591,8 +591,8 @@ describe("MCP Server Base", () => {
 	});
 
 	describe("isOrgsEnabled", () => {
-		it("returns false when session info is not initialized (fail closed)", () => {
-			expect(server.testIsOrgsEnabled()).toBe(false);
+		it("returns true when session info is not initialized (default so org tools survive a failed getSessionInfo)", () => {
+			expect(server.testIsOrgsEnabled()).toBe(true);
 		});
 
 		it("returns true when orgsEnabled is true", () => {

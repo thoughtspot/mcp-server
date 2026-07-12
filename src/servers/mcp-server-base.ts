@@ -103,8 +103,14 @@ export abstract class BaseMCPServer extends Server {
 	 * org tools stay hidden.
 	 */
 	protected isOrgsEnabled(): boolean {
+		// When session info failed to load (e.g. the init-time getSessionInfo call
+		// used an expired props token before the keep-warm DO token was reconciled),
+		// default to true so org tools stay available rather than silently vanishing.
+		// The tool call paths reconcile the live token from the DO independently, so
+		// they still work when the kept-warm token is healthy. When session info IS
+		// present, respect the cluster's actual orgsEnabled flag.
 		if (!this.sessionInfo) {
-			return false;
+			return true;
 		}
 		return this.sessionInfo.orgsEnabled === true;
 	}
