@@ -98,16 +98,45 @@ export abstract class BaseMCPServer extends Server {
 	}
 
 	/**
-	 * Whether Orgs are enabled on this cluster (from session info). Fails closed:
-	 * if session info is unavailable or the flag is absent, returns false so the
-	 * org tools stay hidden.
+	 * Whether Orgs are enabled on this cluster (from session info).
+	 *
+	 * When session info is present, respect its real orgsEnabled flag. When it's
+	 * absent, default to true so org tools stay visible rather than silently
+	 * vanishing: callers (listTools/callTool) run ensureSessionInfo() first, which
+	 * repairs a null sessionInfo on demand, so this default only acts as a fallback
+	 * for the narrow case where even that refetch fails.
 	 */
 	protected isOrgsEnabled(): boolean {
 		if (!this.sessionInfo) {
-			return false;
+			return true;
 		}
 		return this.sessionInfo.orgsEnabled === true;
 	}
+
+	/**
+	 * Lazily (re)load session info when it's missing. The init-time getSessionInfo
+	 * runs before subclasses reconcile their auth token, so on a cold-start
+	 * reconnect after the frozen props token has expired it can fail and leave
+	 * sessionInfo null — which silently mis-gates org tools / datasource discovery.
+	 * Callers that read session-info-derived state (listTools, callTool) invoke
+	 * this first so the value is repaired on demand with a now-valid token. No-op
+	 * (no network call) once sessionInfo is populated, so the happy path is free.
+	 * Best-effort: a failure leaves sessionInfo null (→ fail-closed gates) rather
+	 * than throwing.
+	 */
+	protected async ensureSessionInfo(): Promise<void> {
+		if (this.sessionInfo) {
+			return;
+		}
+		await this.refreshTokenBeforeSessionInfo();
+		await this.initializeService();
+	}
+
+	/**
+	 * Hook for subclasses to ensure the token that getSessionInfo authenticates
+	 * with is valid/loaded before a (re)fetch. Default no-op.
+	 */
+	protected async refreshTokenBeforeSessionInfo(): Promise<void> {}
 
 	/**
 	 * Initialize span with common attributes (user_guid and instance_url)

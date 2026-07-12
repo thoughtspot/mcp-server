@@ -363,6 +363,112 @@ describe("MCP Server org tools", () => {
 		});
 	});
 
+	describe("session info repair after a failed init-time getSessionInfo", () => {
+		// Reproduces the reported bug: on a cold-start reconnect after the frozen
+		// props token has expired, the init-time getSessionInfo authenticates with
+		// that dead token and fails, leaving sessionInfo null. The keep-warm DO
+		// still holds a valid token. ensureSessionInfo (run by listTools/callTool)
+		// must reconcile the DO token and refetch session info so the org-tools gate
+		// reflects the real cluster state.
+		function makeServerWithTokenAwareSession(goodSession: any) {
+			const store = new Map<
+				string,
+				{ activeOrgId?: string; orgToken?: string }
+			>();
+			// The DO holds a valid, newer keep-warm token (differs from the expired
+			// props token) so the reconcile adopts it.
+			const tokenStore = new Map<string, any>();
+			const namespace = makeStorageNamespace(store, tokenStore);
+			// getSessionInfo fails when the client was built with the expired props
+			// token, and succeeds when built with the warm DO token.
+			vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockImplementation(
+				(_instanceUrl: string, bearerToken: string) =>
+					({
+						getSessionInfo: vi.fn(async () => {
+							if (bearerToken === "warm-do-token") {
+								return goodSession;
+							}
+							throw new Error("getSessionInfo: status 401: expired token");
+						}),
+						searchOrgs: vi.fn().mockResolvedValue([]),
+						listOrgs: vi.fn().mockResolvedValue([]),
+						fetchOrgBearerToken: vi.fn().mockResolvedValue("org-scoped-token"),
+						validateConnection: vi.fn().mockResolvedValue(true),
+						instanceUrl: "https://test.thoughtspot.cloud",
+					}) as any,
+			);
+			const props = {
+				instanceUrl: "https://test.thoughtspot.cloud",
+				accessToken: "expired-props-token",
+				globalRefreshToken: "refresh-token",
+				globalTokenExpiresAt: 1, // props token already expired
+				authMode: "oauth",
+				apiVersion: "latest",
+				clientName: { clientId: "c", clientName: "c", registrationDate: 0 },
+			};
+			const env = {
+				CONVERSATION_STORAGE_OBJECT: namespace,
+				USER_TOKEN_OBJECT: namespace,
+			} as any;
+			return { server: new MCPServer({ props, env }), tokenStore };
+		}
+
+		it("repairs a null sessionInfo (org tools reappear) via the warm DO token when init-time getSessionInfo failed", async () => {
+			const goodSession = {
+				clusterId: "test-cluster-123",
+				clusterName: "test-cluster",
+				releaseVersion: "10.13.0.cl-110",
+				userGUID: "test-user-123",
+				userName: "test-user",
+				currentOrgId: "0",
+				privileges: [],
+				configInfo: {
+					mixpanelConfig: {
+						devSdkKey: "k",
+						prodSdkKey: "k",
+						production: false,
+					},
+					selfClusterName: "test-cluster",
+					selfClusterId: "test-cluster-123",
+					enableSpotterDataSourceDiscovery: false,
+					orgsConfiguration: { enabled: true },
+				},
+			};
+			const { server, tokenStore } =
+				makeServerWithTokenAwareSession(goodSession);
+
+			// Seed the DO with a valid keep-warm token before connect. The DO name is
+			// `<storage-key-hash>:__active_org__` (hash of the refresh token).
+			const keyHash = Buffer.from(
+				await crypto.subtle.digest(
+					"SHA-256",
+					new TextEncoder().encode("refresh-token"),
+				),
+			).toString("base64url");
+			tokenStore.set(`${keyHash}:__active_org__`, {
+				globalToken: "warm-do-token",
+				globalRefreshToken: "refresh-token",
+				instanceUrl: "https://test.thoughtspot.cloud",
+				globalTokenExpiresAt: 1893456000000,
+			});
+
+			await server.init();
+			// Init-time getSessionInfo failed on the expired props token.
+			expect((server as any).sessionInfo).toBeFalsy();
+			// but postInit still reconciled the warm DO token into memory.
+			expect((server as any).globalToken).toBe("warm-do-token");
+
+			// listTools runs ensureSessionInfo, which reconciles the warm DO token
+			// and refetches session info successfully.
+			const { listTools } = connect(server);
+			const names = (await listTools()).tools?.map((t) => t.name) ?? [];
+
+			expect((server as any).sessionInfo).toBeTruthy();
+			expect(names).toContain("list_orgs");
+			expect(names).toContain("switch_org");
+		});
+	});
+
 	describe("non-org cluster (orgs disabled): no org overlay on connect", () => {
 		it("does NOT mint an org token or set an active org when orgs are disabled", async () => {
 			const mint = vi.fn().mockResolvedValue("org-scoped-token");

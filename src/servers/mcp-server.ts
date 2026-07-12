@@ -135,6 +135,23 @@ export class MCPServer extends BaseMCPServer {
 		await this.setActiveOrg(this.activeOrgId, orgToken);
 	}
 
+	// Before a (lazy) session-info fetch, make sure this.globalToken holds the live
+	// kept-warm token from the DO — otherwise getSessionInfo would authenticate
+	// with the frozen props token, which on a post-expiry reconnect is dead.
+	protected async refreshTokenBeforeSessionInfo(): Promise<void> {
+		if (this.ctx.props.authMode !== "oauth") {
+			return;
+		}
+		try {
+			await this.initGlobalTokenAndReconcileWithStorage();
+		} catch (error) {
+			console.error(
+				"Failed to reconcile keep-warm token before session info:",
+				error,
+			);
+		}
+	}
+
 	protected async postInit(): Promise<void> {
 		if (this.ctx.props.authMode !== "oauth") {
 			return;
@@ -331,6 +348,10 @@ export class MCPServer extends BaseMCPServer {
 
 	@WithSpan("call-list-tools")
 	protected async listTools() {
+		// Repair session info if the init-time fetch failed, so the org-tools and
+		// datasource-discovery gates below reflect the real cluster state.
+		await this.ensureSessionInfo();
+
 		const span = this.initSpanWithCommonAttributes();
 		span?.setAttribute(
 			"api_version_requested",
@@ -432,6 +453,10 @@ export class MCPServer extends BaseMCPServer {
 			this.touchLastSeen();
 		}
 
+		// Repair session info if the init-time fetch failed, so the org-tools gate
+		// below (and getActiveToken's token selection) act on the real state.
+		await this.ensureSessionInfo();
+
 		if (this.areOrgToolsAvailable()) {
 			// The active org is shared across the user's sessions via the token DO,
 			// so reload per call — a switch_org in one session must be seen by the
@@ -454,11 +479,15 @@ export class MCPServer extends BaseMCPServer {
 		}
 
 		try {
-			// Non-orgs OAuth data tools authenticate with the global token directly
-			// (no org preamble above refreshed it), so reconcile it from the DO per
-			// call. Kept inside this try so its fail-closed 401 (expired token) is
-			// caught by the central handler below rather than escaping raw.
-			if (!this.areOrgToolsAvailable() && this.ctx.props.authMode === "oauth") {
+			// OAuth data tools that authenticate with the global token directly (the
+			// org preamble above only refreshes a token when an org is actually
+			// active) must have it reconciled from the DO per call, or they'd keep
+			// using a stale/expired in-memory token and 401. Keyed on the absence of
+			// an active org token so it covers both non-orgs clusters and the case
+			// where org tools are nominally available but no org is active. Kept
+			// inside this try so its fail-closed 401 is caught by the central handler
+			// below rather than escaping raw.
+			if (this.ctx.props.authMode === "oauth" && !this.activeOrgToken) {
 				await this.initGlobalTokenAndReconcileWithStorage();
 			}
 			return await this.dispatchTool(name, request, recorder);
