@@ -22,6 +22,8 @@ export const UPSTREAM_OPERATION_NAMES = {
 	importMetadataTml: "import_metadata_tml",
 	searchMetadata: "search_metadata",
 	searchObjects: "search_objects",
+	listOrgs: "list_orgs",
+	fetchOrgBearerToken: "fetch_org_bearer_token",
 } as const;
 
 export type UpstreamOperation =
@@ -129,6 +131,30 @@ export function recordUpstreamCallMetrics(
 
 	recorder.count(METRIC_NAMES.upstreamCallsTotal, 1, labels);
 	recorder.histogram(METRIC_NAMES.upstreamDurationMs, durationMs, labels);
+}
+
+// Run an upstream call, recording success/error + duration. Shared by the
+// service classes.
+export async function observeUpstreamCall<T>(
+	recorder: MetricsRecorder | undefined,
+	operation: UpstreamOperation,
+	call: () => Promise<T>,
+): Promise<T> {
+	const startedAt = Date.now();
+	let outcome: MetricOutcome = "success";
+	try {
+		return await call();
+	} catch (error) {
+		outcome = "upstream_error";
+		throw error;
+	} finally {
+		recordUpstreamCallMetrics(
+			recorder,
+			operation,
+			outcome,
+			Date.now() - startedAt,
+		);
+	}
 }
 
 export function recordUpstreamStreamStartedMetric(

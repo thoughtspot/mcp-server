@@ -27,7 +27,9 @@ import {
 	recordToolInvocationMetrics,
 } from "../metrics/runtime/tool-metrics";
 import { getActiveSpan, withSpan } from "../metrics/tracing/tracing-utils";
+import { OrgStorageServiceClient } from "../storage-service/org-storage-service";
 import { StorageServiceClient } from "../storage-service/storage-service";
+import { OrgService } from "../thoughtspot/org-service";
 import { getThoughtSpotClient } from "../thoughtspot/thoughtspot-client";
 import { ThoughtSpotService } from "../thoughtspot/thoughtspot-service";
 import type { Props } from "../utils";
@@ -74,7 +76,9 @@ export abstract class BaseMCPServer extends Server {
 				capabilities: {
 					tools: {},
 					completion: {},
-					resources: {},
+					// listChanged: the resource set (datasources) changes on switch_org,
+					// so we notify clients to re-list.
+					resources: { listChanged: true },
 				},
 			},
 		);
@@ -91,6 +95,24 @@ export abstract class BaseMCPServer extends Server {
 			return false;
 		}
 		return String(this.sessionInfo.enableSpotterDataSourceDiscovery) === "true";
+	}
+
+	/**
+	 * Whether Orgs are enabled on this cluster (from session info). Fails closed:
+	 * if session info is unavailable or the flag is absent, returns false so the
+	 * org tools stay hidden.
+	 */
+	protected isOrgsEnabled(): boolean {
+		// When session info failed to load (e.g. the init-time getSessionInfo call
+		// used an expired props token before the keep-warm DO token was reconciled),
+		// default to true so org tools stay available rather than silently vanishing.
+		// The tool call paths reconcile the live token from the DO independently, so
+		// they still work when the kept-warm token is healthy. When session info IS
+		// present, respect the cluster's actual orgsEnabled flag.
+		if (!this.sessionInfo) {
+			return true;
+		}
+		return this.sessionInfo.orgsEnabled === true;
 	}
 
 	/**
@@ -187,23 +209,61 @@ export abstract class BaseMCPServer extends Server {
 		};
 	}
 
-	protected async getStorageService(): Promise<StorageServiceClient> {
-		const accessToken = this.ctx.props.accessToken;
-		if (!accessToken || accessToken.length === 0) {
-			throw new Error("Access token is required to use Storage Service");
+	/**
+	 * Stable per-login hash used to namespace this user's durable storage (both
+	 * conversation buffers and active-org state), keeping users isolated.
+	 *
+	 * Keyed on the refresh token when present (OAuth): it is stable across the
+	 * access token's 24h rotation and only changes on full reauthentication, so
+	 * storage survives token refresh and resets on reauth. Falls back to the
+	 * access token for static bearer/token connections, which have no refresh
+	 * token (their token is long-lived).
+	 */
+	protected async getStorageKeyHash(): Promise<string> {
+		const keyToken =
+			this.ctx.props.globalRefreshToken ?? this.ctx.props.accessToken;
+		if (!keyToken || keyToken.length === 0) {
+			throw new Error("A token is required to derive the storage key");
 		}
-		const encodedAccessToken = new TextEncoder().encode(accessToken);
 		const hashBuffer = await crypto.subtle.digest(
 			"SHA-256",
-			encodedAccessToken,
+			new TextEncoder().encode(keyToken),
 		);
-		const hashUrlSafe = Buffer.from(new Uint8Array(hashBuffer)).toString(
-			"base64url",
-		);
+		return Buffer.from(new Uint8Array(hashBuffer)).toString("base64url");
+	}
+
+	protected async getStorageService(): Promise<StorageServiceClient> {
+		const hashUrlSafe = await this.getStorageKeyHash();
 		return new StorageServiceClient(
 			this.ctx.env
 				.CONVERSATION_STORAGE_OBJECT as unknown as DurableObjectNamespace,
 			hashUrlSafe,
+		);
+	}
+
+	protected async getOrgStorageService(): Promise<OrgStorageServiceClient> {
+		const hashUrlSafe = await this.getStorageKeyHash();
+		return new OrgStorageServiceClient(
+			this.ctx.env.USER_TOKEN_OBJECT as unknown as DurableObjectNamespace,
+			hashUrlSafe,
+		);
+	}
+
+	protected abstract getActiveOrgId(): string | undefined;
+	// The token to authenticate the current request: the org-scoped token when an
+	// org is active, otherwise the global/cluster token.
+	protected abstract getActiveToken(): string;
+
+	// Build an OrgService bound to an explicit (cluster-wide) token for org listing
+	// / org-token minting.
+	protected getOrgService(
+		bearerToken: string,
+		orgId?: string,
+		recorder?: MetricsRecorder,
+	) {
+		return new OrgService(
+			getThoughtSpotClient(this.ctx.props.instanceUrl, bearerToken, orgId),
+			recorder,
 		);
 	}
 
@@ -214,7 +274,8 @@ export abstract class BaseMCPServer extends Server {
 		return new ThoughtSpotService(
 			getThoughtSpotClient(
 				this.ctx.props.instanceUrl,
-				this.ctx.props.accessToken,
+				this.getActiveToken(),
+				this.getActiveOrgId(),
 			),
 			{
 				recorder,
@@ -439,7 +500,21 @@ export abstract class BaseMCPServer extends Server {
 				});
 			},
 		);
+
+		// Subclass post-initialization hook (runs after sessionInfo is available
+		// and handlers are registered). Best-effort: failures must not break the
+		// connection.
+		try {
+			await this.postInit();
+		} catch (error) {
+			console.error("postInit failed:", error);
+		}
 	}
+
+	/**
+	 * Optional hook for subclasses to run setup after init(). Default no-op.
+	 */
+	protected async postInit(): Promise<void> {}
 
 	async addTracker(tracker: Tracker) {
 		this.trackers.add(tracker);
