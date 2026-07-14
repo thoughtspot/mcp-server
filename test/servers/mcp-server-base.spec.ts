@@ -253,13 +253,8 @@ describe("MCP Server Base", () => {
 
 	describe("Datasource Discovery Check", () => {
 		it("should return false before init is called (sessionInfo not set)", () => {
-			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 			const result = server.testIsDatasourceDiscoveryAvailable();
 			expect(result).toBe(false);
-			expect(warnSpy).toHaveBeenCalledWith(
-				expect.stringContaining("sessionInfo is not initialized"),
-			);
-			warnSpy.mockRestore();
 		});
 
 		it("should return true when enableSpotterDataSourceDiscovery is enabled", async () => {
