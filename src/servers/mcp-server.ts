@@ -770,14 +770,42 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			);
 		}
 
-		await this.getThoughtSpotService(recorder, {
-			analyticalSessionId: analytical_session_id,
-		}).sendAgentConversationMessageStreaming(
-			analytical_session_id,
-			message,
-			storageService.appendMessages.bind(storageService),
-			additional_context,
-		);
+		try {
+			await this.getThoughtSpotService(recorder, {
+				analyticalSessionId: analytical_session_id,
+			}).sendAgentConversationMessageStreaming(
+				analytical_session_id,
+				message,
+				storageService.appendMessages.bind(storageService),
+				additional_context,
+			);
+		} catch (error) {
+			console.error("Error sending message to Spotter conversation:", error);
+			try {
+				// Close out the conversation state in the storage (mark isDone = true), so
+				// that clients don't accidentally get stuck polling for updates forever
+				await storageService.appendMessages(
+					analytical_session_id,
+					[
+						{
+							is_thinking: false,
+							type: "text",
+							text: "Something went wrong",
+						},
+					],
+					true,
+				);
+			} catch (storageError) {
+				console.error(
+					"Error appending error message to storage service:",
+					storageError,
+				);
+			}
+			return this.createErrorResponse(
+				"Encountered an error while sending the message. Please check your inputs and try again.",
+				`Error sending message to conversation ${analytical_session_id}: ${error}`,
+			);
+		}
 
 		return this.createStructuredContentSuccessResponse(
 			{ success: true },

@@ -1427,6 +1427,70 @@ describe("MCP Server", () => {
 				"ERROR: The analytical session has an ongoing response",
 			);
 		});
+
+		it("should close out the conversation when sending the message fails", async () => {
+			mockSendAgentConversationMessageStreaming.mockRejectedValue(
+				new Error("Spotter stream failed"),
+			);
+
+			await server.init();
+			const { callTool } = connect(server);
+
+			const result = await callTool("send_session_message", {
+				analytical_session_id: "conv-abc-123",
+				message: "What is the total revenue?",
+			});
+
+			expect(result.isError).toBe(true);
+			expect((result.content as any[])[0].text).toContain(
+				"Encountered an error while sending the message",
+			);
+			// The conversation must be marked done so clients don't poll forever.
+			expect(mockStorageService.appendMessages).toHaveBeenCalledWith(
+				"conv-abc-123",
+				[
+					{
+						is_thinking: false,
+						type: "text",
+						text: "Something went wrong",
+					},
+				],
+				true,
+			);
+		});
+
+		it("should still return an error when closing out the conversation fails", async () => {
+			mockSendAgentConversationMessageStreaming.mockRejectedValue(
+				new Error("Spotter stream failed"),
+			);
+			mockStorageService.appendMessages.mockRejectedValue(
+				new Error("Storage write failed"),
+			);
+
+			await server.init();
+			const { callTool } = connect(server);
+
+			const result = await callTool("send_session_message", {
+				analytical_session_id: "conv-abc-123",
+				message: "What is the total revenue?",
+			});
+
+			expect(result.isError).toBe(true);
+			expect((result.content as any[])[0].text).toContain(
+				"Encountered an error while sending the message",
+			);
+			expect(mockStorageService.appendMessages).toHaveBeenCalledWith(
+				"conv-abc-123",
+				[
+					{
+						is_thinking: false,
+						type: "text",
+						text: "Something went wrong",
+					},
+				],
+				true,
+			);
+		});
 	});
 
 	describe("Get Session Updates Tool", () => {
