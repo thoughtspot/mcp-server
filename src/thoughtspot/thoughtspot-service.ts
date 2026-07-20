@@ -23,7 +23,7 @@ import { WithSpan, getActiveSpan } from "../metrics/tracing/tracing-utils";
 import { processSendAgentConversationMessageStreamingResponse } from "../streaming-utils";
 import type {
 	SearchObjectsParams,
-	SearchObjectsResult,
+	SearchObjectsResponse,
 } from "./thoughtspot-client";
 import type {
 	Answer,
@@ -753,7 +753,7 @@ export class ThoughtSpotService {
 	@WithSpan("search-objects")
 	async searchObjects(
 		params: SearchObjectsParams,
-	): Promise<SearchObjectsResult> {
+	): Promise<SearchObjectsResponse> {
 		const span = getActiveSpan();
 		span?.setAttribute(
 			"query",
@@ -766,7 +766,7 @@ export class ThoughtSpotService {
 			() => (this.client as any).searchObjects(params),
 		);
 
-		span?.setAttribute("results_count", result.objects.length);
+		span?.setAttribute("results_count", result.results.length);
 		return result;
 	}
 

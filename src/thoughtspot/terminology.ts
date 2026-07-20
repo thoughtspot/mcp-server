@@ -74,7 +74,10 @@ export function resolveObjectTypeFacets(types: string[]): string[] {
 const RESULT_TYPE_TO_CANONICAL: Record<string, string> = {
 	ANSWER_RESULT: "Answer",
 	PINBOARD_RESULT: "Liveboard",
-	PINBOARD_VIZ_RESULT: "Liveboard",
+	// A viz pinned on a Liveboard is its own type ("Liveboard viz"), distinct
+	// from a standalone Answer; `id` points at the parent Liveboard and
+	// `visualization_id` at the viz for fetch_data.
+	PINBOARD_VIZ_RESULT: "Visualization",
 	WORKSHEET_RESULT: "Worksheet",
 	LOGICAL_TABLE_RESULT: "Worksheet",
 };

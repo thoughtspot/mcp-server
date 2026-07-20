@@ -5,9 +5,13 @@ import {
 import { buildTsHeaders, generateRequestId, postJson } from "../grpc-utils";
 import { searchObjectsQuery } from "./search-objects-query";
 import type {
+	RawSearchResult,
+	SearchErrorCode,
 	SearchObjectHeader,
+	SearchObjectResult,
+	SearchObjectsError,
 	SearchObjectsParams,
-	SearchObjectsResult,
+	SearchObjectsResponse,
 } from "./search-objects-types";
 
 // Build a deep link to the object in the ThoughtSpot UI from its result type.
@@ -40,31 +44,37 @@ function toEpochMs(value: unknown): number | undefined {
 	return value < 1e12 ? Math.round(value * 1000) : value;
 }
 
-// Derive a human-readable match reason from the Eureka snippet metadata.
-function deriveMatchReason(snippetInfo: any): string {
-	if (snippetInfo?.titleSnippet?.highlights?.length) {
-		return "Matched in title";
+// Sage/TML tokens only carry meaning for Answers and vizzes; Liveboards report
+// a bare GUID here, which the spec maps to null.
+function deriveQuery(resultType: string, sageQuery: unknown): string | null {
+	if (resultType !== "ANSWER_RESULT" && resultType !== "PINBOARD_VIZ_RESULT") {
+		return null;
 	}
-	if (snippetInfo?.descriptionSnippet?.highlights?.length) {
-		return "Matched in description";
-	}
-	// Eureka may return sageQuerySnippet as an object or a list; token likewise.
-	const sage = snippetInfo?.sageQuerySnippet;
-	const sageEntries = Array.isArray(sage) ? sage : sage ? [sage] : [];
-	const tokens = sageEntries
-		.flatMap((entry: any) =>
-			Array.isArray(entry?.token)
-				? entry.token
-				: entry?.token
-					? [entry.token]
-					: [],
-		)
-		.map((t: any) => t?.token)
-		.filter(Boolean);
-	if (tokens.length) {
-		return `Matched query terms: ${tokens.join(", ")}`;
-	}
-	return "Matched search term";
+	return typeof sageQuery === "string" && sageQuery.trim() ? sageQuery : null;
+}
+
+// Project the internal working header to the spec-shaped result item:
+// UPPER-case type, ISO-8601 last_modified, drop internal-only fields.
+function toResult(header: SearchObjectHeader): SearchObjectResult {
+	return {
+		id: header.id,
+		...(header.visualization_id
+			? { visualization_id: header.visualization_id }
+			: {}),
+		name: header.name,
+		type: header.type.toUpperCase(),
+		owner: header.owner,
+		description: header.description,
+		tags: header.tags,
+		last_modified:
+			header.last_modified != null
+				? new Date(header.last_modified).toISOString()
+				: null,
+		verified: header.verified,
+		frame_url: header.frame_url,
+		query: header.query,
+		confidence: header.confidence,
+	};
 }
 
 // Custom handler: no public API for full-text object search; mirrors the UI's
@@ -76,7 +86,7 @@ export function addSearchObjects(
 ) {
 	(client as any).searchObjects = async (
 		params: SearchObjectsParams,
-	): Promise<SearchObjectsResult> => {
+	): Promise<SearchObjectsResponse> => {
 		const {
 			types,
 			owner,
@@ -211,11 +221,9 @@ export function addSearchObjects(
 							result?.objectSecurityInfo?.objectType ??
 							resultType,
 						owner: header?.authorName ?? "",
-						description: header?.description ?? "",
+						description: header?.description || null,
 						tags,
 						last_modified: toEpochMs(header?.modifiedOn),
-						// Eureka exposes no per-user last-viewed timestamp.
-						last_viewed: null,
 						verified: header?.isVerified ?? false,
 						frame_url: buildFrameUrl(
 							instanceUrl,
@@ -223,8 +231,9 @@ export function addSearchObjects(
 							visualizationId ?? id,
 							id,
 						),
-						match_reason: deriveMatchReason(result?.snippetInfo),
-						confidence: result?.score,
+						query: deriveQuery(resultType, result?.sageQuery),
+						// TODO: raw Eureka relevance score; normalization to 0–1 pending.
+						confidence: result?.score ?? 0,
 					};
 				})
 				.filter(
@@ -265,11 +274,13 @@ export function addSearchObjects(
 			};
 		};
 
-		// Full search for one term; each term mints its own x-request-id.
+		// Full search for one term; the shared x-request-id is passed in so it is
+		// preserved even when the call later fails.
 		const searchSingle = async (
 			query: string,
+			requestId: string,
 			cursor?: string,
-		): Promise<SearchObjectsResult> => {
+		): Promise<RawSearchResult> => {
 			// Clamp: LLM callers do fabricate negative cursors.
 			const rawOffset = Math.max(
 				0,
@@ -278,9 +289,6 @@ export function addSearchObjects(
 			// Honor the cursor's absolute offset; snapping to the current limit could
 			// move it backwards if the caller changed `limit` between pages.
 			const startOffset = rawOffset;
-
-			// Minted per call, sent as x-request-id for cross-system tracing.
-			const requestId = generateRequestId();
 
 			// Accumulate pages so post-filters can't return a short page while
 			// matches remain; the page cap bounds upstream calls.
@@ -332,6 +340,10 @@ export function addSearchObjects(
 			};
 		};
 
+		// Minted once for the whole call so it survives a failure (the error
+		// envelope must still carry a request_id).
+		const requestId = generateRequestId();
+
 		// Normalize into distinct, non-empty terms (string or array input).
 		const rawTerms = Array.isArray(params.query)
 			? params.query
@@ -340,18 +352,122 @@ export function addSearchObjects(
 
 		// Guard empty/whitespace-only input rather than searching upstream for "".
 		if (terms.length === 0) {
-			throw new Error("searchObjects requires a non-empty query");
+			return buildError(
+				"INVALID_ARGUMENT",
+				"Provide a non-empty search term.",
+				false,
+				requestId,
+			);
 		}
 
-		// Single term: full behavior, including cursor-based pagination.
-		if (terms.length === 1) {
-			return searchSingle(terms[0], params.cursor);
-		}
+		try {
+			// Single term: full behavior, including cursor-based pagination.
+			// Multiple terms: one search per term in parallel, merged (no cursor).
+			const raw =
+				terms.length === 1
+					? await searchSingle(terms[0], requestId, params.cursor)
+					: mergeTermResults(
+							await Promise.all(
+								terms.map((term) => searchSingle(term, requestId)),
+							),
+							requestId,
+							limit,
+						);
 
-		// Multiple terms: one search per term in parallel, merged; a multi-term
-		// fan-out has no cursor.
-		const perTerm = await Promise.all(terms.map((term) => searchSingle(term)));
-		return mergeTermResults(perTerm, limit);
+			const results = raw.objects.map(toResult);
+
+			// Query ran but matched nothing — a distinct scenario, not an error.
+			if (results.length === 0) {
+				return {
+					status: "no_results",
+					results: [],
+					message: `No objects matched ${JSON.stringify(terms.join(", "))}.`,
+					next_cursor: null,
+					request_id: requestId,
+				};
+			}
+
+			// Project the internal headers to the spec-shaped success payload.
+			return {
+				results,
+				next_cursor: raw.next_cursor,
+				request_id: requestId,
+			};
+		} catch (error) {
+			return classifySearchError(error, requestId);
+		}
+	};
+}
+
+// Map a thrown search failure to the typed error envelope. Codes are derived
+// from the upstream HTTP status (postJson embeds "status <N>") or the message;
+// `message` is a friendly, safe string — trace specifics via `request_id`.
+function classifySearchError(
+	error: unknown,
+	requestId: string,
+): SearchObjectsError {
+	const raw = error instanceof Error ? error.message : String(error);
+	const status = Number(raw.match(/status (\d{3})/)?.[1]);
+
+	if (status === 401 || status === 403) {
+		return buildError(
+			"UNAUTHORIZED",
+			"Not authorized to search ThoughtSpot. Check your session or token.",
+			false,
+			requestId,
+		);
+	}
+	if (status === 429) {
+		return buildError(
+			"RATE_LIMITED",
+			"ThoughtSpot rate limit reached. Try again shortly.",
+			true,
+			requestId,
+		);
+	}
+	if (
+		status === 408 ||
+		status === 502 ||
+		status === 503 ||
+		status === 504 ||
+		/tim(e|ed)[ -]?out/i.test(raw)
+	) {
+		return buildError(
+			"UPSTREAM_TIMEOUT",
+			"ThoughtSpot took too long to respond. Try again shortly.",
+			true,
+			requestId,
+		);
+	}
+	if (status >= 500) {
+		return buildError(
+			"INTERNAL",
+			"ThoughtSpot hit an error while searching. Try again shortly.",
+			true,
+			requestId,
+		);
+	}
+	// GraphQL/query-level failures and everything else: not transient.
+	return buildError(
+		"INTERNAL",
+		"ThoughtSpot could not complete the search.",
+		false,
+		requestId,
+	);
+}
+
+// Assemble an error envelope.
+function buildError(
+	code: SearchErrorCode,
+	message: string,
+	retryable: boolean,
+	requestId: string,
+): SearchObjectsError {
+	return {
+		status: "error",
+		results: [],
+		error: { code, message, retryable },
+		request_id: requestId,
 	};
 }
 
@@ -360,9 +476,10 @@ export function addSearchObjects(
 // searches, so a global sort would let one term crowd out the others; taking
 // turns guarantees every term is represented.
 function mergeTermResults(
-	results: SearchObjectsResult[],
+	results: RawSearchResult[],
+	requestId: string,
 	limit: number,
-): SearchObjectsResult {
+): RawSearchResult {
 	const byId = new Map<string, SearchObjectHeader>();
 	const queues = results.map((r) => [...r.objects]);
 	let progressed = true;
@@ -389,6 +506,6 @@ function mergeTermResults(
 		objects: [...byId.values()],
 		// Pagination across multiple independent term searches is ambiguous.
 		next_cursor: null,
-		request_id: results.map((r) => r.request_id).join(","),
+		request_id: requestId,
 	};
 }

@@ -58,10 +58,14 @@ query GetEurekaResults($params: Input_eureka_SearchRequest) {
       }
       score
       resultType
+      # Human-readable sage/TML tokens; surfaced as the query field for answers.
+      sageQuery
     }
     isFinalPage
     totalResults
     errorCode
+    nextPageOffset
+    batchSizeRequired
   }
 }
 

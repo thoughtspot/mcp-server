@@ -16,8 +16,13 @@ import { type Org, type SessionInfo, ThoughtSpotApiError } from "./types";
 
 // Re-exported for existing importers; definitions live with the handlers.
 export type {
+	SearchErrorCode,
 	SearchObjectHeader,
+	SearchObjectResult,
+	SearchObjectsError,
+	SearchObjectsNoResults,
 	SearchObjectsParams,
+	SearchObjectsResponse,
 	SearchObjectsResult,
 } from "./grpc/search_objects/search-objects-types";
 

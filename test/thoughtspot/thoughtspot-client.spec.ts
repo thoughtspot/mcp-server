@@ -911,33 +911,31 @@ describe("ThoughtSpot Client", () => {
 			expect(body.variables.params.query).toBe("sales");
 			expect(body.variables.params.batchSize).toBe(5);
 
-			expect(result.objects).toEqual([
+			expect(result.results).toEqual([
 				{
 					id: "answer-123",
 					name: "Sales by Region",
-					type: "Answer",
+					type: "ANSWER",
 					owner: "alice",
 					description: "Revenue by region",
 					tags: ["Finance"],
-					last_modified: 1700000000000,
-					last_viewed: null,
+					last_modified: new Date(1700000000000).toISOString(),
 					verified: true,
 					frame_url: `${mockInstanceUrl}/#/saved-answer/answer-123`,
-					match_reason: "Matched in title",
+					query: null, // no sageQuery in this fixture
 					confidence: 0.9,
 				},
 				{
 					id: "lb-456",
 					name: "Sales Overview",
-					type: "Liveboard",
+					type: "LIVEBOARD",
 					owner: "bob",
 					description: "Overview",
 					tags: [],
-					last_modified: 1700000001000,
-					last_viewed: null,
+					last_modified: new Date(1700000001000).toISOString(),
 					verified: false,
 					frame_url: `${mockInstanceUrl}/#/insights/pinboard/lb-456`,
-					match_reason: "Matched search term",
+					query: null, // Liveboards always map query -> null
 					confidence: 0.8,
 				},
 			]);
@@ -998,7 +996,7 @@ describe("ThoughtSpot Client", () => {
 			const body = JSON.parse((fetch as any).mock.calls[0][1].body);
 			expect(body.variables.params.batchSize).toBe(10);
 			expect(body.variables.params.offset).toBe(0);
-			expect(result.objects).toEqual([]);
+			expect(result.results).toEqual([]);
 			expect(result.next_cursor).toBeNull();
 			expect(result.request_id).toBeTruthy();
 		});
@@ -1077,7 +1075,7 @@ describe("ThoughtSpot Client", () => {
 				modifiedSince: 1650000000000,
 			});
 
-			expect(result.objects.map((o: any) => o.id)).toEqual(["new"]);
+			expect(result.results.map((o: any) => o.id)).toEqual(["new"]);
 		});
 
 		it("normalizes second-precision modifiedOn to epoch-ms", async () => {
@@ -1103,7 +1101,10 @@ describe("ThoughtSpot Client", () => {
 
 			const result = await client.searchObjects({ query: "sales" });
 
-			expect(result.objects[0].last_modified).toBe(1700000000000);
+			// Seconds normalized to ms, then emitted as ISO-8601.
+			expect(result.results[0].last_modified).toBe(
+				new Date(1700000000000).toISOString(),
+			);
 		});
 
 		// Helper: a single raw Eureka result owned by `author`.
@@ -1143,7 +1144,7 @@ describe("ThoughtSpot Client", () => {
 				JSON.parse((fetch as any).mock.calls[1][1].body).variables.params
 					.offset,
 			).toBe(2);
-			expect(result.objects.map((o: any) => o.id)).toEqual(["a1", "a2"]);
+			expect(result.results.map((o: any) => o.id)).toEqual(["a1", "a2"]);
 			// A full final raw page means more may exist: resume past both pages.
 			expect(result.next_cursor).toBe("4");
 		});
@@ -1163,7 +1164,7 @@ describe("ThoughtSpot Client", () => {
 			});
 
 			expect((fetch as any).mock.calls.length).toBe(2);
-			expect(result.objects.map((o: any) => o.id)).toEqual(["a1"]);
+			expect(result.results.map((o: any) => o.id)).toEqual(["a1"]);
 			expect(result.next_cursor).toBeNull();
 		});
 
@@ -1195,20 +1196,19 @@ describe("ThoughtSpot Client", () => {
 			});
 
 			const result = await client.searchObjects({ query: "sales" });
-			expect(result.objects).toEqual([
+			expect(result.results).toEqual([
 				{
 					id: "y",
 					name: "",
 					type: "X",
 					owner: "",
-					description: "",
+					description: null,
 					tags: [],
-					last_modified: undefined,
-					last_viewed: null,
+					last_modified: null,
 					verified: false,
 					frame_url: `${mockInstanceUrl}/#/insights/pinboard/y`,
-					match_reason: "Matched search term",
-					confidence: undefined,
+					query: null,
+					confidence: 0,
 				},
 			]);
 		});
@@ -1240,13 +1240,14 @@ describe("ThoughtSpot Client", () => {
 
 			const result = await client.searchObjects({ query: "sales" });
 
-			expect(result.objects).toHaveLength(1);
-			const obj = result.objects[0] as any;
+			expect(result.results).toHaveLength(1);
+			const obj = result.results[0] as any;
 			// fetch_data resolves the Liveboard id; the viz is passed via
 			// visualization_ids to fetch just this visualization.
 			expect(obj.id).toBe("lb-1");
 			expect(obj.visualization_id).toBe("viz-1");
-			expect(obj.type).toBe("Liveboard");
+			// A viz pinned on a Liveboard is its own type ("Liveboard viz").
+			expect(obj.type).toBe("VISUALIZATION");
 			expect(obj.frame_url).toBe(
 				`${mockInstanceUrl}/#/insights/pinboard/lb-1/viz-1`,
 			);
@@ -1265,10 +1266,10 @@ describe("ThoughtSpot Client", () => {
 			});
 
 			const result = await client.searchObjects({ query: "sales" });
-			expect(result.objects).toEqual([]);
+			expect(result.results).toEqual([]);
 		});
 
-		it("should throw when the response contains GraphQL errors", async () => {
+		it("returns an INTERNAL error envelope on GraphQL errors", async () => {
 			(fetch as any).mockResolvedValue({
 				ok: true,
 				json: vi.fn().mockResolvedValue({
@@ -1277,21 +1278,66 @@ describe("ThoughtSpot Client", () => {
 				}),
 			});
 
-			await expect(client.searchObjects({ query: "sales" })).rejects.toThrow(
-				/searchObjects failed: Invalid locale format/,
-			);
+			const result = await client.searchObjects({ query: "sales" });
+
+			expect(result.status).toBe("error");
+			expect(result.results).toEqual([]);
+			expect(result.error.code).toBe("INTERNAL");
+			expect(result.error.retryable).toBe(false);
+			expect(typeof result.request_id).toBe("string");
 		});
 
-		it("should throw when the response is not ok", async () => {
+		it("maps a 401 to an UNAUTHORIZED error envelope", async () => {
 			(fetch as any).mockResolvedValue({
 				ok: false,
 				status: 401,
 				text: vi.fn().mockResolvedValue("unauthorized"),
 			});
 
-			await expect(client.searchObjects({ query: "sales" })).rejects.toThrow(
-				/searchObjects failed with status 401/,
-			);
+			const result = await client.searchObjects({ query: "sales" });
+
+			expect(result.status).toBe("error");
+			expect(result.error.code).toBe("UNAUTHORIZED");
+			expect(result.error.retryable).toBe(false);
+		});
+
+		it("maps a 429 to a retryable RATE_LIMITED error envelope", async () => {
+			(fetch as any).mockResolvedValue({
+				ok: false,
+				status: 429,
+				text: vi.fn().mockResolvedValue("slow down"),
+			});
+
+			const result = await client.searchObjects({ query: "sales" });
+
+			expect(result.error.code).toBe("RATE_LIMITED");
+			expect(result.error.retryable).toBe(true);
+		});
+
+		it("maps a 504 to a retryable UPSTREAM_TIMEOUT error envelope", async () => {
+			(fetch as any).mockResolvedValue({
+				ok: false,
+				status: 504,
+				text: vi.fn().mockResolvedValue("gateway timeout"),
+			});
+
+			const result = await client.searchObjects({ query: "sales" });
+
+			expect(result.error.code).toBe("UPSTREAM_TIMEOUT");
+			expect(result.error.retryable).toBe(true);
+		});
+
+		it("maps a 500 to a retryable INTERNAL error envelope", async () => {
+			(fetch as any).mockResolvedValue({
+				ok: false,
+				status: 500,
+				text: vi.fn().mockResolvedValue("boom"),
+			});
+
+			const result = await client.searchObjects({ query: "sales" });
+
+			expect(result.error.code).toBe("INTERNAL");
+			expect(result.error.retryable).toBe(true);
 		});
 
 		it("resolves friendly/legacy type synonyms to Eureka facet values", async () => {
@@ -1350,18 +1396,18 @@ describe("ThoughtSpot Client", () => {
 
 			// Interleaved round-robin by term (a from term 1, b from term 2, then
 			// the shared hit), deduped by id with the higher-confidence copy kept.
-			expect(result.objects.map((o: any) => o.id)).toEqual([
+			expect(result.results.map((o: any) => o.id)).toEqual([
 				"a",
 				"b",
 				"shared",
 			]);
 			expect(
-				result.objects.find((o: any) => o.id === "shared").confidence,
+				result.results.find((o: any) => o.id === "shared").confidence,
 			).toBe(0.7);
 			// Pagination is not supported across a multi-term fan-out.
 			expect(result.next_cursor).toBeNull();
-			// The per-term request ids are joined for tracing.
-			expect(result.request_id.split(",")).toHaveLength(2);
+			// One request id is minted for the whole call (shared across terms).
+			expect(result.request_id).not.toContain(",");
 		});
 
 		it("treats a single-element query array like a single-term search", async () => {
@@ -1370,7 +1416,7 @@ describe("ThoughtSpot Client", () => {
 			const result = await client.searchObjects({ query: ["sales"] });
 
 			expect((fetch as any).mock.calls.length).toBe(1);
-			expect(result.objects.map((o: any) => o.id)).toEqual(["a"]);
+			expect(result.results.map((o: any) => o.id)).toEqual(["a"]);
 		});
 
 		it("ignores blank and duplicate terms in a multi-term query", async () => {
@@ -1385,13 +1431,17 @@ describe("ThoughtSpot Client", () => {
 			).toBe("sales");
 		});
 
-		it("throws on a whitespace-only query instead of searching for ''", async () => {
+		it("returns an INVALID_ARGUMENT envelope for a whitespace-only query", async () => {
 			(fetch as any).mockResolvedValue(pageResponse([]));
 
-			await expect(
-				client.searchObjects({ query: ["   ", ""] }),
-			).rejects.toThrow(/non-empty query/);
+			const result = await client.searchObjects({ query: ["   ", ""] });
+
+			expect(result.status).toBe("error");
+			expect(result.error.code).toBe("INVALID_ARGUMENT");
+			expect(result.error.retryable).toBe(false);
+			// Never hits the upstream for an empty term.
 			expect((fetch as any).mock.calls.length).toBe(0);
+			expect(typeof result.request_id).toBe("string");
 		});
 
 		it("caps a merged multi-term result at limit", async () => {
@@ -1410,7 +1460,7 @@ describe("ThoughtSpot Client", () => {
 
 			// Round-robin caps at limit taking the top hit from each term in turn,
 			// so both terms are represented rather than one crowding the other out.
-			expect(result.objects.map((o: any) => o.id)).toEqual(["a", "b"]);
+			expect(result.results.map((o: any) => o.id)).toEqual(["a", "b"]);
 		});
 
 		it("clamps a negative cursor to offset 0", async () => {
@@ -1441,7 +1491,7 @@ describe("ThoughtSpot Client", () => {
 
 			const result = await client.searchObjects({ query: "sales", limit: 2 });
 
-			expect(result.objects.map((o: any) => o.id)).toEqual(["a"]);
+			expect(result.results.map((o: any) => o.id)).toEqual(["a"]);
 			expect(result.next_cursor).toBe("2");
 		});
 
@@ -1460,7 +1510,7 @@ describe("ThoughtSpot Client", () => {
 
 			const result = await client.searchObjects({ query: "sales", limit: 2 });
 
-			expect(result.objects).toHaveLength(2);
+			expect(result.results).toHaveLength(2);
 			expect(result.next_cursor).toBeNull();
 		});
 
@@ -1484,24 +1534,25 @@ describe("ThoughtSpot Client", () => {
 				limit: 2,
 			});
 
-			expect(result.objects.map((o: any) => o.id)).toEqual(["a1", "a2"]);
+			expect(result.results.map((o: any) => o.id)).toEqual(["a1", "a2"]);
 			// The dropped match ("a3") came from the page at offset 2, so the cursor
 			// points back at it rather than past it.
 			expect(result.next_cursor).toBe("2");
 		});
 
-		it("throws when GraphQL errors carry no message", async () => {
+		it("returns an INTERNAL error envelope when GraphQL errors carry no message", async () => {
 			(fetch as any).mockResolvedValue({
 				ok: true,
 				json: vi.fn().mockResolvedValue({ errors: [{}], data: null }),
 			});
 
-			await expect(client.searchObjects({ query: "sales" })).rejects.toThrow(
-				/searchObjects failed: unknown GraphQL error/,
-			);
+			const result = await client.searchObjects({ query: "sales" });
+
+			expect(result.status).toBe("error");
+			expect(result.error.code).toBe("INTERNAL");
 		});
 
-		it("throws when the queryRequest reports an errorCode", async () => {
+		it("returns an INTERNAL error envelope when the queryRequest reports an errorCode", async () => {
 			(fetch as any).mockResolvedValue({
 				ok: true,
 				json: vi.fn().mockResolvedValue({
@@ -1509,9 +1560,23 @@ describe("ThoughtSpot Client", () => {
 				}),
 			});
 
-			await expect(client.searchObjects({ query: "sales" })).rejects.toThrow(
-				/searchObjects failed: errorCode 42/,
-			);
+			const result = await client.searchObjects({ query: "sales" });
+
+			expect(result.status).toBe("error");
+			expect(result.error.code).toBe("INTERNAL");
+			expect(result.error.retryable).toBe(false);
+		});
+
+		it("returns a no_results envelope when the query matches nothing", async () => {
+			(fetch as any).mockResolvedValue(pageResponse([]));
+
+			const result = await client.searchObjects({ query: "nonexistent" });
+
+			expect(result.status).toBe("no_results");
+			expect(result.results).toEqual([]);
+			expect(result.next_cursor).toBeNull();
+			expect(result.message).toContain("nonexistent");
+			expect(typeof result.request_id).toBe("string");
 		});
 
 		it("applies tag as a client-side filter using resolved sticker names", async () => {
@@ -1550,10 +1615,10 @@ describe("ThoughtSpot Client", () => {
 				tag: "finance",
 			});
 
-			expect(result.objects.map((o: any) => o.id)).toEqual(["a"]);
+			expect(result.results.map((o: any) => o.id)).toEqual(["a"]);
 		});
 
-		it("derives the match reason from sage query tokens and descriptions", async () => {
+		it("derives `query` from sageQuery for Answers/vizzes and null otherwise", async () => {
 			(fetch as any).mockResolvedValue({
 				ok: true,
 				json: vi.fn().mockResolvedValue({
@@ -1562,31 +1627,25 @@ describe("ThoughtSpot Client", () => {
 							results: [
 								{
 									objectSecurityInfo: { objectType: "X", objectId: "a" },
-									searchPinboard: { header: { id: "a", title: "A" } },
-									resultType: "PINBOARD_RESULT",
-									snippetInfo: {
-										sageQuerySnippet: {
-											token: [{ token: "sales" }, { token: "region" }],
-										},
-									},
+									searchAnswer: { header: { id: "a", title: "A" } },
+									resultType: "ANSWER_RESULT",
+									sageQuery: "sales by region",
 								},
 								{
 									objectSecurityInfo: { objectType: "X", objectId: "b" },
-									searchPinboard: { header: { id: "b", title: "B" } },
-									resultType: "PINBOARD_RESULT",
-									// A list of snippet entries whose token is a single object,
-									// not a list — both shapes must be tolerated.
-									snippetInfo: {
-										sageQuerySnippet: [{ token: { token: "profit" } }],
+									searchPinboardViz: {
+										pinboardHeader: { id: "lb", title: "LB" },
+										answer: { header: { id: "b", title: "B" } },
 									},
+									resultType: "PINBOARD_VIZ_RESULT",
+									sageQuery: "revenue weekly",
 								},
 								{
+									// Liveboard: sageQuery is a bare GUID -> query must be null.
 									objectSecurityInfo: { objectType: "X", objectId: "c" },
 									searchPinboard: { header: { id: "c", title: "C" } },
 									resultType: "PINBOARD_RESULT",
-									snippetInfo: {
-										descriptionSnippet: { highlights: [{ start: 0, end: 3 }] },
-									},
+									sageQuery: "902ed66c-0765-4e05-832d-3c44fed7424e",
 								},
 							],
 						},
@@ -1596,10 +1655,10 @@ describe("ThoughtSpot Client", () => {
 
 			const result = await client.searchObjects({ query: "sales" });
 
-			expect(result.objects.map((o: any) => o.match_reason)).toEqual([
-				"Matched query terms: sales, region",
-				"Matched query terms: profit",
-				"Matched in description",
+			expect(result.results.map((o: any) => o.query)).toEqual([
+				"sales by region",
+				"revenue weekly",
+				null,
 			]);
 		});
 
@@ -1618,8 +1677,11 @@ describe("ThoughtSpot Client", () => {
 			});
 
 			expect((fetch as any).mock.calls.length).toBe(20);
-			expect(result.objects).toEqual([]);
-			expect(result.next_cursor).toBe("40");
+			// Nothing survived the post-filter -> no_results (cursor null per spec),
+			// even though more raw pages may remain.
+			expect(result.status).toBe("no_results");
+			expect(result.results).toEqual([]);
+			expect(result.next_cursor).toBeNull();
 			expect(warnSpy).toHaveBeenCalledWith(
 				expect.stringContaining("stopped after 20 pages"),
 			);

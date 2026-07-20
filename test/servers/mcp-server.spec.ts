@@ -110,35 +110,33 @@ describe("MCP Server", () => {
 				},
 			]),
 			searchObjects: vi.fn().mockResolvedValue({
-				objects: [
+				results: [
 					{
 						id: "answer-123",
 						name: "Sales by Region",
-						type: "QUESTION_ANSWER_BOOK",
+						type: "ANSWER",
 						owner: "test-user",
 						description: "Revenue broken down by region",
 						tags: [],
-						last_modified: 1700000000000,
-						last_viewed: null,
+						last_modified: "2023-11-14T22:13:20.000Z",
 						verified: true,
 						frame_url:
 							"https://test.thoughtspot.cloud/#/saved-answer/answer-123",
-						match_reason: "Matched in title",
+						query: "sales by region",
 						confidence: 0.95,
 					},
 					{
 						id: "liveboard-456",
 						name: "Sales Overview",
-						type: "PINBOARD_ANSWER_BOOK",
+						type: "LIVEBOARD",
 						owner: "test-user",
 						description: "Overview of sales metrics",
 						tags: [],
-						last_modified: 1700000001000,
-						last_viewed: null,
+						last_modified: "2023-11-14T22:13:21.000Z",
 						verified: false,
 						frame_url:
 							"https://test.thoughtspot.cloud/#/pinboard/liveboard-456",
-						match_reason: "Matched search term",
+						query: null,
 						confidence: 0.82,
 					},
 				],
@@ -440,12 +438,12 @@ describe("MCP Server", () => {
 			const structured = result.structuredContent as any;
 			expect(structured.next_cursor).toBeNull();
 			expect(structured.request_id).toBe("req-1");
-			const objects = structured.objects;
+			const objects = structured.results;
 			expect(objects).toHaveLength(2);
 			expect(objects[0]).toMatchObject({
 				id: "answer-123",
 				name: "Sales by Region",
-				type: "QUESTION_ANSWER_BOOK",
+				type: "ANSWER",
 				owner: "test-user",
 				verified: true,
 				frame_url: "https://test.thoughtspot.cloud/#/saved-answer/answer-123",

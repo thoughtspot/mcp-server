@@ -960,10 +960,16 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 				cursor,
 			});
 
-			return this.createStructuredContentSuccessResponse(
-				result,
-				`${result.objects.length} object(s) found`,
-			);
+			// no_results and error are returned as structured content (not a
+			// protocol error) so the model gets the typed envelope to render.
+			const statusMessage =
+				"status" in result
+					? result.status === "error"
+						? `search_objects error: ${result.error.code}`
+						: "search_objects: no results"
+					: `${result.results.length} object(s) found`;
+
+			return this.createStructuredContentSuccessResponse(result, statusMessage);
 		} catch (error) {
 			// Surface the upstream message (e.g. status 401/500) so the failure is
 			// actionable rather than a generic "check your inputs".

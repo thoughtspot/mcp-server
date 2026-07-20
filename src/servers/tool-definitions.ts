@@ -114,7 +114,7 @@ export const SearchObjectsInputSchema = z.object({
 		),
 });
 
-const SearchObjectHeaderSchema = z.object({
+const SearchObjectResultSchema = z.object({
 	id: z
 		.string()
 		.describe(
@@ -130,51 +130,90 @@ const SearchObjectHeaderSchema = z.object({
 	type: z
 		.string()
 		.describe(
-			"The canonical object type: one of 'Liveboard', 'Answer' or 'Worksheet' (may fall back to a raw backend type for unrecognized kinds). Can be passed straight back as a `types` filter.",
+			"UPPER-case object type: 'LIVEBOARD', 'ANSWER', 'VISUALIZATION' (a viz pinned on a Liveboard, i.e. a 'Liveboard viz'; `id` is the parent Liveboard and `visualization_id` the viz) or 'WORKSHEET'. Can be passed straight back as a `types` filter.",
 		),
 	owner: z
 		.string()
 		.describe("The display name of the user who authored the object."),
-	description: z.string().describe("The description of the object."),
+	description: z
+		.string()
+		.nullable()
+		.describe("The description of the object, or null when it has none."),
 	tags: z
 		.array(z.string())
 		.describe("The names of the tags/stickers applied to the object."),
 	last_modified: z
-		.number()
-		.optional()
-		.describe("Epoch-millisecond timestamp of the last modification."),
-	last_viewed: z
-		.number()
+		.string()
 		.nullable()
-		.optional()
 		.describe(
-			"Epoch-millisecond timestamp the current user last viewed the object (viewedbymeTime). Null when the search backend does not expose it.",
+			"ISO-8601 timestamp of the last modification (e.g. 2026-05-15T14:30:00Z), or null when unavailable. Render as a plain date.",
 		),
 	verified: z.boolean().describe("Whether the object is marked as verified."),
 	frame_url: z
 		.string()
 		.describe("Deep link to open the object in the ThoughtSpot UI."),
-	match_reason: z
-		.string()
-		.describe(
-			"Human-readable explanation of why the object matched the query.",
-		),
-	confidence: z
-		.number()
-		.optional()
-		.describe("The relevance score of the result for the search term."),
-});
-
-export const SearchObjectsOutputSchema = z.object({
-	objects: z
-		.array(SearchObjectHeaderSchema)
-		.describe("Ranked object headers matching the search term."),
-	next_cursor: z
+	query: z
 		.string()
 		.nullable()
 		.describe(
-			"Cursor to pass back as `cursor` to fetch the next page, or null when there are no more results.",
+			"For an Answer/viz: the sage/TML query tokens that define it (e.g. 'sales by region monthly'). Null for a Liveboard.",
 		),
+	confidence: z
+		.number()
+		.describe(
+			"Relevance score of the result for the search term. Ranking only — never surface as a number to the user.",
+		),
+});
+
+// A search_objects call returns one of three scenarios: success (no `status`),
+// no_results, or error. Modeled as a single object (not a union) so the JSON
+// Schema root stays `type: "object"` — MCP clients reject an `anyOf` root
+// outputSchema. Scenario-specific fields are therefore optional.
+export const SearchObjectsResponseSchema = z.object({
+	status: z
+		.enum(["no_results", "error"])
+		.optional()
+		.describe(
+			"Absent on a successful hit list. 'no_results' = the query ran but matched nothing; 'error' = the search failed (see `error`).",
+		),
+	results: z
+		.array(SearchObjectResultSchema)
+		.describe(
+			"Ranked results matching the search; empty for no_results/error.",
+		),
+	next_cursor: z
+		.string()
+		.nullable()
+		.optional()
+		.describe(
+			"Cursor to pass back as `cursor` for the next page; null when there are no more results, and omitted on error.",
+		),
+	message: z
+		.string()
+		.optional()
+		.describe(
+			"Present on no_results: human-readable 'nothing matched' note; safe to relay to the user.",
+		),
+	error: z
+		.object({
+			code: z
+				.enum([
+					"INVALID_ARGUMENT",
+					"UNAUTHORIZED",
+					"RATE_LIMITED",
+					"UPSTREAM_TIMEOUT",
+					"INTERNAL",
+				])
+				.describe("Machine-readable failure category. Never show to the user."),
+			message: z
+				.string()
+				.describe("Human-readable failure reason; safe to relay to the user."),
+			retryable: z
+				.boolean()
+				.describe("True when retrying the same call may succeed."),
+		})
+		.optional()
+		.describe("Present only on error."),
 	request_id: z
 		.string()
 		.describe(
@@ -497,9 +536,9 @@ export const toolDefinitionsV2 = [
 	{
 		name: ToolName.SearchObjects,
 		description:
-			"Search for objects (answers, liveboards, worksheets, and other metadata) in ThoughtSpot matching a given search term. Supports optional filters (types, owner, tag, modified_since, verified_only) and pagination (limit, cursor). Returns ranked object headers with id, name, type, owner, description, tags, last_modified, last_viewed, verified, frame_url, match_reason and confidence, plus next_cursor and request_id. Returns identifiers and metadata only.",
+			"Search for objects (Answers, Liveboards, Worksheets) in ThoughtSpot matching a given search term. Supports optional filters (types, owner, tag, modified_since, verified_only) and pagination (limit, cursor). Returns `results` (ranked), plus `next_cursor` and `request_id`. Each result carries: id, name, type (LIVEBOARD | ANSWER | VISUALIZATION | WORKSHEET; VISUALIZATION is a viz pinned on a Liveboard — render it as 'Liveboard viz'), owner, description, tags, last_modified (ISO-8601), verified, frame_url, query (Answer/viz sage tokens; null for Liveboards) and confidence. Returns identifiers and metadata only.\n\nHow to present the results:\n• Render as a table with fixed columns in this order: Object (the name, linked to `frame_url`) · Type · Owner · Verified (✓ or —) · Last Modified.\n• Put the description and, for an Answer/viz, the `query` tokens as sub-lines under the name (e.g. '↳ sales by region, last 3 months') — never as their own columns.\n• Render `last_modified` as a plain date (2026-05-15), never the raw timestamp.\n• Lead with the top match; if the top 2–3 are close, present them as ranked candidates.\n• Never surface `next_cursor`, `request_id`, or the numeric `confidence` in your prose.\n\nOutcomes other than a hit list:\n• `status: \"no_results\"` — the search ran but nothing matched. Relay `message`, and suggest broadening the term or dropping a filter. Do not invent results.\n• `status: \"error\"` — the search failed. Tell the user briefly using `error.message`; if `error.retryable` is true, offer to try again. Never show `error.code` or `request_id`.",
 		inputSchema: z.toJSONSchema(SearchObjectsInputSchema),
-		outputSchema: z.toJSONSchema(SearchObjectsOutputSchema),
+		outputSchema: z.toJSONSchema(SearchObjectsResponseSchema),
 		annotations: {
 			title: "Search Objects",
 			readOnlyHint: true,
