@@ -1434,17 +1434,20 @@ describe("MCP Server", () => {
 			);
 
 			await server.init();
-			const { callTool } = connect(server);
 
-			const result = await callTool("send_session_message", {
-				analytical_session_id: "conv-abc-123",
-				message: "What is the total revenue?",
-			});
+			await expect(
+				server.callSendSessionMessage({
+					method: "tools/call",
+					params: {
+						name: "send_session_message",
+						arguments: {
+							analytical_session_id: "conv-abc-123",
+							message: "What is the total revenue?",
+						},
+					},
+				}),
+			).rejects.toThrow("Spotter stream failed");
 
-			expect(result.isError).toBe(true);
-			expect((result.content as any[])[0].text).toContain(
-				"Encountered an error while sending the message",
-			);
 			// The conversation must be marked done so clients don't poll forever.
 			expect(mockStorageService.appendMessages).toHaveBeenCalledWith(
 				"conv-abc-123",
@@ -1459,7 +1462,7 @@ describe("MCP Server", () => {
 			);
 		});
 
-		it("should still return an error when closing out the conversation fails", async () => {
+		it("should still throw when closing out the conversation fails", async () => {
 			mockSendAgentConversationMessageStreaming.mockRejectedValue(
 				new Error("Spotter stream failed"),
 			);
@@ -1468,17 +1471,20 @@ describe("MCP Server", () => {
 			);
 
 			await server.init();
-			const { callTool } = connect(server);
 
-			const result = await callTool("send_session_message", {
-				analytical_session_id: "conv-abc-123",
-				message: "What is the total revenue?",
-			});
+			await expect(
+				server.callSendSessionMessage({
+					method: "tools/call",
+					params: {
+						name: "send_session_message",
+						arguments: {
+							analytical_session_id: "conv-abc-123",
+							message: "What is the total revenue?",
+						},
+					},
+				}),
+			).rejects.toThrow("Spotter stream failed");
 
-			expect(result.isError).toBe(true);
-			expect((result.content as any[])[0].text).toContain(
-				"Encountered an error while sending the message",
-			);
 			expect(mockStorageService.appendMessages).toHaveBeenCalledWith(
 				"conv-abc-123",
 				[
