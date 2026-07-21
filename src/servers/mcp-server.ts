@@ -801,10 +801,7 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 					storageError,
 				);
 			}
-			return this.createErrorResponse(
-				"Encountered an error while sending the message. Please check your inputs and try again.",
-				`Error sending message to conversation ${analytical_session_id}: ${error}`,
-			);
+			throw error;
 		}
 
 		return this.createStructuredContentSuccessResponse(
