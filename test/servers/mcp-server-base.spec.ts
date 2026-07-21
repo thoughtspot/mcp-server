@@ -54,8 +54,8 @@ class TestMCPServer extends MCPServer {
 		);
 	}
 
-	public testIsDatasourceDiscoveryAvailable() {
-		return this.isDatasourceDiscoveryAvailable();
+	public testIsSpotterDataSourceDiscoveryEnabled() {
+		return this.isSpotterDataSourceDiscoveryEnabled();
 	}
 
 	public getTrackers() {
@@ -253,18 +253,13 @@ describe("MCP Server Base", () => {
 
 	describe("Datasource Discovery Check", () => {
 		it("should return false before init is called (sessionInfo not set)", () => {
-			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-			const result = server.testIsDatasourceDiscoveryAvailable();
+			const result = server.testIsSpotterDataSourceDiscoveryEnabled();
 			expect(result).toBe(false);
-			expect(warnSpy).toHaveBeenCalledWith(
-				expect.stringContaining("sessionInfo is not initialized"),
-			);
-			warnSpy.mockRestore();
 		});
 
 		it("should return true when enableSpotterDataSourceDiscovery is enabled", async () => {
 			await server.init();
-			const result = server.testIsDatasourceDiscoveryAvailable();
+			const result = server.testIsSpotterDataSourceDiscoveryEnabled();
 			expect(result).toBe(true);
 		});
 
@@ -281,7 +276,7 @@ describe("MCP Server Base", () => {
 
 			const testServer = new TestMCPServer({ props: mockProps, env: mockEnv });
 			await testServer.init();
-			expect(testServer.testIsDatasourceDiscoveryAvailable()).toBe(false);
+			expect(testServer.testIsSpotterDataSourceDiscoveryEnabled()).toBe(false);
 		});
 
 		it("should return false when enableSpotterDataSourceDiscovery is undefined", async () => {
@@ -297,7 +292,7 @@ describe("MCP Server Base", () => {
 
 			const testServer = new TestMCPServer({ props: mockProps, env: mockEnv });
 			await testServer.init();
-			expect(testServer.testIsDatasourceDiscoveryAvailable()).toBe(false);
+			expect(testServer.testIsSpotterDataSourceDiscoveryEnabled()).toBe(false);
 		});
 	});
 

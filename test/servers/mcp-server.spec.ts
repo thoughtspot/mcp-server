@@ -146,7 +146,7 @@ describe("MCP Server", () => {
 					userName: "test-user",
 					currentOrgId: "test-org",
 					privileges: [],
-					enableSpotterDataSourceDiscovery: true,
+					isSpotterDataSourceDiscoveryEnabled: true,
 				},
 				{
 					clientId: "test-client-id",
@@ -1238,6 +1238,8 @@ describe("MCP Server", () => {
 				"conv-with-ds-456",
 			);
 			expect(mockCreateAgentConversationWithAutoMode).toHaveBeenCalledWith({
+				isSpotterDataSourceDiscoveryEnabled: true,
+				isSpotterChatHistoryEnabled: false,
 				dataSourceId: "ds-123",
 			});
 		});

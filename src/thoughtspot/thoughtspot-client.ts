@@ -247,8 +247,12 @@ function addCreateAgentConversationWithAutoMode(
 	orgId?: string,
 ) {
 	(client as any).createAgentConversationWithAutoMode = async ({
+		isSpotterDataSourceDiscoveryEnabled,
+		isSpotterChatHistoryEnabled,
 		dataSourceId,
 	}: {
+		isSpotterDataSourceDiscoveryEnabled: boolean;
+		isSpotterChatHistoryEnabled: boolean;
 		dataSourceId?: string;
 	}): Promise<AgentConversation> => {
 		const endpoint = "/conversation/v2/";
@@ -269,10 +273,13 @@ function addCreateAgentConversationWithAutoMode(
 				conv_settings: {
 					enable_nls: true,
 					enable_why: true,
-					save_chat_enabled: false,
+					save_chat_enabled: isSpotterChatHistoryEnabled,
 					enable_tool_permissions: false,
-					enable_search_datasets: !dataSourceId,
-					enable_auto_select_dataset: !dataSourceId,
+					enable_search_datasets:
+						isSpotterDataSourceDiscoveryEnabled && !dataSourceId,
+					enable_auto_select_dataset:
+						isSpotterDataSourceDiscoveryEnabled && !dataSourceId,
+					tags: ["mcp-server"],
 				},
 			}),
 		};
