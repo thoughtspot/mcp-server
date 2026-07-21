@@ -477,6 +477,28 @@
             font-size: 18px;
         }
 
+        .collapsible-header {
+            cursor: pointer;
+            user-select: none;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .collapsible-header .chevron {
+            transition: transform 0.2s;
+            font-size: 12px;
+            color: rgba(0, 0, 0, 0.45);
+        }
+
+        .collapsible-header .chevron.expanded {
+            transform: rotate(90deg);
+        }
+
+        .collapsible-body {
+            margin-top: 16px;
+        }
+
         @media (max-width: 968px) {
             .main-grid {
                 grid-template-columns: 1fr;
@@ -558,6 +580,16 @@
                 client_uri: null,
                 redirect_uris: []
             });
+
+            const [addUriClientId, setAddUriClientId] = useState('');
+            const [addUriClientSecret, setAddUriClientSecret] = useState('');
+            const [addUriAddList, setAddUriAddList] = useState(['']);
+            const [addUriAddListErrors, setAddUriAddListErrors] = useState([null]);
+            const [addUriRemoveList, setAddUriRemoveList] = useState(['']);
+            const [addUriSubmitting, setAddUriSubmitting] = useState(false);
+            const [addUriResult, setAddUriResult] = useState(null);
+            const [addUriError, setAddUriError] = useState(null);
+            const [addUriExpanded, setAddUriExpanded] = useState(false);
 
             useEffect(() => {
                 fetchConfig();
@@ -725,6 +757,109 @@
                     setRegistrationError(err.message);
                 } finally {
                     setRegistering(false);
+                }
+            };
+
+            const handleAddUriListChange = (index, value) => {
+                const newList = [...addUriAddList];
+                newList[index] = value;
+                setAddUriAddList(newList);
+
+                const newErrors = [...addUriAddListErrors];
+                newErrors[index] = value.trim() ? validateUrl(value, false) : null;
+                setAddUriAddListErrors(newErrors);
+            };
+
+            const addAddUriField = () => {
+                setAddUriAddList(prev => [...prev, '']);
+                setAddUriAddListErrors(prev => [...prev, null]);
+            };
+
+            const removeAddUriField = (index) => {
+                if (addUriAddList.length > 1) {
+                    setAddUriAddList(prev => prev.filter((_, i) => i !== index));
+                    setAddUriAddListErrors(prev => prev.filter((_, i) => i !== index));
+                }
+            };
+
+            const handleRemoveUriListChange = (index, value) => {
+                const newList = [...addUriRemoveList];
+                newList[index] = value;
+                setAddUriRemoveList(newList);
+            };
+
+            const addRemoveUriField = () => {
+                setAddUriRemoveList(prev => [...prev, '']);
+            };
+
+            const removeRemoveUriField = (index) => {
+                if (addUriRemoveList.length > 1) {
+                    setAddUriRemoveList(prev => prev.filter((_, i) => i !== index));
+                }
+            };
+
+            const handleAddRedirectUri = async (e) => {
+                e.preventDefault();
+
+                const urisToAdd = addUriAddList.map(uri => uri.trim()).filter(uri => uri !== '');
+                const urisToRemove = addUriRemoveList.map(uri => uri.trim()).filter(uri => uri !== '');
+
+                const addErrors = addUriAddList.map(uri => uri.trim() ? validateUrl(uri, false) : null);
+                setAddUriAddListErrors(addErrors);
+
+                if (addErrors.some(err => err !== null)) {
+                    setAddUriError('Please fix validation errors before submitting');
+                    return;
+                }
+
+                if (urisToAdd.length === 0 && urisToRemove.length === 0) {
+                    setAddUriError('Enter at least one redirect URI to add or remove');
+                    return;
+                }
+
+                setAddUriSubmitting(true);
+                setAddUriError(null);
+                setAddUriResult(null);
+
+                try {
+                    const payload = { client_secret: addUriClientSecret };
+                    if (urisToAdd.length > 0) {
+                        payload.redirect_uris = urisToAdd;
+                    }
+                    if (urisToRemove.length > 0) {
+                        payload.redirect_uris_remove = urisToRemove;
+                    }
+
+                    const response = await fetch(
+                        `/register/${encodeURIComponent(addUriClientId)}/redirect-uris`,
+                        {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify(payload)
+                        }
+                    );
+
+                    const data = await response.json().catch(() => ({}));
+
+                    if (!response.ok) {
+                        // Surface whatever the server returned as-is. In particular, a 401 is
+                        // deliberately identical whether client_id is unknown or the secret is
+                        // wrong (anti-enumeration) - don't try to distinguish those cases here.
+                        throw new Error(data.error || `Request failed: ${response.statusText}`);
+                    }
+
+                    setAddUriResult(data);
+                    setAddUriAddList(['']);
+                    setAddUriAddListErrors([null]);
+                    setAddUriRemoveList(['']);
+                    // Don't hold the secret in memory any longer than this one request needs.
+                    setAddUriClientSecret('');
+                } catch (err) {
+                    setAddUriError(err.message);
+                } finally {
+                    setAddUriSubmitting(false);
                 }
             };
 
@@ -1004,6 +1139,156 @@
                         </div>
                     )}
                     </div>
+
+                    {/* Update Redirect URIs for an Existing Client */}
+                    {config && (
+                        <div className="card full-width">
+                            <h2
+                                className="collapsible-header"
+                                onClick={() => setAddUriExpanded(prev => !prev)}
+                            >
+                                <span>
+                                    <span className="icon">🔗</span>
+                                    Update Redirect URIs for an Existing Client
+                                </span>
+                                <span className={`chevron ${addUriExpanded ? 'expanded' : ''}`}>▶</span>
+                            </h2>
+                            {addUriExpanded && (
+                                <div className="collapsible-body">
+                                    <div className="description" style={{ marginBottom: '16px' }}>
+                                        Already have a client ID and secret? Add and/or remove redirect URIs on it without generating new credentials. This merges into the client's existing list - it won't replace it, and a client can never be left with zero redirect URIs.
+                                    </div>
+                                    {addUriError && (
+                                        <div className="error">
+                                            <strong>Error:</strong> {addUriError}
+                                        </div>
+                                    )}
+                                    {addUriResult && (
+                                        <div className="success">
+                                            Redirect URIs updated. This client now has {addUriResult.redirect_uris?.length} redirect URI(s).
+                                        </div>
+                                    )}
+                                    <form onSubmit={handleAddRedirectUri}>
+                                        <div className="form-grid">
+                                            <div className="form-group">
+                                                <label>Client ID *</label>
+                                                <input
+                                                    type="text"
+                                                    value={addUriClientId}
+                                                    onChange={(e) => setAddUriClientId(e.target.value)}
+                                                    placeholder="Your existing client ID"
+                                                    required
+                                                />
+                                            </div>
+
+                                            <div className="form-group">
+                                                <label>Client Secret *</label>
+                                                <input
+                                                    type="password"
+                                                    value={addUriClientSecret}
+                                                    onChange={(e) => setAddUriClientSecret(e.target.value)}
+                                                    placeholder="Your existing client secret"
+                                                    required
+                                                />
+                                            </div>
+                                        </div>
+
+                                        <div className="form-group">
+                                            <label>Redirect URIs to Add</label>
+                                            <div className="description">Unioned into the client's existing list (duplicates are ignored)</div>
+                                            {addUriAddList.map((uri, index) => (
+                                                <div key={index}>
+                                                    <div className="array-input">
+                                                        <input
+                                                            type="url"
+                                                            value={uri}
+                                                            onChange={(e) => handleAddUriListChange(index, e.target.value)}
+                                                            placeholder="https://example.com/oauth/callback"
+                                                            className={addUriAddListErrors[index] ? 'invalid' : ''}
+                                                        />
+                                                        {addUriAddList.length > 1 && (
+                                                            <button
+                                                                type="button"
+                                                                className="btn btn-danger btn-small"
+                                                                onClick={() => removeAddUriField(index)}
+                                                            >
+                                                                Remove
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                    {addUriAddListErrors[index] && (
+                                                        <div className="form-error">{addUriAddListErrors[index]}</div>
+                                                    )}
+                                                </div>
+                                            ))}
+                                            <button
+                                                type="button"
+                                                className="btn btn-add btn-small"
+                                                onClick={addAddUriField}
+                                            >
+                                                + Add Another URI
+                                            </button>
+                                        </div>
+
+                                        <div className="form-group">
+                                            <label>Redirect URIs to Remove</label>
+                                            <div className="description">Pruned from the client's existing list before any adds above are applied</div>
+                                            {addUriRemoveList.map((uri, index) => (
+                                                <div key={index} className="array-input">
+                                                    <input
+                                                        type="text"
+                                                        value={uri}
+                                                        onChange={(e) => handleRemoveUriListChange(index, e.target.value)}
+                                                        placeholder="https://stale.example.com/oauth/callback"
+                                                    />
+                                                    {addUriRemoveList.length > 1 && (
+                                                        <button
+                                                            type="button"
+                                                            className="btn btn-danger btn-small"
+                                                            onClick={() => removeRemoveUriField(index)}
+                                                        >
+                                                            Remove
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            ))}
+                                            <button
+                                                type="button"
+                                                className="btn btn-add btn-small"
+                                                onClick={addRemoveUriField}
+                                            >
+                                                + Add Another URI
+                                            </button>
+                                        </div>
+
+                                        <div className="form-actions">
+                                            <button
+                                                type="submit"
+                                                className="btn btn-primary"
+                                                disabled={addUriSubmitting || !addUriClientId || !addUriClientSecret}
+                                            >
+                                                {addUriSubmitting ? 'Updating...' : '➕ Update Redirect URIs'}
+                                            </button>
+                                        </div>
+                                    </form>
+
+                                    {addUriResult && (
+                                        <div className="response-item full-width" style={{ marginTop: '16px' }}>
+                                            <label>Updated Redirect URIs</label>
+                                            <ul className="url-list">
+                                                {addUriResult.redirect_uris?.map((uri, i) => (
+                                                    <li key={i}>
+                                                        <span>🔗</span>
+                                                        <span className="value" style={{ padding: 0, background: 'transparent' }}>{uri}</span>
+                                                    </li>
+                                                ))}
+                                            </ul>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                    )}
 
                     {/* Registration Response */}
                     {registrationResponse && (
