@@ -112,10 +112,10 @@ describe("MCP Server", () => {
 			searchObjects: vi.fn().mockResolvedValue({
 				results: [
 					{
-						id: "answer-123",
-						name: "Sales by Region",
+						object_id: "answer-123",
+						title: "Sales by Region",
 						type: "ANSWER",
-						owner: "test-user",
+						author_name: "test-user",
 						description: "Revenue broken down by region",
 						tags: [],
 						last_modified: "2023-11-14T22:13:20.000Z",
@@ -126,10 +126,10 @@ describe("MCP Server", () => {
 						confidence: 0.95,
 					},
 					{
-						id: "liveboard-456",
-						name: "Sales Overview",
+						object_id: "liveboard-456",
+						title: "Sales Overview",
 						type: "LIVEBOARD",
-						owner: "test-user",
+						author_name: "test-user",
 						description: "Overview of sales metrics",
 						tags: [],
 						last_modified: "2023-11-14T22:13:21.000Z",
@@ -441,14 +441,14 @@ describe("MCP Server", () => {
 			const objects = structured.results;
 			expect(objects).toHaveLength(2);
 			expect(objects[0]).toMatchObject({
-				id: "answer-123",
-				name: "Sales by Region",
+				object_id: "answer-123",
+				title: "Sales by Region",
 				type: "ANSWER",
-				owner: "test-user",
+				author_name: "test-user",
 				verified: true,
 				frame_url: "https://test.thoughtspot.cloud/#/saved-answer/answer-123",
 			});
-			expect(objects[1].id).toBe("liveboard-456");
+			expect(objects[1].object_id).toBe("liveboard-456");
 		});
 
 		it("should pass the documented params through to the client", async () => {
@@ -462,8 +462,8 @@ describe("MCP Server", () => {
 
 			await callTool("search_objects", {
 				query: "sales",
-				types: ["liveboard"],
-				owner: "alice",
+				types: ["LIVEBOARD"],
+				author_name: "alice",
 				tag: "Finance",
 				modified_since: 1700000000000,
 				verified_only: true,
@@ -471,10 +471,11 @@ describe("MCP Server", () => {
 				cursor: "50",
 			});
 
+			// Tool input `author_name` maps to the internal `owner` search param.
 			expect((client as any).searchObjects).toHaveBeenCalledWith(
 				expect.objectContaining({
 					query: "sales",
-					types: ["liveboard"],
+					types: ["LIVEBOARD"],
 					owner: "alice",
 					tag: "Finance",
 					modifiedSince: 1700000000000,

@@ -1,8 +1,8 @@
 import {
 	resolveObjectTypeFacets,
 	resolveResultTypeToCanonical,
-} from "../../terminology";
-import { buildTsHeaders, generateRequestId, postJson } from "../grpc-utils";
+} from "../object-types";
+import { buildHeaders, generateRequestId, postJson } from "../rest-utils";
 import { searchObjectsQuery } from "./search-objects-query";
 import type {
 	RawSearchResult,
@@ -57,13 +57,14 @@ function deriveQuery(resultType: string, sageQuery: unknown): string | null {
 // UPPER-case type, ISO-8601 last_modified, drop internal-only fields.
 function toResult(header: SearchObjectHeader): SearchObjectResult {
 	return {
-		id: header.id,
+		object_id: header.id,
 		...(header.visualization_id
 			? { visualization_id: header.visualization_id }
 			: {}),
-		name: header.name,
-		type: header.type.toUpperCase(),
-		owner: header.owner,
+		title: header.name,
+		// Emit as an UPPER_SNAKE token, e.g. "Liveboard viz" -> "LIVEBOARD_VIZ".
+		type: header.type.toUpperCase().replace(/\s+/g, "_"),
+		author_name: header.owner,
 		description: header.description,
 		tags: header.tags,
 		last_modified:
@@ -99,11 +100,13 @@ export function addSearchObjects(
 		// Not expressible in the Eureka schema; applied per fetched page below.
 		const hasPostFilters = Boolean(owner || tag || modifiedSince);
 
-		// Server-side facet filters, shared across all terms.
+		// Server-side facet filters. OBJECT_TYPE is the filterable facet (the
+		// facet the UI's facetSelections uses); OBJECT_TYPE_FACET is only a
+		// computed/returned facet, not a filter.
 		const facetSelections: { facetType: string; facetValue: string[] }[] = [];
 		if (types?.length) {
 			facetSelections.push({
-				facetType: "OBJECT_TYPE_FACET",
+				facetType: "OBJECT_TYPE",
 				facetValue: resolveObjectTypeFacets(types),
 			});
 		}
@@ -126,7 +129,10 @@ export function addSearchObjects(
 		}> => {
 			const data = (await postJson(
 				`${instanceUrl}${endpoint}`,
-				buildTsHeaders(token, { requestId, acceptLanguage: "en-US" }),
+				buildHeaders(token, undefined, undefined, {
+					requestId,
+					acceptLanguage: "en-US",
+				}),
 				{
 					operationName: "GetEurekaResults",
 					query: searchObjectsQuery,
@@ -183,25 +189,44 @@ export function addSearchObjects(
 			let pageObjects: SearchObjectHeader[] = results
 				.map((result: any): SearchObjectHeader | null => {
 					const resultType: string = result?.resultType ?? "";
-					const viz = result?.searchPinboardViz;
 
-					// A pinboard-viz hit is fetched via its parent Liveboard, so surface
-					// the Liveboard as `id` (fetch_data resolves it) and the viz id
-					// separately. Other kinds carry their id on the matching sub-header.
+					// Eureka returns ALL sub-objects on every result; only the one
+					// matching resultType is populated (the rest are empty stubs with
+					// id/title ""). So dispatch strictly on resultType, never on which
+					// sub-object is "present".
 					let id: string | undefined;
 					let visualizationId: string | undefined;
 					let header: any;
-					if (viz) {
-						header = viz.answer?.header ?? viz.pinboardHeader;
-						id = viz.pinboardHeader?.id ?? result?.objectSecurityInfo?.objectId;
-						visualizationId = viz.answer?.header?.id;
+					if (resultType === "PINBOARD_VIZ_RESULT") {
+						// A pinboard-viz hit is fetched via its parent Liveboard, so
+						// surface the Liveboard as `id` (fetch_data resolves it) and the
+						// viz id separately.
+						const viz = result?.searchPinboardViz;
+						header = viz?.answer?.header;
+						id =
+							viz?.pinboardHeader?.id || result?.objectSecurityInfo?.objectId;
+						visualizationId = viz?.answer?.header?.id || undefined;
+					} else if (resultType === "PINBOARD_RESULT") {
+						header = result?.searchPinboard?.header;
+						id = header?.id || result?.objectSecurityInfo?.objectId;
+					} else if (resultType === "ANSWER_RESULT") {
+						header = result?.searchAnswer?.header;
+						id = header?.id || result?.objectSecurityInfo?.objectId;
+					} else if (
+						resultType === "WORKSHEET_RESULT" ||
+						resultType === "LOGICAL_TABLE_RESULT"
+					) {
+						header = result?.searchWorksheet?.header;
+						id = header?.id || result?.objectSecurityInfo?.objectId;
 					} else {
+						// Unknown kind: take whichever sub-header actually carries an id.
 						header =
 							result?.searchAnswer?.header ??
 							result?.searchPinboard?.header ??
 							result?.searchWorksheet?.header;
-						id = header?.id ?? result?.objectSecurityInfo?.objectId;
+						id = header?.id || result?.objectSecurityInfo?.objectId;
 					}
+					// Empty-string ids are stubs, not real ids — drop them.
 					if (!id) {
 						return null;
 					}
@@ -274,9 +299,9 @@ export function addSearchObjects(
 			};
 		};
 
-		// Full search for one term; the shared x-request-id is passed in so it is
+		// Full search for the term; the x-request-id is passed in so it is
 		// preserved even when the call later fails.
-		const searchSingle = async (
+		const runSearch = async (
 			query: string,
 			requestId: string,
 			cursor?: string,
@@ -336,7 +361,6 @@ export function addSearchObjects(
 			return {
 				objects,
 				next_cursor,
-				request_id: requestId,
 			};
 		};
 
@@ -344,14 +368,10 @@ export function addSearchObjects(
 		// envelope must still carry a request_id).
 		const requestId = generateRequestId();
 
-		// Normalize into distinct, non-empty terms (string or array input).
-		const rawTerms = Array.isArray(params.query)
-			? params.query
-			: [params.query];
-		const terms = [...new Set(rawTerms.map((t) => t.trim()).filter(Boolean))];
+		const term = params.query.trim();
 
 		// Guard empty/whitespace-only input rather than searching upstream for "".
-		if (terms.length === 0) {
+		if (!term) {
 			return buildError(
 				"INVALID_ARGUMENT",
 				"Provide a non-empty search term.",
@@ -361,18 +381,7 @@ export function addSearchObjects(
 		}
 
 		try {
-			// Single term: full behavior, including cursor-based pagination.
-			// Multiple terms: one search per term in parallel, merged (no cursor).
-			const raw =
-				terms.length === 1
-					? await searchSingle(terms[0], requestId, params.cursor)
-					: mergeTermResults(
-							await Promise.all(
-								terms.map((term) => searchSingle(term, requestId)),
-							),
-							requestId,
-							limit,
-						);
+			const raw = await runSearch(term, requestId, params.cursor);
 
 			const results = raw.objects.map(toResult);
 
@@ -381,7 +390,7 @@ export function addSearchObjects(
 				return {
 					status: "no_results",
 					results: [],
-					message: `No objects matched ${JSON.stringify(terms.join(", "))}.`,
+					message: `No objects matched ${JSON.stringify(term)}.`,
 					next_cursor: null,
 					request_id: requestId,
 				};
@@ -467,45 +476,6 @@ function buildError(
 		status: "error",
 		results: [],
 		error: { code, message, retryable },
-		request_id: requestId,
-	};
-}
-
-// Interleave per-term results in rank order (round-robin), deduping by id, up
-// to limit. Per-term relevance scores aren't comparable across independent
-// searches, so a global sort would let one term crowd out the others; taking
-// turns guarantees every term is represented.
-function mergeTermResults(
-	results: RawSearchResult[],
-	requestId: string,
-	limit: number,
-): RawSearchResult {
-	const byId = new Map<string, SearchObjectHeader>();
-	const queues = results.map((r) => [...r.objects]);
-	let progressed = true;
-	while (byId.size < limit && progressed) {
-		progressed = false;
-		for (const queue of queues) {
-			if (byId.size >= limit) {
-				break;
-			}
-			const obj = queue.shift();
-			if (!obj) {
-				continue;
-			}
-			progressed = true;
-			const existing = byId.get(obj.id);
-			// Keep the highest-confidence copy; Map preserves first-seen position.
-			if (!existing || (obj.confidence ?? 0) > (existing.confidence ?? 0)) {
-				byId.set(obj.id, obj);
-			}
-		}
-	}
-
-	return {
-		objects: [...byId.values()],
-		// Pagination across multiple independent term searches is ambiguous.
-		next_cursor: null,
 		request_id: requestId,
 	};
 }

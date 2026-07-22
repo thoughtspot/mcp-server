@@ -67,21 +67,22 @@ export const GetAnswerOutputSchema = z.object({
 
 export const SearchObjectsInputSchema = z.object({
 	query: z
-		.union([z.string().min(1), z.array(z.string().min(1)).nonempty()])
+		.string()
+		.min(1)
 		.describe(
-			"The search term(s) to find objects for, matched against object names or descriptions. Pass a single string for one search, or an array of distinct terms when the user's request covers several separate things. Each term is searched in parallel and the results are merged and de-duplicated. Note: pagination via `cursor` only applies to a single-term search.",
+			"The search term to find objects for, matched against object names or descriptions.",
 		),
 	types: z
-		.array(z.string())
+		.array(z.enum(["LIVEBOARD", "LIVEBOARD_VIZ", "ANSWER", "WORKSHEET"]))
 		.optional()
 		.describe(
-			"Restrict results to these object types. Accepts friendly and legacy names: 'liveboard' (aliases 'pinboard', 'dashboard'), 'answer', and 'worksheet' (aliases 'logical table', 'data model', 'data source'). Omit to search all types.",
+			"Restrict results to these object types. Allowed values: 'LIVEBOARD', 'LIVEBOARD_VIZ' (a viz pinned on a Liveboard), 'ANSWER', 'WORKSHEET'. Omit to search all types.",
 		),
-	owner: z
+	author_name: z
 		.string()
 		.optional()
 		.describe(
-			"Restrict results to objects authored by this user, matched against the author's display name (case-insensitive).",
+			"Restrict results to objects authored by the provided user, matched against the author's display name (case-insensitive).",
 		),
 	tag: z
 		.string()
@@ -115,7 +116,7 @@ export const SearchObjectsInputSchema = z.object({
 });
 
 const SearchObjectResultSchema = z.object({
-	id: z
+	object_id: z
 		.string()
 		.describe(
 			"The GUID to pass to fetch_data as `object_id`. For a visualization pinned on a Liveboard this is the parent Liveboard's GUID (see `visualization_id`).",
@@ -124,15 +125,15 @@ const SearchObjectResultSchema = z.object({
 		.string()
 		.optional()
 		.describe(
-			"Set only when this result is a specific visualization on a Liveboard: `id` is the Liveboard and this is the visualization. Pass it to fetch_data as `visualization_ids` to fetch just this viz.",
+			"Set only when this result is a specific visualization on a Liveboard: `object_id` is the Liveboard and this is the visualization. Pass it to fetch_data as `visualization_ids` to fetch just this viz.",
 		),
-	name: z.string().describe("The display name/title of the object."),
+	title: z.string().describe("The display name/title of the object."),
 	type: z
 		.string()
 		.describe(
-			"UPPER-case object type: 'LIVEBOARD', 'ANSWER', 'VISUALIZATION' (a viz pinned on a Liveboard, i.e. a 'Liveboard viz'; `id` is the parent Liveboard and `visualization_id` the viz) or 'WORKSHEET'. Can be passed straight back as a `types` filter.",
+			"UPPER-case object type: 'LIVEBOARD', 'ANSWER', 'LIVEBOARD_VIZ' (a viz pinned on a Liveboard, i.e. a 'Liveboard viz'; `object_id` is the parent Liveboard and `visualization_id` the viz) or 'WORKSHEET'. Any of these can be passed straight back as a `types` filter.",
 		),
-	owner: z
+	author_name: z
 		.string()
 		.describe("The display name of the user who authored the object."),
 	description: z
@@ -535,8 +536,20 @@ export const toolDefinitionsV1 = [
 export const toolDefinitionsV2 = [
 	{
 		name: ToolName.SearchObjects,
-		description:
-			"Search for objects (Answers, Liveboards, Worksheets) in ThoughtSpot matching a given search term. Supports optional filters (types, owner, tag, modified_since, verified_only) and pagination (limit, cursor). Returns `results` (ranked), plus `next_cursor` and `request_id`. Each result carries: id, name, type (LIVEBOARD | ANSWER | VISUALIZATION | WORKSHEET; VISUALIZATION is a viz pinned on a Liveboard — render it as 'Liveboard viz'), owner, description, tags, last_modified (ISO-8601), verified, frame_url, query (Answer/viz sage tokens; null for Liveboards) and confidence. Returns identifiers and metadata only.\n\nHow to present the results:\n• Render as a table with fixed columns in this order: Object (the name, linked to `frame_url`) · Type · Owner · Verified (✓ or —) · Last Modified.\n• Put the description and, for an Answer/viz, the `query` tokens as sub-lines under the name (e.g. '↳ sales by region, last 3 months') — never as their own columns.\n• Render `last_modified` as a plain date (2026-05-15), never the raw timestamp.\n• Lead with the top match; if the top 2–3 are close, present them as ranked candidates.\n• Never surface `next_cursor`, `request_id`, or the numeric `confidence` in your prose.\n\nOutcomes other than a hit list:\n• `status: \"no_results\"` — the search ran but nothing matched. Relay `message`, and suggest broadening the term or dropping a filter. Do not invent results.\n• `status: \"error\"` — the search failed. Tell the user briefly using `error.message`; if `error.retryable` is true, offer to try again. Never show `error.code` or `request_id`.",
+		description: [
+			"Search for objects (Answers, Liveboards, Worksheets) in ThoughtSpot matching a given search term. Supports optional filters (types, owner, tag, modified_since, verified_only) and pagination (limit, cursor). Returns `results` (ranked), plus `next_cursor` and `request_id`. Each result carries: object_id, title, type (LIVEBOARD | ANSWER | LIVEBOARD_VIZ | WORKSHEET; LIVEBOARD_VIZ is a viz pinned on a Liveboard — render it as 'Liveboard viz'), author_name, description, tags, last_modified (ISO-8601), verified, frame_url, query (Answer/viz sage tokens; null for Liveboards) and confidence. Returns identifiers and metadata only — never the object's data or contents, and it does not run queries.",
+			"",
+			"How to present the results:",
+			"• Render as a table with fixed columns in this order: Object (the name, linked to `frame_url`) · Type · Owner · Verified (✓ or —) · Last Modified.",
+			"• Put the description and, for an Answer/viz, the `query` tokens as sub-lines under the name (e.g. '↳ sales by region, last 3 months') — never as their own columns.",
+			"• Render `last_modified` as a plain date (2026-05-15), never the raw timestamp.",
+			"• Lead with the top match; if the top 2–3 are close, present them as ranked candidates.",
+			"• Never surface `next_cursor`, `request_id`, or the numeric `confidence` in your prose.",
+			"",
+			"Outcomes other than a hit list:",
+			'• `status: "no_results"` — the search ran but nothing matched. Relay `message`, and suggest broadening the term or dropping a filter. Do not invent results.',
+			'• `status: "error"` — the search failed. Tell the user briefly using `error.message`; if `error.retryable` is true, offer to try again. Never show `error.code` or `request_id`.',
+		].join("\n"),
 		inputSchema: z.toJSONSchema(SearchObjectsInputSchema),
 		outputSchema: z.toJSONSchema(SearchObjectsResponseSchema),
 		annotations: {

@@ -23,12 +23,12 @@ export interface SearchObjectHeader {
 
 // Spec-shaped result item surfaced to the client (Slack contract 2026-07-09).
 export interface SearchObjectResult {
-	id: string;
+	object_id: string;
 	visualization_id?: string;
-	name: string;
+	title: string;
 	// UPPER-case enum: LIVEBOARD | ANSWER | WORKSHEET (viz collapses to LIVEBOARD).
 	type: string;
-	owner: string;
+	author_name: string;
 	description: string | null;
 	tags: string[];
 	// ISO-8601, or null when the backend exposes no modification time.
@@ -40,8 +40,8 @@ export interface SearchObjectResult {
 }
 
 export interface SearchObjectsParams {
-	// A single search term, or several terms to search in parallel and merge.
-	query: string | string[];
+	// A single search term matched against object names/descriptions.
+	query: string;
 	types?: string[];
 	owner?: string;
 	tag?: string;
@@ -51,12 +51,10 @@ export interface SearchObjectsParams {
 	cursor?: string;
 }
 
-// Internal accumulator returned by the per-term search before projection.
+// Internal accumulator returned by the search before projection.
 export interface RawSearchResult {
 	objects: SearchObjectHeader[];
 	next_cursor: string | null;
-	// Client-minted x-request-id, echoed for cross-system tracing.
-	request_id: string;
 }
 
 // Final spec-shaped success payload (no `status` field, per the spec).

@@ -940,7 +940,7 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		const {
 			query,
 			types,
-			owner,
+			author_name,
 			tag,
 			modified_since,
 			verified_only,
@@ -952,7 +952,7 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			const result = await this.getThoughtSpotService(recorder).searchObjects({
 				query,
 				types,
-				owner,
+				owner: author_name,
 				tag,
 				modifiedSince: modified_since,
 				verifiedOnly: verified_only,

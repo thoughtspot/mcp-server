@@ -1,26 +1,31 @@
-// Shared helpers for the gRPC-backed ThoughtSpot tools.
+// Shared helpers for the raw-fetch ThoughtSpot tools.
+
+export const ORG_HEADER = "x-thoughtspot-orgs";
 
 // Fresh id sent as x-request-id so a call can be traced across systems.
 export function generateRequestId(): string {
 	return globalThis.crypto.randomUUID();
 }
 
-// Standard headers for ThoughtSpot HTTP calls. `acceptLanguage` is opt-in: the
-// gRPC/Eureka endpoints 500 without it, but the legacy calls never sent it.
-export function buildTsHeaders(
+// Auth/content headers for the raw-fetch handlers, incl. the org header if set.
+// `acceptLanguage`/`requestId` are opt-in: the Eureka endpoints 500 without a
+// locale, and traced calls carry an x-request-id; the SDK-backed calls send
+// neither.
+export function buildHeaders(
 	token: string,
-	options: {
-		requestId?: string;
-		accept?: string;
-		acceptLanguage?: string;
-	} = {},
+	orgId?: string,
+	accept = "application/json",
+	options: { requestId?: string; acceptLanguage?: string } = {},
 ): Record<string, string> {
 	const headers: Record<string, string> = {
 		"Content-Type": "application/json",
-		Accept: options.accept ?? "application/json",
+		Accept: accept,
 		"user-agent": "ThoughtSpot-ts-client",
 		Authorization: `Bearer ${token}`,
 	};
+	if (orgId) {
+		headers[ORG_HEADER] = orgId;
+	}
 	if (options.acceptLanguage) {
 		headers["accept-language"] = options.acceptLanguage;
 	}

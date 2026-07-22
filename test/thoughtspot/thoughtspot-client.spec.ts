@@ -913,10 +913,10 @@ describe("ThoughtSpot Client", () => {
 
 			expect(result.results).toEqual([
 				{
-					id: "answer-123",
-					name: "Sales by Region",
+					object_id: "answer-123",
+					title: "Sales by Region",
 					type: "ANSWER",
-					owner: "alice",
+					author_name: "alice",
 					description: "Revenue by region",
 					tags: ["Finance"],
 					last_modified: new Date(1700000000000).toISOString(),
@@ -926,10 +926,10 @@ describe("ThoughtSpot Client", () => {
 					confidence: 0.9,
 				},
 				{
-					id: "lb-456",
-					name: "Sales Overview",
+					object_id: "lb-456",
+					title: "Sales Overview",
 					type: "LIVEBOARD",
-					owner: "bob",
+					author_name: "bob",
 					description: "Overview",
 					tags: [],
 					last_modified: new Date(1700000001000).toISOString(),
@@ -972,13 +972,16 @@ describe("ThoughtSpot Client", () => {
 
 			await client.searchObjects({
 				query: "sales",
-				types: ["liveboard", "answer"],
+				types: ["LIVEBOARD", "ANSWER"],
 				verifiedOnly: true,
 			});
 
 			const body = JSON.parse((fetch as any).mock.calls[0][1].body);
 			expect(body.variables.params.facetSelections).toEqual([
-				{ facetType: "OBJECT_TYPE_FACET", facetValue: ["pinboard", "answer"] },
+				{
+					facetType: "OBJECT_TYPE",
+					facetValue: ["pinboard_answer_book", "question_answer_book"],
+				},
 				{ facetType: "IS_VERIFIED", facetValue: ["true"] },
 			]);
 		});
@@ -1075,7 +1078,7 @@ describe("ThoughtSpot Client", () => {
 				modifiedSince: 1650000000000,
 			});
 
-			expect(result.results.map((o: any) => o.id)).toEqual(["new"]);
+			expect(result.results.map((o: any) => o.object_id)).toEqual(["new"]);
 		});
 
 		it("normalizes second-precision modifiedOn to epoch-ms", async () => {
@@ -1144,7 +1147,7 @@ describe("ThoughtSpot Client", () => {
 				JSON.parse((fetch as any).mock.calls[1][1].body).variables.params
 					.offset,
 			).toBe(2);
-			expect(result.results.map((o: any) => o.id)).toEqual(["a1", "a2"]);
+			expect(result.results.map((o: any) => o.object_id)).toEqual(["a1", "a2"]);
 			// A full final raw page means more may exist: resume past both pages.
 			expect(result.next_cursor).toBe("4");
 		});
@@ -1164,7 +1167,7 @@ describe("ThoughtSpot Client", () => {
 			});
 
 			expect((fetch as any).mock.calls.length).toBe(2);
-			expect(result.results.map((o: any) => o.id)).toEqual(["a1"]);
+			expect(result.results.map((o: any) => o.object_id)).toEqual(["a1"]);
 			expect(result.next_cursor).toBeNull();
 		});
 
@@ -1198,10 +1201,10 @@ describe("ThoughtSpot Client", () => {
 			const result = await client.searchObjects({ query: "sales" });
 			expect(result.results).toEqual([
 				{
-					id: "y",
-					name: "",
+					object_id: "y",
+					title: "",
 					type: "X",
-					owner: "",
+					author_name: "",
 					description: null,
 					tags: [],
 					last_modified: null,
@@ -1244,10 +1247,10 @@ describe("ThoughtSpot Client", () => {
 			const obj = result.results[0] as any;
 			// fetch_data resolves the Liveboard id; the viz is passed via
 			// visualization_ids to fetch just this visualization.
-			expect(obj.id).toBe("lb-1");
+			expect(obj.object_id).toBe("lb-1");
 			expect(obj.visualization_id).toBe("viz-1");
 			// A viz pinned on a Liveboard is its own type ("Liveboard viz").
-			expect(obj.type).toBe("VISUALIZATION");
+			expect(obj.type).toBe("LIVEBOARD_VIZ");
 			expect(obj.frame_url).toBe(
 				`${mockInstanceUrl}/#/insights/pinboard/lb-1/viz-1`,
 			);
@@ -1340,7 +1343,7 @@ describe("ThoughtSpot Client", () => {
 			expect(result.error.retryable).toBe(true);
 		});
 
-		it("resolves friendly/legacy type synonyms to Eureka facet values", async () => {
+		it("resolves the type filter enum to Eureka facet values", async () => {
 			(fetch as any).mockResolvedValue({
 				ok: true,
 				json: vi
@@ -1350,16 +1353,15 @@ describe("ThoughtSpot Client", () => {
 
 			await client.searchObjects({
 				query: "sales",
-				// dashboard -> pinboard; worksheet + logical table + data model ->
-				// worksheet (deduped).
-				types: ["dashboard", "worksheet", "logical table", "data model"],
+				// LIVEBOARD -> pinboard_answer_book; WORKSHEET -> logical_table (deduped).
+				types: ["LIVEBOARD", "WORKSHEET", "WORKSHEET"],
 			});
 
 			const body = JSON.parse((fetch as any).mock.calls[0][1].body);
 			expect(body.variables.params.facetSelections).toEqual([
 				{
-					facetType: "OBJECT_TYPE_FACET",
-					facetValue: ["pinboard", "worksheet"],
+					facetType: "OBJECT_TYPE",
+					facetValue: ["pinboard_answer_book", "logical_table"],
 				},
 			]);
 		});
@@ -1372,69 +1374,10 @@ describe("ThoughtSpot Client", () => {
 			score,
 		});
 
-		it("fires a parallel search per term and merges the results", async () => {
-			(fetch as any)
-				.mockResolvedValueOnce(
-					pageResponse([scoredResult("a", 0.5), scoredResult("shared", 0.7)]),
-				)
-				.mockResolvedValueOnce(
-					pageResponse([scoredResult("b", 0.9), scoredResult("shared", 0.4)]),
-				);
-
-			const result = await client.searchObjects({
-				query: ["sales", "marketing"],
-			});
-
-			// One upstream call per term.
-			expect((fetch as any).mock.calls.length).toBe(2);
-			expect(
-				JSON.parse((fetch as any).mock.calls[0][1].body).variables.params.query,
-			).toBe("sales");
-			expect(
-				JSON.parse((fetch as any).mock.calls[1][1].body).variables.params.query,
-			).toBe("marketing");
-
-			// Interleaved round-robin by term (a from term 1, b from term 2, then
-			// the shared hit), deduped by id with the higher-confidence copy kept.
-			expect(result.results.map((o: any) => o.id)).toEqual([
-				"a",
-				"b",
-				"shared",
-			]);
-			expect(
-				result.results.find((o: any) => o.id === "shared").confidence,
-			).toBe(0.7);
-			// Pagination is not supported across a multi-term fan-out.
-			expect(result.next_cursor).toBeNull();
-			// One request id is minted for the whole call (shared across terms).
-			expect(result.request_id).not.toContain(",");
-		});
-
-		it("treats a single-element query array like a single-term search", async () => {
-			(fetch as any).mockResolvedValue(pageResponse([scoredResult("a", 0.5)]));
-
-			const result = await client.searchObjects({ query: ["sales"] });
-
-			expect((fetch as any).mock.calls.length).toBe(1);
-			expect(result.results.map((o: any) => o.id)).toEqual(["a"]);
-		});
-
-		it("ignores blank and duplicate terms in a multi-term query", async () => {
-			(fetch as any).mockResolvedValue(pageResponse([scoredResult("a", 0.5)]));
-
-			await client.searchObjects({ query: ["sales", "  ", "sales"] });
-
-			// "sales" deduped, blank dropped -> a single search.
-			expect((fetch as any).mock.calls.length).toBe(1);
-			expect(
-				JSON.parse((fetch as any).mock.calls[0][1].body).variables.params.query,
-			).toBe("sales");
-		});
-
 		it("returns an INVALID_ARGUMENT envelope for a whitespace-only query", async () => {
 			(fetch as any).mockResolvedValue(pageResponse([]));
 
-			const result = await client.searchObjects({ query: ["   ", ""] });
+			const result = await client.searchObjects({ query: "   " });
 
 			expect(result.status).toBe("error");
 			expect(result.error.code).toBe("INVALID_ARGUMENT");
@@ -1442,25 +1385,6 @@ describe("ThoughtSpot Client", () => {
 			// Never hits the upstream for an empty term.
 			expect((fetch as any).mock.calls.length).toBe(0);
 			expect(typeof result.request_id).toBe("string");
-		});
-
-		it("caps a merged multi-term result at limit", async () => {
-			(fetch as any)
-				.mockResolvedValueOnce(
-					pageResponse([scoredResult("a", 0.5), scoredResult("s", 0.7)]),
-				)
-				.mockResolvedValueOnce(
-					pageResponse([scoredResult("b", 0.9), scoredResult("c", 0.4)]),
-				);
-
-			const result = await client.searchObjects({
-				query: ["sales", "marketing"],
-				limit: 2,
-			});
-
-			// Round-robin caps at limit taking the top hit from each term in turn,
-			// so both terms are represented rather than one crowding the other out.
-			expect(result.results.map((o: any) => o.id)).toEqual(["a", "b"]);
 		});
 
 		it("clamps a negative cursor to offset 0", async () => {
@@ -1491,7 +1415,7 @@ describe("ThoughtSpot Client", () => {
 
 			const result = await client.searchObjects({ query: "sales", limit: 2 });
 
-			expect(result.results.map((o: any) => o.id)).toEqual(["a"]);
+			expect(result.results.map((o: any) => o.object_id)).toEqual(["a"]);
 			expect(result.next_cursor).toBe("2");
 		});
 
@@ -1534,7 +1458,7 @@ describe("ThoughtSpot Client", () => {
 				limit: 2,
 			});
 
-			expect(result.results.map((o: any) => o.id)).toEqual(["a1", "a2"]);
+			expect(result.results.map((o: any) => o.object_id)).toEqual(["a1", "a2"]);
 			// The dropped match ("a3") came from the page at offset 2, so the cursor
 			// points back at it rather than past it.
 			expect(result.next_cursor).toBe("2");
@@ -1615,7 +1539,7 @@ describe("ThoughtSpot Client", () => {
 				tag: "finance",
 			});
 
-			expect(result.results.map((o: any) => o.id)).toEqual(["a"]);
+			expect(result.results.map((o: any) => o.object_id)).toEqual(["a"]);
 		});
 
 		it("derives `query` from sageQuery for Answers/vizzes and null otherwise", async () => {
