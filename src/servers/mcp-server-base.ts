@@ -32,6 +32,7 @@ import { StorageServiceClient } from "../storage-service/storage-service";
 import { OrgService } from "../thoughtspot/org-service";
 import { getThoughtSpotClient } from "../thoughtspot/thoughtspot-client";
 import { ThoughtSpotService } from "../thoughtspot/thoughtspot-service";
+import type { SessionInfo } from "../thoughtspot/types";
 import type { Props } from "../utils";
 
 // Response utility types
@@ -60,7 +61,7 @@ export interface Context {
 
 export abstract class BaseMCPServer extends Server {
 	protected trackers: Trackers = new Trackers();
-	protected sessionInfo: any;
+	protected sessionInfo: SessionInfo | undefined;
 
 	constructor(
 		protected ctx: Context,
@@ -85,34 +86,28 @@ export abstract class BaseMCPServer extends Server {
 	}
 
 	/**
-	 * Check if data source discovery is available
+	 * Whether Spotter data source discovery (Auto Mode) is enabled
 	 */
-	protected isDatasourceDiscoveryAvailable(): boolean {
-		if (!this.sessionInfo) {
-			console.warn(
-				"[DEBUG] sessionInfo is not initialized when checking datasource discovery availability",
-			);
-			return false;
-		}
-		return String(this.sessionInfo.enableSpotterDataSourceDiscovery) === "true";
+	protected isSpotterDataSourceDiscoveryEnabled(): boolean {
+		return this.sessionInfo?.isSpotterDataSourceDiscoveryEnabled === true;
 	}
 
 	/**
-	 * Whether Orgs are enabled on this cluster (from session info). Fails closed:
-	 * if session info is unavailable or the flag is absent, returns false so the
-	 * org tools stay hidden.
+	 * Whether Orgs feature is enabled. If session info is not available, we assume Orgs is
+	 * enabled to ensure the Org-related tools do not disappear.
 	 */
 	protected isOrgsEnabled(): boolean {
-		// When session info failed to load (e.g. the init-time getSessionInfo call
-		// used an expired props token before the keep-warm DO token was reconciled),
-		// default to true so org tools stay available rather than silently vanishing.
-		// The tool call paths reconcile the live token from the DO independently, so
-		// they still work when the kept-warm token is healthy. When session info IS
-		// present, respect the cluster's actual orgsEnabled flag.
 		if (!this.sessionInfo) {
 			return true;
 		}
 		return this.sessionInfo.orgsEnabled === true;
+	}
+
+	/**
+	 * Whether Spotter chat history (save chat) is enabled
+	 */
+	protected isSpotterChatHistoryEnabled(): boolean {
+		return this.sessionInfo?.isSpotterChatHistoryEnabled === true;
 	}
 
 	/**

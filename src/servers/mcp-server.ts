@@ -360,7 +360,7 @@ export class MCPServer extends BaseMCPServer {
 
 		// Filter out GetDataSourceSuggestions if feature flag is not available
 		if (
-			!this.isDatasourceDiscoveryAvailable() &&
+			!this.isSpotterDataSourceDiscoveryEnabled() &&
 			tools.some((tool) => tool.name === ToolName.GetDataSourceSuggestions)
 		) {
 			tools = tools.filter(
@@ -712,10 +712,13 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 
 		let response: AgentConversation;
 		try {
-			response =
-				await this.getThoughtSpotService(recorder).createAgentConversation(
-					data_source_id,
-				);
+			response = await this.getThoughtSpotService(
+				recorder,
+			).createAgentConversation(
+				this.isSpotterDataSourceDiscoveryEnabled(),
+				this.isSpotterChatHistoryEnabled(),
+				data_source_id,
+			);
 		} catch (error) {
 			if (this.apiErrorStatus(error) !== 401) {
 				throw error;

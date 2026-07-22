@@ -295,6 +295,8 @@ export class ThoughtSpotService {
 	 */
 	@WithSpan("create-agent-conversation")
 	async createAgentConversation(
+		isSpotterDataSourceDiscoveryEnabled: boolean,
+		isSpotterChatHistoryEnabled: boolean,
 		dataSourceId?: string,
 	): Promise<AgentConversation> {
 		const span = trace.getSpan(context.active());
@@ -306,6 +308,8 @@ export class ThoughtSpotService {
 				UPSTREAM_OPERATION_NAMES.createAgentConversation,
 				() =>
 					(this.client as any).createAgentConversationWithAutoMode({
+						isSpotterDataSourceDiscoveryEnabled,
+						isSpotterChatHistoryEnabled,
 						dataSourceId,
 					}),
 			);
@@ -673,10 +677,10 @@ export class ThoughtSpotService {
 	async getSessionInfo(): Promise<SessionInfo> {
 		const span = getActiveSpan();
 
-		const info = await this.observeUpstreamCall(
+		const info = (await this.observeUpstreamCall(
 			UPSTREAM_OPERATION_NAMES.getSessionInfo,
 			() => (this.client as any).getSessionInfo(),
-		);
+		)) as any;
 		const devMixpanelToken = info.configInfo.mixpanelConfig.devSdkKey;
 		const prodMixpanelToken = info.configInfo.mixpanelConfig.prodSdkKey;
 		const mixpanelToken = info.configInfo.mixpanelConfig.production
@@ -697,9 +701,11 @@ export class ThoughtSpotService {
 			releaseVersion: info.releaseVersion,
 			currentOrgId: info.currentOrgId,
 			privileges: info.privileges,
-			enableSpotterDataSourceDiscovery:
+			isSpotterDataSourceDiscoveryEnabled:
 				info.configInfo?.enableSpotterDataSourceDiscovery,
 			orgsEnabled: info.configInfo?.orgsConfiguration?.enabled,
+			isSpotterChatHistoryEnabled:
+				info.configInfo?.showSpotterPastConversations,
 		};
 	}
 
