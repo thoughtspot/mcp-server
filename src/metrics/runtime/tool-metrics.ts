@@ -24,6 +24,7 @@ export const UPSTREAM_OPERATION_NAMES = {
 	searchObjects: "search_objects",
 	listOrgs: "list_orgs",
 	fetchOrgBearerToken: "fetch_org_bearer_token",
+	fetchData: "fetch_data",
 } as const;
 
 export type UpstreamOperation =

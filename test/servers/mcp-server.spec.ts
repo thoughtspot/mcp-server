@@ -143,6 +143,22 @@ describe("MCP Server", () => {
 				next_cursor: null,
 				request_id: "req-1",
 			}),
+			fetchData: vi.fn().mockResolvedValue({
+				id: "answer-123",
+				name: "Sales by Region",
+				type: "ANSWER",
+				description: "Revenue broken down by region",
+				data: [
+					{
+						viz_id: undefined,
+						columns: ["Region", "Revenue"],
+						data_rows: [["East", "1200000"]],
+						total_row_count: 1,
+						row_count: 1,
+					},
+				],
+				request_id: "req-2",
+			}),
 			instanceUrl: "https://test.thoughtspot.cloud",
 		} as any);
 
@@ -198,10 +214,11 @@ describe("MCP Server", () => {
 
 			const result = await listTools();
 
-			// V2 tools (latest version): 6 tools
-			expect(result.tools).toHaveLength(6);
+			// V2 tools (latest version): 7 tools
+			expect(result.tools).toHaveLength(7);
 			expect(result.tools?.map((t) => t.name)).toEqual([
 				"search_objects",
+				"fetch_data",
 				"check_connectivity",
 				"create_analysis_session",
 				"send_session_message",
@@ -236,7 +253,7 @@ describe("MCP Server", () => {
 			);
 		});
 
-		it("should return 6 tools regardless of enableSpotterDataSourceDiscovery when using latest (V2)", async () => {
+		it("should return 7 tools regardless of enableSpotterDataSourceDiscovery when using latest (V2)", async () => {
 			// Mock getThoughtSpotClient with enableSpotterDataSourceDiscovery set to false
 			vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
 				getSessionInfo: vi.fn().mockResolvedValue({
@@ -270,9 +287,10 @@ describe("MCP Server", () => {
 			const result = await listTools();
 
 			// V2 tools don't have a datasource discovery tool, so filtering has no effect
-			expect(result.tools).toHaveLength(6);
+			expect(result.tools).toHaveLength(7);
 			expect(result.tools?.map((t) => t.name)).toEqual([
 				"search_objects",
+				"fetch_data",
 				"check_connectivity",
 				"create_analysis_session",
 				"send_session_message",
@@ -501,6 +519,59 @@ describe("MCP Server", () => {
 			// Surfaces the upstream error message so the failure is actionable.
 			expect((result.content as any[])[0].text).toMatch(
 				/Failed to search objects: upstream boom/,
+			);
+		});
+	});
+
+	describe("Fetch Data Tool", () => {
+		it("should return the object's data shaped to its type", async () => {
+			await server.init();
+			const { callTool } = connect(server);
+
+			const result = await callTool("fetch_data", { object_id: "answer-123" });
+
+			expect(result.isError).toBeUndefined();
+			const structured = result.structuredContent as any;
+			expect(structured).toMatchObject({
+				id: "answer-123",
+				name: "Sales by Region",
+				type: "ANSWER",
+				request_id: "req-2",
+			});
+			expect(structured.data).toHaveLength(1);
+			expect(structured.data[0].columns).toEqual(["Region", "Revenue"]);
+		});
+
+		it("should pass object_id and max_rows through to the client", async () => {
+			await server.init();
+			const { callTool } = connect(server);
+
+			const client = thoughtspotClient.getThoughtSpotClient(
+				"https://test.thoughtspot.cloud",
+				"test-access-token",
+			);
+
+			await callTool("fetch_data", { object_id: "answer-123", max_rows: 50 });
+
+			expect((client as any).fetchData).toHaveBeenCalledWith(
+				expect.objectContaining({ objectId: "answer-123", maxRows: 50 }),
+			);
+		});
+
+		it("should return an error response when the fetch fails", async () => {
+			vi.spyOn(ThoughtSpotService.prototype, "fetchData").mockRejectedValueOnce(
+				new Error("upstream boom"),
+			);
+
+			await server.init();
+			const { callTool } = connect(server);
+
+			const result = await callTool("fetch_data", { object_id: "answer-123" });
+
+			expect(result.isError).toBe(true);
+			// Surfaces the upstream error message so the failure is actionable.
+			expect((result.content as any[])[0].text).toMatch(
+				/Failed to fetch object data: upstream boom/,
 			);
 		});
 	});
