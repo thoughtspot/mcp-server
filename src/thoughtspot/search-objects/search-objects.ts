@@ -1,5 +1,11 @@
 import { resolveObjectTypeFacets } from "../object-types";
 import { buildHeaders, generateRequestId, postJson } from "../rest-utils";
+import {
+	DEFAULT_SEARCH_LIMIT,
+	MAX_PAGES,
+	MAX_PINBOARD_VIZ_COUNT,
+	POST_FILTERING_TIME_LIMIT,
+} from "./search-objects-constants";
 import { toHeader, toResult } from "./search-objects-mapper";
 import { searchObjectsQuery } from "./search-objects-query";
 import type {
@@ -27,7 +33,7 @@ export function addSearchObjects(
 			tag,
 			modifiedSince,
 			verifiedOnly,
-			limit = 10,
+			limit = DEFAULT_SEARCH_LIMIT,
 		} = params;
 
 		// Not expressible in the Eureka schema; applied per fetched page below.
@@ -73,7 +79,7 @@ export function addSearchObjects(
 							// STICKERS facet lets tag ids resolve to names.
 							desiredFacets: [{ facetType: "STICKERS", facetValue: [] }],
 							facetSelections,
-							maxPinboardVizCount: 5,
+							maxPinboardVizCount: MAX_PINBOARD_VIZ_COUNT,
 							filterSelections: [],
 							offset: pageOffset,
 							query,
@@ -174,8 +180,10 @@ export function addSearchObjects(
 			const startOffset = rawOffset;
 
 			// Accumulate pages so post-filters can't return a short page while
-			// matches remain; the page cap bounds upstream calls.
-			const MAX_PAGES = 20;
+			// matches remain; a page cap AND a wall-clock budget bound the loop so
+			// a sparse filter can never fan out into an unbounded number of/too-slow
+			// upstream calls.
+			const startedAt = Date.now();
 			let objects: SearchObjectHeader[] = [];
 			let pageOffset = startOffset;
 			let hasMorePages = false;
@@ -199,12 +207,13 @@ export function addSearchObjects(
 				hasPostFilters &&
 				objects.length < limit &&
 				hasMorePages &&
-				pages < MAX_PAGES
+				pages < MAX_PAGES &&
+				Date.now() - startedAt < POST_FILTERING_TIME_LIMIT
 			);
 
 			if (hasPostFilters && objects.length < limit && hasMorePages) {
 				console.warn(
-					`searchObjects: stopped after ${MAX_PAGES} pages with ${objects.length}/${limit} matches; more may exist (continue via next_cursor).`,
+					`searchObjects: stopped after ${pages} page(s)/${Date.now() - startedAt}ms with ${objects.length}/${limit} matches; more may exist (continue via next_cursor).`,
 				);
 			}
 

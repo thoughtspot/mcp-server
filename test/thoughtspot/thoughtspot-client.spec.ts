@@ -1595,7 +1595,7 @@ describe("ThoughtSpot Client", () => {
 			expect(result.results).toEqual([]);
 			expect(result.next_cursor).toBeNull();
 			expect(warnSpy).toHaveBeenCalledWith(
-				expect.stringContaining("stopped after 20 pages"),
+				expect.stringContaining("stopped after 20 page"),
 			);
 			warnSpy.mockRestore();
 		});

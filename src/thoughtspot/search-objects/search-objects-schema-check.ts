@@ -4,11 +4,11 @@
 // schema mismatch without needing a schema registry.
 
 import { buildHeaders, generateRequestId } from "../rest-utils";
+import {
+	MAX_PINBOARD_VIZ_COUNT,
+	SCHEMA_CHECK_TIMEOUT_MS,
+} from "./search-objects-constants";
 import { searchObjectsQuery } from "./search-objects-query";
-
-// Hard cap on the check so a slow/hung endpoint never stalls startup — the check
-// resolves to "unknown" if it exceeds this.
-const SCHEMA_CHECK_TIMEOUT_MS = 10_000;
 
 // Outcome of the init-time schema check:
 //  - "ok":      got a well-formed response in the shape the mapper expects.
@@ -92,7 +92,7 @@ async function runSchemaCheck(
 						batchSize: 1,
 						desiredFacets: [{ facetType: "STICKERS", facetValue: [] }],
 						facetSelections: [],
-						maxPinboardVizCount: 5,
+						maxPinboardVizCount: MAX_PINBOARD_VIZ_COUNT,
 						filterSelections: [],
 						offset: 0,
 						query: "a",
