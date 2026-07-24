@@ -13,6 +13,7 @@ import {
 } from "../metrics/runtime/metrics-recorder";
 import type { ToolMetricApiSurface } from "../metrics/runtime/tool-metrics";
 import { WithSpan } from "../metrics/tracing/tracing-utils";
+import { verifySearchObjectsSchema } from "../thoughtspot/search-objects/search-objects-schema-check";
 import type {
 	DataSource,
 	ThoughtSpotService,
@@ -50,6 +51,10 @@ export class MCPServer extends BaseMCPServer {
 	private globalToken: string | undefined;
 	// False for pre-multi-org grants (no refresh token) — keeps old behavior until re-auth.
 	private grantHasRefreshToken = false;
+	// Init-time search_objects schema check. If it confirms
+	// the query drifted from the live Eureka schema, search_objects is not listed.
+	private static searchSchemaChecked = false;
+	private static searchObjectsDisabled = false;
 
 	constructor(ctx: Context) {
 		super(ctx, "ThoughtSpot", "2.0.0");
@@ -137,7 +142,33 @@ export class MCPServer extends BaseMCPServer {
 		await this.setActiveOrg(this.activeOrgId, orgToken);
 	}
 
+	// verify the search_objects query still matches the liveEureka schema.
+	// Fully isolated in its own try/catch so it can never break init or any other tool.
+	private async checkSearchObjectsSchema(): Promise<void> {
+		if (MCPServer.searchSchemaChecked) {
+			return;
+		}
+		const { instanceUrl, accessToken } = this.ctx.props;
+		if (!instanceUrl || !accessToken) {
+			return;
+		}
+		MCPServer.searchSchemaChecked = true;
+		try {
+			const result = await verifySearchObjectsSchema(instanceUrl, accessToken);
+			if (result === "drift") {
+				MCPServer.searchObjectsDisabled = true;
+				console.warn(
+					"search_objects tool not loaded: its GraphQL query does not match the live Eureka schema (schema mismatch).",
+				);
+			}
+		} catch (error) {
+			console.error("search_objects schema check errored:", error);
+		}
+	}
+
 	protected async postInit(): Promise<void> {
+		await this.checkSearchObjectsSchema();
+
 		if (this.ctx.props.authMode !== "oauth") {
 			return;
 		}
@@ -375,6 +406,12 @@ export class MCPServer extends BaseMCPServer {
 				(tool) =>
 					tool.name !== ToolName.ListOrgs && tool.name !== ToolName.SwitchOrg,
 			);
+		}
+
+		// Drop search_objects when the init-time check confirmed its query no
+		// longer matches the live Eureka schema (see postInit).
+		if (MCPServer.searchObjectsDisabled) {
+			tools = tools.filter((tool) => tool.name !== ToolName.SearchObjects);
 		}
 
 		return { tools };
@@ -965,8 +1002,9 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 				cursor,
 			});
 
-			// no_results and error are returned as structured content (not a
-			// protocol error) so the model gets the typed envelope to render.
+			// Return no_results and error as normal structured content (not an MCP
+			// protocol error) so the model still receives the structured response
+			// and can relay the outcome to the user.
 			const statusMessage =
 				"status" in result
 					? result.status === "error"
