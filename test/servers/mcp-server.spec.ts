@@ -120,7 +120,7 @@ describe("MCP Server", () => {
 						tags: [],
 						last_modified: "2023-11-14T22:13:20.000Z",
 						verified: true,
-						frame_url:
+						external_link:
 							"https://test.thoughtspot.cloud/#/saved-answer/answer-123",
 						query: "sales by region",
 						confidence: 0.95,
@@ -134,14 +134,13 @@ describe("MCP Server", () => {
 						tags: [],
 						last_modified: "2023-11-14T22:13:21.000Z",
 						verified: false,
-						frame_url:
+						external_link:
 							"https://test.thoughtspot.cloud/#/pinboard/liveboard-456",
 						query: null,
 						confidence: 0.82,
 					},
 				],
 				next_cursor: null,
-				request_id: "req-1",
 			}),
 			instanceUrl: "https://test.thoughtspot.cloud",
 		} as any);
@@ -279,6 +278,40 @@ describe("MCP Server", () => {
 				"get_session_updates",
 				"create_dashboard",
 			]);
+		});
+
+		it("drops search_objects when the init schema check detects drift", async () => {
+			const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+			// Force the one-time check to re-run and return a validation error.
+			(MCPServer as any).searchSchemaChecked = false;
+			(MCPServer as any).searchObjectsDisabled = false;
+			vi.stubGlobal(
+				"fetch",
+				vi.fn().mockResolvedValueOnce({
+					status: 400,
+					json: async () => ({
+						errors: [
+							{
+								message: 'Cannot query field "sageQuery".',
+								extensions: { code: "GRAPHQL_VALIDATION_FAILED" },
+							},
+						],
+					}),
+				}),
+			);
+
+			const drifted = new MCPServer({ props: mockProps, env: {} as any });
+			await drifted.init();
+			const { listTools } = connect(drifted);
+			const result = await listTools();
+
+			expect(result.tools?.map((t) => t.name)).not.toContain("search_objects");
+
+			// Restore isolate state so later tests see a clean, already-checked flag.
+			(MCPServer as any).searchObjectsDisabled = false;
+			(MCPServer as any).searchSchemaChecked = true;
+			vi.unstubAllGlobals();
+			warn.mockRestore();
 		});
 	});
 
@@ -437,7 +470,6 @@ describe("MCP Server", () => {
 			expect(result.isError).toBeUndefined();
 			const structured = result.structuredContent as any;
 			expect(structured.next_cursor).toBeNull();
-			expect(structured.request_id).toBe("req-1");
 			const objects = structured.results;
 			expect(objects).toHaveLength(2);
 			expect(objects[0]).toMatchObject({
@@ -446,7 +478,8 @@ describe("MCP Server", () => {
 				type: "ANSWER",
 				author_name: "test-user",
 				verified: true,
-				frame_url: "https://test.thoughtspot.cloud/#/saved-answer/answer-123",
+				external_link:
+					"https://test.thoughtspot.cloud/#/saved-answer/answer-123",
 			});
 			expect(objects[1].object_id).toBe("liveboard-456");
 		});

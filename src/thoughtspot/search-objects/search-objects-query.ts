@@ -1,5 +1,9 @@
 // GraphQL query for the private Eureka object search (no public REST equivalent),
 // trimmed to the fields the search_objects mapper actually reads.
+//
+// LIMITATION: this is a hand-maintained copy. There is no shared source of truth
+// between Eureka's (federated) GraphQL schema and this query, so it can silently
+// drift if Eureka changes.
 export const searchObjectsQuery = `
 query GetEurekaResults($params: Input_eureka_SearchRequest) {
   queryRequest(request: $params) {

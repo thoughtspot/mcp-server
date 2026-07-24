@@ -15,7 +15,7 @@ export interface SearchObjectHeader {
 	tags: string[];
 	last_modified?: number;
 	verified: boolean;
-	frame_url: string;
+	external_link: string;
 	// Sage/TML tokens for Answers/vizzes; null for Liveboards (spec rule).
 	query: string | null;
 	confidence: number;
@@ -29,12 +29,13 @@ export interface SearchObjectResult {
 	// UPPER-case enum: LIVEBOARD | ANSWER | WORKSHEET (viz collapses to LIVEBOARD).
 	type: string;
 	author_name: string;
-	description: string | null;
+	// Omitted when the object has no description.
+	description?: string;
 	tags: string[];
-	// ISO-8601, or null when the backend exposes no modification time.
-	last_modified: string | null;
+	// ISO-8601; omitted when the backend exposes no modification time.
+	last_modified?: string;
 	verified: boolean;
-	frame_url: string;
+	external_link: string;
 	query: string | null;
 	confidence: number;
 }
@@ -61,7 +62,6 @@ export interface RawSearchResult {
 export interface SearchObjectsResult {
 	results: SearchObjectResult[];
 	next_cursor: string | null;
-	request_id: string;
 }
 
 // Typed error codes for the error envelope (Slack contract 2026-07-09).
@@ -76,9 +76,7 @@ export type SearchErrorCode =
 export interface SearchObjectsNoResults {
 	status: "no_results";
 	results: SearchObjectResult[];
-	message: string;
 	next_cursor: null;
-	request_id: string;
 }
 
 // Couldn't return data.
@@ -90,7 +88,6 @@ export interface SearchObjectsError {
 		message: string;
 		retryable: boolean;
 	};
-	request_id: string;
 }
 
 // The three scenarios the handler can return.

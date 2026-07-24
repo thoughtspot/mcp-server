@@ -138,21 +138,23 @@ const SearchObjectResultSchema = z.object({
 		.describe("The display name of the user who authored the object."),
 	description: z
 		.string()
-		.nullable()
-		.describe("The description of the object, or null when it has none."),
+		.optional()
+		.describe("The description of the object; omitted when it has none."),
 	tags: z
 		.array(z.string())
 		.describe("The names of the tags/stickers applied to the object."),
 	last_modified: z
 		.string()
-		.nullable()
+		.optional()
 		.describe(
-			"ISO-8601 timestamp of the last modification (e.g. 2026-05-15T14:30:00Z), or null when unavailable. Render as a plain date.",
+			"ISO-8601 timestamp of the last modification (e.g. 2026-05-15T14:30:00Z); omitted when unavailable. Render as a plain date.",
 		),
 	verified: z.boolean().describe("Whether the object is marked as verified."),
-	frame_url: z
+	external_link: z
 		.string()
-		.describe("Deep link to open the object in the ThoughtSpot UI."),
+		.describe(
+			"Deep link to open the object in the ThoughtSpot UI (opens in a new browser tab; not an embeddable iframe URL).",
+		),
 	query: z
 		.string()
 		.nullable()
@@ -189,12 +191,6 @@ export const SearchObjectsResponseSchema = z.object({
 		.describe(
 			"Cursor to pass back as `cursor` for the next page; null when there are no more results, and omitted on error.",
 		),
-	message: z
-		.string()
-		.optional()
-		.describe(
-			"Present on no_results: human-readable 'nothing matched' note; safe to relay to the user.",
-		),
 	error: z
 		.object({
 			code: z
@@ -215,11 +211,6 @@ export const SearchObjectsResponseSchema = z.object({
 		})
 		.optional()
 		.describe("Present only on error."),
-	request_id: z
-		.string()
-		.describe(
-			"Correlation id sent on the upstream call as x-request-id; trace this in ThoughtSpot's server logs.",
-		),
 });
 
 export const CheckConnectivityInputSchema = z.object({});
@@ -537,18 +528,18 @@ export const toolDefinitionsV2 = [
 	{
 		name: ToolName.SearchObjects,
 		description: [
-			"Search for objects (Answers, Liveboards, Worksheets) in ThoughtSpot matching a given search term. Supports optional filters (types, owner, tag, modified_since, verified_only) and pagination (limit, cursor). Returns `results` (ranked), plus `next_cursor` and `request_id`. Each result carries: object_id, title, type (LIVEBOARD | ANSWER | LIVEBOARD_VIZ | WORKSHEET; LIVEBOARD_VIZ is a viz pinned on a Liveboard — render it as 'Liveboard viz'), author_name, description, tags, last_modified (ISO-8601), verified, frame_url, query (Answer/viz sage tokens; null for Liveboards) and confidence. Returns identifiers and metadata only — never the object's data or contents, and it does not run queries.",
+			"Search for objects (Answers, Liveboards, Worksheets) in ThoughtSpot matching a given search term. Supports optional filters (types, owner, tag, modified_since, verified_only) and pagination (limit, cursor). Returns `results` (ranked), plus `next_cursor`. Each result carries: object_id, title, type (LIVEBOARD | ANSWER | LIVEBOARD_VIZ | WORKSHEET; LIVEBOARD_VIZ is a viz pinned on a Liveboard — render it as 'Liveboard viz'), author_name, description, tags, last_modified (ISO-8601), verified, external_link, query (Answer/viz sage tokens; null for Liveboards) and confidence. Returns identifiers and metadata only — never the object's data or contents, and it does not run queries.",
 			"",
 			"How to present the results:",
-			"• Render as a table with fixed columns in this order: Object (the name, linked to `frame_url`) · Type · Owner · Verified (✓ or —) · Last Modified.",
+			"• Render as a table with fixed columns in this order: Object (the name, linked to `external_link`) · Type · Owner · Verified (✓ or —) · Last Modified.",
 			"• Put the description and, for an Answer/viz, the `query` tokens as sub-lines under the name (e.g. '↳ sales by region, last 3 months') — never as their own columns.",
 			"• Render `last_modified` as a plain date (2026-05-15), never the raw timestamp.",
 			"• Lead with the top match; if the top 2–3 are close, present them as ranked candidates.",
-			"• Never surface `next_cursor`, `request_id`, or the numeric `confidence` in your prose.",
+			"• Never surface `next_cursor` or the numeric `confidence` in your prose.",
 			"",
 			"Outcomes other than a hit list:",
-			'• `status: "no_results"` — the search ran but nothing matched. Relay `message`, and suggest broadening the term or dropping a filter. Do not invent results.',
-			'• `status: "error"` — the search failed. Tell the user briefly using `error.message`; if `error.retryable` is true, offer to try again. Never show `error.code` or `request_id`.',
+			'• `status: "no_results"` — the search ran but nothing matched. Tell the user nothing matched, and suggest broadening the term or dropping a filter. Do not invent results.',
+			'• `status: "error"` — the search failed. Tell the user briefly using `error.message`; if `error.retryable` is true, offer to try again. Never show `error.code`.',
 		].join("\n"),
 		inputSchema: z.toJSONSchema(SearchObjectsInputSchema),
 		outputSchema: z.toJSONSchema(SearchObjectsResponseSchema),

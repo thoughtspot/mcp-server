@@ -906,7 +906,6 @@ describe("ThoughtSpot Client", () => {
 			});
 
 			const body = JSON.parse((fetch as any).mock.calls[0][1].body);
-			const headers = (fetch as any).mock.calls[0][1].headers;
 			expect(body.operationName).toBe("GetEurekaResults");
 			expect(body.variables.params.query).toBe("sales");
 			expect(body.variables.params.batchSize).toBe(5);
@@ -921,7 +920,7 @@ describe("ThoughtSpot Client", () => {
 					tags: ["Finance"],
 					last_modified: new Date(1700000000000).toISOString(),
 					verified: true,
-					frame_url: `${mockInstanceUrl}/#/saved-answer/answer-123`,
+					external_link: `${mockInstanceUrl}/#/saved-answer/answer-123`,
 					query: null, // no sageQuery in this fixture
 					confidence: 0.9,
 				},
@@ -934,14 +933,12 @@ describe("ThoughtSpot Client", () => {
 					tags: [],
 					last_modified: new Date(1700000001000).toISOString(),
 					verified: false,
-					frame_url: `${mockInstanceUrl}/#/insights/pinboard/lb-456`,
+					external_link: `${mockInstanceUrl}/#/insights/pinboard/lb-456`,
 					query: null, // Liveboards always map query -> null
 					confidence: 0.8,
 				},
 			]);
 			expect(result.next_cursor).toBeNull();
-			// request_id is generated client-side and echoed back.
-			expect(result.request_id).toBe(headers["x-request-id"]);
 		});
 
 		it("should generate and send the x-request-id header", async () => {
@@ -952,14 +949,12 @@ describe("ThoughtSpot Client", () => {
 					.mockResolvedValue({ data: { queryRequest: { results: [] } } }),
 			});
 
-			const result = await client.searchObjects({ query: "sales" });
+			await client.searchObjects({ query: "sales" });
 
 			const headers = (fetch as any).mock.calls[0][1].headers;
 			const uuid =
 				/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 			expect(headers["x-request-id"]).toMatch(uuid);
-			// The same id the request was sent with is echoed back to the caller.
-			expect(result.request_id).toBe(headers["x-request-id"]);
 		});
 
 		it("should send server-side facet selections for types and verified_only", async () => {
@@ -1001,7 +996,6 @@ describe("ThoughtSpot Client", () => {
 			expect(body.variables.params.offset).toBe(0);
 			expect(result.results).toEqual([]);
 			expect(result.next_cursor).toBeNull();
-			expect(result.request_id).toBeTruthy();
 		});
 
 		it("should page using the cursor and emit next_cursor on a full page", async () => {
@@ -1205,11 +1199,9 @@ describe("ThoughtSpot Client", () => {
 					title: "",
 					type: "X",
 					author_name: "",
-					description: null,
 					tags: [],
-					last_modified: null,
 					verified: false,
-					frame_url: `${mockInstanceUrl}/#/insights/pinboard/y`,
+					external_link: `${mockInstanceUrl}/#/insights/pinboard/y`,
 					query: null,
 					confidence: 0,
 				},
@@ -1251,7 +1243,7 @@ describe("ThoughtSpot Client", () => {
 			expect(obj.visualization_id).toBe("viz-1");
 			// A viz pinned on a Liveboard is its own type ("Liveboard viz").
 			expect(obj.type).toBe("LIVEBOARD_VIZ");
-			expect(obj.frame_url).toBe(
+			expect(obj.external_link).toBe(
 				`${mockInstanceUrl}/#/insights/pinboard/lb-1/viz-1`,
 			);
 		});
@@ -1287,7 +1279,6 @@ describe("ThoughtSpot Client", () => {
 			expect(result.results).toEqual([]);
 			expect(result.error.code).toBe("INTERNAL");
 			expect(result.error.retryable).toBe(false);
-			expect(typeof result.request_id).toBe("string");
 		});
 
 		it("maps a 401 to an UNAUTHORIZED error envelope", async () => {
@@ -1384,7 +1375,6 @@ describe("ThoughtSpot Client", () => {
 			expect(result.error.retryable).toBe(false);
 			// Never hits the upstream for an empty term.
 			expect((fetch as any).mock.calls.length).toBe(0);
-			expect(typeof result.request_id).toBe("string");
 		});
 
 		it("clamps a negative cursor to offset 0", async () => {
@@ -1499,8 +1489,6 @@ describe("ThoughtSpot Client", () => {
 			expect(result.status).toBe("no_results");
 			expect(result.results).toEqual([]);
 			expect(result.next_cursor).toBeNull();
-			expect(result.message).toContain("nonexistent");
-			expect(typeof result.request_id).toBe("string");
 		});
 
 		it("applies tag as a client-side filter using resolved sticker names", async () => {

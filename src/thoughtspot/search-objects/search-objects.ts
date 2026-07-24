@@ -1,82 +1,15 @@
-import {
-	resolveObjectTypeFacets,
-	resolveResultTypeToCanonical,
-} from "../object-types";
+import { resolveObjectTypeFacets } from "../object-types";
 import { buildHeaders, generateRequestId, postJson } from "../rest-utils";
+import { toHeader, toResult } from "./search-objects-mapper";
 import { searchObjectsQuery } from "./search-objects-query";
 import type {
 	RawSearchResult,
 	SearchErrorCode,
 	SearchObjectHeader,
-	SearchObjectResult,
 	SearchObjectsError,
 	SearchObjectsParams,
 	SearchObjectsResponse,
 } from "./search-objects-types";
-
-// Build a deep link to the object in the ThoughtSpot UI from its result type.
-function buildFrameUrl(
-	instanceUrl: string,
-	resultType: string,
-	id: string,
-	parentId?: string,
-): string {
-	const base = instanceUrl.replace(/\/$/, "");
-	switch (resultType) {
-		case "PINBOARD_VIZ_RESULT":
-			return `${base}/#/insights/pinboard/${parentId ?? id}/${id}`;
-		case "ANSWER_RESULT":
-			return `${base}/#/saved-answer/${id}`;
-		case "WORKSHEET_RESULT":
-		case "LOGICAL_TABLE_RESULT":
-			return `${base}/#/data/tables/${id}`;
-		default:
-			return `${base}/#/insights/pinboard/${id}`;
-	}
-}
-
-// Eureka may report modifiedOn in seconds; normalize to epoch-ms so it matches
-// the epoch-ms `modified_since` filter and the documented output unit.
-function toEpochMs(value: unknown): number | undefined {
-	if (typeof value !== "number" || !Number.isFinite(value)) {
-		return undefined;
-	}
-	return value < 1e12 ? Math.round(value * 1000) : value;
-}
-
-// Sage/TML tokens only carry meaning for Answers and vizzes; Liveboards report
-// a bare GUID here, which the spec maps to null.
-function deriveQuery(resultType: string, sageQuery: unknown): string | null {
-	if (resultType !== "ANSWER_RESULT" && resultType !== "PINBOARD_VIZ_RESULT") {
-		return null;
-	}
-	return typeof sageQuery === "string" && sageQuery.trim() ? sageQuery : null;
-}
-
-// Project the internal working header to the spec-shaped result item:
-// UPPER-case type, ISO-8601 last_modified, drop internal-only fields.
-function toResult(header: SearchObjectHeader): SearchObjectResult {
-	return {
-		object_id: header.id,
-		...(header.visualization_id
-			? { visualization_id: header.visualization_id }
-			: {}),
-		title: header.name,
-		// Emit as an UPPER_SNAKE token, e.g. "Liveboard viz" -> "LIVEBOARD_VIZ".
-		type: header.type.toUpperCase().replace(/\s+/g, "_"),
-		author_name: header.owner,
-		description: header.description,
-		tags: header.tags,
-		last_modified:
-			header.last_modified != null
-				? new Date(header.last_modified).toISOString()
-				: null,
-		verified: header.verified,
-		frame_url: header.frame_url,
-		query: header.query,
-		confidence: header.confidence,
-	};
-}
 
 // Custom handler: no public API for full-text object search; mirrors the UI's
 // Eureka search.
@@ -114,8 +47,6 @@ export function addSearchObjects(
 			facetSelections.push({ facetType: "IS_VERIFIED", facetValue: ["true"] });
 		}
 
-		const endpoint = "/prism/?op=GetEurekaResults";
-
 		// Fetch and map one raw page for a term, applying the post-filters.
 		const fetchPage = async (
 			query: string,
@@ -128,7 +59,7 @@ export function addSearchObjects(
 			totalResults?: number;
 		}> => {
 			const data = (await postJson(
-				`${instanceUrl}${endpoint}`,
+				`${instanceUrl}/prism/?op=GetEurekaResults`,
 				buildHeaders(token, undefined, undefined, {
 					requestId,
 					acceptLanguage: "en-US",
@@ -187,95 +118,22 @@ export function addSearchObjects(
 			}
 
 			let pageObjects: SearchObjectHeader[] = results
-				.map((result: any): SearchObjectHeader | null => {
-					const resultType: string = result?.resultType ?? "";
-
-					// Eureka returns ALL sub-objects on every result; only the one
-					// matching resultType is populated (the rest are empty stubs with
-					// id/title ""). So dispatch strictly on resultType, never on which
-					// sub-object is "present".
-					let id: string | undefined;
-					let visualizationId: string | undefined;
-					let header: any;
-					if (resultType === "PINBOARD_VIZ_RESULT") {
-						// A pinboard-viz hit is fetched via its parent Liveboard, so
-						// surface the Liveboard as `id` (fetch_data resolves it) and the
-						// viz id separately.
-						const viz = result?.searchPinboardViz;
-						header = viz?.answer?.header;
-						id =
-							viz?.pinboardHeader?.id || result?.objectSecurityInfo?.objectId;
-						visualizationId = viz?.answer?.header?.id || undefined;
-					} else if (resultType === "PINBOARD_RESULT") {
-						header = result?.searchPinboard?.header;
-						id = header?.id || result?.objectSecurityInfo?.objectId;
-					} else if (resultType === "ANSWER_RESULT") {
-						header = result?.searchAnswer?.header;
-						id = header?.id || result?.objectSecurityInfo?.objectId;
-					} else if (
-						resultType === "WORKSHEET_RESULT" ||
-						resultType === "LOGICAL_TABLE_RESULT"
-					) {
-						header = result?.searchWorksheet?.header;
-						id = header?.id || result?.objectSecurityInfo?.objectId;
-					} else {
-						// Unknown kind: take whichever sub-header actually carries an id.
-						header =
-							result?.searchAnswer?.header ??
-							result?.searchPinboard?.header ??
-							result?.searchWorksheet?.header;
-						id = header?.id || result?.objectSecurityInfo?.objectId;
-					}
-					// Empty-string ids are stubs, not real ids — drop them.
-					if (!id) {
-						return null;
-					}
-					// Falls back to the raw id when the STICKERS facet carries no name;
-					// a `tag` filter then can't match by name (rare, cluster-dependent).
-					const tags = (header?.tagIds ?? []).map(
-						(tagId: string) => stickerNames[tagId] ?? tagId,
-					);
-					return {
-						id,
-						visualization_id: visualizationId,
-						name: header?.title ?? "",
-						// Canonical type so it round-trips as a `types` filter; raw
-						// backend type is the fallback for unrecognized kinds.
-						type:
-							resolveResultTypeToCanonical(resultType) ??
-							result?.objectSecurityInfo?.objectType ??
-							resultType,
-						owner: header?.authorName ?? "",
-						description: header?.description || null,
-						tags,
-						last_modified: toEpochMs(header?.modifiedOn),
-						verified: header?.isVerified ?? false,
-						frame_url: buildFrameUrl(
-							instanceUrl,
-							resultType,
-							visualizationId ?? id,
-							id,
-						),
-						query: deriveQuery(resultType, result?.sageQuery),
-						// TODO: raw Eureka relevance score; normalization to 0–1 pending.
-						confidence: result?.score ?? 0,
-					};
-				})
+				.map((result: any) => toHeader(result, instanceUrl, stickerNames))
 				.filter(
 					(obj: SearchObjectHeader | null): obj is SearchObjectHeader =>
 						obj !== null,
 				);
 
 			if (owner) {
-				const needle = owner.toLowerCase();
+				const ownerLower = owner.toLowerCase();
 				pageObjects = pageObjects.filter((o) =>
-					o.owner.toLowerCase().includes(needle),
+					o.owner.toLowerCase().includes(ownerLower),
 				);
 			}
 			if (tag) {
-				const needle = tag.toLowerCase();
+				const tagLower = tag.toLowerCase();
 				pageObjects = pageObjects.filter((o) =>
-					o.tags.some((t) => t.toLowerCase().includes(needle)),
+					o.tags.some((t) => t.toLowerCase().includes(tagLower)),
 				);
 			}
 			if (modifiedSince) {
@@ -364,8 +222,7 @@ export function addSearchObjects(
 			};
 		};
 
-		// Minted once for the whole call so it survives a failure (the error
-		// envelope must still carry a request_id).
+		// Minted once and sent upstream as x-request-id for server-side tracing.
 		const requestId = generateRequestId();
 
 		const term = params.query.trim();
@@ -376,7 +233,6 @@ export function addSearchObjects(
 				"INVALID_ARGUMENT",
 				"Provide a non-empty search term.",
 				false,
-				requestId,
 			);
 		}
 
@@ -390,9 +246,7 @@ export function addSearchObjects(
 				return {
 					status: "no_results",
 					results: [],
-					message: `No objects matched ${JSON.stringify(term)}.`,
 					next_cursor: null,
-					request_id: requestId,
 				};
 			}
 
@@ -400,21 +254,17 @@ export function addSearchObjects(
 			return {
 				results,
 				next_cursor: raw.next_cursor,
-				request_id: requestId,
 			};
 		} catch (error) {
-			return classifySearchError(error, requestId);
+			return classifySearchError(error);
 		}
 	};
 }
 
 // Map a thrown search failure to the typed error envelope. Codes are derived
 // from the upstream HTTP status (postJson embeds "status <N>") or the message;
-// `message` is a friendly, safe string — trace specifics via `request_id`.
-function classifySearchError(
-	error: unknown,
-	requestId: string,
-): SearchObjectsError {
+// `message` is a friendly, safe string.
+function classifySearchError(error: unknown): SearchObjectsError {
 	const raw = error instanceof Error ? error.message : String(error);
 	const status = Number(raw.match(/status (\d{3})/)?.[1]);
 
@@ -423,7 +273,6 @@ function classifySearchError(
 			"UNAUTHORIZED",
 			"Not authorized to search ThoughtSpot. Check your session or token.",
 			false,
-			requestId,
 		);
 	}
 	if (status === 429) {
@@ -431,7 +280,6 @@ function classifySearchError(
 			"RATE_LIMITED",
 			"ThoughtSpot rate limit reached. Try again shortly.",
 			true,
-			requestId,
 		);
 	}
 	if (
@@ -445,7 +293,6 @@ function classifySearchError(
 			"UPSTREAM_TIMEOUT",
 			"ThoughtSpot took too long to respond. Try again shortly.",
 			true,
-			requestId,
 		);
 	}
 	if (status >= 500) {
@@ -453,7 +300,6 @@ function classifySearchError(
 			"INTERNAL",
 			"ThoughtSpot hit an error while searching. Try again shortly.",
 			true,
-			requestId,
 		);
 	}
 	// GraphQL/query-level failures and everything else: not transient.
@@ -461,7 +307,6 @@ function classifySearchError(
 		"INTERNAL",
 		"ThoughtSpot could not complete the search.",
 		false,
-		requestId,
 	);
 }
 
@@ -470,12 +315,10 @@ function buildError(
 	code: SearchErrorCode,
 	message: string,
 	retryable: boolean,
-	requestId: string,
 ): SearchObjectsError {
 	return {
 		status: "error",
 		results: [],
 		error: { code, message, retryable },
-		request_id: requestId,
 	};
 }
