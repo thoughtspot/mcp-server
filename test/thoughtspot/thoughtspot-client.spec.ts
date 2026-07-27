@@ -633,6 +633,7 @@ describe("ThoughtSpot Client", () => {
 			expect(body.conv_settings).toEqual({
 				enable_nls: true,
 				enable_why: true,
+				enable_spotql: false,
 				save_chat_enabled: false,
 				enable_tool_permissions: false,
 				enable_search_datasets: true,
