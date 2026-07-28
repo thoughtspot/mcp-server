@@ -273,6 +273,7 @@ function addCreateAgentConversationWithAutoMode(
 				conv_settings: {
 					enable_nls: true,
 					enable_why: true,
+					enable_spotql: false,
 					save_chat_enabled: isSpotterChatHistoryEnabled,
 					enable_tool_permissions: false,
 					enable_search_datasets:
