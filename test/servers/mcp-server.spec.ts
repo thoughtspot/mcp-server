@@ -279,40 +279,6 @@ describe("MCP Server", () => {
 				"create_dashboard",
 			]);
 		});
-
-		it("drops search_objects when the init schema check detects drift", async () => {
-			const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-			// Force the one-time check to re-run and return a validation error.
-			(MCPServer as any).searchSchemaChecked = false;
-			(MCPServer as any).searchObjectsDisabled = false;
-			vi.stubGlobal(
-				"fetch",
-				vi.fn().mockResolvedValueOnce({
-					status: 400,
-					json: async () => ({
-						errors: [
-							{
-								message: 'Cannot query field "sageQuery".',
-								extensions: { code: "GRAPHQL_VALIDATION_FAILED" },
-							},
-						],
-					}),
-				}),
-			);
-
-			const drifted = new MCPServer({ props: mockProps, env: {} as any });
-			await drifted.init();
-			const { listTools } = connect(drifted);
-			const result = await listTools();
-
-			expect(result.tools?.map((t) => t.name)).not.toContain("search_objects");
-
-			// Restore isolate state so later tests see a clean, already-checked flag.
-			(MCPServer as any).searchObjectsDisabled = false;
-			(MCPServer as any).searchSchemaChecked = true;
-			vi.unstubAllGlobals();
-			warn.mockRestore();
-		});
 	});
 
 	describe("Ping Tool", () => {

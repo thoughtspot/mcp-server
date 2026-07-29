@@ -10,7 +10,3 @@ export const MAX_PINBOARD_VIZ_COUNT = 5;
 // filter can't fan out into unbounded/too-slow upstream calls.
 export const MAX_PAGES = 20;
 export const POST_FILTERING_TIME_LIMIT = 15_000; // ms
-
-// Hard cap on the init-time schema check so a slow/hung endpoint never stalls
-// startup — the check resolves to "unknown" if it exceeds this.
-export const SCHEMA_CHECK_TIMEOUT_MS = 10_000;
