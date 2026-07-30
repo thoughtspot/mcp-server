@@ -92,27 +92,30 @@ describe("MCP Server Base", () => {
 	let mockProps: any;
 	let mockStreamingStorage: any;
 
-	const makeSessionInfo = (overrides: any = {}) => ({
-		clusterId: "test-cluster-123",
-		clusterName: "test-cluster",
-		releaseVersion: "10.13.0.cl-110",
-		userGUID: "test-user-123",
-		configInfo: {
-			mixpanelConfig: {
-				devSdkKey: "test-dev-token",
-				prodSdkKey: "test-prod-token",
-				production: false,
+	const makeSessionInfo = (overrides: any = {}) => {
+		const { configInfo: configInfoOverride, ...restOverrides } = overrides;
+		return {
+			clusterId: "test-cluster-123",
+			clusterName: "test-cluster",
+			releaseVersion: "10.13.0.cl-110",
+			userGUID: "test-user-123",
+			configInfo: {
+				mixpanelConfig: {
+					devSdkKey: "test-dev-token",
+					prodSdkKey: "test-prod-token",
+					production: false,
+				},
+				selfClusterName: "test-cluster",
+				selfClusterId: "test-cluster-123",
+				enableSpotterDataSourceDiscovery: true,
+				...configInfoOverride,
 			},
-			selfClusterName: "test-cluster",
-			selfClusterId: "test-cluster-123",
-			enableSpotterDataSourceDiscovery: true,
-			...overrides.configInfo,
-		},
-		userName: "test-user",
-		currentOrgId: "test-org",
-		privileges: [],
-		...overrides,
-	});
+			userName: "test-user",
+			currentOrgId: "test-org",
+			privileges: [],
+			...restOverrides,
+		};
+	};
 
 	beforeEach(() => {
 		vi.clearAllMocks();
@@ -252,9 +255,9 @@ describe("MCP Server Base", () => {
 	});
 
 	describe("Datasource Discovery Check", () => {
-		it("should return false before init is called (sessionInfo not set)", () => {
+		it("should return true before init is called (sessionInfo not set — safe default)", () => {
 			const result = server.testIsSpotterDataSourceDiscoveryEnabled();
-			expect(result).toBe(false);
+			expect(result).toBe(true);
 		});
 
 		it("should return true when enableSpotterDataSourceDiscovery is enabled", async () => {
