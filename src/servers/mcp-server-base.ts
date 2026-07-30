@@ -89,15 +89,21 @@ export abstract class BaseMCPServer extends Server {
 	 * Whether Spotter data source discovery (Auto Mode) is enabled
 	 */
 	protected isSpotterDataSourceDiscoveryEnabled(): boolean {
-		return this.sessionInfo?.isSpotterDataSourceDiscoveryEnabled === true;
+		if (!this.sessionInfo) {
+			console.warn(
+				"Session info not available when checking data source discovery flag",
+			);
+			return true;
+		}
+		return this.sessionInfo.isSpotterDataSourceDiscoveryEnabled === true;
 	}
 
 	/**
-	 * Whether Orgs feature is enabled. If session info is not available, we assume Orgs is
-	 * enabled to ensure the Org-related tools do not disappear.
+	 * Whether Orgs feature is enabled
 	 */
 	protected isOrgsEnabled(): boolean {
 		if (!this.sessionInfo) {
+			console.warn("Session info not available when checking orgs flag");
 			return true;
 		}
 		return this.sessionInfo.orgsEnabled === true;
@@ -107,7 +113,13 @@ export abstract class BaseMCPServer extends Server {
 	 * Whether Spotter chat history (save chat) is enabled
 	 */
 	protected isSpotterChatHistoryEnabled(): boolean {
-		return this.sessionInfo?.isSpotterChatHistoryEnabled === true;
+		if (!this.sessionInfo) {
+			console.warn(
+				"Session info not available when checking chat history flag",
+			);
+			return true;
+		}
+		return this.sessionInfo.isSpotterChatHistoryEnabled === true;
 	}
 
 	/**
