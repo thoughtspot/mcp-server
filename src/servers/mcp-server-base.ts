@@ -127,12 +127,10 @@ export abstract class BaseMCPServer extends Server {
 	 */
 	protected initSpanWithCommonAttributes(): Span | undefined {
 		const span = getActiveSpan();
-		if (this.sessionInfo?.userGUID) {
-			span?.setAttributes({
-				user_guid: this.sessionInfo.userGUID,
-				instance_url: this.ctx.props.instanceUrl,
-			});
-		}
+		span?.setAttributes({
+			user_guid: this.sessionInfo?.userGUID || "unknown",
+			instance_url: this.ctx.props?.instanceUrl || "unknown",
+		});
 		return span;
 	}
 

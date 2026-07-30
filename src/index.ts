@@ -187,7 +187,6 @@ const oauthHandler = {
 		if (span) {
 			span.setAttributes({
 				component: "OAuthProvider",
-				instance_url: (ctx as any).props?.instanceUrl || "unknown",
 				request_url: request.url,
 				request_method: request.method,
 			});
