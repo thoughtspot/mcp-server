@@ -152,6 +152,12 @@ export const ConversationUpdateSchema = z.object({
 		.describe(
 			"A human-readable title describing what the answer shows. Only present when `type` is `answer`.",
 		),
+	answer_data_source_id: z
+		.string()
+		.optional()
+		.describe(
+			"The identifier of the data source which the answer is created on. Only present when `type` is `answer`. You can use this to understand which answers were created with the same data source, or to initiate future conversations using the same data source.",
+		),
 	answer_query: z
 		.string()
 		.optional()
@@ -235,27 +241,155 @@ export const AnswerSchema = z.object({
 		),
 });
 
-export const CreateDashboardInputSchema = z.object({
-	title: z.string().describe("Title of the dashboard to be created."),
-	note_tile: z
-		.string()
+/**
+ * Guidance reused across the dashboard tools. Kept in one place so `create_dashboard` and
+ * `modify_dashboard` describe the same capability the same way.
+ */
+const DESIGN_CONTEXT_GUIDANCE = `Free-form description of how the dashboard should look and be organised. There is no length limit, so pass as much detail as you have: if you are migrating a dashboard from another tool (for example a Tableau workbook), describe its charts, groupings, tabs, ordering and colours here in your own words.
+
+What is worth including, because the dashboard designer acts on it:
+- The data source to use, by name or id. This is the single most important item. Without it the tool will come back asking which data source to use instead of building anything.
+- Grouping and tabs: which charts belong together, and whether they should be split across tabs.
+- Narrative order: what matters most. Key figures and headline metrics are placed top-left first.
+- Chart types per metric, stated literally (for example "revenue by region as a column chart"). Use the user's exact wording for measures and dimensions; it is interpreted literally.
+- Brand colours as hex codes.
+- Any short explanatory text you want on the dashboard. Keep it brief and do not put live figures such as amounts, counts or percentages in it.
+
+What it cannot do, so do not ask for it: changing the chart type of an existing chart (it has to be recreated instead), editing an existing chart's columns or query, and colouring individual data values (for example red for "Churn").`;
+
+/** One line for tools that are not entry points, so the full contract is not sent three times. */
+const RESULT_CONTRACT_BRIEF =
+	"Check `status`: `completed` (give the user `dashboard_url`), `in_progress` (call this again), `needs_input` (`question` says what is needed; answer it via `modify_dashboard` with the same `dashboard_id` and `task_id`), `failed` (see `error`).";
+
+const RESULT_CONTRACT_GUIDANCE = `Check \`status\` on the result and act on it:
+- \`completed\`: the dashboard is saved. Give the user \`dashboard_url\`.
+- \`needs_input\`: the designer needs more detail before it can proceed, and nothing has changed yet. \`question\` holds exactly what it asked, and \`choices\` any options it offered. **It is your decision how to resolve this.** If you can answer it yourself, for example you already know which data source to use or can resolve it from what the user told you earlier, just answer it. Only ask the user when you genuinely cannot. Either way, continue by calling \`modify_dashboard\` with the same \`dashboard_id\` and \`task_id\`, putting the answer in \`instructions\`. Do not abandon the request and do not report it to the user as finished.
+- \`in_progress\`: still working. Call \`get_dashboard_status\` with \`task_id\` to continue, and keep calling it until you get another status.
+- \`failed\`: nothing usable was produced. \`error\` explains why.`;
+
+/**
+ * Shared result shape for the dashboard tools.
+ *
+ * Field prose is deliberately sparse. This schema ships on all three tools, so every sentence here
+ * is sent three times on every request. Anything the status contract in the tool description
+ * already explains (how to use `task_id`, what to do per status) is not repeated here, and fields
+ * whose names say what they are carry no description at all.
+ */
+export const DashboardResultSchema = z.object({
+	status: z
+		.enum(["completed", "in_progress", "needs_input", "failed"])
 		.describe(
-			'Intended to be a summary of the contents of the dashboard. You can fill this with information about the questions asked by the user and the analyses performed to answer those questions. You can include any action items or next steps the user should consider taking. The format for the `note_tile` field is raw unescaped HTML, and can include custom styles, text formatting, and colors. You can include emojis for visual appeal. At the end, you can add a line indicating the date the content was generated. The entire content of the `note_tile` should be in a single line with no line breaks. You can use <br> or CSS styling to add spacing inside the HTML content where needed, but avoid unnecessary whitespace inside the content. Use unescaped raw HTML such as <p> and not &lt;p&gt;. Example content: "<h2>Title of Note Tile</h2><p>Comprehensive summary of questions and answers used to generate the dashboard. Use HTML formatting:<br>- Text styling to highlight <strong>important phrases</strong><br>- 🚀 Emojis for visual appeal<br><br><em style="color: #636e72;">Generated on April 15, 2026</em></p>".',
+			"Outcome of the request. See the tool description for what to do for each value.",
 		),
-	answers: z
-		.array(AnswerSchema)
+	dashboard_id: z.string().optional(),
+	dashboard_url: z.string().optional(),
+	task_id: z.string().optional(),
+	changes_applied: z
+		.boolean()
+		.optional()
 		.describe(
-			"List of answers to add to the dashboard. The order of tiles on the dashboard will match the order of answers in this list (top to bottom, left to right).",
+			"Whether the dashboard actually changed. False with `completed` means the request was understood but changed nothing.",
+		),
+	summary: z.string().optional().describe("What the designer reported."),
+	steps: z.array(z.string()).optional(),
+	events_seen: z
+		.number()
+		.optional()
+		.describe(
+			"Progress so far while `in_progress`. Rising between calls means it is working; stuck at 0 may mean it is not.",
+		),
+	question: z
+		.string()
+		.optional()
+		.describe(
+			"What the designer needs from you when `status` is `needs_input`.",
+		),
+	choices: z
+		.array(z.string())
+		.optional()
+		.describe("Options the designer offered alongside `question`."),
+	error: z.string().optional().describe("Why it failed."),
+});
+
+export const CreateDashboardInputSchema = z
+	.object({
+		title: z.string().describe("Title of the dashboard to be created."),
+		design_context: z.string().optional().describe(DESIGN_CONTEXT_GUIDANCE),
+		data_source_id: z
+			.string()
+			.optional()
+			.describe(
+				'Id of the data source to build new charts from, in the format "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx". Required when you do not pass `answers`, because the charts have to be created from somewhere. If you only know the data source name, use `get_data_source_suggestions` to resolve it, or name it inside `design_context`.',
+			),
+		answers: z
+			.array(AnswerSchema)
+			.optional()
+			.describe(
+				"List of answers to add to the dashboard, from a prior analysis. Omit this when you have no answers yet and want the charts built from `design_context` instead, in which case you must pass `data_source_id`.",
+			),
+		skip_layout: z
+			.boolean()
+			.optional()
+			.describe(
+				"Set true to skip organising and styling, returning as soon as the answers are assembled. The result is a plain uniform grid in the order of `answers`, so only use this when the user explicitly wants the raw dashboard quickly and does not care how it looks.",
+			),
+	})
+	.refine((d) => (d.answers && d.answers.length > 0) || d.design_context, {
+		message:
+			"Provide `answers` from a prior analysis, or `design_context` describing the dashboard to build, or both.",
+	})
+	.refine((d) => (d.answers && d.answers.length > 0) || d.data_source_id, {
+		message:
+			"`data_source_id` is required when `answers` is not provided, because the charts have to be created from a data source.",
+	});
+
+export const CreateDashboardOutputSchema = DashboardResultSchema.extend({
+	link: z
+		.string()
+		.optional()
+		.describe(
+			"A URL link to the created dashboard. Retained for backwards compatibility; prefer `dashboard_url`.",
 		),
 });
 
-export const CreateDashboardOutputSchema = z.object({
-	link: z
+export const ModifyDashboardInputSchema = z.object({
+	dashboard_id: z
 		.string()
+		.min(1)
 		.describe(
-			"A URL link to the created dashboard. You can provide this link to the user to view the dashboard.",
+			'Id of the dashboard to change, in the format "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx". Always required, including when continuing earlier work with `task_id`, so that every call states which dashboard it is changing. If you do not have the id, ask the user for it or for the dashboard link, which ends in `/pinboard/<id>`. Do not guess it and do not pass a dashboard name here.',
+		),
+	task_id: z
+		.string()
+		.optional()
+		.describe(
+			"Handle returned by a previous `create_dashboard` or `modify_dashboard` call. Pass it alongside `dashboard_id` to answer a question the designer asked, or to send a follow-up instruction, which keeps the earlier context. Omit it to start a fresh change. It must belong to the same `dashboard_id`.",
+		),
+	instructions: z
+		.string()
+		.min(1)
+		.describe(
+			"What to change, in plain language. This can be a layout or styling change, a request to add new charts, or an answer to a question the designer asked you. Include the same kind of detail described for `design_context` on `create_dashboard`, and name the data source when the change needs new charts.",
+		),
+	data_source_id: z
+		.string()
+		.optional()
+		.describe(
+			"Id of the data source to use if the change requires new charts. Without it, a request that needs new charts will come back asking which data source to use.",
 		),
 });
+
+export const ModifyDashboardOutputSchema = DashboardResultSchema;
+
+export const GetDashboardStatusInputSchema = z.object({
+	task_id: z
+		.string()
+		.describe(
+			"The `task_id` returned by `create_dashboard` or `modify_dashboard` when `status` was `in_progress`.",
+		),
+});
+
+export const GetDashboardStatusOutputSchema = DashboardResultSchema;
 
 export const SpotterVizCreateSessionInputSchema = z
 	.object({
@@ -375,6 +509,41 @@ export const SpotterVizSaveLiveboardOutputSchema = z.object({
 		),
 });
 
+export const ListOrgsInputSchema = z.object({});
+
+export const ListOrgsOutputSchema = z.object({
+	orgs: z
+		.array(
+			z.object({
+				id: z.number().describe("Unique identifier of the Org."),
+				name: z.string().describe("Name of the Org."),
+				description: z.string().optional().describe("Description of the Org."),
+				is_active: z
+					.boolean()
+					.optional()
+					.describe(
+						"Present and true only for the Org currently active for your account. Absent for all other Orgs. Tool calls operate against the active Org.",
+					),
+			}),
+		)
+		.describe("The list of Orgs the user can access."),
+});
+
+export const SwitchOrgInputSchema = z.object({
+	org_id: z
+		.number()
+		.describe(
+			"The id of the Org to switch to. Use an `id` returned by `list_orgs`. Subsequent tool calls in this session operate against this Org.",
+		),
+});
+
+export const SwitchOrgOutputSchema = z.object({
+	success: z.boolean().describe("Whether the Org switch was successful."),
+	active_org_id: z
+		.number()
+		.describe("The id of the Org now active for the session."),
+});
+
 export enum ToolName {
 	// V1
 	Ping = "ping",
@@ -388,6 +557,10 @@ export enum ToolName {
 	SendSessionMessage = "send_session_message",
 	GetSessionUpdates = "get_session_updates",
 	CreateDashboard = "create_dashboard",
+	ModifyDashboard = "modify_dashboard",
+	GetDashboardStatus = "get_dashboard_status",
+	ListOrgs = "list_orgs",
+	SwitchOrg = "switch_org",
 	// SpotterViz (Aurora)
 	SpotterVizCreateSession = "spotterviz_create_session",
 	SpotterVizSubmitQuery = "spotterviz_submit_query",
@@ -498,7 +671,7 @@ export const toolDefinitionsV2 = [
 	{
 		name: ToolName.GetSessionUpdates,
 		description:
-			"Get the latest updates from the Analytics Agent. You can call this after `send_session_message` to retrieve the Agent's response. If `is_done` is false, you can call this tool again to continue polling, as the Agent is still generating a response. Even if `is_done` is false, you can use the updates to show status updates or progress to the user, so that they are informed about the ongoing process. An empty `session_updates` list while `is_done` is false is normal; it means the Agent is still thinking. When `is_done` is true, the Agent has finished and the results in `session_updates` are complete, so you can present them to the user. You can also send a follow-up message in the same session after `is_done` is true.",
+			"Get the latest updates from the Analytics Agent. You can call this after `send_session_message` to retrieve the Agent's response. If `is_done` is false, you can call this tool again to continue polling, as the Agent is still generating a response. Even if `is_done` is false, you can use the updates to show status updates or progress to the user, so that they are informed about the ongoing process. An empty `session_updates` list while `is_done` is false is normal; it means the Agent is still thinking. When `is_done` is true, the Agent has finished and the results in `session_updates` are complete, so you can present them to the user. You can also send a follow-up message in the same session after `is_done` is true. If the completed response indicates that no data or no results were found, AND the `list_orgs` tool is available to you, the requested data may live in a different org or the user may not have access to it in the current org: tell the user this and that they can call `list_orgs` to see their orgs (the active one is marked `is_active`) and `switch_org` to switch to another org, then retry. If `list_orgs` is not available, do not mention orgs.",
 		inputSchema: z.toJSONSchema(GetSessionUpdatesInputSchema),
 		outputSchema: z.toJSONSchema(GetSessionUpdatesOutputSchema),
 		annotations: {
@@ -510,8 +683,15 @@ export const toolDefinitionsV2 = [
 	},
 	{
 		name: ToolName.CreateDashboard,
-		description:
-			"Create a dashboard from a list of answers, allowing the user to revisit the results later. You can use this if the user asks for a dashboard or liveboard, or asks to save the results from the analysis. This can be a useful way to save the results to revisit later, or present them to other users. After creating the dashboard, always call `spotterviz_create_session` with the returned `liveboard_id` as `existing_liveboard_id` to apply layout and styling improvements via SpotterViz.",
+		description: `Create a dashboard, organise it, and save it, so the user can revisit the results later or share them with others. Use this whenever the user asks for a dashboard or a liveboard, asks to save the results of an analysis, or asks to recreate a dashboard they have elsewhere.
+
+There are two ways to call it, and you can combine them:
+1. From analysis you already did: pass \`answers\` from \`get_session_updates\`. The charts you already have are assembled into a dashboard.
+2. From a description: pass \`design_context\` describing the dashboard you want, plus \`data_source_id\`. The charts are created for you. Use this when the user has a template, a spec, or a dashboard from another tool (for example a Tableau workbook) that they want recreated.
+
+**The dashboard is always organised and styled before it is saved**, so what you get back is presentable rather than a plain grid. Add \`design_context\` when the user has preferences about how it should look; leave it out and sensible choices are made for you. Because this includes a design pass, it can take a few minutes and may return before it is finished.
+
+${RESULT_CONTRACT_GUIDANCE}`,
 		inputSchema: z.toJSONSchema(CreateDashboardInputSchema),
 		outputSchema: z.toJSONSchema(CreateDashboardOutputSchema),
 		annotations: {
@@ -522,9 +702,45 @@ export const toolDefinitionsV2 = [
 		},
 	},
 	{
+		name: ToolName.ModifyDashboard,
+		description: `Change an existing dashboard. It can rearrange and restyle what is already there, add new charts, add short explanatory text, and organise charts into groups or tabs.
+
+\`dashboard_id\` is always required, so that every call says which dashboard it is changing. Add \`task_id\` as well to continue something you already started, which is how you answer a question the designer asked you or send a follow-up instruction about the same dashboard.
+
+Describe the change in \`instructions\` in plain language, and be specific: vague requests come back as questions rather than changes. If the change needs new charts, name the data source or pass \`data_source_id\`.
+
+Changes are saved to the user's real dashboard automatically as they are made, so only call this when the user has asked for the dashboard to change. Changing a dashboard can take a few minutes, so this may return before it is finished.
+
+${RESULT_CONTRACT_GUIDANCE}`,
+		inputSchema: z.toJSONSchema(ModifyDashboardInputSchema),
+		outputSchema: z.toJSONSchema(ModifyDashboardOutputSchema),
+		annotations: {
+			title: "Modify Dashboard",
+			readOnlyHint: false,
+			destructiveHint: false,
+			openWorldHint: false,
+		},
+	},
+	{
+		name: ToolName.GetDashboardStatus,
+		description: `Continue waiting for a dashboard that is still being built or changed. Call this when \`create_dashboard\` or \`modify_dashboard\` returned \`status: "in_progress"\`, passing the \`task_id\` they gave you.
+
+Each call waits a short while before returning, so calling it repeatedly is the correct way to wait. Keep calling until \`status\` is \`completed\`, \`needs_input\` or \`failed\`. Do not abandon a task after one \`in_progress\` result, and do not start a new \`create_dashboard\` or \`modify_dashboard\` call for the same work, or you will create duplicate dashboards.
+
+${RESULT_CONTRACT_BRIEF}`,
+		inputSchema: z.toJSONSchema(GetDashboardStatusInputSchema),
+		outputSchema: z.toJSONSchema(GetDashboardStatusOutputSchema),
+		annotations: {
+			title: "Get Dashboard Status",
+			readOnlyHint: true,
+			destructiveHint: false,
+			openWorldHint: false,
+		},
+	},
+	{
 		name: ToolName.SpotterVizCreateSession,
 		description:
-			"Start a SpotterViz session. SpotterViz is a layout and styling agent — it does NOT generate new analytical charts or answers. If the user wants a dashboard with data, always use Spotter3 tools first (`create_analysis_session` → `send_session_message` → `get_session_updates` → `create_dashboard`) to generate the charts, then call this tool with `existing_liveboard_id` set to the `liveboard_id` returned by `create_dashboard`. Exactly one of `new_liveboard_name` or `existing_liveboard_id` must be provided. Use `existing_liveboard_id` when you have a liveboard from a prior `create_dashboard` call — SpotterViz will apply layout and styling to those existing charts. Use `new_liveboard_name` only for a blank-canvas scenario where the user explicitly wants no analytical content. The returned `spotterviz_session_id` is the identifier for follow-up SpotterViz tools.",
+			"DEPRECATED and no longer listed: use `create_dashboard` and `modify_dashboard` instead, which do this in a single call. Low-level session primitive kept only for existing callers. Opens a SpotterViz session against a new or existing liveboard; exactly one of `new_liveboard_name` or `existing_liveboard_id` must be provided. The returned `spotterviz_session_id` is the identifier for the other `spotterviz_*` tools.",
 		inputSchema: z.toJSONSchema(SpotterVizCreateSessionInputSchema),
 		outputSchema: z.toJSONSchema(SpotterVizCreateSessionOutputSchema),
 		annotations: {
@@ -537,7 +753,7 @@ export const toolDefinitionsV2 = [
 	{
 		name: ToolName.SpotterVizSubmitQuery,
 		description:
-			"Submit a styling prompt to an existing SpotterViz session. Keep the prompt short and vague — SpotterViz is capable of making good layout and styling decisions autonomously. A simple prompt like 'organize and beautify this dashboard' is preferred over specifying exact arrangements. Only include specific styling or layout instructions if the user has explicitly asked for them (e.g. the user said 'put the revenue chart first' or 'use a dark theme'). Do NOT send analytical questions or requests to create new charts; SpotterViz cannot generate analytical content. If new analysis is needed, use the Spotter3 tools (`create_analysis_session`, `send_session_message`, `get_session_updates`) instead. The SpotterViz agent streams its response asynchronously, so this tool returns immediately once streaming starts — poll `spotterviz_get_updates` to retrieve the response. Do not call this again on the same `spotterviz_session_id` until the previous turn has finished (i.e. `spotterviz_get_updates` returns the turn-done signal); calling it concurrently will be rejected.",
+			"DEPRECATED and no longer listed: use `create_dashboard` and `modify_dashboard` instead, which do this in a single call. Low-level session primitive kept only for existing callers. Submits a prompt to an existing SpotterViz session; it can restyle and rearrange a liveboard and can also create new answers on it. The response streams asynchronously, so this returns as soon as streaming starts; poll `spotterviz_get_updates` for the response. Do not call it again on the same `spotterviz_session_id` until the previous turn is done, or it will be rejected.",
 		inputSchema: z.toJSONSchema(SpotterVizSubmitQueryInputSchema),
 		outputSchema: z.toJSONSchema(SpotterVizSubmitQueryOutputSchema),
 		annotations: {
@@ -561,6 +777,19 @@ export const toolDefinitionsV2 = [
 		},
 	},
 	{
+		name: ToolName.ListOrgs,
+		description:
+			"List the Orgs the authenticated user can access on the ThoughtSpot instance, including the ID, name, and description of each Org. The Org marked `is_active: true` is the one currently active for your account, which all tool calls operate against. Use this to tell the user which Org they are in. Only available when authenticated via OAuth. If the list is large , summarize or show only the most relevant orgs (e.g. the active one and a few others) rather than listing all of them, unless the user explicitly asks to see all orgs.",
+		inputSchema: z.toJSONSchema(ListOrgsInputSchema),
+		outputSchema: z.toJSONSchema(ListOrgsOutputSchema),
+		annotations: {
+			title: "List Orgs",
+			readOnlyHint: true,
+			destructiveHint: false,
+			openWorldHint: false,
+		},
+	},
+	{
 		name: ToolName.SpotterVizSaveLiveboard,
 		description:
 			"Persist the current state of the SpotterViz session's liveboard back to ThoughtSpot. Always call this after `spotterviz_get_updates` returns `is_done: true` — do not end the SpotterViz flow without saving. The session stays active after saving, so further `spotterviz_submit_query` calls on the same session id continue to work. Returns a `liveboard_url` you must surface to the user as a direct link to the saved liveboard.",
@@ -568,6 +797,19 @@ export const toolDefinitionsV2 = [
 		outputSchema: z.toJSONSchema(SpotterVizSaveLiveboardOutputSchema),
 		annotations: {
 			title: "Save SpotterViz Liveboard",
+			readOnlyHint: false,
+			destructiveHint: false,
+			openWorldHint: false,
+		},
+	},
+	{
+		name: ToolName.SwitchOrg,
+		description:
+			"Switch the active Org. After switching, all subsequent tool calls (analysis sessions, answers, data sources, dashboards) operate against the selected Org. Pass an `org_id` returned by `list_orgs`. If you do not have access to the Org, the switch fails and the active Org is unchanged. The selection is durable and shared across all of your sessions — it persists across reconnects and applies to your other active conversations; it resets only on re-authentication or after prolonged inactivity. Only available when authenticated via OAuth.",
+		inputSchema: z.toJSONSchema(SwitchOrgInputSchema),
+		outputSchema: z.toJSONSchema(SwitchOrgOutputSchema),
+		annotations: {
+			title: "Switch Org",
 			readOnlyHint: false,
 			destructiveHint: false,
 			openWorldHint: false,

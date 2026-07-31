@@ -1,8 +1,14 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { SpanStatusCode } from "@opentelemetry/api";
-import { McpServerError, type Props, putInKV, getFromKV } from "../src/utils";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { instrumentedMCPServer } from "../src/cloudflare-utils";
 import { getActiveSpan } from "../src/metrics/tracing/tracing-utils";
+import {
+	McpServerError,
+	type Props,
+	getFromKV,
+	normalizeClientName,
+	putInKV,
+} from "../src/utils";
 
 // Mock the tracing utils
 vi.mock("../src/metrics/tracing/tracing-utils", () => ({
@@ -39,6 +45,57 @@ describe("utils", () => {
 			expect(props.clientName.clientName).toBe("Test Client");
 			expect(props.clientName.registrationDate).toBe(1234567890);
 			expect(props.hostName).toBe("test-host.com");
+		});
+	});
+
+	describe("normalizeClientName", () => {
+		it("should fill all defaults when clientName is null", () => {
+			const result = normalizeClientName(null);
+
+			expect(result.clientId).toBe("Bearer Token client");
+			expect(result.clientName).toBe("Bearer Token client");
+			expect(typeof result.registrationDate).toBe("number");
+			expect(result.registrationDate).toBeGreaterThan(0);
+		});
+
+		it("should pass through a fully-populated object unchanged", () => {
+			const result = normalizeClientName({
+				clientId: "client-123",
+				clientName: "My Client",
+				registrationDate: 1234567890,
+			});
+
+			expect(result).toEqual({
+				clientId: "client-123",
+				clientName: "My Client",
+				registrationDate: 1234567890,
+			});
+		});
+
+		it("should preserve clientId but default clientName and registrationDate for a ClientInfo lacking them", () => {
+			// ClientInfo has optional clientName and no registrationDate field.
+			const result = normalizeClientName({
+				clientId: "oauth-client-id",
+				redirectUris: ["https://example.com/cb"],
+			} as any);
+
+			expect(result.clientId).toBe("oauth-client-id");
+			expect(result.clientName).toBe("Bearer Token client");
+			expect(typeof result.registrationDate).toBe("number");
+			expect(result.registrationDate).toBeGreaterThan(0);
+		});
+
+		it("should preserve clientId and clientName but generate registrationDate for a ClientInfo", () => {
+			const result = normalizeClientName({
+				clientId: "oauth-client-id",
+				clientName: "Registered App",
+				redirectUris: ["https://example.com/cb"],
+			} as any);
+
+			expect(result.clientId).toBe("oauth-client-id");
+			expect(result.clientName).toBe("Registered App");
+			expect(typeof result.registrationDate).toBe("number");
+			expect(result.registrationDate).toBeGreaterThan(0);
 		});
 	});
 
@@ -311,9 +368,10 @@ describe("utils", () => {
 				const error = new McpServerError("Test error", 400);
 
 				expect(Object.getPrototypeOf(error)).toBe(McpServerError.prototype);
-				expect(Object.getPrototypeOf(Object.getPrototypeOf(error))).toBe(
-					Error.prototype,
-				);
+				// Chain: McpServerError -> PkgMcpServerError -> Error
+				const grandparent = Object.getPrototypeOf(Object.getPrototypeOf(error));
+				const greatGrandparent = Object.getPrototypeOf(grandparent);
+				expect(greatGrandparent).toBe(Error.prototype);
 			});
 		});
 

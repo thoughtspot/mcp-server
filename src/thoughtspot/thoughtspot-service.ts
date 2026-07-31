@@ -15,6 +15,7 @@ import { createRequestMetricsRecorder } from "../metrics/runtime/request-metrics
 import type { MetricsEnvLike } from "../metrics/runtime/runtime-config";
 import {
 	UPSTREAM_OPERATION_NAMES,
+	type UpstreamOperation,
 	observeUpstreamCall,
 	recordUpstreamStreamStartedMetric,
 } from "../metrics/runtime/tool-metrics";
@@ -44,6 +45,13 @@ export class ThoughtSpotService {
 		private client: ThoughtSpotRestApi,
 		private readonly metrics: ThoughtSpotServiceMetricsOptions = {},
 	) {}
+
+	private observeUpstreamCall<T>(
+		operation: UpstreamOperation,
+		call: () => Promise<T>,
+	): Promise<T> {
+		return observeUpstreamCall(this.metrics.recorder, operation, call);
+	}
 
 	private createStreamMetricsRecorder(): MetricsRecorder {
 		const recorder = createRequestMetricsRecorder(this.metrics.metricsEnv);
@@ -291,6 +299,8 @@ export class ThoughtSpotService {
 	 */
 	@WithSpan("create-agent-conversation")
 	async createAgentConversation(
+		isSpotterDataSourceDiscoveryEnabled: boolean,
+		isSpotterChatHistoryEnabled: boolean,
 		dataSourceId?: string,
 	): Promise<AgentConversation> {
 		const span = trace.getSpan(context.active());
@@ -303,6 +313,8 @@ export class ThoughtSpotService {
 				UPSTREAM_OPERATION_NAMES.createAgentConversation,
 				() =>
 					(this.client as any).createAgentConversationWithAutoMode({
+						isSpotterDataSourceDiscoveryEnabled,
+						isSpotterChatHistoryEnabled,
 						dataSourceId,
 					}),
 			);
@@ -513,8 +525,8 @@ export class ThoughtSpotService {
 	async fetchTMLAndCreateLiveboard(
 		title: string,
 		answers: Answer[],
-		noteTileParsedHtml: string,
-	): Promise<{ url?: string; error: Error | null }> {
+		noteTileParsedHtml?: string,
+	): Promise<{ url?: string; liveboardId?: string; error: Error | null }> {
 		const span = getActiveSpan();
 
 		try {
@@ -534,13 +546,10 @@ export class ThoughtSpotService {
 				),
 			);
 
-			// Add note tile first
-			const noteTitle = {
-				id: "Viz_0",
-				note_tile: {
-					html_parsed_string: noteTileParsedHtml,
-				},
-			};
+			// A note tile is only added when the caller supplied content for one.
+			const noteTiles = noteTileParsedHtml
+				? [{ note_tile: { html_parsed_string: noteTileParsedHtml } }]
+				: [];
 
 			// Update answers with TML data to match TML visualization format
 			const visualizationAnswers = answers
@@ -548,7 +557,6 @@ export class ThoughtSpotService {
 					const tml = tmls[idx];
 					if (!tml) return null;
 					return {
-						id: `Viz_${idx + 1}`,
 						answer: {
 							...tml.answer,
 							name: answer.title,
@@ -557,14 +565,23 @@ export class ThoughtSpotService {
 				})
 				.filter((viz) => viz !== null);
 
-			// Combine note tile first, then visualization answers
-			const tiles = [noteTitle, ...visualizationAnswers];
+			// Ids are assigned from final position, because createLiveboard builds the layout's
+			// visualization_id from the array index. Deriving them any other way desyncs the two:
+			// previously the note tile was hardcoded to Viz_0 and answers to Viz_{idx+1}, which
+			// only lined up while a note tile was always present and no answer was ever dropped.
+			const tiles = [...noteTiles, ...visualizationAnswers].map(
+				(tile, idx) => ({
+					id: `Viz_${idx}`,
+					...tile,
+				}),
+			);
 
 			span?.addEvent("create-liveboard");
 
-			const liveboardUrl = await this.createLiveboard(title, tiles);
+			const created = await this.createLiveboardWithId(title, tiles);
 			return {
-				url: liveboardUrl,
+				url: created.url,
+				liveboardId: created.liveboardId,
 				error: null,
 			};
 		} catch (error) {
@@ -643,10 +660,23 @@ export class ThoughtSpotService {
 	}
 
 	/**
-	 * Create liveboard from answers
+	 * Create liveboard from answers. Returns the URL only; prefer
+	 * `createLiveboardWithId` when the caller also needs the liveboard GUID (e.g. to hand the
+	 * liveboard to a follow-up agent turn).
+	 */
+	async createLiveboard(name: string, answers: any[]): Promise<string> {
+		const { url } = await this.createLiveboardWithId(name, answers);
+		return url;
+	}
+
+	/**
+	 * Create liveboard from answers, returning both the URL and the new liveboard's GUID.
 	 */
 	@WithSpan("create-liveboard")
-	async createLiveboard(name: string, answers: any[]): Promise<string> {
+	async createLiveboardWithId(
+		name: string,
+		answers: any[],
+	): Promise<{ url: string; liveboardId: string }> {
 		const span = getActiveSpan();
 		span?.setAttributes({
 			total_answers: answers.length,
@@ -683,12 +713,14 @@ export class ThoughtSpotService {
 				}),
 		);
 
-		const liveboardUrl = `${(this.client as any).instanceUrl}/#/pinboard/${resp[0].response.header.id_guid}`;
+		const liveboardId = resp[0].response.header.id_guid;
+		const liveboardUrl = `${(this.client as any).instanceUrl}/#/pinboard/${liveboardId}`;
+		span?.setAttribute("liveboard_id", liveboardId);
 		span?.setStatus({
 			code: SpanStatusCode.OK,
 			message: "Liveboard created successfully",
 		});
-		return liveboardUrl;
+		return { url: liveboardUrl, liveboardId };
 	}
 
 	/**
@@ -738,11 +770,10 @@ export class ThoughtSpotService {
 	async getSessionInfo(): Promise<SessionInfo> {
 		const span = getActiveSpan();
 
-		const info = await observeUpstreamCall(
-			this.metrics.recorder,
+		const info = (await this.observeUpstreamCall(
 			UPSTREAM_OPERATION_NAMES.getSessionInfo,
 			() => (this.client as any).getSessionInfo(),
-		);
+		)) as any;
 		const devMixpanelToken = info.configInfo.mixpanelConfig.devSdkKey;
 		const prodMixpanelToken = info.configInfo.mixpanelConfig.prodSdkKey;
 		const mixpanelToken = info.configInfo.mixpanelConfig.production
@@ -763,8 +794,11 @@ export class ThoughtSpotService {
 			releaseVersion: info.releaseVersion,
 			currentOrgId: info.currentOrgId,
 			privileges: info.privileges,
-			enableSpotterDataSourceDiscovery:
+			isSpotterDataSourceDiscoveryEnabled:
 				info.configInfo?.enableSpotterDataSourceDiscovery,
+			orgsEnabled: info.configInfo?.orgsConfiguration?.enabled,
+			isSpotterChatHistoryEnabled:
+				info.configInfo?.showSpotterPastConversations,
 		};
 	}
 

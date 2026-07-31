@@ -192,11 +192,13 @@ describe("thoughtspot-service", () => {
 				.mockResolvedValue(mockResponse);
 
 			const service = new ThoughtSpotService(mockClient);
-			const result = await service.createAgentConversation();
+			const result = await service.createAgentConversation(false, false);
 
 			expect(
 				mockClient.createAgentConversationWithAutoMode,
 			).toHaveBeenCalledWith({
+				isSpotterDataSourceDiscoveryEnabled: false,
+				isSpotterChatHistoryEnabled: false,
 				dataSourceId: undefined,
 			});
 			expect(result).toEqual(mockResponse);
@@ -212,11 +214,13 @@ describe("thoughtspot-service", () => {
 				.mockResolvedValue(mockResponse);
 
 			const service = new ThoughtSpotService(mockClient);
-			await service.createAgentConversation("worksheet-123");
+			await service.createAgentConversation(false, false, "worksheet-123");
 
 			expect(
 				mockClient.createAgentConversationWithAutoMode,
 			).toHaveBeenCalledWith({
+				isSpotterDataSourceDiscoveryEnabled: false,
+				isSpotterChatHistoryEnabled: false,
 				dataSourceId: "worksheet-123",
 			});
 		});
@@ -263,7 +267,7 @@ describe("thoughtspot-service", () => {
 					.mockResolvedValueOnce({
 						done: false,
 						value: encoder.encode(
-							'data: [{"type":"text","content":"Hello","metadata":{}}]\n',
+							'data: [{"type":"text","content":"Hello","metadata":{"format":"markdown"}}]\n',
 						),
 					})
 					.mockResolvedValueOnce({ done: true, value: undefined }),
@@ -521,7 +525,7 @@ describe("thoughtspot-service", () => {
 					.mockResolvedValueOnce({
 						done: false,
 						value: encoder.encode(
-							'data: [{"type":"text","content":"The revenue is $1M"}]\n',
+							'data: [{"type":"text","content":"The revenue is $1M","metadata":{"format":"markdown"}}]\n',
 						),
 					})
 					.mockResolvedValueOnce({ done: true, value: undefined }),
@@ -636,7 +640,7 @@ describe("thoughtspot-service", () => {
 					.mockResolvedValueOnce({
 						done: false,
 						value: encoder.encode(
-							': heartbeat\n\ndata: [{"type":"text","content":"Done"}]\n',
+							': heartbeat\n\ndata: [{"type":"text","content":"Done","metadata":{"format":"markdown"}}]\n',
 						),
 					})
 					.mockResolvedValueOnce({ done: true, value: undefined }),
@@ -679,7 +683,7 @@ describe("thoughtspot-service", () => {
 					.mockResolvedValueOnce({
 						done: false,
 						value: encoder.encode(
-							'data: [{"type":"text","content":"Thinking...","metadata":{"type":"thinking"}}]\n',
+							'data: [{"type":"text","content":"Thinking...","metadata":{"type":"thinking","format":"markdown"}}]\n',
 						),
 					})
 					.mockResolvedValueOnce({ done: true, value: undefined }),
@@ -984,8 +988,88 @@ describe("thoughtspot-service", () => {
 
 			expect(result).toEqual({
 				url: "https://test.thoughtspot.com/#/pinboard/liveboard123",
+				liveboardId: "liveboard123",
 				error: null,
 			});
+		});
+
+		// The layout's visualization_id comes from the array index, so tile ids must be assigned
+		// from final position. Any other scheme desyncs the two and imports a broken liveboard.
+		it("assigns tile ids from final position, with and without a note tile", async () => {
+			const answers = [
+				{ title: "A", session_identifier: "s1", generation_number: 1 },
+				{ title: "B", session_identifier: "s2", generation_number: 1 },
+			];
+
+			const run = async (noteTile?: string) => {
+				(mockClient as any).exportUnsavedAnswerTML = vi
+					.fn()
+					.mockResolvedValue({ answer: { name: "x" } });
+				mockClient.importMetadataTML = vi
+					.fn()
+					.mockResolvedValue([{ response: { header: { id_guid: "lb" } } }]);
+				await fetchTMLAndCreateLiveboard(
+					"T",
+					answers,
+					noteTile as any,
+					mockClient,
+				);
+				const tml = JSON.parse(
+					(mockClient.importMetadataTML as any).mock.calls[0][0]
+						.metadata_tmls[0],
+				);
+				return {
+					vizIds: tml.liveboard.visualizations.map((v: any) => v.id),
+					layoutIds: tml.liveboard.layout.tiles.map(
+						(t: any) => t.visualization_id,
+					),
+					noteTiles: tml.liveboard.visualizations.filter(
+						(v: any) => v.note_tile,
+					).length,
+				};
+			};
+
+			const withNote = await run("<p>hi</p>");
+			expect(withNote.noteTiles).toBe(1);
+			expect(withNote.vizIds).toEqual(["Viz_0", "Viz_1", "Viz_2"]);
+			expect(withNote.layoutIds).toEqual(withNote.vizIds);
+
+			const withoutNote = await run(undefined);
+			expect(withoutNote.noteTiles).toBe(0);
+			expect(withoutNote.vizIds).toEqual(["Viz_0", "Viz_1"]);
+			expect(withoutNote.layoutIds).toEqual(withoutNote.vizIds);
+		});
+
+		it("keeps ids and layout aligned when an answer's TML cannot be fetched", async () => {
+			// Previously ids were Viz_{idx+1} from the pre-filter index, so a dropped answer left
+			// a gap that the position-derived layout did not have.
+			(mockClient as any).exportUnsavedAnswerTML = vi
+				.fn()
+				.mockResolvedValueOnce({ answer: { name: "ok" } })
+				.mockResolvedValueOnce(null);
+			mockClient.importMetadataTML = vi
+				.fn()
+				.mockResolvedValue([{ response: { header: { id_guid: "lb" } } }]);
+
+			await fetchTMLAndCreateLiveboard(
+				"T",
+				[
+					{ title: "A", session_identifier: "s1", generation_number: 1 },
+					{ title: "B", session_identifier: "s2", generation_number: 1 },
+				],
+				undefined as any,
+				mockClient,
+			);
+
+			const tml = JSON.parse(
+				(mockClient.importMetadataTML as any).mock.calls[0][0].metadata_tmls[0],
+			);
+			expect(tml.liveboard.visualizations.map((v: any) => v.id)).toEqual([
+				"Viz_0",
+			]);
+			expect(
+				tml.liveboard.layout.tiles.map((t: any) => t.visualization_id),
+			).toEqual(["Viz_0"]);
 		});
 
 		it("should handle TML fetch errors", async () => {

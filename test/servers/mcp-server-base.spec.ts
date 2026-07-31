@@ -54,8 +54,8 @@ class TestMCPServer extends MCPServer {
 		);
 	}
 
-	public testIsDatasourceDiscoveryAvailable() {
-		return this.isDatasourceDiscoveryAvailable();
+	public testIsSpotterDataSourceDiscoveryEnabled() {
+		return this.isSpotterDataSourceDiscoveryEnabled();
 	}
 
 	public getTrackers() {
@@ -72,6 +72,18 @@ class TestMCPServer extends MCPServer {
 
 	public async testGetStorageService() {
 		return this.getStorageService();
+	}
+
+	public async testGetStorageKeyHash() {
+		return this.getStorageKeyHash();
+	}
+
+	public testIsOrgsEnabled() {
+		return this.isOrgsEnabled();
+	}
+
+	public setSessionInfo(info: any) {
+		this.sessionInfo = info;
 	}
 }
 
@@ -241,18 +253,13 @@ describe("MCP Server Base", () => {
 
 	describe("Datasource Discovery Check", () => {
 		it("should return false before init is called (sessionInfo not set)", () => {
-			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-			const result = server.testIsDatasourceDiscoveryAvailable();
+			const result = server.testIsSpotterDataSourceDiscoveryEnabled();
 			expect(result).toBe(false);
-			expect(warnSpy).toHaveBeenCalledWith(
-				expect.stringContaining("sessionInfo is not initialized"),
-			);
-			warnSpy.mockRestore();
 		});
 
 		it("should return true when enableSpotterDataSourceDiscovery is enabled", async () => {
 			await server.init();
-			const result = server.testIsDatasourceDiscoveryAvailable();
+			const result = server.testIsSpotterDataSourceDiscoveryEnabled();
 			expect(result).toBe(true);
 		});
 
@@ -269,7 +276,7 @@ describe("MCP Server Base", () => {
 
 			const testServer = new TestMCPServer({ props: mockProps, env: mockEnv });
 			await testServer.init();
-			expect(testServer.testIsDatasourceDiscoveryAvailable()).toBe(false);
+			expect(testServer.testIsSpotterDataSourceDiscoveryEnabled()).toBe(false);
 		});
 
 		it("should return false when enableSpotterDataSourceDiscovery is undefined", async () => {
@@ -285,7 +292,7 @@ describe("MCP Server Base", () => {
 
 			const testServer = new TestMCPServer({ props: mockProps, env: mockEnv });
 			await testServer.init();
-			expect(testServer.testIsDatasourceDiscoveryAvailable()).toBe(false);
+			expect(testServer.testIsSpotterDataSourceDiscoveryEnabled()).toBe(false);
 		});
 	});
 
@@ -418,7 +425,7 @@ describe("MCP Server Base", () => {
 				env: mockEnv,
 			});
 			await expect(serverWithNoToken.testGetStorageService()).rejects.toThrow(
-				"Access token is required to use Storage Service",
+				"A token is required to derive the storage key",
 			);
 		});
 
@@ -428,7 +435,7 @@ describe("MCP Server Base", () => {
 				env: mockEnv,
 			});
 			await expect(serverWithNoToken.testGetStorageService()).rejects.toThrow(
-				"Access token is required to use Storage Service",
+				"A token is required to derive the storage key",
 			);
 		});
 
@@ -505,6 +512,94 @@ describe("MCP Server Base", () => {
 			expect((service1 as any).accessTokenHashUrlSafe).toBe(
 				(service2 as any).accessTokenHashUrlSafe,
 			);
+		});
+	});
+
+	describe("getStorageKeyHash", () => {
+		async function sha256Base64Url(token: string): Promise<string> {
+			const buf = await crypto.subtle.digest(
+				"SHA-256",
+				new TextEncoder().encode(token),
+			);
+			return Buffer.from(new Uint8Array(buf)).toString("base64url");
+		}
+
+		it("prefers the refresh token when present (stable across access-token rotation)", async () => {
+			const s = new TestMCPServer({
+				props: {
+					...mockProps,
+					accessToken: "access-A",
+					globalRefreshToken: "refresh-X",
+				},
+				env: mockEnv,
+			});
+			expect(await s.testGetStorageKeyHash()).toBe(
+				await sha256Base64Url("refresh-X"),
+			);
+		});
+
+		it("is stable when the access token rotates but refresh token is unchanged", async () => {
+			const s1 = new TestMCPServer({
+				props: {
+					...mockProps,
+					accessToken: "access-A",
+					globalRefreshToken: "r",
+				},
+				env: mockEnv,
+			});
+			const s2 = new TestMCPServer({
+				props: {
+					...mockProps,
+					accessToken: "access-B",
+					globalRefreshToken: "r",
+				},
+				env: mockEnv,
+			});
+			expect(await s1.testGetStorageKeyHash()).toBe(
+				await s2.testGetStorageKeyHash(),
+			);
+		});
+
+		it("falls back to the access token when no refresh token (bearer/token auth)", async () => {
+			const s = new TestMCPServer({
+				props: {
+					...mockProps,
+					accessToken: "access-only",
+					globalRefreshToken: undefined,
+				},
+				env: mockEnv,
+			});
+			expect(await s.testGetStorageKeyHash()).toBe(
+				await sha256Base64Url("access-only"),
+			);
+		});
+
+		it("throws when neither token is present", async () => {
+			const s = new TestMCPServer({
+				props: { ...mockProps, accessToken: "", globalRefreshToken: undefined },
+				env: mockEnv,
+			});
+			await expect(s.testGetStorageKeyHash()).rejects.toThrow(
+				"A token is required to derive the storage key",
+			);
+		});
+	});
+
+	describe("isOrgsEnabled", () => {
+		it("returns true when session info is not initialized (default so org tools survive a failed getSessionInfo)", () => {
+			expect(server.testIsOrgsEnabled()).toBe(true);
+		});
+
+		it("returns true when orgsEnabled is true", () => {
+			server.setSessionInfo({ orgsEnabled: true });
+			expect(server.testIsOrgsEnabled()).toBe(true);
+		});
+
+		it("returns false when orgsEnabled is false or absent", () => {
+			server.setSessionInfo({ orgsEnabled: false });
+			expect(server.testIsOrgsEnabled()).toBe(false);
+			server.setSessionInfo({});
+			expect(server.testIsOrgsEnabled()).toBe(false);
 		});
 	});
 

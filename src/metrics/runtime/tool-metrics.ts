@@ -25,6 +25,8 @@ export const UPSTREAM_OPERATION_NAMES = {
 	saveBachPinboard: "save_bach_pinboard",
 	createAuroraSession: "create_aurora_session",
 	submitAuroraQuery: "submit_aurora_query",
+	listOrgs: "list_orgs",
+	fetchOrgBearerToken: "fetch_org_bearer_token",
 } as const;
 
 export type UpstreamOperation =
@@ -134,10 +136,8 @@ export function recordUpstreamCallMetrics(
 	recorder.histogram(METRIC_NAMES.upstreamDurationMs, durationMs, labels);
 }
 
-/**
- * Run an upstream call and record its outcome + duration via `recordUpstreamCallMetrics`.
- * Errors propagate to the caller — the metric is recorded as `upstream_error` first.
- */
+// Run an upstream call, recording success/error + duration. Shared by the
+// service classes.
 export async function observeUpstreamCall<T>(
 	recorder: MetricsRecorder | undefined,
 	operation: UpstreamOperation,
