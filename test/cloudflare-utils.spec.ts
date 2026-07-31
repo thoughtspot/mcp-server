@@ -107,3 +107,120 @@ describe("instrumentedMCPServer serve()", () => {
 		expect(response.status).toBe(200);
 	});
 });
+
+describe("instrumentedMCPServer serve() - CLUSTER_URL_BLOCKLIST", () => {
+	it("blocks request with 403 when instanceUrl matches a blocklist entry", async () => {
+		const server = getServeResult();
+
+		const request = new Request("https://example.com/mcp", { method: "POST" });
+		const env = {
+			CLUSTER_URL_BLOCKLIST: "blocked.thoughtspot.com,other.example.com",
+		};
+		const ctx = {
+			props: { instanceUrl: "https://blocked.thoughtspot.com/callosum" },
+		} as any;
+
+		const response = await server.fetch(request, env, ctx);
+
+		expect(response.status).toBe(403);
+		expect(await response.text()).toContain("not permitted to connect");
+	});
+
+	it("blocks request when instanceUrl partially matches a blocklist entry", async () => {
+		const server = getServeResult();
+
+		const request = new Request("https://example.com/mcp", { method: "POST" });
+		const env = { CLUSTER_URL_BLOCKLIST: "blocked.thoughtspot.com" };
+		const ctx = {
+			props: { instanceUrl: "https://blocked.thoughtspot.com" },
+		} as any;
+
+		const response = await server.fetch(request, env, ctx);
+
+		expect(response.status).toBe(403);
+	});
+
+	it("passes through when instanceUrl does not match any blocklist entry", async () => {
+		const upstreamResponse = new Response("ok", { status: 200 });
+		const upstreamFetch = vi.fn().mockResolvedValue(upstreamResponse);
+		vi.mocked(McpAgent.serve as any).mockReturnValueOnce({
+			fetch: upstreamFetch,
+		});
+
+		const server = getServeResult();
+
+		const request = new Request("https://example.com/mcp", { method: "POST" });
+		const env = {
+			CLUSTER_URL_BLOCKLIST: "blocked.thoughtspot.com,other.example.com",
+		};
+		const ctx = {
+			props: { instanceUrl: "https://allowed.thoughtspot.com" },
+		} as any;
+
+		const response = await server.fetch(request, env, ctx);
+
+		expect(upstreamFetch).toHaveBeenCalledWith(request, env, ctx);
+		expect(response.status).toBe(200);
+	});
+
+	it("passes through when CLUSTER_URL_BLOCKLIST is not set", async () => {
+		const upstreamResponse = new Response("ok", { status: 200 });
+		const upstreamFetch = vi.fn().mockResolvedValue(upstreamResponse);
+		vi.mocked(McpAgent.serve as any).mockReturnValueOnce({
+			fetch: upstreamFetch,
+		});
+
+		const server = getServeResult();
+
+		const request = new Request("https://example.com/mcp", { method: "POST" });
+		const env = {};
+		const ctx = {
+			props: { instanceUrl: "https://any.thoughtspot.com" },
+		} as any;
+
+		const response = await server.fetch(request, env, ctx);
+
+		expect(upstreamFetch).toHaveBeenCalledWith(request, env, ctx);
+		expect(response.status).toBe(200);
+	});
+
+	it("passes through when instanceUrl is undefined", async () => {
+		const upstreamResponse = new Response("ok", { status: 200 });
+		const upstreamFetch = vi.fn().mockResolvedValue(upstreamResponse);
+		vi.mocked(McpAgent.serve as any).mockReturnValueOnce({
+			fetch: upstreamFetch,
+		});
+
+		const server = getServeResult();
+
+		const request = new Request("https://example.com/mcp", { method: "POST" });
+		const env = { CLUSTER_URL_BLOCKLIST: "blocked.thoughtspot.com" };
+		const ctx = { props: {} } as any;
+
+		const response = await server.fetch(request, env, ctx);
+
+		expect(upstreamFetch).toHaveBeenCalledWith(request, env, ctx);
+		expect(response.status).toBe(200);
+	});
+
+	it("passes through when blocklist is an empty string", async () => {
+		const upstreamResponse = new Response("ok", { status: 200 });
+		const upstreamFetch = vi.fn().mockResolvedValue(upstreamResponse);
+		vi.mocked(McpAgent.serve as any).mockReturnValueOnce({
+			fetch: upstreamFetch,
+		});
+
+		const server = getServeResult();
+
+		const request = new Request("https://example.com/mcp", { method: "POST" });
+		const env = { CLUSTER_URL_BLOCKLIST: "" };
+		const ctx = {
+			props: { instanceUrl: "https://any.thoughtspot.com" },
+		} as any;
+
+		const response = await server.fetch(request, env, ctx);
+
+		expect(upstreamFetch).toHaveBeenCalledWith(request, env, ctx);
+		expect(response.status).toBe(200);
+	});
+});
