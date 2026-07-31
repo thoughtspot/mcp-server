@@ -57,7 +57,7 @@ export interface BaseMessage {
 }
 
 export interface TextMessage extends BaseMessage {
-	type: "text" | "text_chunk";
+	type: "text" | "text_chunk" | "step_notification";
 	text: string;
 }
 
