@@ -71,6 +71,12 @@
 			]
 		}
 	],
+	// SAVE_VIA_LUMOS: route finalize_model's commit through the Lumos save endpoint instead of
+	// driving bach from this worker. Verified working end-to-end (2026-08-06); default ON so the
+	// server doesn't have to accumulate the generation working set (avoids the under-pinning risk).
+	"vars": {
+		"SAVE_VIA_LUMOS": "true"
+	},
 	"kv_namespaces": [{
 		"binding": "OAUTH_KV",
 		"id": "05ca6fed380e4fe48dbfc5c3d03b4070"

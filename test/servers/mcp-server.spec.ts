@@ -197,8 +197,8 @@ describe("MCP Server", () => {
 
 			const result = await listTools();
 
-			// V2 tools (latest version): 6 tools
-			expect(result.tools).toHaveLength(6);
+			// V3 tools (latest version): 8 tools (V2's 6 non-OAuth tools + 2 model tools)
+			expect(result.tools).toHaveLength(8);
 			expect(result.tools?.map((t) => t.name)).toEqual([
 				"search_objects",
 				"check_connectivity",
@@ -206,6 +206,8 @@ describe("MCP Server", () => {
 				"send_session_message",
 				"get_session_updates",
 				"create_dashboard",
+				"send_model_message",
+				"finalize_model",
 			]);
 		});
 
@@ -235,7 +237,7 @@ describe("MCP Server", () => {
 			);
 		});
 
-		it("should return 6 tools regardless of enableSpotterDataSourceDiscovery when using latest (V2)", async () => {
+		it("should return 10 tools regardless of enableSpotterDataSourceDiscovery when using latest (V3)", async () => {
 			// Mock getThoughtSpotClient with enableSpotterDataSourceDiscovery set to false
 			vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
 				getSessionInfo: vi.fn().mockResolvedValue({
@@ -268,8 +270,8 @@ describe("MCP Server", () => {
 
 			const result = await listTools();
 
-			// V2 tools don't have a datasource discovery tool, so filtering has no effect
-			expect(result.tools).toHaveLength(6);
+			// Neither V2 nor the model tools have a datasource discovery tool, so filtering has no effect
+			expect(result.tools).toHaveLength(8);
 			expect(result.tools?.map((t) => t.name)).toEqual([
 				"search_objects",
 				"check_connectivity",
@@ -277,6 +279,8 @@ describe("MCP Server", () => {
 				"send_session_message",
 				"get_session_updates",
 				"create_dashboard",
+				"send_model_message",
+				"finalize_model",
 			]);
 		});
 	});

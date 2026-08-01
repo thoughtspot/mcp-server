@@ -1,5 +1,11 @@
 import { isBoolean } from "lodash";
-import type { Message, StreamingMessagesState } from "../thoughtspot/types";
+import type {
+	Message,
+	ModelSessionState,
+	ModelUpdate,
+	ModelUpdatesState,
+	StreamingMessagesState,
+} from "../thoughtspot/types";
 
 const DEFAULT_TTL_MS = 30 * 60 * 1000; // 30 minutes
 const STORAGE_BATCH_SIZE = 127; // Cloudflare DO bulk get/put limit is 128, we use 127 to be safe
@@ -8,6 +14,19 @@ const MESSAGE_KEY_PREFIX = "message-";
 const IS_DONE_KEY = "is-done";
 const WRITE_BOOKMARK_KEY = "write-bookmark";
 const READ_BOOKMARK_KEY = "read-bookmark";
+
+// Spotter model-creation session state is stored as a single blob under this key. It lives in a
+// separate DO instance (routed by model_session_id) from analytical conversations, so there is no
+// collision with the message/bookmark keys above.
+const MODEL_SESSION_KEY = "model-session";
+
+// Streamed model updates use their own write/read bookmarks and per-index keys (independent of the
+// analytical-message ones above) so the background stream consumer can append while
+// get_model_updates reads — each op is atomic within the DO, so no read-modify-write clobbering.
+const MODEL_UPDATE_KEY_PREFIX = "model-update-";
+const MODEL_WRITE_BOOKMARK_KEY = "model-write-bookmark";
+const MODEL_READ_BOOKMARK_KEY = "model-read-bookmark";
+const MODEL_UPDATES_DONE_KEY = "model-updates-done";
 
 /**
  * A Durable Object that stores streaming conversation messages and exposes them over HTTP.
@@ -53,6 +72,36 @@ export class ConversationStorageServerSQLite {
 
 				case "GET /messages": {
 					const state = await this.getNewMessagesAndUpdateBookmark();
+					return Response.json(state);
+				}
+
+				case "POST /model-put": {
+					const body = (await request.json()) as ModelSessionState;
+					await this.putModelSession(body);
+					return Response.json({ ok: true });
+				}
+
+				case "GET /model-get": {
+					const state = await this.getModelSession();
+					return Response.json(state);
+				}
+
+				case "POST /model-append": {
+					const body = (await request.json()) as {
+						updates?: ModelUpdate[];
+						isDone?: boolean;
+						resetDone?: boolean;
+					};
+					await this.appendModelUpdates(
+						body.updates ?? [],
+						body.isDone ?? false,
+						body.resetDone ?? false,
+					);
+					return Response.json({ ok: true });
+				}
+
+				case "GET /model-updates": {
+					const state = await this.getNewModelUpdatesAndAdvanceBookmark();
 					return Response.json(state);
 				}
 
@@ -160,6 +209,93 @@ export class ConversationStorageServerSQLite {
 			messages: newMessages,
 			isDone,
 		};
+	}
+
+	/*
+	 * Store the full model-session state as a single blob and restart the TTL. Overwrites any
+	 * previous state for this session (the caller owns read/write ordering).
+	 */
+	private async putModelSession(state: ModelSessionState): Promise<void> {
+		await this.state.storage.put<ModelSessionState>(MODEL_SESSION_KEY, state);
+		await this.restartTtl();
+	}
+
+	/*
+	 * Retrieve the model-session state, or null if this session was never created / has expired.
+	 */
+	private async getModelSession(): Promise<ModelSessionState | null> {
+		const state =
+			await this.state.storage.get<ModelSessionState>(MODEL_SESSION_KEY);
+		return state ?? null;
+	}
+
+	/*
+	 * Append streamed model updates starting at the current MODEL_WRITE_BOOKMARK, advancing it.
+	 * `resetDone` clears the done flag at the start of a new turn (done in the same batch as the
+	 * first appended updates, so a racing reader never sees the previous turn's done). `isDone`
+	 * marks the turn complete and is always written in the same (last) batch as its updates, so a
+	 * reader never observes done before the final updates are visible.
+	 */
+	private async appendModelUpdates(
+		updates: ModelUpdate[],
+		isDone: boolean,
+		resetDone: boolean,
+	): Promise<void> {
+		let idx =
+			(await this.state.storage.get<number>(MODEL_WRITE_BOOKMARK_KEY)) ?? 0;
+		const entriesToStore = {} as Record<string, ModelUpdate | number | boolean>;
+		if (resetDone) {
+			entriesToStore[MODEL_UPDATES_DONE_KEY] = false;
+		}
+		for (const update of updates) {
+			entriesToStore[`${MODEL_UPDATE_KEY_PREFIX}${idx}`] = update;
+			idx++;
+		}
+		entriesToStore[MODEL_WRITE_BOOKMARK_KEY] = idx;
+		if (isDone) {
+			entriesToStore[MODEL_UPDATES_DONE_KEY] = true;
+		}
+
+		await this.putInBatches(entriesToStore);
+		await this.restartTtl();
+	}
+
+	/*
+	 * Return all model updates appended since the last call, advancing MODEL_READ_BOOKMARK. Mirrors
+	 * getNewMessagesAndUpdateBookmark: the read is atomic within the DO, so it is safe to poll this
+	 * while the background stream consumer is still appending.
+	 */
+	private async getNewModelUpdatesAndAdvanceBookmark(): Promise<ModelUpdatesState> {
+		const stored = await this.state.storage.get<boolean | number>([
+			MODEL_UPDATES_DONE_KEY,
+			MODEL_READ_BOOKMARK_KEY,
+			MODEL_WRITE_BOOKMARK_KEY,
+		]);
+		const isDone = (stored.get(MODEL_UPDATES_DONE_KEY) as boolean) ?? false;
+		const readBookmark = (stored.get(MODEL_READ_BOOKMARK_KEY) as number) ?? 0;
+		const writeBookmark = (stored.get(MODEL_WRITE_BOOKMARK_KEY) as number) ?? 0;
+
+		const keys = [];
+		for (let i = readBookmark; i < writeBookmark; i++) {
+			keys.push(MODEL_UPDATE_KEY_PREFIX + i);
+		}
+
+		const updates: ModelUpdate[] = [];
+		if (writeBookmark > readBookmark) {
+			const updatesMap = await this.getInBatches<ModelUpdate>(keys);
+			for (let i = readBookmark; i < writeBookmark; i++) {
+				const update = updatesMap.get(MODEL_UPDATE_KEY_PREFIX + i);
+				if (update) updates.push(update);
+			}
+			// Only advance the read bookmark when it actually moved — an idle poll (no new
+			// updates) skips the write, so it costs a single read and no DO write contention.
+			await this.state.storage.put<number>(
+				MODEL_READ_BOOKMARK_KEY,
+				writeBookmark,
+			);
+		}
+
+		return { updates, isDone };
 	}
 
 	/*
