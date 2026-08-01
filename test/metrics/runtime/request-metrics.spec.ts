@@ -443,7 +443,7 @@ describe("withRequestMetrics", () => {
 		const request = new Request("https://example.com/token/mcp");
 
 		expect(resolveApiVersionLabels(request, {} as ExecutionContext)).toEqual({
-			apiReleaseDate: "2026-05-01",
+			apiReleaseDate: "2026-07-31",
 			apiVersion: "latest",
 			apiVersionMode: "implicit_latest",
 		});
@@ -451,12 +451,12 @@ describe("withRequestMetrics", () => {
 
 	it("labels date-based token routes as pinned even when they currently resolve to latest", () => {
 		const request = new Request(
-			"https://example.com/token/mcp?api-version=2026-05-01",
+			"https://example.com/token/mcp?api-version=2026-07-31",
 		);
 
 		expect(resolveApiVersionLabels(request, {} as ExecutionContext)).toEqual({
-			apiRequestedVersion: "2026-05-01",
-			apiReleaseDate: "2026-05-01",
+			apiRequestedVersion: "2026-07-31",
+			apiReleaseDate: "2026-07-31",
 			apiVersion: "latest",
 			apiVersionMode: "pinned",
 		});
@@ -469,7 +469,7 @@ describe("withRequestMetrics", () => {
 
 		expect(resolveApiVersionLabels(request, {} as ExecutionContext)).toEqual({
 			apiRequestedVersion: "latest",
-			apiReleaseDate: "2026-05-01",
+			apiReleaseDate: "2026-07-31",
 			apiVersion: "latest",
 			apiVersionMode: "explicit_latest",
 		});
@@ -478,7 +478,7 @@ describe("withRequestMetrics", () => {
 	it("maps stable date-based versions onto the latest label", () => {
 		const ctx = {} as ExecutionContext;
 		const request = new Request(
-			"https://example.com/token/mcp?api-version=2026-05-01",
+			"https://example.com/token/mcp?api-version=2026-07-31",
 		);
 
 		expect(resolveCanonicalApiVersionLabel(request, ctx)).toBe("latest");
