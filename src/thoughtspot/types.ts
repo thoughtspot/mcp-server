@@ -86,6 +86,41 @@ export interface StreamingMessagesState {
 	isDone: boolean;
 }
 
+/**
+ * Persisted *scalar* state for a Spotter model session, stored as a single blob in the
+ * ConversationStorageServerSQLite Durable Object so it survives isolate restarts. The streamed
+ * updates are NOT here — they use a separate write/read-bookmark store (see ModelUpdatesState) so
+ * the background stream consumer and the reader never clobber each other on a shared blob.
+ */
+export interface ModelSessionState {
+	transactionId: string;
+	generationNo: number;
+	// Every edit generation the server has reported for this session (the initial/baseline
+	// generation from chat/init is excluded). Sent as genNoWorkingSet on the bach SAVE_WORKSHEET
+	// request — the save fails without the full working set, since one edit spans many generations.
+	genNoWorkingSet: number[];
+	// A ThoughtSpot session cookie (JSESSIONID=…; possibly more) minted from the bearer token via
+	// session/login. Forwarded on the Lumos /chat calls because backend tools (e.g. FormulaGen
+	// validation) require a cookie session — a Bearer token alone hits a broken code path.
+	sessionCookie?: string;
+	// The most recent clarification the builder asked (the inner `choice` object from a
+	// META_CHOICE event: { title, choice_type, choice_option_type, choice_options: [...] }).
+	// The builder does not send a choice_id, so to answer we echo this object back upstream with
+	// each option's is_selected flag set per the user's selection. Null when nothing is pending.
+	pendingChoice?: Record<string, unknown> | null;
+}
+
+// A single normalized streamed update (e.g. { type: "text", text }, { type: "choice", ... }).
+export type ModelUpdate = Record<string, unknown>;
+
+// The result of reading the not-yet-consumed model updates for a session. Mirrors
+// StreamingMessagesState: `updates` are those appended since the reader's last call, and `isDone`
+// flips true once the background stream consumer has finished the current turn.
+export interface ModelUpdatesState {
+	updates: ModelUpdate[];
+	isDone: boolean;
+}
+
 export interface Answer {
 	title: string;
 	session_identifier: string;

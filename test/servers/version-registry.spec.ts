@@ -135,7 +135,7 @@ describe("Version Registry", () => {
 		it("maps requested selectors onto canonical metrics labels and release dates", () => {
 			expect(resolveApiVersionMetrics("latest")).toEqual({
 				apiVersion: "latest",
-				apiReleaseDate: "2026-05-01",
+				apiReleaseDate: "2026-07-31",
 			});
 			expect(resolveApiVersionMetrics("2025-03-15")).toEqual({
 				apiVersion: "backwards-compatibility-default",
@@ -254,7 +254,7 @@ describe("Version Registry", () => {
 			},
 			{
 				apiVersion: "2030-01-01",
-				expectedVersionDate: "2026-05-01",
+				expectedVersionDate: "2026-07-31",
 				label: "far future date",
 			},
 		])(

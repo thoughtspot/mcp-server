@@ -1,4 +1,8 @@
-import { toolDefinitionsV1, toolDefinitionsV2 } from "./tool-definitions";
+import {
+	toolDefinitionsV1,
+	toolDefinitionsV2,
+	toolDefinitionsV3,
+} from "./tool-definitions";
 
 export const YYYY_MM_DD_DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -60,7 +64,13 @@ export const VERSION_REGISTRY: VersionConfig[] = [
 		description: "Spotter3 agent conversation tools released",
 	},
 	{
-		version: ["latest", "2026-05-01"],
+		version: ["latest", "2026-07-31"],
+		tools: [...toolDefinitionsV3],
+		description:
+			"Spotter Model agentic model-creation tools added (create/send/get-updates/finalize)",
+	},
+	{
+		version: ["2026-05-01"],
 		tools: [...toolDefinitionsV2],
 		description: "Spotter3 agent conversation tools released",
 	},
