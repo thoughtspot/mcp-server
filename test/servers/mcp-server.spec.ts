@@ -146,7 +146,7 @@ describe("MCP Server", () => {
 					userName: "test-user",
 					currentOrgId: "test-org",
 					privileges: [],
-					enableSpotterDataSourceDiscovery: true,
+					isSpotterDataSourceDiscoveryEnabled: true,
 				},
 				{
 					clientId: "test-client-id",
@@ -1238,6 +1238,8 @@ describe("MCP Server", () => {
 				"conv-with-ds-456",
 			);
 			expect(mockCreateAgentConversationWithAutoMode).toHaveBeenCalledWith({
+				isSpotterDataSourceDiscoveryEnabled: true,
+				isSpotterChatHistoryEnabled: false,
 				dataSourceId: "ds-123",
 			});
 		});
@@ -1425,6 +1427,76 @@ describe("MCP Server", () => {
 			expect(result.isError).toBe(true);
 			expect((result.content as any[])[0].text).toContain(
 				"ERROR: The analytical session has an ongoing response",
+			);
+		});
+
+		it("should close out the conversation when sending the message fails", async () => {
+			mockSendAgentConversationMessageStreaming.mockRejectedValue(
+				new Error("Spotter stream failed"),
+			);
+
+			await server.init();
+
+			await expect(
+				server.callSendSessionMessage({
+					method: "tools/call",
+					params: {
+						name: "send_session_message",
+						arguments: {
+							analytical_session_id: "conv-abc-123",
+							message: "What is the total revenue?",
+						},
+					},
+				}),
+			).rejects.toThrow("Spotter stream failed");
+
+			// The conversation must be marked done so clients don't poll forever.
+			expect(mockStorageService.appendMessages).toHaveBeenCalledWith(
+				"conv-abc-123",
+				[
+					{
+						is_thinking: false,
+						type: "text",
+						text: "Something went wrong",
+					},
+				],
+				true,
+			);
+		});
+
+		it("should still throw when closing out the conversation fails", async () => {
+			mockSendAgentConversationMessageStreaming.mockRejectedValue(
+				new Error("Spotter stream failed"),
+			);
+			mockStorageService.appendMessages.mockRejectedValue(
+				new Error("Storage write failed"),
+			);
+
+			await server.init();
+
+			await expect(
+				server.callSendSessionMessage({
+					method: "tools/call",
+					params: {
+						name: "send_session_message",
+						arguments: {
+							analytical_session_id: "conv-abc-123",
+							message: "What is the total revenue?",
+						},
+					},
+				}),
+			).rejects.toThrow("Spotter stream failed");
+
+			expect(mockStorageService.appendMessages).toHaveBeenCalledWith(
+				"conv-abc-123",
+				[
+					{
+						is_thinking: false,
+						type: "text",
+						text: "Something went wrong",
+					},
+				],
+				true,
 			);
 		});
 	});

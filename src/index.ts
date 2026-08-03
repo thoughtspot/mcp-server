@@ -187,7 +187,6 @@ const oauthHandler = {
 		if (span) {
 			span.setAttributes({
 				component: "OAuthProvider",
-				instance_url: (ctx as any).props?.instanceUrl || "unknown",
 				request_url: request.url,
 				request_method: request.method,
 			});
@@ -201,6 +200,37 @@ const instrumentedOAuthHandler = instrument(oauthHandler, config);
 // OTEL instrumentation automatically uses or passing along some headers from upstream calls, so we
 // need to strip them from the request before OTEL sees them if we don't want that to happen
 const HEADERS_TO_STRIP = ["traceparent", "tracestate"];
+
+// Temporary path aliases for clients that can't send a query string (some
+// hosts mishandle the "?" in the connection URL). A request to
+// `<base>-<version>` is rewritten to `<base>?api-version=<version>` before
+// routing/metrics see it.
+// TODO: Remove once affected clients support query params.
+const ALIASABLE_MCP_PATHS = ["/mcp", "/token/mcp"] as const;
+
+function applyPathAlias(
+	request: Request<unknown, IncomingRequestCfProperties<unknown>>,
+): Request<unknown, IncomingRequestCfProperties<unknown>> {
+	const url = new URL(request.url);
+	for (const base of ALIASABLE_MCP_PATHS) {
+		const prefix = `${base}-`;
+		if (!url.pathname.startsWith(prefix)) {
+			continue;
+		}
+		const version = url.pathname.slice(prefix.length);
+		if (!version) {
+			continue;
+		}
+		url.pathname = base;
+		url.searchParams.set("api-version", version);
+		return new Request(url.toString(), request) as Request<
+			unknown,
+			IncomingRequestCfProperties<unknown>
+		>;
+	}
+	return request;
+}
+
 export default {
 	async fetch(
 		request: Request<unknown, IncomingRequestCfProperties<unknown>>,
@@ -212,6 +242,8 @@ export default {
 			HEADERS_TO_STRIP.forEach((header) => headers.delete(header));
 			request = new Request(request, { headers });
 		}
+
+		request = applyPathAlias(request);
 
 		return withRequestMetrics(
 			env as unknown as Record<string, unknown>,
