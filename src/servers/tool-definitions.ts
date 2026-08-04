@@ -250,9 +250,9 @@ const FetchDataVizSchema = z.object({
 		),
 	columns: z.array(z.string()).describe("The column names, in order."),
 	data_rows: z
-		.array(z.array(z.unknown()))
+		.array(z.array(z.union([z.string(), z.number(), z.boolean(), z.null()])))
 		.describe(
-			"The data rows; each row is an array of cell values aligned to `columns`. Cells may be strings, numbers, booleans or null depending on the column type. Non-integer numeric cells are rounded to 2 decimal places (2 significant digits below 0.1) to trim payload size, so treat them as approximate.",
+			"The data rows; each row is an array of cell values aligned to `columns` — each cell a string, number, boolean, or null. Numeric cells are returned at full precision, exactly as stored.",
 		),
 	total_row_count: z
 		.number()

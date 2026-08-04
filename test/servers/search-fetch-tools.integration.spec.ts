@@ -12,13 +12,14 @@
  *
  * This exercises the request building (endpoints, headers, x-request-id,
  * facets, pagination offsets) and the response parsing/shaping (Eureka result
- * → canonical header, REST data → rounded rows) that the client-mocked unit
+ * → canonical header, REST data → positional rows) that the client-mocked unit
  * tests can't reach. Tools are invoked via the handler methods directly (as in
  * mcp-server-v2.integration.spec.ts) rather than a transport.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MCPServer } from "../../src/servers/mcp-server";
+import { LIVEBOARD_RECORD_SIZE } from "../../src/thoughtspot/fetch-data/fetch-data";
 import { ThoughtSpotService } from "../../src/thoughtspot/thoughtspot-service";
 import { makeRequest } from "./helpers";
 
@@ -407,7 +408,7 @@ describe("search_objects tool — real handler + mocked network", () => {
 // ---------------------------------------------------------------------------
 
 describe("fetch_data tool — real handler + mocked network", () => {
-	it("resolves an Answer's type, hits the answer endpoint, and rounds cells", async () => {
+	it("resolves an Answer's type, hits the answer endpoint, and returns full-precision cells", async () => {
 		handlers.metaSearch = () =>
 			jsonResponse([
 				{
@@ -416,7 +417,7 @@ describe("fetch_data tool — real handler + mocked network", () => {
 					metadata_header: { description: "Revenue by region" },
 				},
 			]);
-		// COMPACT positional rows with fractional cells to exercise rounding.
+		// COMPACT positional rows with fractional cells; returned verbatim.
 		handlers.answerData = () =>
 			jsonResponse({
 				contents: [
@@ -455,10 +456,10 @@ describe("fetch_data tool — real handler + mocked network", () => {
 			row_count: 2,
 			sampling_ratio: 1,
 		});
-		// 1,200,000.555 → 2 decimals; 0.0456 (<0.1) → 2 significant digits.
+		// Cells are returned verbatim, at full precision.
 		expect(structured.data[0].data_rows).toEqual([
-			["East", 1_200_000.56],
-			["West", 0.046],
+			["East", 1_200_000.555],
+			["West", 0.0456],
 		]);
 
 		// Step 1 body resolves the id; the data endpoint matches the resolved type.
@@ -524,15 +525,17 @@ describe("fetch_data tool — real handler + mocked network", () => {
 			],
 		});
 
-		// Liveboard endpoint used; the viz filter and record_size ride the body.
+		// Liveboard endpoint used; the viz filter rides the body. record_size is
+		// unbounded (the endpoint 500s if it's smaller than the viz); max_rows caps
+		// client-side.
 		const [, init] = callTo("/metadata/liveboard/data") ?? [];
 		const body = JSON.parse(init.body);
 		expect(body.visualization_identifiers).toEqual(["viz-1"]);
-		expect(body.record_size).toBe(50);
+		expect(body.record_size).toBe(LIVEBOARD_RECORD_SIZE);
 		expect(callTo("/metadata/answer/data")).toBeUndefined();
 	});
 
-	it("retries when record_size is below the viz row count, then caps to max_rows", async () => {
+	it("requests the full viz in one call and caps to max_rows client-side", async () => {
 		handlers.metaSearch = () =>
 			jsonResponse([
 				{
@@ -546,7 +549,8 @@ describe("fetch_data tool — real handler + mocked network", () => {
 			{ Product: "B", Units: 2 },
 			{ Product: "C", Units: 3 },
 		];
-		// The Liveboard endpoint 500s unless record_size >= the viz's total rows.
+		// The endpoint 500s if record_size < the viz's rows; the unbounded
+		// record_size we send always holds the whole viz, so it succeeds first try.
 		handlers.liveboardData = (b) => {
 			if ((b.record_size ?? 0) < allRows.length) {
 				return jsonResponse(
@@ -581,7 +585,7 @@ describe("fetch_data tool — real handler + mocked network", () => {
 
 		expect(result.isError).toBeUndefined();
 		const structured = result.structuredContent as any;
-		// Refetched all rows, then capped to max_rows; total still reflects upstream.
+		// Full viz fetched in one call, then capped to max_rows; total reflects upstream.
 		expect(structured.data[0].data_rows).toEqual([
 			["A", 1],
 			["B", 2],
@@ -589,13 +593,14 @@ describe("fetch_data tool — real handler + mocked network", () => {
 		expect(structured.data[0].row_count).toBe(2);
 		expect(structured.data[0].total_row_count).toBe(3);
 
-		// Two calls: the rejected max_rows attempt, then the refetch at the count.
+		// Exactly one Liveboard call (no retry), with an unbounded record_size.
 		const lbCalls = fetchMock.mock.calls.filter(([u]) =>
 			String(u).includes("/metadata/liveboard/data"),
 		);
-		expect(lbCalls.length).toBe(2);
-		expect(JSON.parse(lbCalls[0][1].body).record_size).toBe(2);
-		expect(JSON.parse(lbCalls[1][1].body).record_size).toBe(3);
+		expect(lbCalls.length).toBe(1);
+		expect(JSON.parse(lbCalls[0][1].body).record_size).toBe(
+			LIVEBOARD_RECORD_SIZE,
+		);
 	});
 
 	it("returns an error response for an unsupported object type", async () => {

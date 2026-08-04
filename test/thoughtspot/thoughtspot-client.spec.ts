@@ -5,6 +5,7 @@ import {
 import type { ResponseContext } from "@thoughtspot/rest-api-sdk";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import YAML from "yaml";
+import { LIVEBOARD_RECORD_SIZE } from "../../src/thoughtspot/fetch-data/fetch-data";
 import { getThoughtSpotClient } from "../../src/thoughtspot/thoughtspot-client";
 
 // Mock the ThoughtSpot REST API SDK
@@ -1704,7 +1705,7 @@ describe("ThoughtSpot Client", () => {
 						columns: ["city", "Total quantity purchased", "Total sales"],
 						data_rows: [
 							["Boulder", 677792, 34070647.18],
-							["Atlanta", 424496, 21161832.43],
+							["Atlanta", 424496, 21161832.426],
 						],
 						total_row_count: 2,
 						row_count: 2,
@@ -1763,7 +1764,8 @@ describe("ThoughtSpot Client", () => {
 			expect(dataUrl).toBe(
 				`${mockInstanceUrl}/api/rest/2.0/metadata/liveboard/data`,
 			);
-			expect(dataBody.record_size).toBe(50);
+			// Liveboards request the full viz (unbounded record_size); max_rows caps client-side.
+			expect(dataBody.record_size).toBe(LIVEBOARD_RECORD_SIZE);
 			// No viz filter when fetching the whole Liveboard.
 			expect(dataBody.visualization_identifiers).toBeUndefined();
 
@@ -1867,7 +1869,7 @@ describe("ThoughtSpot Client", () => {
 				columns: ["city", "Total sales"],
 				data_rows: [
 					["Boulder", 34070647.18],
-					["Atlanta", 21161832.43],
+					["Atlanta", 21161832.426],
 				],
 			});
 		});
@@ -1897,14 +1899,14 @@ describe("ThoughtSpot Client", () => {
 			expect(result.data[0].columns).toEqual(["city", "Total sales"]);
 			expect(result.data[0].data_rows).toEqual([
 				["Boulder", 34070647.18],
-				["Atlanta", 21161832.43],
+				["Atlanta", 21161832.426],
 			]);
 			// row_count falls back to the returned row count.
 			expect(result.data[0].row_count).toBe(2);
 		});
 
-		// FP noise collapses, long tails trim; non-numbers pass through.
-		it("rounds numeric cells to 2 decimals in COMPACT rows", async () => {
+		// Cells pass through unchanged — full precision, no rounding.
+		it("returns numeric cells at full precision in COMPACT rows", async () => {
 			(fetch as any)
 				.mockResolvedValueOnce(metaResponse("ANSWER", "Noisy Answer"))
 				.mockResolvedValueOnce({
@@ -1928,12 +1930,12 @@ describe("ThoughtSpot Client", () => {
 			const result = await client.fetchData({ objectId: "obj-1" });
 
 			expect(result.data[0].data_rows).toEqual([
-				["Boulder", 10679247.69, 120.03, 42],
-				["Atlanta", 0.3, 121.69, null],
+				["Boulder", 10679247.690000001, 120.030833623, 42],
+				["Atlanta", 0.1 + 0.2, 121.694679091, null],
 			]);
 		});
 
-		it("rounds numeric cells to 2 decimals in FULL rows", async () => {
+		it("returns numeric cells at full precision in FULL rows", async () => {
 			(fetch as any)
 				.mockResolvedValueOnce(metaResponse("ANSWER", "Noisy Full"))
 				.mockResolvedValueOnce({
@@ -1953,12 +1955,13 @@ describe("ThoughtSpot Client", () => {
 
 			const result = await client.fetchData({ objectId: "obj-1" });
 
-			expect(result.data[0].data_rows).toEqual([["Boulder", 10679247.69]]);
+			expect(result.data[0].data_rows).toEqual([
+				["Boulder", 10679247.690000001],
+			]);
 		});
 
-		// Small-magnitude values (rates, ratios) keep 2 significant digits instead
-		// of being zeroed out by the 2-decimal rounding.
-		it("preserves small-magnitude values with 2 significant digits", async () => {
+		// Small-magnitude values (rates, ratios) are returned exactly as stored.
+		it("preserves small-magnitude values exactly", async () => {
 			(fetch as any)
 				.mockResolvedValueOnce(metaResponse("ANSWER", "Rates"))
 				.mockResolvedValueOnce({
@@ -1988,9 +1991,8 @@ describe("ThoughtSpot Client", () => {
 			]);
 		});
 
-		// Large integer IDs/timestamps must pass through exactly (rounding via
-		// *100 would overflow 2^53 and corrupt them).
-		it("preserves large integers without rounding", async () => {
+		// Large integer IDs/timestamps pass through exactly.
+		it("preserves large integers exactly", async () => {
 			const bigId = 90071992547409936;
 			const microTs = 1735689600000000;
 			(fetch as any)

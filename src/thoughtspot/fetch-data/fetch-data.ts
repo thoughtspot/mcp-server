@@ -9,6 +9,10 @@ import type {
 // Keep in sync with the `max_rows` description in tool-definitions.ts.
 export const FETCH_DATA_DEFAULT_MAX_ROWS = 25;
 
+// "Unbounded" record_size for Liveboards (they 500 if it can't hold the whole
+// viz). Max 32-bit signed int — the endpoint reads it as a GraphQL Int.
+export const LIVEBOARD_RECORD_SIZE = 2_147_483_647;
+
 // Only Answers and Liveboards expose fetchable data.
 const ANSWER_TYPE = "ANSWER";
 const LIVEBOARD_TYPE = "LIVEBOARD";
@@ -34,29 +38,8 @@ function isObjectRow(row: unknown): row is Record<string, unknown> {
 	return typeof row === "object" && row !== null && !Array.isArray(row);
 }
 
-// Round numeric cells to 2 decimals: collapses FP noise and trims payload.
-// Non-numbers and non-finite values pass through untouched.
-function roundCell(value: unknown): unknown {
-	if (typeof value !== "number" || !Number.isFinite(value)) {
-		return value;
-	}
-	// Integers have no fractional noise to trim; rounding large ones (IDs,
-	// epoch timestamps) via *100 would overflow 2^53 and corrupt them.
-	if (Number.isInteger(value)) {
-		return value;
-	}
-	// Below 0.1 keep 2 significant digits so rates/ratios aren't zeroed.
-	if (Math.abs(value) < 0.1) {
-		return Number(value.toPrecision(2));
-	}
-	return Math.round(value * 100) / 100;
-}
-
-function roundRow(row: unknown[]): unknown[] {
-	return row.map(roundCell);
-}
-
 // Normalize FULL or COMPACT rows into `columns` + positional `data_rows`.
+// Cell values pass through as-is — no rounding, so callers get full precision.
 function normalizeRows(content: RawDataContent): {
 	columns: string[];
 	rows: unknown[][];
@@ -68,9 +51,7 @@ function normalizeRows(content: RawDataContent): {
 	if (!isObjectRow(firstRow)) {
 		return {
 			columns: content.column_names ?? [],
-			rows: rawRows
-				.filter((row): row is unknown[] => Array.isArray(row))
-				.map(roundRow),
+			rows: rawRows.filter((row): row is unknown[] => Array.isArray(row)),
 		};
 	}
 
@@ -79,7 +60,7 @@ function normalizeRows(content: RawDataContent): {
 	const columns = Object.keys(firstRow);
 	// Null/malformed entries are dropped.
 	const rows = rawRows.flatMap((row) =>
-		isObjectRow(row) ? [roundRow(columns.map((col) => row[col]))] : [],
+		isObjectRow(row) ? [columns.map((col) => row[col])] : [],
 	);
 	return { columns, rows };
 }
@@ -107,18 +88,6 @@ function mapContents(
 			sampling_ratio: content.sampling_ratio,
 		};
 	});
-}
-
-// The Liveboard data endpoint rejects a record_size smaller than a viz's total
-// row count with a 500 ("rowCount: N cannot be greater than batchSize: M"). We
-// can't know N up front, so we read the required count off the error and refetch
-// big enough. Returns that count, or null when the error is something else.
-function requiredRowCount(error: unknown): number | null {
-	const message = error instanceof Error ? error.message : String(error);
-	const match = message.match(
-		/rowCount:\s*(\d+)\s+cannot be greater than batchSize/,
-	);
-	return match ? Number(match[1]) : null;
 }
 
 // Custom handler: the rest-api-sdk has no single call that resolves a GUID's
@@ -169,30 +138,16 @@ export function addFetchData(client: any, instanceUrl: string, token: string) {
 			);
 		}
 
-		// `record_size` caps returned rows for Answers, but the Liveboard endpoint
-		// treats it as "must hold the whole viz" and 500s when it's too small.
-		// Start at maxRows; on that error, bump to the required count and refetch,
-		// then cap rows client-side below. Attempts are bounded (a full Liveboard
-		// can report a larger viz on each retry) to avoid a runaway loop.
-		let recordSize = maxRows;
-		let data: any;
-		for (let attempt = 0; ; attempt++) {
-			try {
-				data = await postJson(
-					`${instanceUrl}${endpoint}`,
-					headers,
-					{ ...body, record_size: recordSize },
-					"fetchData failed",
-				);
-				break;
-			} catch (error) {
-				const needed = requiredRowCount(error);
-				if (needed == null || needed <= recordSize || attempt >= 3) {
-					throw error;
-				}
-				recordSize = needed;
-			}
-		}
+		// Answers cap rows via record_size; Liveboards need the whole viz, capped
+		// client-side in mapContents.
+		const recordSize =
+			objectType === LIVEBOARD_TYPE ? LIVEBOARD_RECORD_SIZE : maxRows;
+		const data = await postJson(
+			`${instanceUrl}${endpoint}`,
+			headers,
+			{ ...body, record_size: recordSize },
+			"fetchData failed",
+		);
 		const contents: RawDataContent[] = data?.contents ?? [];
 
 		return {
