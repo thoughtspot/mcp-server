@@ -634,4 +634,143 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 			{ is_thinking: false, type: "text_chunk", text: "two" },
 		]);
 	});
+
+	it("parses a step_notification event and stores a step_notification message", async () => {
+		const storage = makeMockStorage();
+		const line = `data: ${JSON.stringify([{ type: "notification", code: "TOOL_CALL_NOTIFICATION", metadata: { tool_title: "Running query" } }])}\n`;
+		const reader = makeReader([line]);
+
+		await processSendAgentConversationMessageStreamingResponse(
+			CONV_ID,
+			reader,
+			storage.appendMessages,
+			INSTANCE_URL,
+		);
+
+		expect(storage.appendMessagesAndRestartTtl).toHaveBeenCalledWith(CONV_ID, [
+			{ is_thinking: false, type: "step_notification", text: "Running query" },
+		]);
+		expect(storage.appendMessagesAndRestartTtl).toHaveBeenCalledWith(
+			CONV_ID,
+			[],
+			true,
+		);
+	});
+
+	it("sets is_thinking=true on a step_notification event when metadata.type is 'thinking'", async () => {
+		const storage = makeMockStorage();
+		const line = `data: ${JSON.stringify([{ type: "notification", code: "TOOL_CALL_NOTIFICATION", metadata: { tool_title: "Thinking step", type: "thinking" } }])}\n`;
+		const reader = makeReader([line]);
+
+		await processSendAgentConversationMessageStreamingResponse(
+			CONV_ID,
+			reader,
+			storage.appendMessages,
+			INSTANCE_URL,
+		);
+
+		expect(storage.appendMessagesAndRestartTtl).toHaveBeenCalledWith(CONV_ID, [
+			{ is_thinking: true, type: "step_notification", text: "Thinking step" },
+		]);
+	});
+
+	it("records a step_notification metric for a TOOL_CALL_NOTIFICATION event", async () => {
+		const storage = makeMockStorage();
+		const recorder: MetricsRecorder = {
+			...NOOP_METRICS_RECORDER,
+			count: vi.fn(),
+		};
+		const line = `data: ${JSON.stringify([{ type: "notification", code: "TOOL_CALL_NOTIFICATION", metadata: { tool_title: "Running query" } }])}\n`;
+		const reader = makeReader([line]);
+
+		await processSendAgentConversationMessageStreamingResponse(
+			CONV_ID,
+			reader,
+			storage.appendMessages,
+			INSTANCE_URL,
+			recorder,
+		);
+
+		expect(recorder.count).toHaveBeenCalledWith(
+			METRIC_NAMES.upstreamStreamMessagesTotal,
+			1,
+			expect.objectContaining({
+				upstream_operation: "send_agent_conversation_message_streaming",
+				message_type: "step_notification",
+				is_thinking: false,
+			}),
+		);
+	});
+
+	it("increments total_text_messages_parsed for a step_notification event", async () => {
+		const storage = makeMockStorage();
+		const line = `data: ${JSON.stringify([{ type: "notification", code: "TOOL_CALL_NOTIFICATION", metadata: { tool_title: "Running query" } }])}\n`;
+		const reader = makeReader([line]);
+
+		await processSendAgentConversationMessageStreamingResponse(
+			CONV_ID,
+			reader,
+			storage.appendMessages,
+			INSTANCE_URL,
+		);
+
+		expect(tracingState.span?.setAttributes).toHaveBeenCalledWith({
+			total_messages_parsed: 1,
+			total_text_messages_parsed: 1,
+			total_answer_messages_parsed: 0,
+			total_messages_ignored: 0,
+		});
+	});
+
+	it("ignores a notification event when code is not TOOL_CALL_NOTIFICATION", async () => {
+		const storage = makeMockStorage();
+		const line = `data: ${JSON.stringify([{ type: "notification", code: "OTHER_NOTIFICATION", metadata: { tool_title: "Running query" } }])}\n`;
+		const reader = makeReader([line]);
+
+		await processSendAgentConversationMessageStreamingResponse(
+			CONV_ID,
+			reader,
+			storage.appendMessages,
+			INSTANCE_URL,
+		);
+
+		expect(storage.appendMessagesAndRestartTtl).toHaveBeenCalledOnce();
+		expect(storage.appendMessagesAndRestartTtl).toHaveBeenCalledWith(
+			CONV_ID,
+			[],
+			true,
+		);
+		expect(tracingState.span?.setAttributes).toHaveBeenCalledWith({
+			total_messages_parsed: 0,
+			total_text_messages_parsed: 0,
+			total_answer_messages_parsed: 0,
+			total_messages_ignored: 1,
+		});
+	});
+
+	it("ignores a notification event when metadata.tool_title is missing", async () => {
+		const storage = makeMockStorage();
+		const line = `data: ${JSON.stringify([{ type: "notification", code: "TOOL_CALL_NOTIFICATION", metadata: {} }])}\n`;
+		const reader = makeReader([line]);
+
+		await processSendAgentConversationMessageStreamingResponse(
+			CONV_ID,
+			reader,
+			storage.appendMessages,
+			INSTANCE_URL,
+		);
+
+		expect(storage.appendMessagesAndRestartTtl).toHaveBeenCalledOnce();
+		expect(storage.appendMessagesAndRestartTtl).toHaveBeenCalledWith(
+			CONV_ID,
+			[],
+			true,
+		);
+		expect(tracingState.span?.setAttributes).toHaveBeenCalledWith({
+			total_messages_parsed: 0,
+			total_text_messages_parsed: 0,
+			total_answer_messages_parsed: 0,
+			total_messages_ignored: 1,
+		});
+	});
 });

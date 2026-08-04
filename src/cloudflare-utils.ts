@@ -35,6 +35,31 @@ export function instrumentedMCPServer<T extends BaseMCPServer>(
 				env: any,
 				ctx: ExecutionContext,
 			) => {
+				// Block access to clusters based on blocklist from environment variables
+				if (env.CLUSTER_URL_BLOCKLIST) {
+					try {
+						const blocklist: string[] = env.CLUSTER_URL_BLOCKLIST.split(",");
+						if (
+							blocklist.length > 0 &&
+							blocklist.some((blocked) =>
+								(ctx.props as any).instanceUrl?.includes(blocked),
+							)
+						) {
+							console.error(
+								"Rejecting request from cluster",
+								(ctx.props as any).instanceUrl,
+								"due to presence in blocklist",
+							);
+							return new Response(
+								"This cluster is not permitted to connect to MCP Server. Please contact your administrator to enable access.",
+								{ status: 403 },
+							);
+						}
+					} catch (error) {
+						console.error("Error using cluster URL blocklist", error);
+					}
+				}
+
 				// Due to https://community.openai.com/t/the-responses-api-terminates-a-session-too-early/1312539/16
 				// We need to ignore DELETE requests from OpenAI MCP clients. As the DELETE makes the session terminate too early.
 				if (
@@ -43,6 +68,7 @@ export function instrumentedMCPServer<T extends BaseMCPServer>(
 				) {
 					return new Response(null, { status: 403 });
 				}
+
 				return serverFetch(request, env, ctx);
 			};
 			return server;

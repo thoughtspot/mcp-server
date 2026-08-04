@@ -560,7 +560,10 @@ describe("ThoughtSpot Client", () => {
 				json: vi.fn().mockResolvedValue(mockConversation),
 			});
 
-			const result = await client.createAgentConversationWithAutoMode({});
+			const result = await client.createAgentConversationWithAutoMode({
+				isSpotterDataSourceDiscoveryEnabled: true,
+				isSpotterChatHistoryEnabled: false,
+			});
 
 			expect(fetch).toHaveBeenCalledWith(
 				`${mockInstanceUrl}/conversation/v2/`,
@@ -596,6 +599,8 @@ describe("ThoughtSpot Client", () => {
 			});
 
 			const result = await client.createAgentConversationWithAutoMode({
+				isSpotterDataSourceDiscoveryEnabled: true,
+				isSpotterChatHistoryEnabled: false,
 				dataSourceId,
 			});
 
@@ -618,17 +623,22 @@ describe("ThoughtSpot Client", () => {
 				json: vi.fn().mockResolvedValue({ conversation_id: "conv-789" }),
 			});
 
-			await client.createAgentConversationWithAutoMode({});
+			await client.createAgentConversationWithAutoMode({
+				isSpotterDataSourceDiscoveryEnabled: true,
+				isSpotterChatHistoryEnabled: false,
+			});
 
 			const fetchCall = (fetch as any).mock.calls[0];
 			const body = JSON.parse(fetchCall[1].body);
 			expect(body.conv_settings).toEqual({
 				enable_nls: true,
 				enable_why: true,
+				enable_spotql: false,
 				save_chat_enabled: false,
 				enable_tool_permissions: false,
 				enable_search_datasets: true,
 				enable_auto_select_dataset: true,
+				tags: ["mcp-server"],
 			});
 		});
 
@@ -1595,7 +1605,7 @@ describe("ThoughtSpot Client", () => {
 			expect(result.results).toEqual([]);
 			expect(result.next_cursor).toBeNull();
 			expect(warnSpy).toHaveBeenCalledWith(
-				expect.stringContaining("stopped after 20 pages"),
+				expect.stringContaining("stopped after 20 page"),
 			);
 			warnSpy.mockRestore();
 		});

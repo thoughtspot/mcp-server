@@ -192,11 +192,13 @@ describe("thoughtspot-service", () => {
 				.mockResolvedValue(mockResponse);
 
 			const service = new ThoughtSpotService(mockClient);
-			const result = await service.createAgentConversation();
+			const result = await service.createAgentConversation(false, false);
 
 			expect(
 				mockClient.createAgentConversationWithAutoMode,
 			).toHaveBeenCalledWith({
+				isSpotterDataSourceDiscoveryEnabled: false,
+				isSpotterChatHistoryEnabled: false,
 				dataSourceId: undefined,
 			});
 			expect(result).toEqual(mockResponse);
@@ -212,11 +214,13 @@ describe("thoughtspot-service", () => {
 				.mockResolvedValue(mockResponse);
 
 			const service = new ThoughtSpotService(mockClient);
-			await service.createAgentConversation("worksheet-123");
+			await service.createAgentConversation(false, false, "worksheet-123");
 
 			expect(
 				mockClient.createAgentConversationWithAutoMode,
 			).toHaveBeenCalledWith({
+				isSpotterDataSourceDiscoveryEnabled: false,
+				isSpotterChatHistoryEnabled: false,
 				dataSourceId: "worksheet-123",
 			});
 		});

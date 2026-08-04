@@ -351,9 +351,9 @@ export const GetSessionUpdatesInputSchema = z.object({
 
 export const ConversationUpdateSchema = z.object({
 	type: z
-		.enum(["text", "text_chunk", "answer"])
+		.enum(["text", "text_chunk", "answer", "step_notification"])
 		.describe(
-			"The type of update: `text` or `text_chunk` for a natural language message from the Analytics Agent, or `answer` for a data visualization with query results. Determines which other fields are populated.",
+			"The type of update: `text` or `text_chunk` for a natural language message from the Analytics Agent, `answer` for a data visualization with query results, or `step_notification` to announce key progress steps which the Agent is working through. Determines which other fields are populated.",
 		),
 	is_thinking: z
 		.boolean()
@@ -364,7 +364,7 @@ export const ConversationUpdateSchema = z.object({
 		.string()
 		.optional()
 		.describe(
-			"The text content of the message. Only present when `type` is `text` or `text_chunk`. If `type` is `text_chunk`, concatenate the chunks of text together in the order received to form the complete message.",
+			"The text content of the message. Only present when `type` is `text`, `text_chunk`, or `step_notification`. If `type` is `text_chunk`, concatenate the chunks of text together in the order received to form the complete message. If `type` is `step_notification`, the text will describe the step the Analytics Agent is currently working on, and is not meant to be concatenated with other text-based events.",
 		),
 	answer_id: z
 		.string()

@@ -195,7 +195,7 @@ describe("MCP Server", () => {
 					userName: "test-user",
 					currentOrgId: "test-org",
 					privileges: [],
-					enableSpotterDataSourceDiscovery: true,
+					isSpotterDataSourceDiscoveryEnabled: true,
 				},
 				{
 					clientId: "test-client-id",
@@ -296,40 +296,6 @@ describe("MCP Server", () => {
 				"get_session_updates",
 				"create_dashboard",
 			]);
-		});
-
-		it("drops search_objects when the init schema check detects drift", async () => {
-			const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-			// Force the one-time check to re-run and return a validation error.
-			(MCPServer as any).searchSchemaChecked = false;
-			(MCPServer as any).searchObjectsDisabled = false;
-			vi.stubGlobal(
-				"fetch",
-				vi.fn().mockResolvedValueOnce({
-					status: 400,
-					json: async () => ({
-						errors: [
-							{
-								message: 'Cannot query field "sageQuery".',
-								extensions: { code: "GRAPHQL_VALIDATION_FAILED" },
-							},
-						],
-					}),
-				}),
-			);
-
-			const drifted = new MCPServer({ props: mockProps, env: {} as any });
-			await drifted.init();
-			const { listTools } = connect(drifted);
-			const result = await listTools();
-
-			expect(result.tools?.map((t) => t.name)).not.toContain("search_objects");
-
-			// Restore isolate state so later tests see a clean, already-checked flag.
-			(MCPServer as any).searchObjectsDisabled = false;
-			(MCPServer as any).searchSchemaChecked = true;
-			vi.unstubAllGlobals();
-			warn.mockRestore();
 		});
 	});
 
@@ -1456,6 +1422,8 @@ describe("MCP Server", () => {
 				"conv-with-ds-456",
 			);
 			expect(mockCreateAgentConversationWithAutoMode).toHaveBeenCalledWith({
+				isSpotterDataSourceDiscoveryEnabled: true,
+				isSpotterChatHistoryEnabled: false,
 				dataSourceId: "ds-123",
 			});
 		});
@@ -1643,6 +1611,76 @@ describe("MCP Server", () => {
 			expect(result.isError).toBe(true);
 			expect((result.content as any[])[0].text).toContain(
 				"ERROR: The analytical session has an ongoing response",
+			);
+		});
+
+		it("should close out the conversation when sending the message fails", async () => {
+			mockSendAgentConversationMessageStreaming.mockRejectedValue(
+				new Error("Spotter stream failed"),
+			);
+
+			await server.init();
+
+			await expect(
+				server.callSendSessionMessage({
+					method: "tools/call",
+					params: {
+						name: "send_session_message",
+						arguments: {
+							analytical_session_id: "conv-abc-123",
+							message: "What is the total revenue?",
+						},
+					},
+				}),
+			).rejects.toThrow("Spotter stream failed");
+
+			// The conversation must be marked done so clients don't poll forever.
+			expect(mockStorageService.appendMessages).toHaveBeenCalledWith(
+				"conv-abc-123",
+				[
+					{
+						is_thinking: false,
+						type: "text",
+						text: "Something went wrong",
+					},
+				],
+				true,
+			);
+		});
+
+		it("should still throw when closing out the conversation fails", async () => {
+			mockSendAgentConversationMessageStreaming.mockRejectedValue(
+				new Error("Spotter stream failed"),
+			);
+			mockStorageService.appendMessages.mockRejectedValue(
+				new Error("Storage write failed"),
+			);
+
+			await server.init();
+
+			await expect(
+				server.callSendSessionMessage({
+					method: "tools/call",
+					params: {
+						name: "send_session_message",
+						arguments: {
+							analytical_session_id: "conv-abc-123",
+							message: "What is the total revenue?",
+						},
+					},
+				}),
+			).rejects.toThrow("Spotter stream failed");
+
+			expect(mockStorageService.appendMessages).toHaveBeenCalledWith(
+				"conv-abc-123",
+				[
+					{
+						is_thinking: false,
+						type: "text",
+						text: "Something went wrong",
+					},
+				],
+				true,
 			);
 		});
 	});

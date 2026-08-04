@@ -47,10 +47,9 @@ export interface SessionInfo {
 	releaseVersion: string;
 	currentOrgId: string;
 	privileges: any;
-	enableSpotterDataSourceDiscovery?: boolean;
-	// Whether Orgs are enabled on this cluster (configInfo.orgsConfiguration.enabled).
-	// Gates the org tools (list_orgs/switch_org).
+	isSpotterDataSourceDiscoveryEnabled?: boolean;
 	orgsEnabled?: boolean;
+	isSpotterChatHistoryEnabled?: boolean;
 }
 
 export interface BaseMessage {
@@ -58,7 +57,7 @@ export interface BaseMessage {
 }
 
 export interface TextMessage extends BaseMessage {
-	type: "text" | "text_chunk";
+	type: "text" | "text_chunk" | "step_notification";
 	text: string;
 }
 

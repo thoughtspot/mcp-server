@@ -137,9 +137,29 @@ export const processSendAgentConversationMessageStreamingResponse = async (
 									answer_query: item.metadata?.sage_query,
 									iframe_url: iframeUrl,
 								});
+							} else if (item.type === "notification") {
+								if (
+									item.code !== "TOOL_CALL_NOTIFICATION" ||
+									!item.metadata?.tool_title
+								) {
+									nMessagesIgnored++;
+									continue;
+								}
+
+								nTextMessagesParsed++;
+								recordUpstreamStreamMessageMetric(
+									recorder,
+									upstreamOperation,
+									"step_notification",
+									item.metadata?.type === "thinking",
+								);
+								newMessages.push({
+									is_thinking: item.metadata?.type === "thinking",
+									type: "step_notification",
+									text: item.metadata.tool_title,
+								});
 							} else if (
 								item.type === "ack" ||
-								item.type === "notification" ||
 								item.type === "search_datasets" ||
 								item.type === "file" ||
 								item.type === "conv_title"

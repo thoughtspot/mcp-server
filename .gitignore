@@ -138,6 +138,8 @@ dist
 .yarn/install-state.gz
 .pnp.*
 .wrangler
+.wrangler.old
+.wrangler.new
 .dev.vars
 coverage
 key.pem

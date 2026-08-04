@@ -281,7 +281,7 @@ describe("search_objects tool — real handler + mocked network", () => {
 			last_modified: "2023-11-14T22:13:20.000Z", // seconds → ISO-8601
 			verified: true,
 			query: "sales by region", // sage tokens for an Answer
-			frame_url: `${INSTANCE_URL}/#/saved-answer/answer-1`,
+			external_link: `${INSTANCE_URL}/#/saved-answer/answer-1`,
 			confidence: 0.95,
 		});
 
@@ -292,17 +292,17 @@ describe("search_objects tool — real handler + mocked network", () => {
 			title: "Revenue Trend",
 			last_modified: "2023-11-14T22:13:25.000Z", // already ms → ISO-8601
 			query: "revenue weekly",
-			frame_url: `${INSTANCE_URL}/#/insights/pinboard/liveboard-1/viz-1`,
+			external_link: `${INSTANCE_URL}/#/insights/pinboard/liveboard-1/viz-1`,
 		});
 
 		expect(structured.next_cursor).toBeNull(); // isFinalPage: true
-		expect(typeof structured.request_id).toBe("string");
-		expect(structured.request_id.length).toBeGreaterThan(0);
 
 		// The outbound Eureka request carries the tracing + locale headers.
 		const [, init] = callTo("op=GetEurekaResults") ?? [];
 		expect(init.headers["accept-language"]).toBe("en-US");
-		expect(init.headers["x-request-id"]).toBe(structured.request_id);
+		// x-request-id is sent upstream for tracing; not echoed in the response.
+		expect(typeof init.headers["x-request-id"]).toBe("string");
+		expect(init.headers["x-request-id"].length).toBeGreaterThan(0);
 		const body = JSON.parse(init.body);
 		expect(body.variables.params.query).toBe("sales");
 		expect(body.variables.params.batchSize).toBe(10); // default limit
@@ -384,7 +384,6 @@ describe("search_objects tool — real handler + mocked network", () => {
 		expect(structured.results).toEqual([]);
 		expect(structured.error.code).toBe("INTERNAL");
 		expect(structured.error.retryable).toBe(false);
-		expect(typeof structured.request_id).toBe("string");
 	});
 
 	it("returns a no_results envelope when nothing matches", async () => {
@@ -400,7 +399,6 @@ describe("search_objects tool — real handler + mocked network", () => {
 		expect(structured.status).toBe("no_results");
 		expect(structured.results).toEqual([]);
 		expect(structured.next_cursor).toBeNull();
-		expect(structured.message).toContain("nothing-matches-this");
 	});
 });
 

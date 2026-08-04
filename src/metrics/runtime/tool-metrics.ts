@@ -35,6 +35,7 @@ export type UpstreamStreamMessageType =
 	| "text"
 	| "text_chunk"
 	| "answer"
+	| "step_notification"
 	| "error";
 
 function buildToolMetricLabels(

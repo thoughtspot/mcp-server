@@ -13,7 +13,6 @@ import {
 } from "../metrics/runtime/metrics-recorder";
 import type { ToolMetricApiSurface } from "../metrics/runtime/tool-metrics";
 import { WithSpan } from "../metrics/tracing/tracing-utils";
-import { verifySearchObjectsSchema } from "../thoughtspot/search-objects/search-objects-schema-check";
 import type {
 	DataSource,
 	ThoughtSpotService,
@@ -51,10 +50,6 @@ export class MCPServer extends BaseMCPServer {
 	private globalToken: string | undefined;
 	// False for pre-multi-org grants (no refresh token) — keeps old behavior until re-auth.
 	private grantHasRefreshToken = false;
-	// Init-time search_objects schema check. If it confirms
-	// the query drifted from the live Eureka schema, search_objects is not listed.
-	private static searchSchemaChecked = false;
-	private static searchObjectsDisabled = false;
 
 	constructor(ctx: Context) {
 		super(ctx, "ThoughtSpot", "2.0.0");
@@ -142,33 +137,7 @@ export class MCPServer extends BaseMCPServer {
 		await this.setActiveOrg(this.activeOrgId, orgToken);
 	}
 
-	// verify the search_objects query still matches the liveEureka schema.
-	// Fully isolated in its own try/catch so it can never break init or any other tool.
-	private async checkSearchObjectsSchema(): Promise<void> {
-		if (MCPServer.searchSchemaChecked) {
-			return;
-		}
-		const { instanceUrl, accessToken } = this.ctx.props;
-		if (!instanceUrl || !accessToken) {
-			return;
-		}
-		MCPServer.searchSchemaChecked = true;
-		try {
-			const result = await verifySearchObjectsSchema(instanceUrl, accessToken);
-			if (result === "drift") {
-				MCPServer.searchObjectsDisabled = true;
-				console.warn(
-					"search_objects tool not loaded: its GraphQL query does not match the live Eureka schema (schema mismatch).",
-				);
-			}
-		} catch (error) {
-			console.error("search_objects schema check errored:", error);
-		}
-	}
-
 	protected async postInit(): Promise<void> {
-		await this.checkSearchObjectsSchema();
-
 		if (this.ctx.props.authMode !== "oauth") {
 			return;
 		}
@@ -393,7 +362,7 @@ export class MCPServer extends BaseMCPServer {
 
 		// Filter out GetDataSourceSuggestions if feature flag is not available
 		if (
-			!this.isDatasourceDiscoveryAvailable() &&
+			!this.isSpotterDataSourceDiscoveryEnabled() &&
 			tools.some((tool) => tool.name === ToolName.GetDataSourceSuggestions)
 		) {
 			tools = tools.filter(
@@ -406,12 +375,6 @@ export class MCPServer extends BaseMCPServer {
 				(tool) =>
 					tool.name !== ToolName.ListOrgs && tool.name !== ToolName.SwitchOrg,
 			);
-		}
-
-		// Drop search_objects when the init-time check confirmed its query no
-		// longer matches the live Eureka schema (see postInit).
-		if (MCPServer.searchObjectsDisabled) {
-			tools = tools.filter((tool) => tool.name !== ToolName.SearchObjects);
 		}
 
 		return { tools };
@@ -759,10 +722,13 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 
 		let response: AgentConversation;
 		try {
-			response =
-				await this.getThoughtSpotService(recorder).createAgentConversation(
-					data_source_id,
-				);
+			response = await this.getThoughtSpotService(
+				recorder,
+			).createAgentConversation(
+				this.isSpotterDataSourceDiscoveryEnabled(),
+				this.isSpotterChatHistoryEnabled(),
+				data_source_id,
+			);
 		} catch (error) {
 			if (this.apiErrorStatus(error) !== 401) {
 				throw error;
@@ -817,14 +783,39 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			);
 		}
 
-		await this.getThoughtSpotService(recorder, {
-			analyticalSessionId: analytical_session_id,
-		}).sendAgentConversationMessageStreaming(
-			analytical_session_id,
-			message,
-			storageService.appendMessages.bind(storageService),
-			additional_context,
-		);
+		try {
+			await this.getThoughtSpotService(recorder, {
+				analyticalSessionId: analytical_session_id,
+			}).sendAgentConversationMessageStreaming(
+				analytical_session_id,
+				message,
+				storageService.appendMessages.bind(storageService),
+				additional_context,
+			);
+		} catch (error) {
+			console.error("Error sending message to Spotter conversation:", error);
+			try {
+				// Close out the conversation state in the storage (mark isDone = true), so
+				// that clients don't accidentally get stuck polling for updates forever
+				await storageService.appendMessages(
+					analytical_session_id,
+					[
+						{
+							is_thinking: false,
+							type: "text",
+							text: "Something went wrong",
+						},
+					],
+					true,
+				);
+			} catch (storageError) {
+				console.error(
+					"Error appending error message to storage service:",
+					storageError,
+				);
+			}
+			throw error;
+		}
 
 		return this.createStructuredContentSuccessResponse(
 			{ success: true },
