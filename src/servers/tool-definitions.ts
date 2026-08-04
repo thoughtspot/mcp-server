@@ -213,6 +213,84 @@ export const SearchObjectsResponseSchema = z.object({
 		.describe("Present only on error."),
 });
 
+export const FetchDataInputSchema = z.object({
+	object_id: z
+		.string()
+		.describe(
+			"The GUID of the object to fetch data for, typically an `object_id` returned by a prior `search_objects` call. Supports saved Answers and Liveboards.",
+		),
+	visualization_ids: z
+		.array(z.string())
+		.optional()
+		.describe(
+			"When `object_id` corresponds to a Liveboard, restrict the fetch to these visualization GUIDs (use to pull a single visualization/answer pinned on a Liveboard). Omit to fetch every visualization on the Liveboard. Ignored for standalone Answers.",
+		),
+	max_rows: z
+		.number()
+		.int()
+		.positive()
+		.optional()
+		.describe(
+			"Maximum number of rows to return per visualization. Defaults to 25. Raise this only when you need the full result set and the object is known to be large.",
+		),
+});
+
+const FetchDataVizSchema = z.object({
+	viz_id: z
+		.string()
+		.optional()
+		.describe(
+			"The GUID of the visualization. Present for Liveboard visualizations; omitted for a standalone Answer.",
+		),
+	viz_name: z
+		.string()
+		.optional()
+		.describe(
+			"The name of the visualization. Present for Liveboard visualizations.",
+		),
+	columns: z.array(z.string()).describe("The column names, in order."),
+	data_rows: z
+		.array(z.array(z.union([z.string(), z.number(), z.boolean(), z.null()])))
+		.describe(
+			"The data rows; each row is an array of cell values aligned to `columns` — each cell a string, number, boolean, or null. Numeric cells are returned at full precision, exactly as stored.",
+		),
+	total_row_count: z
+		.number()
+		.optional()
+		.describe(
+			"Total rows available upstream, which may exceed the rows returned when capped by `max_rows`.",
+		),
+	row_count: z
+		.number()
+		.optional()
+		.describe("Number of rows actually returned in `data_rows`."),
+	sampling_ratio: z
+		.number()
+		.optional()
+		.describe(
+			"Sampling ratio between 0 and 1; a value of 1 means the complete result set was returned (not sampled).",
+		),
+});
+
+export const FetchDataOutputSchema = z.object({
+	id: z.string().describe("The GUID of the fetched object."),
+	name: z.string().describe("The display name of the object."),
+	type: z
+		.string()
+		.describe("The resolved object type: either 'ANSWER' or 'LIVEBOARD'."),
+	description: z.string().describe("The description of the object."),
+	data: z
+		.array(FetchDataVizSchema)
+		.describe(
+			"The object's data. A single entry for an Answer; one entry per visualization for a Liveboard.",
+		),
+	request_id: z
+		.string()
+		.describe(
+			"Correlation id sent on the upstream calls as x-request-id; trace this in ThoughtSpot's server logs.",
+		),
+});
+
 export const CheckConnectivityInputSchema = z.object({});
 
 export const CheckConnectivityOutputSchema = z.object({
@@ -455,6 +533,7 @@ export enum ToolName {
 	GetDataSourceSuggestions = "getDataSourceSuggestions",
 	// V2 (Spotter 3)
 	SearchObjects = "search_objects",
+	FetchData = "fetch_data",
 	CheckConnectivity = "check_connectivity",
 	CreateAnalysisSession = "create_analysis_session",
 	SendSessionMessage = "send_session_message",
@@ -545,6 +624,22 @@ export const toolDefinitionsV2 = [
 		outputSchema: z.toJSONSchema(SearchObjectsResponseSchema),
 		annotations: {
 			title: "Search Objects",
+			readOnlyHint: true,
+			destructiveHint: false,
+			openWorldHint: false,
+		},
+	},
+	{
+		name: ToolName.FetchData,
+		description: [
+			"Fetch the full data (columns and rows) of a saved Answer or Liveboard, identified by its GUID.",
+			"CALL THIS WHENEVER the user wants to explain, describe, summarize, analyze, interpret, or ask what a specific object contains or shows: any explanation of what an object contains must be grounded in the data this tool returns, so fetch it first with the object's `id`, then answer from the returned data.",
+			"Returns the object's data exactly as saved — it does not run new queries or change the object's question, filters, or columns. The result is shaped to the object's type: an Answer returns a single tabular result, a Liveboard returns one tabular result per visualization (each with its visualization id and name). To pull a single visualization pinned on a Liveboard, pass the Liveboard GUID as `object_id` and the visualization GUID in `visualization_ids`. Each result includes the column names and data rows. Use the optional `max_rows` to bound the rows returned per visualization (defaults to 25).",
+		].join("\n"),
+		inputSchema: z.toJSONSchema(FetchDataInputSchema),
+		outputSchema: z.toJSONSchema(FetchDataOutputSchema),
+		annotations: {
+			title: "Fetch Object Data",
 			readOnlyHint: true,
 			destructiveHint: false,
 			openWorldHint: false,

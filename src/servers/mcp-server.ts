@@ -28,6 +28,7 @@ import {
 	CreateAnalysisSessionInputSchema,
 	CreateDashboardInputSchema,
 	CreateLiveboardSchema,
+	FetchDataInputSchema,
 	GetAnswerSchema,
 	GetDataSourceSuggestionsSchema,
 	GetRelevantQuestionsSchema,
@@ -516,6 +517,10 @@ export class MCPServer extends BaseMCPServer {
 
 			case ToolName.SearchObjects: {
 				return this.callSearchObjects(request, recorder);
+			}
+
+			case ToolName.FetchData: {
+				return this.callFetchData(request, recorder);
 			}
 
 			case ToolName.CheckConnectivity: {
@@ -1086,6 +1091,35 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			{ success: true, active_org_id: org_id },
 			`Switched to org ${orgId}`,
 		);
+	}
+
+	@WithSpan("call-fetch-data")
+	async callFetchData(
+		request: z.infer<typeof CallToolRequestSchema>,
+		recorder: MetricsRecorder,
+	) {
+		const { object_id, visualization_ids, max_rows } =
+			FetchDataInputSchema.parse(request.params.arguments);
+
+		try {
+			const result = await this.getThoughtSpotService(recorder).fetchData({
+				objectId: object_id,
+				vizIds: visualization_ids,
+				maxRows: max_rows,
+			});
+
+			return this.createStructuredContentSuccessResponse(
+				result,
+				`Fetched data for ${result.type} ${object_id} (${result.data.length} result(s))`,
+			);
+		} catch (error) {
+			// Surface the upstream message (e.g. status 401/500) so the failure is
+			// actionable rather than a generic "check the object id".
+			return this.createErrorResponse(
+				`Failed to fetch object data: ${(error as Error).message}`,
+				"fetch_data failed",
+			);
+		}
 	}
 
 	private _sources: {
