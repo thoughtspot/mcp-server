@@ -32,6 +32,7 @@ import {
 	GetDataSourceSuggestionsSchema,
 	GetRelevantQuestionsSchema,
 	GetSessionUpdatesInputSchema,
+	SearchObjectsInputSchema,
 	SendSessionMessageInputSchema,
 	SwitchOrgInputSchema,
 	ToolName,
@@ -513,6 +514,10 @@ export class MCPServer extends BaseMCPServer {
 				return this.callGetDataSourceSuggestions(request, recorder);
 			}
 
+			case ToolName.SearchObjects: {
+				return this.callSearchObjects(request, recorder);
+			}
+
 			case ToolName.CheckConnectivity: {
 				if (!this.ctx.props.accessToken || !this.ctx.props.instanceUrl) {
 					return this.createErrorResponse(
@@ -953,6 +958,55 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			JSON.stringify(dataSourcesInfo),
 			`${dataSources.length} data source suggestion(s) found`,
 		);
+	}
+
+	@WithSpan("call-search-objects")
+	async callSearchObjects(
+		request: z.infer<typeof CallToolRequestSchema>,
+		recorder: MetricsRecorder,
+	) {
+		const {
+			query,
+			types,
+			author_name,
+			tag,
+			modified_since,
+			verified_only,
+			limit,
+			cursor,
+		} = SearchObjectsInputSchema.parse(request.params.arguments);
+
+		try {
+			const result = await this.getThoughtSpotService(recorder).searchObjects({
+				query,
+				types,
+				owner: author_name,
+				tag,
+				modifiedSince: modified_since,
+				verifiedOnly: verified_only,
+				limit,
+				cursor,
+			});
+
+			// Return no_results and error as normal structured content (not an MCP
+			// protocol error) so the model still receives the structured response
+			// and can relay the outcome to the user.
+			const statusMessage =
+				"status" in result
+					? result.status === "error"
+						? `search_objects error: ${result.error.code}`
+						: "search_objects: no results"
+					: `${result.results.length} object(s) found`;
+
+			return this.createStructuredContentSuccessResponse(result, statusMessage);
+		} catch (error) {
+			// Surface the upstream message (e.g. status 401/500) so the failure is
+			// actionable rather than a generic "check your inputs".
+			return this.createErrorResponse(
+				`Failed to search objects: ${(error as Error).message}`,
+				"search_objects failed",
+			);
+		}
 	}
 
 	@WithSpan("call-list-orgs")

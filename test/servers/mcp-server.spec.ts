@@ -109,6 +109,39 @@ describe("MCP Server", () => {
 					},
 				},
 			]),
+			searchObjects: vi.fn().mockResolvedValue({
+				results: [
+					{
+						object_id: "answer-123",
+						title: "Sales by Region",
+						type: "ANSWER",
+						author_name: "test-user",
+						description: "Revenue broken down by region",
+						tags: [],
+						last_modified: "2023-11-14T22:13:20.000Z",
+						verified: true,
+						external_link:
+							"https://test.thoughtspot.cloud/#/saved-answer/answer-123",
+						query: "sales by region",
+						confidence: 0.95,
+					},
+					{
+						object_id: "liveboard-456",
+						title: "Sales Overview",
+						type: "LIVEBOARD",
+						author_name: "test-user",
+						description: "Overview of sales metrics",
+						tags: [],
+						last_modified: "2023-11-14T22:13:21.000Z",
+						verified: false,
+						external_link:
+							"https://test.thoughtspot.cloud/#/pinboard/liveboard-456",
+						query: null,
+						confidence: 0.82,
+					},
+				],
+				next_cursor: null,
+			}),
 			instanceUrl: "https://test.thoughtspot.cloud",
 		} as any);
 
@@ -164,9 +197,10 @@ describe("MCP Server", () => {
 
 			const result = await listTools();
 
-			// V2 tools (latest version): 5 tools
-			expect(result.tools).toHaveLength(5);
+			// V2 tools (latest version): 6 tools
+			expect(result.tools).toHaveLength(6);
 			expect(result.tools?.map((t) => t.name)).toEqual([
+				"search_objects",
 				"check_connectivity",
 				"create_analysis_session",
 				"send_session_message",
@@ -201,7 +235,7 @@ describe("MCP Server", () => {
 			);
 		});
 
-		it("should return 5 tools regardless of enableSpotterDataSourceDiscovery when using latest (V2)", async () => {
+		it("should return 6 tools regardless of enableSpotterDataSourceDiscovery when using latest (V2)", async () => {
 			// Mock getThoughtSpotClient with enableSpotterDataSourceDiscovery set to false
 			vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
 				getSessionInfo: vi.fn().mockResolvedValue({
@@ -235,8 +269,9 @@ describe("MCP Server", () => {
 			const result = await listTools();
 
 			// V2 tools don't have a datasource discovery tool, so filtering has no effect
-			expect(result.tools).toHaveLength(5);
+			expect(result.tools).toHaveLength(6);
 			expect(result.tools?.map((t) => t.name)).toEqual([
+				"search_objects",
 				"check_connectivity",
 				"create_analysis_session",
 				"send_session_message",
@@ -388,6 +423,84 @@ describe("MCP Server", () => {
 
 			expect(result.isError).toBeUndefined();
 			expect((result.content as any[])[0].text).toBe('{"success":true}');
+		});
+	});
+
+	describe("Search Objects Tool", () => {
+		it("should return matching objects for a search term", async () => {
+			await server.init();
+			const { callTool } = connect(server);
+
+			const result = await callTool("search_objects", { query: "sales" });
+
+			expect(result.isError).toBeUndefined();
+			const structured = result.structuredContent as any;
+			expect(structured.next_cursor).toBeNull();
+			const objects = structured.results;
+			expect(objects).toHaveLength(2);
+			expect(objects[0]).toMatchObject({
+				object_id: "answer-123",
+				title: "Sales by Region",
+				type: "ANSWER",
+				author_name: "test-user",
+				verified: true,
+				external_link:
+					"https://test.thoughtspot.cloud/#/saved-answer/answer-123",
+			});
+			expect(objects[1].object_id).toBe("liveboard-456");
+		});
+
+		it("should pass the documented params through to the client", async () => {
+			await server.init();
+			const { callTool } = connect(server);
+
+			const client = thoughtspotClient.getThoughtSpotClient(
+				"https://test.thoughtspot.cloud",
+				"test-access-token",
+			);
+
+			await callTool("search_objects", {
+				query: "sales",
+				types: ["LIVEBOARD"],
+				author_name: "alice",
+				tag: "Finance",
+				modified_since: 1700000000000,
+				verified_only: true,
+				limit: 25,
+				cursor: "50",
+			});
+
+			// Tool input `author_name` maps to the internal `owner` search param.
+			expect((client as any).searchObjects).toHaveBeenCalledWith(
+				expect.objectContaining({
+					query: "sales",
+					types: ["LIVEBOARD"],
+					owner: "alice",
+					tag: "Finance",
+					modifiedSince: 1700000000000,
+					verifiedOnly: true,
+					limit: 25,
+					cursor: "50",
+				}),
+			);
+		});
+
+		it("should return an error response when the search fails", async () => {
+			vi.spyOn(
+				ThoughtSpotService.prototype,
+				"searchObjects",
+			).mockRejectedValueOnce(new Error("upstream boom"));
+
+			await server.init();
+			const { callTool } = connect(server);
+
+			const result = await callTool("search_objects", { query: "sales" });
+
+			expect(result.isError).toBe(true);
+			// Surfaces the upstream error message so the failure is actionable.
+			expect((result.content as any[])[0].text).toMatch(
+				/Failed to search objects: upstream boom/,
+			);
 		});
 	});
 

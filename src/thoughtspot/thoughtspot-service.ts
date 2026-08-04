@@ -22,6 +22,10 @@ import {
 import { WithSpan, getActiveSpan } from "../metrics/tracing/tracing-utils";
 import { processSendAgentConversationMessageStreamingResponse } from "../streaming-utils";
 import type {
+	SearchObjectsParams,
+	SearchObjectsResponse,
+} from "./thoughtspot-client";
+import type {
 	Answer,
 	DataSource,
 	DataSourceSuggestion,
@@ -750,16 +754,39 @@ export class ThoughtSpotService {
 	}
 
 	/**
+	 * Search for objects (answers, liveboards, worksheets, etc.) by a search term
+	 */
+	@WithSpan("search-objects")
+	async searchObjects(
+		params: SearchObjectsParams,
+	): Promise<SearchObjectsResponse> {
+		const span = getActiveSpan();
+		span?.setAttribute(
+			"query",
+			Array.isArray(params.query) ? params.query.join(", ") : params.query,
+		);
+		span?.setAttribute("limit", params.limit ?? 10);
+
+		const result = await this.observeUpstreamCall(
+			UPSTREAM_OPERATION_NAMES.searchObjects,
+			() => (this.client as any).searchObjects(params),
+		);
+
+		span?.setAttribute("results_count", result.results.length);
+		return result;
+	}
+
+	/**
 	 * Validate connection to ThoughtSpot
 	 */
 	@WithSpan("validate-connection")
 	async validateConnection(): Promise<boolean> {
 		try {
-			await this.observeUpstreamCall(
+			const info = await this.observeUpstreamCall(
 				UPSTREAM_OPERATION_NAMES.getSessionInfo,
 				() => (this.client as any).getSessionInfo(),
 			);
-			return true;
+			return Boolean(info?.userGUID);
 		} catch (error) {
 			// The decorator will automatically record the exception
 			return false;

@@ -10,14 +10,28 @@ import type {
 import { customAlphabet } from "nanoid";
 import { of } from "rxjs";
 import YAML from "yaml";
+import { ORG_HEADER, buildHeaders } from "./rest-utils";
+import { addSearchObjects } from "./search-objects/search-objects";
 import { ORG_TOKEN_VALIDITY_SEC, fetchOrgToken } from "./token-endpoints";
 import { type Org, type SessionInfo, ThoughtSpotApiError } from "./types";
+
+// Re-exported for existing importers; definitions live with the handlers.
+export type {
+	SearchErrorCode,
+	SearchObjectHeader,
+	SearchObjectResult,
+	SearchObjectsError,
+	SearchObjectsNoResults,
+	SearchObjectsParams,
+	SearchObjectsResponse,
+	SearchObjectsResult,
+} from "./search-objects/search-objects-types";
 
 /*
  * Inject custom handlers into the ThoughtSpot client
  */
 // Per-request org selector; the access token works across all the user's orgs.
-const ORG_HEADER = "x-thoughtspot-orgs";
+// ORG_HEADER lives in rest-utils alongside buildHeaders.
 
 export const getThoughtSpotClient = (
 	instanceUrl: string,
@@ -61,28 +75,11 @@ export const getThoughtSpotClient = (
 		bearerToken,
 		orgId,
 	);
+	addSearchObjects(client, instanceUrl, bearerToken);
 	addFetchOrgBearerToken(client, instanceUrl);
 	addListOrgs(client, instanceUrl, bearerToken);
 	return client;
 };
-
-// Auth/content headers for the raw-fetch handlers, incl. the org header if set.
-function buildHeaders(
-	token: string,
-	orgId?: string,
-	accept = "application/json",
-): Record<string, string> {
-	const headers: Record<string, string> = {
-		"Content-Type": "application/json",
-		Accept: accept,
-		"user-agent": "ThoughtSpot-ts-client",
-		Authorization: `Bearer ${token}`,
-	};
-	if (orgId) {
-		headers[ORG_HEADER] = orgId;
-	}
-	return headers;
-}
 
 const getAnswerTML = `
 mutation GetUnsavedAnswerTML($session: BachSessionIdInput!, $exportDependencies: Boolean, $formatType:  EDocFormatType, $exportPermissions: Boolean, $exportFqn: Boolean) {

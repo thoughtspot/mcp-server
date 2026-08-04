@@ -65,6 +65,154 @@ export const GetAnswerOutputSchema = z.object({
 		.describe("Information about the fields in the answer"),
 });
 
+export const SearchObjectsInputSchema = z.object({
+	query: z
+		.string()
+		.min(1)
+		.describe(
+			"The search term to find objects for, matched against object names or descriptions.",
+		),
+	types: z
+		.array(z.enum(["LIVEBOARD", "LIVEBOARD_VIZ", "ANSWER", "WORKSHEET"]))
+		.optional()
+		.describe(
+			"Restrict results to these object types. Allowed values: 'LIVEBOARD', 'LIVEBOARD_VIZ' (a viz pinned on a Liveboard), 'ANSWER', 'WORKSHEET'. Omit to search all types.",
+		),
+	author_name: z
+		.string()
+		.optional()
+		.describe(
+			"Restrict results to objects authored by the provided user, matched against the author's display name (case-insensitive).",
+		),
+	tag: z
+		.string()
+		.optional()
+		.describe(
+			"Restrict results to objects carrying this tag/sticker, matched by tag name (case-insensitive).",
+		),
+	modified_since: z
+		.number()
+		.int()
+		.optional()
+		.describe(
+			"Only return objects last modified on or after this epoch-millisecond timestamp.",
+		),
+	verified_only: z
+		.boolean()
+		.optional()
+		.describe("If true, only return objects marked as verified."),
+	limit: z
+		.number()
+		.int()
+		.positive()
+		.optional()
+		.describe("The maximum number of results to return. Defaults to 10."),
+	cursor: z
+		.string()
+		.optional()
+		.describe(
+			"Opaque pagination cursor returned as `next_cursor` by a previous call. Omit for the first page.",
+		),
+});
+
+const SearchObjectResultSchema = z.object({
+	object_id: z
+		.string()
+		.describe(
+			"The GUID to pass to fetch_data as `object_id`. For a visualization pinned on a Liveboard this is the parent Liveboard's GUID (see `visualization_id`).",
+		),
+	visualization_id: z
+		.string()
+		.optional()
+		.describe(
+			"Set only when this result is a specific visualization on a Liveboard: `object_id` is the Liveboard and this is the visualization. Pass it to fetch_data as `visualization_ids` to fetch just this viz.",
+		),
+	title: z.string().describe("The display name/title of the object."),
+	type: z
+		.string()
+		.describe(
+			"UPPER-case object type: 'LIVEBOARD', 'ANSWER', 'LIVEBOARD_VIZ' (a viz pinned on a Liveboard, i.e. a 'Liveboard viz'; `object_id` is the parent Liveboard and `visualization_id` the viz) or 'WORKSHEET'. Any of these can be passed straight back as a `types` filter.",
+		),
+	author_name: z
+		.string()
+		.describe("The display name of the user who authored the object."),
+	description: z
+		.string()
+		.optional()
+		.describe("The description of the object; omitted when it has none."),
+	tags: z
+		.array(z.string())
+		.describe("The names of the tags/stickers applied to the object."),
+	last_modified: z
+		.string()
+		.optional()
+		.describe(
+			"ISO-8601 timestamp of the last modification (e.g. 2026-05-15T14:30:00Z); omitted when unavailable. Render as a plain date.",
+		),
+	verified: z.boolean().describe("Whether the object is marked as verified."),
+	external_link: z
+		.string()
+		.describe(
+			"Deep link to open the object in the ThoughtSpot UI (opens in a new browser tab; not an embeddable iframe URL).",
+		),
+	query: z
+		.string()
+		.nullable()
+		.describe(
+			"For an Answer/viz: the sage/TML query tokens that define it (e.g. 'sales by region monthly'). Null for a Liveboard.",
+		),
+	confidence: z
+		.number()
+		.describe(
+			"Relevance score of the result for the search term. Ranking only — never surface as a number to the user.",
+		),
+});
+
+// A search_objects call returns one of three scenarios: success (no `status`),
+// no_results, or error. Modeled as a single object (not a union) so the JSON
+// Schema root stays `type: "object"` — MCP clients reject an `anyOf` root
+// outputSchema. Scenario-specific fields are therefore optional.
+export const SearchObjectsResponseSchema = z.object({
+	status: z
+		.enum(["no_results", "error"])
+		.optional()
+		.describe(
+			"Absent on a successful hit list. 'no_results' = the query ran but matched nothing; 'error' = the search failed (see `error`).",
+		),
+	results: z
+		.array(SearchObjectResultSchema)
+		.describe(
+			"Ranked results matching the search; empty for no_results/error.",
+		),
+	next_cursor: z
+		.string()
+		.nullable()
+		.optional()
+		.describe(
+			"Cursor to pass back as `cursor` for the next page; null when there are no more results, and omitted on error.",
+		),
+	error: z
+		.object({
+			code: z
+				.enum([
+					"INVALID_ARGUMENT",
+					"UNAUTHORIZED",
+					"RATE_LIMITED",
+					"UPSTREAM_TIMEOUT",
+					"INTERNAL",
+				])
+				.describe("Machine-readable failure category. Never show to the user."),
+			message: z
+				.string()
+				.describe("Human-readable failure reason; safe to relay to the user."),
+			retryable: z
+				.boolean()
+				.describe("True when retrying the same call may succeed."),
+		})
+		.optional()
+		.describe("Present only on error."),
+});
+
 export const CheckConnectivityInputSchema = z.object({});
 
 export const CheckConnectivityOutputSchema = z.object({
@@ -306,6 +454,7 @@ export enum ToolName {
 	CreateLiveboard = "createLiveboard",
 	GetDataSourceSuggestions = "getDataSourceSuggestions",
 	// V2 (Spotter 3)
+	SearchObjects = "search_objects",
 	CheckConnectivity = "check_connectivity",
 	CreateAnalysisSession = "create_analysis_session",
 	SendSessionMessage = "send_session_message",
@@ -376,6 +525,31 @@ export const toolDefinitionsV1 = [
 ];
 
 export const toolDefinitionsV2 = [
+	{
+		name: ToolName.SearchObjects,
+		description: [
+			"Search for objects (Answers, Liveboards, Worksheets) in ThoughtSpot matching a given search term. Supports optional filters (types, owner, tag, modified_since, verified_only) and pagination (limit, cursor). Returns `results` (ranked), plus `next_cursor`. Each result carries: object_id, title, type (LIVEBOARD | ANSWER | LIVEBOARD_VIZ | WORKSHEET; LIVEBOARD_VIZ is a viz pinned on a Liveboard — render it as 'Liveboard viz'), author_name, description, tags, last_modified (ISO-8601), verified, external_link, query (Answer/viz sage tokens; null for Liveboards) and confidence. Returns identifiers and metadata only — never the object's data or contents, and it does not run queries.",
+			"",
+			"How to present the results:",
+			"• Render as a table with fixed columns in this order: Object (the name, linked to `external_link`) · Type · Owner · Verified (✓ or —) · Last Modified.",
+			"• Put the description and, for an Answer/viz, the `query` tokens as sub-lines under the name (e.g. '↳ sales by region, last 3 months') — never as their own columns.",
+			"• Render `last_modified` as a plain date (2026-05-15), never the raw timestamp.",
+			"• Lead with the top match; if the top 2–3 are close, present them as ranked candidates.",
+			"• Never surface `next_cursor` or the numeric `confidence` in your prose.",
+			"",
+			"Outcomes other than a hit list:",
+			'• `status: "no_results"` — the search ran but nothing matched. Tell the user nothing matched, and suggest broadening the term or dropping a filter. Do not invent results.',
+			'• `status: "error"` — the search failed. Tell the user briefly using `error.message`; if `error.retryable` is true, offer to try again. Never show `error.code`.',
+		].join("\n"),
+		inputSchema: z.toJSONSchema(SearchObjectsInputSchema),
+		outputSchema: z.toJSONSchema(SearchObjectsResponseSchema),
+		annotations: {
+			title: "Search Objects",
+			readOnlyHint: true,
+			destructiveHint: false,
+			openWorldHint: false,
+		},
+	},
 	{
 		name: ToolName.CheckConnectivity,
 		description:
