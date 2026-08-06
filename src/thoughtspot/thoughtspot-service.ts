@@ -792,6 +792,69 @@ export class ThoughtSpotService {
 			return false;
 		}
 	}
+
+	// ── Spotter Model (Lumos) — thin wrappers over the client's /lumos handlers ──
+
+	// Pass modelIdentifier to open an EXISTING model for editing; connectionIdentifier to build a
+	// new one. Exactly one is expected.
+	async createModelSession(
+		connectionIdentifier?: string,
+		modelIdentifier?: string,
+	): Promise<{
+		conversation_id: string;
+		transaction_id: string;
+		generation_no: number;
+	}> {
+		return (this.client as any).createModelSession({
+			connectionIdentifier,
+			modelIdentifier,
+		});
+	}
+
+	async mintSessionCookie(): Promise<string | null> {
+		return (this.client as any).mintSessionCookie();
+	}
+
+	async sendModelMessageStreaming(params: {
+		conversation_identifier: string;
+		transaction_id: string;
+		generation_no: number;
+		gen_no_working_set?: number[];
+		session_cookie?: string;
+		message: string;
+		choice?: unknown;
+	}): Promise<Response> {
+		return (this.client as any).sendModelMessageStreaming(params);
+	}
+
+	async saveModel(params: {
+		transaction_id: string;
+		generation_no: number;
+		gen_no_working_set?: number[];
+		name?: string;
+		description?: string;
+	}): Promise<{ model_identifier: string; url?: string }> {
+		return (this.client as any).saveModel(params);
+	}
+
+	// Server-side save: Lumos derives the transaction and the full generation working set from
+	// its own session state, so no handles are passed from here.
+	async saveModelViaLumos(params: {
+		model_session_id: string;
+		name?: string;
+		description?: string;
+		session_cookie?: string;
+	}): Promise<{ model_identifier: string; url?: string }> {
+		return (this.client as any).saveModelViaLumos(params);
+	}
+
+	async fetchWorksheetModel(params: {
+		session_identifier: string;
+		generation_number: number;
+		gen_no_working_set?: number[];
+	}): Promise<any> {
+		return (this.client as any).fetchWorksheetModel(params);
+	}
 }
 
 // Backward compatibility - export functions that use the service class
