@@ -5,7 +5,7 @@ import {
 	recordUpstreamStreamMessageMetric,
 } from "./metrics/runtime/tool-metrics";
 import { withSpan } from "./metrics/tracing/tracing-utils";
-import type { Message } from "./thoughtspot/types";
+import { type Message, SpotterResponseFormat } from "./thoughtspot/types";
 
 /*
  * Handles processing the event stream from a send agent conversation message response. Reads from
@@ -13,6 +13,8 @@ import type { Message } from "./thoughtspot/types";
  * wrap it with a span to collect relevant metrics during processing.
  */
 export const processSendAgentConversationMessageStreamingResponse = async (
+	instanceUrl: string,
+	spotterResponseFormat: SpotterResponseFormat,
 	conversationId: string,
 	streamingResponseReader: ReadableStreamDefaultReader,
 	appendStoredMessages: (
@@ -20,7 +22,6 @@ export const processSendAgentConversationMessageStreamingResponse = async (
 		messages: Message[],
 		isDone?: boolean,
 	) => Promise<void>,
-	instanceUrl: string,
 	recorder?: MetricsRecorder,
 ) => {
 	return await withSpan(
@@ -78,6 +79,14 @@ export const processSendAgentConversationMessageStreamingResponse = async (
 
 						// Loop through the items in the line and convert to messages if applicable
 						for (const item of data) {
+							// For the raw format, we don't need to perform any post-processing, so
+							// just add the messages directly
+							if (spotterResponseFormat === SpotterResponseFormat.RAW) {
+								newMessages.push({ ...item });
+								continue;
+							}
+
+							// For the simplified format, we perform some further processing
 							if (item.type === "text") {
 								// Ignore non-markdown text messages
 								if (item.metadata?.format !== "markdown") {

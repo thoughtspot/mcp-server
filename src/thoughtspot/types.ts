@@ -52,6 +52,11 @@ export interface SessionInfo {
 	isSpotterChatHistoryEnabled?: boolean;
 }
 
+export enum SpotterResponseFormat {
+	SIMPLIFIED = "SIMPLIFIED",
+	RAW = "RAW",
+}
+
 export interface BaseMessage {
 	is_thinking: boolean;
 }

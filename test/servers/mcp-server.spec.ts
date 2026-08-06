@@ -6,6 +6,7 @@ import { METRIC_NAMES } from "../../src/metrics/runtime/metric-types";
 import { MCPServer } from "../../src/servers/mcp-server";
 import * as thoughtspotClient from "../../src/thoughtspot/thoughtspot-client";
 import { ThoughtSpotService } from "../../src/thoughtspot/thoughtspot-service";
+import { SpotterResponseFormat } from "../../src/thoughtspot/types";
 import { makeRequest } from "./helpers";
 
 // Mock the MixpanelTracker
@@ -1501,6 +1502,7 @@ describe("MCP Server", () => {
 			expect(mockSendAgentConversationMessageStreaming).toHaveBeenCalledWith(
 				"conv-abc-123",
 				"What is the total revenue?",
+				SpotterResponseFormat.SIMPLIFIED,
 				expect.any(Function),
 				undefined,
 			);
@@ -1519,6 +1521,7 @@ describe("MCP Server", () => {
 			expect(mockSendAgentConversationMessageStreaming).toHaveBeenCalledWith(
 				"conv-abc-123",
 				"Compare revenue by region",
+				SpotterResponseFormat.SIMPLIFIED,
 				expect.any(Function),
 				"The user is focused on North America",
 			);
@@ -1949,7 +1952,12 @@ describe("MCP Server", () => {
 				sendAgentConversationMessageStreaming: vi
 					.fn()
 					.mockImplementation(
-						async (convId: string, _msg: string, appendFn: any) => {
+						async (
+							convId: string,
+							_msg: string,
+							_format: SpotterResponseFormat,
+							appendFn: any,
+						) => {
 							await appendFn(convId, [expectedMessages[0]]);
 							await appendFn(convId, [expectedMessages[1]], true);
 						},
@@ -1982,7 +1990,12 @@ describe("MCP Server", () => {
 			const mockSendStreaming = vi
 				.fn()
 				.mockImplementation(
-					async (convId: string, _msg: string, appendFn: any) => {
+					async (
+						convId: string,
+						_msg: string,
+						_format: SpotterResponseFormat,
+						appendFn: any,
+					) => {
 						await appendFn(convId, [], true);
 					},
 				);
@@ -2018,7 +2031,12 @@ describe("MCP Server", () => {
 			const mockSendStreaming = vi
 				.fn()
 				.mockImplementation(
-					async (convId: string, _msg: string, appendFn: any) => {
+					async (
+						convId: string,
+						_msg: string,
+						_format: SpotterResponseFormat,
+						appendFn: any,
+					) => {
 						await appendFn(convId, [], true);
 					},
 				);
@@ -2047,9 +2065,9 @@ describe("MCP Server", () => {
 			);
 
 			// Without context: additional_context arg is undefined
-			expect(mockSendStreaming.mock.calls[0][3]).toBeUndefined();
+			expect(mockSendStreaming.mock.calls[0][4]).toBeUndefined();
 			// With context: additional_context is forwarded to the service
-			expect(mockSendStreaming.mock.calls[1][3]).toBe(
+			expect(mockSendStreaming.mock.calls[1][4]).toBe(
 				"Fiscal year starts in April",
 			);
 		});

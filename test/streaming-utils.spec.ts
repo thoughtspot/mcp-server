@@ -1,3 +1,4 @@
+import { SpanStatusCode } from "@opentelemetry/api";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const tracingState = vi.hoisted(() => ({
 	span: undefined as
@@ -27,6 +28,7 @@ import {
 	NOOP_METRICS_RECORDER,
 } from "../src/metrics/runtime/metrics-recorder";
 import { processSendAgentConversationMessageStreamingResponse } from "../src/streaming-utils";
+import { SpotterResponseFormat } from "../src/thoughtspot/types";
 import { makeReader } from "./servers/helpers";
 
 // Mock storage
@@ -61,10 +63,11 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		const reader = makeReader([]);
 
 		await processSendAgentConversationMessageStreamingResponse(
+			INSTANCE_URL,
+			SpotterResponseFormat.SIMPLIFIED,
 			CONV_ID,
 			reader,
 			storage.appendMessages,
-			INSTANCE_URL,
 		);
 
 		expect(storage.appendMessagesAndRestartTtl).toHaveBeenCalledOnce();
@@ -81,10 +84,11 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		const reader = makeReader([line]);
 
 		await processSendAgentConversationMessageStreamingResponse(
+			INSTANCE_URL,
+			SpotterResponseFormat.SIMPLIFIED,
 			CONV_ID,
 			reader,
 			storage.appendMessages,
-			INSTANCE_URL,
 		);
 
 		expect(storage.appendMessagesAndRestartTtl).toHaveBeenCalledWith(CONV_ID, [
@@ -108,10 +112,11 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		const reader = makeReader([line]);
 
 		await processSendAgentConversationMessageStreamingResponse(
+			INSTANCE_URL,
+			SpotterResponseFormat.SIMPLIFIED,
 			CONV_ID,
 			reader,
 			storage.appendMessages,
-			INSTANCE_URL,
 			recorder,
 		);
 
@@ -132,10 +137,11 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		const reader = makeReader([line]);
 
 		await processSendAgentConversationMessageStreamingResponse(
+			INSTANCE_URL,
+			SpotterResponseFormat.SIMPLIFIED,
 			CONV_ID,
 			reader,
 			storage.appendMessages,
-			INSTANCE_URL,
 		);
 
 		expect(storage.appendMessagesAndRestartTtl).toHaveBeenCalledWith(CONV_ID, [
@@ -149,10 +155,11 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		const reader = makeReader([line]);
 
 		await processSendAgentConversationMessageStreamingResponse(
+			INSTANCE_URL,
+			SpotterResponseFormat.SIMPLIFIED,
 			CONV_ID,
 			reader,
 			storage.appendMessages,
-			INSTANCE_URL,
 		);
 
 		expect(storage.appendMessagesAndRestartTtl).toHaveBeenCalledWith(CONV_ID, [
@@ -166,10 +173,11 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		const reader = makeReader([line]);
 
 		await processSendAgentConversationMessageStreamingResponse(
+			INSTANCE_URL,
+			SpotterResponseFormat.SIMPLIFIED,
 			CONV_ID,
 			reader,
 			storage.appendMessages,
-			INSTANCE_URL,
 		);
 
 		expect(storage.appendMessagesAndRestartTtl).toHaveBeenCalledWith(CONV_ID, [
@@ -183,10 +191,11 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		const reader = makeReader([line]);
 
 		await processSendAgentConversationMessageStreamingResponse(
+			INSTANCE_URL,
+			SpotterResponseFormat.SIMPLIFIED,
 			CONV_ID,
 			reader,
 			storage.appendMessages,
-			INSTANCE_URL,
 		);
 
 		// Only the terminal done call should have been made (no message stored)
@@ -210,10 +219,11 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		const reader = makeReader([line]);
 
 		await processSendAgentConversationMessageStreamingResponse(
+			INSTANCE_URL,
+			SpotterResponseFormat.SIMPLIFIED,
 			CONV_ID,
 			reader,
 			storage.appendMessages,
-			INSTANCE_URL,
 		);
 
 		expect(storage.appendMessagesAndRestartTtl).toHaveBeenCalledOnce();
@@ -240,10 +250,11 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		const reader = makeReader([line]);
 
 		await processSendAgentConversationMessageStreamingResponse(
+			INSTANCE_URL,
+			SpotterResponseFormat.SIMPLIFIED,
 			CONV_ID,
 			reader,
 			storage.appendMessages,
-			INSTANCE_URL,
 			recorder,
 		);
 
@@ -256,10 +267,11 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		const reader = makeReader([line]);
 
 		await processSendAgentConversationMessageStreamingResponse(
+			INSTANCE_URL,
+			SpotterResponseFormat.SIMPLIFIED,
 			CONV_ID,
 			reader,
 			storage.appendMessages,
-			INSTANCE_URL,
 		);
 
 		expect(storage.appendMessagesAndRestartTtl).toHaveBeenCalledOnce();
@@ -282,10 +294,11 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		const reader = makeReader([line]);
 
 		await processSendAgentConversationMessageStreamingResponse(
+			INSTANCE_URL,
+			SpotterResponseFormat.SIMPLIFIED,
 			CONV_ID,
 			reader,
 			storage.appendMessages,
-			INSTANCE_URL,
 		);
 
 		expect(storage.appendMessagesAndRestartTtl).toHaveBeenCalledOnce();
@@ -318,10 +331,11 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		const reader = makeReader([line]);
 
 		await processSendAgentConversationMessageStreamingResponse(
+			INSTANCE_URL,
+			SpotterResponseFormat.SIMPLIFIED,
 			CONV_ID,
 			reader,
 			storage.appendMessages,
-			INSTANCE_URL,
 		);
 
 		expect(storage.appendMessagesAndRestartTtl).toHaveBeenCalledWith(CONV_ID, [
@@ -351,10 +365,11 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		const reader = makeReader([line]);
 
 		await processSendAgentConversationMessageStreamingResponse(
+			INSTANCE_URL,
+			SpotterResponseFormat.SIMPLIFIED,
 			CONV_ID,
 			reader,
 			storage.appendMessages,
-			INSTANCE_URL,
 		);
 
 		const expectedIframeUrl = `${INSTANCE_URL}/?tsmcp=true#/embed/conv-assist-answer?sessionId=sess-1&genNo=42&acSessionId=txn-1&acGenNo=7`;
@@ -386,10 +401,11 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		const reader = makeReader([line]);
 
 		await processSendAgentConversationMessageStreamingResponse(
+			INSTANCE_URL,
+			SpotterResponseFormat.SIMPLIFIED,
 			CONV_ID,
 			reader,
 			storage.appendMessages,
-			INSTANCE_URL,
 		);
 
 		const expectedIframeUrl = `${INSTANCE_URL}/?tsmcp=true#/embed/conv-assist-answer?sessionId=sess-2&genNo=1&acSessionId=txn-2&acGenNo=2`;
@@ -411,10 +427,11 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		const reader = makeReader([line]);
 
 		await processSendAgentConversationMessageStreamingResponse(
+			INSTANCE_URL,
+			SpotterResponseFormat.SIMPLIFIED,
 			CONV_ID,
 			reader,
 			storage.appendMessages,
-			INSTANCE_URL,
 		);
 
 		expect(storage.appendMessagesAndRestartTtl).toHaveBeenCalledWith(CONV_ID, [
@@ -428,10 +445,11 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		const reader = makeReader([line]);
 
 		await processSendAgentConversationMessageStreamingResponse(
+			INSTANCE_URL,
+			SpotterResponseFormat.SIMPLIFIED,
 			CONV_ID,
 			reader,
 			storage.appendMessages,
-			INSTANCE_URL,
 		);
 
 		expect(storage.appendMessagesAndRestartTtl).toHaveBeenCalledWith(CONV_ID, [
@@ -445,10 +463,11 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		const reader = makeReader([line]);
 
 		await processSendAgentConversationMessageStreamingResponse(
+			INSTANCE_URL,
+			SpotterResponseFormat.SIMPLIFIED,
 			CONV_ID,
 			reader,
 			storage.appendMessages,
-			INSTANCE_URL,
 		);
 
 		expect(tracingState.span?.setAttributes).toHaveBeenCalledWith({
@@ -473,10 +492,11 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		const reader = makeReader([line]);
 
 		await processSendAgentConversationMessageStreamingResponse(
+			INSTANCE_URL,
+			SpotterResponseFormat.SIMPLIFIED,
 			CONV_ID,
 			reader,
 			storage.appendMessages,
-			INSTANCE_URL,
 		);
 
 		// Only the terminal done call should have been made (no messages stored)
@@ -495,10 +515,11 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		const reader = makeReader([chunk]);
 
 		await processSendAgentConversationMessageStreamingResponse(
+			INSTANCE_URL,
+			SpotterResponseFormat.SIMPLIFIED,
 			CONV_ID,
 			reader,
 			storage.appendMessages,
-			INSTANCE_URL,
 		);
 
 		expect(storage.appendMessagesAndRestartTtl).toHaveBeenCalledWith(CONV_ID, [
@@ -512,10 +533,11 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		const reader = makeReader([chunk]);
 
 		await processSendAgentConversationMessageStreamingResponse(
+			INSTANCE_URL,
+			SpotterResponseFormat.SIMPLIFIED,
 			CONV_ID,
 			reader,
 			storage.appendMessages,
-			INSTANCE_URL,
 		);
 
 		expect(consoleWarnSpy).toHaveBeenCalledWith(
@@ -531,10 +553,11 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		const reader = makeReader([chunk]);
 
 		await processSendAgentConversationMessageStreamingResponse(
+			INSTANCE_URL,
+			SpotterResponseFormat.SIMPLIFIED,
 			CONV_ID,
 			reader,
 			storage.appendMessages,
-			INSTANCE_URL,
 		);
 
 		expect(consoleErrorSpy).toHaveBeenCalledWith(
@@ -549,10 +572,11 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		const reader = makeReader([line]);
 
 		await processSendAgentConversationMessageStreamingResponse(
+			INSTANCE_URL,
+			SpotterResponseFormat.SIMPLIFIED,
 			CONV_ID,
 			reader,
 			storage.appendMessages,
-			INSTANCE_URL,
 		);
 
 		expect(consoleWarnSpy).toHaveBeenCalledWith(
@@ -571,10 +595,11 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		const reader = makeReader([part1, part2]);
 
 		await processSendAgentConversationMessageStreamingResponse(
+			INSTANCE_URL,
+			SpotterResponseFormat.SIMPLIFIED,
 			CONV_ID,
 			reader,
 			storage.appendMessages,
-			INSTANCE_URL,
 		);
 
 		expect(storage.appendMessagesAndRestartTtl).toHaveBeenCalledWith(CONV_ID, [
@@ -589,10 +614,11 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		const reader = makeReader([chunk1, chunk2]);
 
 		await processSendAgentConversationMessageStreamingResponse(
+			INSTANCE_URL,
+			SpotterResponseFormat.SIMPLIFIED,
 			CONV_ID,
 			reader,
 			storage.appendMessages,
-			INSTANCE_URL,
 		);
 
 		expect(storage.appendMessagesAndRestartTtl).toHaveBeenNthCalledWith(
@@ -623,10 +649,11 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		const reader = makeReader([chunk]);
 
 		await processSendAgentConversationMessageStreamingResponse(
+			INSTANCE_URL,
+			SpotterResponseFormat.SIMPLIFIED,
 			CONV_ID,
 			reader,
 			storage.appendMessages,
-			INSTANCE_URL,
 		);
 
 		expect(storage.appendMessagesAndRestartTtl).toHaveBeenCalledWith(CONV_ID, [
@@ -641,10 +668,11 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		const reader = makeReader([line]);
 
 		await processSendAgentConversationMessageStreamingResponse(
+			INSTANCE_URL,
+			SpotterResponseFormat.SIMPLIFIED,
 			CONV_ID,
 			reader,
 			storage.appendMessages,
-			INSTANCE_URL,
 		);
 
 		expect(storage.appendMessagesAndRestartTtl).toHaveBeenCalledWith(CONV_ID, [
@@ -663,10 +691,11 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		const reader = makeReader([line]);
 
 		await processSendAgentConversationMessageStreamingResponse(
+			INSTANCE_URL,
+			SpotterResponseFormat.SIMPLIFIED,
 			CONV_ID,
 			reader,
 			storage.appendMessages,
-			INSTANCE_URL,
 		);
 
 		expect(storage.appendMessagesAndRestartTtl).toHaveBeenCalledWith(CONV_ID, [
@@ -684,10 +713,11 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		const reader = makeReader([line]);
 
 		await processSendAgentConversationMessageStreamingResponse(
+			INSTANCE_URL,
+			SpotterResponseFormat.SIMPLIFIED,
 			CONV_ID,
 			reader,
 			storage.appendMessages,
-			INSTANCE_URL,
 			recorder,
 		);
 
@@ -708,10 +738,11 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		const reader = makeReader([line]);
 
 		await processSendAgentConversationMessageStreamingResponse(
+			INSTANCE_URL,
+			SpotterResponseFormat.SIMPLIFIED,
 			CONV_ID,
 			reader,
 			storage.appendMessages,
-			INSTANCE_URL,
 		);
 
 		expect(tracingState.span?.setAttributes).toHaveBeenCalledWith({
@@ -728,10 +759,11 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		const reader = makeReader([line]);
 
 		await processSendAgentConversationMessageStreamingResponse(
+			INSTANCE_URL,
+			SpotterResponseFormat.SIMPLIFIED,
 			CONV_ID,
 			reader,
 			storage.appendMessages,
-			INSTANCE_URL,
 		);
 
 		expect(storage.appendMessagesAndRestartTtl).toHaveBeenCalledOnce();
@@ -754,10 +786,11 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		const reader = makeReader([line]);
 
 		await processSendAgentConversationMessageStreamingResponse(
+			INSTANCE_URL,
+			SpotterResponseFormat.SIMPLIFIED,
 			CONV_ID,
 			reader,
 			storage.appendMessages,
-			INSTANCE_URL,
 		);
 
 		expect(storage.appendMessagesAndRestartTtl).toHaveBeenCalledOnce();
@@ -771,6 +804,234 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 			total_text_messages_parsed: 0,
 			total_answer_messages_parsed: 0,
 			total_messages_ignored: 1,
+		});
+	});
+});
+
+describe("processSendAgentConversationMessageStreamingResponse — raw format", () => {
+	let consoleWarnSpy: ReturnType<typeof vi.spyOn>;
+	let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
+
+	beforeEach(() => {
+		vi.clearAllMocks();
+		tracingState.span = undefined;
+		consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+		consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+	});
+
+	afterEach(() => {
+		vi.restoreAllMocks();
+	});
+
+	const processRaw = (
+		reader: ReadableStreamDefaultReader,
+		storage: ReturnType<typeof makeMockStorage>,
+		recorder?: MetricsRecorder,
+	) =>
+		processSendAgentConversationMessageStreamingResponse(
+			INSTANCE_URL,
+			SpotterResponseFormat.RAW,
+			CONV_ID,
+			reader,
+			storage.appendMessages,
+			recorder,
+		);
+
+	it("stores a text event verbatim instead of reshaping it", async () => {
+		const storage = makeMockStorage();
+		const item = {
+			type: "text",
+			content: "Hello world",
+			metadata: { format: "markdown" },
+		};
+		const reader = makeReader([`data: ${JSON.stringify([item])}\n`]);
+
+		await processRaw(reader, storage);
+
+		// Raw mode passes the upstream item straight through — no is_thinking/text
+		// projection like the simplified format performs.
+		expect(storage.appendMessagesAndRestartTtl).toHaveBeenCalledWith(CONV_ID, [
+			item,
+		]);
+	});
+
+	it("keeps text events that the simplified format drops for non-markdown", async () => {
+		const storage = makeMockStorage();
+		const plain = {
+			type: "text",
+			content: "Plain text",
+			metadata: { format: "plain" },
+		};
+		const noFormat = { type: "text", content: "No format at all" };
+		const reader = makeReader([`data: ${JSON.stringify([plain, noFormat])}\n`]);
+
+		await processRaw(reader, storage);
+
+		expect(storage.appendMessagesAndRestartTtl).toHaveBeenCalledWith(CONV_ID, [
+			plain,
+			noFormat,
+		]);
+	});
+
+	it("keeps ack, notification, search_datasets, file, and conv_title events", async () => {
+		const storage = makeMockStorage();
+		const items = [
+			{ type: "ack" },
+			{ type: "notification", code: "OTHER_NOTIFICATION", metadata: {} },
+			{ type: "search_datasets", datasets: ["ds-1"] },
+			{ type: "file", url: "https://example.com/f.csv" },
+			{ type: "conv_title", title: "Revenue analysis" },
+		];
+		const reader = makeReader([`data: ${JSON.stringify(items)}\n`]);
+
+		await processRaw(reader, storage);
+
+		expect(storage.appendMessagesAndRestartTtl).toHaveBeenCalledWith(
+			CONV_ID,
+			items,
+		);
+	});
+
+	it("keeps unknown event types without logging a warning", async () => {
+		const storage = makeMockStorage();
+		const item = { type: "some_future_event_type", payload: { a: 1 } };
+		const reader = makeReader([`data: ${JSON.stringify([item])}\n`]);
+
+		await processRaw(reader, storage);
+
+		expect(storage.appendMessagesAndRestartTtl).toHaveBeenCalledWith(CONV_ID, [
+			item,
+		]);
+		expect(consoleWarnSpy).not.toHaveBeenCalled();
+	});
+
+	it("passes an answer event through without building an iframe url", async () => {
+		const storage = makeMockStorage();
+		const item = {
+			type: "answer",
+			metadata: {
+				session_id: "sess-1",
+				gen_no: 42,
+				transaction_id: "txn-1",
+				generation_number: 7,
+				title: "Revenue by Region",
+				sage_query: "revenue by region",
+			},
+		};
+		const reader = makeReader([`data: ${JSON.stringify([item])}\n`]);
+
+		await processRaw(reader, storage);
+
+		const [, messages] = (
+			storage.appendMessagesAndRestartTtl as ReturnType<typeof vi.fn>
+		).mock.calls[0];
+		expect(messages).toEqual([item]);
+		expect(messages[0]).not.toHaveProperty("iframe_url");
+		expect(messages[0]).not.toHaveProperty("answer_id");
+	});
+
+	it("passes an error event through without logging or a fallback message", async () => {
+		const storage = makeMockStorage();
+		const item = {
+			type: "error",
+			error_code: "SPOTTER_500",
+			display_message: "Something broke upstream",
+		};
+		const reader = makeReader([`data: ${JSON.stringify([item])}\n`]);
+
+		await processRaw(reader, storage);
+
+		expect(storage.appendMessagesAndRestartTtl).toHaveBeenCalledWith(CONV_ID, [
+			item,
+		]);
+		expect(consoleErrorSpy).not.toHaveBeenCalled();
+		// The simplified format flags the span on an error event; raw mode does not
+		// inspect the payload, so the span still concludes successfully.
+		expect(tracingState.span?.setStatus).toHaveBeenCalledWith({
+			code: SpanStatusCode.OK,
+			message: "Streaming response concluded successfully",
+		});
+	});
+
+	it("marks the conversation as done when the stream ends", async () => {
+		const storage = makeMockStorage();
+		const reader = makeReader([
+			`data: ${JSON.stringify([{ type: "text", content: "Hi" }])}\n`,
+		]);
+
+		await processRaw(reader, storage);
+
+		expect(storage.appendMessagesAndRestartTtl).toHaveBeenLastCalledWith(
+			CONV_ID,
+			[],
+			true,
+		);
+	});
+
+	it("stores every item from a multi-item line in a single append", async () => {
+		const storage = makeMockStorage();
+		const items = [
+			{ type: "text", content: "First", metadata: { format: "markdown" } },
+			{ type: "ack" },
+			{ type: "text", content: "Second", metadata: { format: "plain" } },
+		];
+		const reader = makeReader([`data: ${JSON.stringify(items)}\n`]);
+
+		await processRaw(reader, storage);
+
+		// One append for the batch, one terminal done call.
+		expect(storage.appendMessagesAndRestartTtl).toHaveBeenCalledTimes(2);
+		expect(storage.appendMessagesAndRestartTtl).toHaveBeenNthCalledWith(
+			1,
+			CONV_ID,
+			items,
+		);
+	});
+
+	it("still skips blank lines and heartbeats", async () => {
+		const storage = makeMockStorage();
+		const item = { type: "text", content: "After heartbeat" };
+		const reader = makeReader([
+			`\n: heartbeat\ndata: ${JSON.stringify([item])}\n`,
+		]);
+
+		await processRaw(reader, storage);
+
+		expect(storage.appendMessagesAndRestartTtl).toHaveBeenCalledTimes(2);
+		expect(storage.appendMessagesAndRestartTtl).toHaveBeenNthCalledWith(
+			1,
+			CONV_ID,
+			[item],
+		);
+	});
+
+	it("records no per-message metrics and reports zero parse counters", async () => {
+		const storage = makeMockStorage();
+		const recorder: MetricsRecorder = {
+			...NOOP_METRICS_RECORDER,
+			count: vi.fn(),
+		};
+		const reader = makeReader([
+			`data: ${JSON.stringify([
+				{ type: "text", content: "Hi", metadata: { format: "markdown" } },
+				{ type: "answer", metadata: { session_id: "s1", gen_no: 1 } },
+			])}\n`,
+		]);
+
+		await processRaw(reader, storage, recorder);
+
+		// Raw mode short-circuits before the recordUpstreamStreamMessageMetric calls,
+		// so the per-message counters stay untouched and the span counts stay at zero.
+		expect(recorder.count).not.toHaveBeenCalledWith(
+			METRIC_NAMES.upstreamStreamMessagesTotal,
+			expect.anything(),
+			expect.anything(),
+		);
+		expect(tracingState.span?.setAttributes).toHaveBeenCalledWith({
+			total_messages_parsed: 0,
+			total_text_messages_parsed: 0,
+			total_answer_messages_parsed: 0,
+			total_messages_ignored: 0,
 		});
 	});
 });

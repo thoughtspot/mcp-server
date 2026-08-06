@@ -122,6 +122,10 @@ const hooks: AuthHooks<Props> = {
 		props.apiVersion = apiVersion;
 		props.apiVersionMode = apiVersionMode;
 
+		const enableRawSessionUpdates =
+			url.searchParams.get("enable-raw-session-updates") === "true";
+		props.enableRawSessionUpdates = enableRawSessionUpdates;
+
 		return props;
 	},
 };
@@ -149,6 +153,9 @@ const oauthFetchHandler = createOAuthHandler<Props>({
 			apiVersionMode = resolveRequestedApiVersionMode(apiVersion);
 		}
 
+		const enableRawSessionUpdates =
+			url.searchParams.get("enable-raw-session-updates") === "true";
+
 		return {
 			...(baseProps as Props),
 			clientName: normalizeClientName(baseProps.clientName),
@@ -159,6 +166,7 @@ const oauthFetchHandler = createOAuthHandler<Props>({
 			apiVersionMode,
 			// OAuth-authenticated flow; enables the OAuth-only org tools.
 			authMode: "oauth",
+			enableRawSessionUpdates,
 		};
 	},
 	// Extra routes mounted on the default handler app (consumer-specific).
