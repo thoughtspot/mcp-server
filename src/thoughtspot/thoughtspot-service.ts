@@ -30,6 +30,7 @@ import type {
 	DataSource,
 	DataSourceSuggestion,
 	Message,
+	RawMessage,
 	SessionInfo,
 	SpotterResponseFormat,
 } from "./types";
@@ -346,7 +347,7 @@ export class ThoughtSpotService {
 		spotterResponseFormat: SpotterResponseFormat,
 		appendStoredMessages: (
 			conversationId: string,
-			messages: Message[],
+			messages: (Message | RawMessage)[],
 			isDone?: boolean,
 		) => Promise<void>,
 		additionalContext?: string | undefined,

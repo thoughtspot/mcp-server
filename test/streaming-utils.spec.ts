@@ -905,7 +905,7 @@ describe("processSendAgentConversationMessageStreamingResponse — raw format", 
 		expect(consoleWarnSpy).not.toHaveBeenCalled();
 	});
 
-	it("passes an answer event through without building an iframe url", async () => {
+	it("passes an answer event through, synthesizing answer_id but not an iframe url", async () => {
 		const storage = makeMockStorage();
 		const item = {
 			type: "answer",
@@ -925,12 +925,19 @@ describe("processSendAgentConversationMessageStreamingResponse — raw format", 
 		const [, messages] = (
 			storage.appendMessagesAndRestartTtl as ReturnType<typeof vi.fn>
 		).mock.calls[0];
-		expect(messages).toEqual([item]);
+		// Raw mode still synthesizes `answer_id` so the get_session_updates ->
+		// create_dashboard handoff keeps working, but does not otherwise reshape
+		// the item (e.g. no iframe_url).
+		expect(messages).toEqual([
+			{
+				...item,
+				answer_id: JSON.stringify({ session_id: "sess-1", gen_no: 42 }),
+			},
+		]);
 		expect(messages[0]).not.toHaveProperty("iframe_url");
-		expect(messages[0]).not.toHaveProperty("answer_id");
 	});
 
-	it("passes an error event through without logging or a fallback message", async () => {
+	it("passes an error event through unmodified while still logging and flagging the span", async () => {
 		const storage = makeMockStorage();
 		const item = {
 			type: "error",
@@ -941,15 +948,18 @@ describe("processSendAgentConversationMessageStreamingResponse — raw format", 
 
 		await processRaw(reader, storage);
 
+		// Raw mode does not reshape the item (no fallback text message is built),
+		// but it still surfaces the error for observability.
 		expect(storage.appendMessagesAndRestartTtl).toHaveBeenCalledWith(CONV_ID, [
 			item,
 		]);
-		expect(consoleErrorSpy).not.toHaveBeenCalled();
-		// The simplified format flags the span on an error event; raw mode does not
-		// inspect the payload, so the span still concludes successfully.
+		expect(consoleErrorSpy).toHaveBeenCalledWith(
+			"Error event in event stream, error code",
+			"SPOTTER_500",
+		);
 		expect(tracingState.span?.setStatus).toHaveBeenCalledWith({
-			code: SpanStatusCode.OK,
-			message: "Streaming response concluded successfully",
+			code: SpanStatusCode.ERROR,
+			message: "Error event in event stream, error code: SPOTTER_500",
 		});
 	});
 
@@ -1005,7 +1015,7 @@ describe("processSendAgentConversationMessageStreamingResponse — raw format", 
 		);
 	});
 
-	it("records no per-message metrics and reports zero parse counters", async () => {
+	it("still records per-message metrics and parse counters despite not reshaping messages", async () => {
 		const storage = makeMockStorage();
 		const recorder: MetricsRecorder = {
 			...NOOP_METRICS_RECORDER,
@@ -1020,17 +1030,22 @@ describe("processSendAgentConversationMessageStreamingResponse — raw format", 
 
 		await processRaw(reader, storage, recorder);
 
-		// Raw mode short-circuits before the recordUpstreamStreamMessageMetric calls,
-		// so the per-message counters stay untouched and the span counts stay at zero.
-		expect(recorder.count).not.toHaveBeenCalledWith(
+		// Raw mode does not reshape messages, but it still classifies each item by
+		// type so metrics/counters stay accurate for observability.
+		expect(recorder.count).toHaveBeenCalledWith(
 			METRIC_NAMES.upstreamStreamMessagesTotal,
-			expect.anything(),
-			expect.anything(),
+			1,
+			expect.objectContaining({ message_type: "text" }),
+		);
+		expect(recorder.count).toHaveBeenCalledWith(
+			METRIC_NAMES.upstreamStreamMessagesTotal,
+			1,
+			expect.objectContaining({ message_type: "answer" }),
 		);
 		expect(tracingState.span?.setAttributes).toHaveBeenCalledWith({
-			total_messages_parsed: 0,
-			total_text_messages_parsed: 0,
-			total_answer_messages_parsed: 0,
+			total_messages_parsed: 2,
+			total_text_messages_parsed: 1,
+			total_answer_messages_parsed: 1,
 			total_messages_ignored: 0,
 		});
 	});
