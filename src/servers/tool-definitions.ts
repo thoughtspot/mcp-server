@@ -333,6 +333,19 @@ export const GetSessionUpdatesOutputSchema = z.object({
 		),
 });
 
+export const GetSessionUpdatesRawOutputSchema = z.object({
+	session_updates: z
+		.array(z.unknown())
+		.describe(
+			"List of incremental new updates from the analytical session. The updates can be in any format, with no guarantees on their structure. Updates returned in a previous response will not be sent again. This may be an empty list if the Analytics Agent is still thinking. You can instead use the `is_done` flag to know whether the Agent response is complete.",
+		),
+	is_done: z
+		.boolean()
+		.describe(
+			"Whether the Analytics Agent has finished responding. If `is_done` is false, you can make another `get_session_updates` call to get the next set of updates.",
+		),
+});
+
 export const CreateLiveboardSchema = z.object({
 	name: z.string().describe("The name of the liveboard to create"),
 	answers: z
@@ -524,6 +537,23 @@ export const toolDefinitionsV1 = [
 	},
 ];
 
+const GET_SESSION_UPDATES_SHARED_TOOL_DEFINITION = {
+	name: ToolName.GetSessionUpdates,
+	inputSchema: z.toJSONSchema(GetSessionUpdatesInputSchema),
+	annotations: {
+		title: "Get Analysis Session Updates",
+		readOnlyHint: true,
+		destructiveHint: false,
+		openWorldHint: false,
+	},
+};
+
+const GET_SESSION_UPDATES_STRUCTURED_DESCRIPTION =
+	"Get the latest updates from the Analytics Agent. You can call this after `send_session_message` to retrieve the Agent's response. If `is_done` is false, you can call this tool again to continue polling, as the Agent is still generating a response. Even if `is_done` is false, you can use the updates to show status updates or progress to the user, so that they are informed about the ongoing process. An empty `session_updates` list while `is_done` is false is normal; it means the Agent is still thinking. When `is_done` is true, the Agent has finished and the results in `session_updates` are complete, so you can present them to the user. You can also send a follow-up message in the same session after `is_done` is true. If the completed response indicates that no data or no results were found, AND the `list_orgs` tool is available to you, the requested data may live in a different org or the user may not have access to it in the current org: tell the user this and that they can call `list_orgs` to see their orgs (the active one is marked `is_active`) and `switch_org` to switch to another org, then retry. If `list_orgs` is not available, do not mention orgs.";
+
+const GET_SESSION_UPDATES_RAW_DESCRIPTION =
+	"Get the latest updates from the Analytics Agent, returned in their raw upstream form. You can call this after `send_session_message` to retrieve the Agent's response. If `is_done` is false, you can call this tool again to continue polling, as the Agent is still generating a response. Even if `is_done` is false, you can use the updates to show status updates or progress to the user, so that they are informed about the ongoing process. An empty `session_updates` list while `is_done` is false is normal; it means the Agent is still thinking. Each item in `session_updates` has no guaranteed shape, since it is passed through unfiltered from the upstream Agent — inspect each item's fields defensively rather than assuming a fixed structure, though answer-type items still carry an `answer_id` you can pass to `create_dashboard`. When `is_done` is true, the Agent has finished responding and no further updates will arrive for this message; you can also send a follow-up message in the same session at that point. If you cannot tell from the raw updates whether any data or results were found, AND the `list_orgs` tool is available to you, the requested data may live in a different org or the user may not have access to it in the current org: tell the user this and that they can call `list_orgs` to see their orgs (the active one is marked `is_active`) and `switch_org` to switch to another org, then retry. If `list_orgs` is not available, do not mention orgs.";
+
 export const toolDefinitionsV2 = [
 	{
 		name: ToolName.SearchObjects,
@@ -589,18 +619,17 @@ export const toolDefinitionsV2 = [
 			openWorldHint: false,
 		},
 	},
+	// There are two versions of the get_session_updates tool; we will filter the tool list to pick
+	// only the version we want based on whether the raw session updates flag is enabled or not
 	{
-		name: ToolName.GetSessionUpdates,
-		description:
-			"Get the latest updates from the Analytics Agent. You can call this after `send_session_message` to retrieve the Agent's response. If `is_done` is false, you can call this tool again to continue polling, as the Agent is still generating a response. Even if `is_done` is false, you can use the updates to show status updates or progress to the user, so that they are informed about the ongoing process. An empty `session_updates` list while `is_done` is false is normal; it means the Agent is still thinking. When `is_done` is true, the Agent has finished and the results in `session_updates` are complete, so you can present them to the user. You can also send a follow-up message in the same session after `is_done` is true. If the completed response indicates that no data or no results were found, AND the `list_orgs` tool is available to you, the requested data may live in a different org or the user may not have access to it in the current org: tell the user this and that they can call `list_orgs` to see their orgs (the active one is marked `is_active`) and `switch_org` to switch to another org, then retry. If `list_orgs` is not available, do not mention orgs.",
-		inputSchema: z.toJSONSchema(GetSessionUpdatesInputSchema),
+		...GET_SESSION_UPDATES_SHARED_TOOL_DEFINITION,
+		description: GET_SESSION_UPDATES_STRUCTURED_DESCRIPTION,
 		outputSchema: z.toJSONSchema(GetSessionUpdatesOutputSchema),
-		annotations: {
-			title: "Get Analysis Session Updates",
-			readOnlyHint: true,
-			destructiveHint: false,
-			openWorldHint: false,
-		},
+	},
+	{
+		...GET_SESSION_UPDATES_SHARED_TOOL_DEFINITION,
+		description: GET_SESSION_UPDATES_RAW_DESCRIPTION,
+		outputSchema: z.toJSONSchema(GetSessionUpdatesRawOutputSchema),
 	},
 	{
 		name: ToolName.CreateDashboard,

@@ -8,10 +8,8 @@ import { getActiveSpan } from "./metrics/tracing/tracing-utils";
 
 export type Props = {
 	accessToken: string;
-	// From gettoken, for keep-warm refresh.
 	globalRefreshToken?: string;
 	globalTokenCreatedAt?: number;
-	// Absolute epoch-ms expiry.
 	globalTokenExpiresAt?: number;
 	instanceUrl: string;
 	clientName: {
@@ -22,8 +20,8 @@ export type Props = {
 	apiVersion?: string;
 	apiVersionMode?: ApiVersionMode;
 	apiRequestedVersion?: string;
-	// Auth method ("oauth" vs "bearer"/"token"); gates OAuth-only tools.
 	authMode?: AuthMode;
+	enableRawSessionUpdates?: boolean;
 };
 
 const DEFAULT_CLIENT_NAME = "Bearer Token client";

@@ -30,7 +30,9 @@ import type {
 	DataSource,
 	DataSourceSuggestion,
 	Message,
+	RawMessage,
 	SessionInfo,
+	SpotterResponseFormat,
 } from "./types";
 
 type ThoughtSpotServiceMetricsOptions = {
@@ -342,9 +344,10 @@ export class ThoughtSpotService {
 	async sendAgentConversationMessageStreaming(
 		conversationId: string,
 		message: string,
+		spotterResponseFormat: SpotterResponseFormat,
 		appendStoredMessages: (
 			conversationId: string,
-			messages: Message[],
+			messages: (Message | RawMessage)[],
 			isDone?: boolean,
 		) => Promise<void>,
 		additionalContext?: string | undefined,
@@ -388,10 +391,11 @@ export class ThoughtSpotService {
 
 			const processStreamPromise =
 				processSendAgentConversationMessageStreamingResponse(
+					(this.client as any).instanceUrl,
+					spotterResponseFormat,
 					conversationId,
 					reader,
 					appendStoredMessages,
-					(this.client as any).instanceUrl,
 					streamRecorder,
 				).finally(() => {
 					this.scheduleBackgroundMetricsFlush(streamRecorder);

@@ -11,6 +11,7 @@ import {
 	getRelevantQuestions,
 	getSessionInfo,
 } from "../../src/thoughtspot/thoughtspot-service";
+import { SpotterResponseFormat } from "../../src/thoughtspot/types";
 
 // Mock the ThoughtSpot REST API client
 const mockClient = {
@@ -303,6 +304,7 @@ describe("thoughtspot-service", () => {
 			await service.sendAgentConversationMessageStreaming(
 				"conv-123",
 				"Show me revenue",
+				SpotterResponseFormat.SIMPLIFIED,
 				appendMessages,
 			);
 			await recorder.flush();
@@ -379,6 +381,7 @@ describe("thoughtspot-service", () => {
 				service.sendAgentConversationMessageStreaming(
 					"conv-123",
 					"Show me revenue",
+					SpotterResponseFormat.SIMPLIFIED,
 					{
 						appendMessagesAndRestartTtl: vi.fn(),
 					} as any,
@@ -420,6 +423,7 @@ describe("thoughtspot-service", () => {
 				service.sendAgentConversationMessageStreaming(
 					"conv-123",
 					"Show me revenue",
+					SpotterResponseFormat.SIMPLIFIED,
 					{
 						appendMessagesAndRestartTtl: vi.fn(),
 					} as any,
@@ -457,6 +461,7 @@ describe("thoughtspot-service", () => {
 			await service.sendAgentConversationMessageStreaming(
 				"conv-123",
 				"Show me revenue",
+				SpotterResponseFormat.SIMPLIFIED,
 				streamingMessageStorage,
 				"User is in the EMEA region",
 			);
@@ -503,6 +508,7 @@ describe("thoughtspot-service", () => {
 			await service.sendAgentConversationMessageStreaming(
 				"conv-123",
 				"Show me revenue",
+				SpotterResponseFormat.SIMPLIFIED,
 				streamingMessageStorage,
 			);
 
@@ -543,6 +549,7 @@ describe("thoughtspot-service", () => {
 			await service.sendAgentConversationMessageStreaming(
 				"conv-123",
 				"Show me revenue",
+				SpotterResponseFormat.SIMPLIFIED,
 				appendStoredMessages,
 			);
 
@@ -564,6 +571,52 @@ describe("thoughtspot-service", () => {
 				[],
 				true,
 			);
+		});
+
+		it("should forward the RAW format so stream items reach storage unprocessed", async () => {
+			const encoder = new TextEncoder();
+			// A non-markdown text item: the simplified format drops it, so seeing it
+			// in storage proves the RAW format reached the stream parser.
+			const rawItem = {
+				type: "text",
+				content: "The revenue is $1M",
+				metadata: { format: "plain", type: "thinking" },
+			};
+			const reader = {
+				read: vi
+					.fn()
+					.mockResolvedValueOnce({
+						done: false,
+						value: encoder.encode(`data: ${JSON.stringify([rawItem])}\n`),
+					})
+					.mockResolvedValueOnce({ done: true, value: undefined }),
+			};
+
+			mockClient.sendAgentConversationMessageStreaming = vi
+				.fn()
+				.mockResolvedValue({
+					body: { getReader: vi.fn().mockReturnValue(reader) },
+				});
+
+			const appendStoredMessages = vi.fn().mockResolvedValue(undefined);
+
+			const service = new ThoughtSpotService(mockClient);
+			await service.sendAgentConversationMessageStreaming(
+				"conv-123",
+				"Show me revenue",
+				SpotterResponseFormat.RAW,
+				appendStoredMessages,
+			);
+
+			await vi.waitFor(() => {
+				expect(appendStoredMessages).toHaveBeenLastCalledWith(
+					"conv-123",
+					[],
+					true,
+				);
+			});
+
+			expect(appendStoredMessages).toHaveBeenCalledWith("conv-123", [rawItem]);
 		});
 
 		it("should call appendStoredMessages with parsed answer messages", async () => {
@@ -603,6 +656,7 @@ describe("thoughtspot-service", () => {
 			await service.sendAgentConversationMessageStreaming(
 				"conv-123",
 				"Show me revenue by region",
+				SpotterResponseFormat.SIMPLIFIED,
 				appendStoredMessages,
 			);
 
@@ -658,6 +712,7 @@ describe("thoughtspot-service", () => {
 			await service.sendAgentConversationMessageStreaming(
 				"conv-123",
 				"Test",
+				SpotterResponseFormat.SIMPLIFIED,
 				appendStoredMessages,
 			);
 
@@ -701,6 +756,7 @@ describe("thoughtspot-service", () => {
 			await service.sendAgentConversationMessageStreaming(
 				"conv-123",
 				"Test",
+				SpotterResponseFormat.SIMPLIFIED,
 				appendStoredMessages,
 			);
 
