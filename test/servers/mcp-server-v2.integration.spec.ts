@@ -26,7 +26,10 @@ import { MCPServer } from "../../src/servers/mcp-server";
 import { StorageServiceClient } from "../../src/storage-service/storage-service";
 import { processSendAgentConversationMessageStreamingResponse } from "../../src/streaming-utils";
 import * as thoughtspotClient from "../../src/thoughtspot/thoughtspot-client";
-import type { Message } from "../../src/thoughtspot/types";
+import {
+	type Message,
+	SpotterResponseFormat,
+} from "../../src/thoughtspot/types";
 import { makeReader, makeRequest } from "./helpers";
 
 vi.mock("../../src/metrics/mixpanel/mixpanel", () => ({
@@ -289,6 +292,7 @@ describe("V2 MCPServer + Real Storage Integration", () => {
 					async (
 						convId: string,
 						_msg: string,
+						_format: SpotterResponseFormat,
 						appendFn: typeof realStorage.appendMessages,
 					) => {
 						await appendFn(convId, [expectedMessages[0]]);
@@ -326,6 +330,7 @@ describe("V2 MCPServer + Real Storage Integration", () => {
 					async (
 						convId: string,
 						_msg: string,
+						_format: SpotterResponseFormat,
 						appendFn: typeof realStorage.appendMessages,
 					) => {
 						// Intentionally omit isDone: true — the conversation stays "in progress"
@@ -379,6 +384,7 @@ describe("V2 MCPServer + Real Storage Integration", () => {
 					async (
 						convId: string,
 						_msg: string,
+						_format: SpotterResponseFormat,
 						appendFn: typeof realStorage.appendMessages,
 					) => {
 						await appendFn(convId, [msg1], true /* isDone */);
@@ -412,6 +418,7 @@ describe("V2 MCPServer + Real Storage Integration", () => {
 					async (
 						convId: string,
 						_msg: string,
+						_format: SpotterResponseFormat,
 						appendFn: typeof realStorage.appendMessages,
 					) => {
 						await appendFn(convId, [msg2], true /* isDone */);
@@ -455,10 +462,11 @@ describe("V2 Streaming Parser + Real Storage Integration", () => {
 		]);
 
 		await processSendAgentConversationMessageStreamingResponse(
+			INSTANCE_URL,
+			SpotterResponseFormat.SIMPLIFIED,
 			"stream-conv-1",
 			reader,
 			client.appendMessages.bind(client),
-			INSTANCE_URL,
 		);
 
 		const state = await client.getNewMessages("stream-conv-1");
@@ -490,10 +498,11 @@ describe("V2 Streaming Parser + Real Storage Integration", () => {
 		const reader = makeReader([`data: ${JSON.stringify([answerEvent])}\n`]);
 
 		await processSendAgentConversationMessageStreamingResponse(
+			INSTANCE_URL,
+			SpotterResponseFormat.SIMPLIFIED,
 			"stream-conv-2",
 			reader,
 			client.appendMessages.bind(client),
-			INSTANCE_URL,
 		);
 
 		const state = await client.getNewMessages("stream-conv-2");
@@ -519,10 +528,11 @@ describe("V2 Streaming Parser + Real Storage Integration", () => {
 		const reader = makeReader([thinkingLine, answerLine, textLine]);
 
 		await processSendAgentConversationMessageStreamingResponse(
+			INSTANCE_URL,
+			SpotterResponseFormat.SIMPLIFIED,
 			"stream-conv-3",
 			reader,
 			client.appendMessages.bind(client),
-			INSTANCE_URL,
 		);
 
 		const state = await client.getNewMessages("stream-conv-3");

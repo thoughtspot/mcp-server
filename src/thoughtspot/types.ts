@@ -52,6 +52,11 @@ export interface SessionInfo {
 	isSpotterChatHistoryEnabled?: boolean;
 }
 
+export enum SpotterResponseFormat {
+	SIMPLIFIED = "SIMPLIFIED",
+	RAW = "RAW",
+}
+
 export interface BaseMessage {
 	is_thinking: boolean;
 }
@@ -72,8 +77,12 @@ export interface AnswerMessage extends BaseMessage {
 
 export type Message = TextMessage | AnswerMessage;
 
+// In raw mode, upstream events are passed through unmodified instead of being reshaped into a
+// `Message`, so their shape is not guaranteed to match `Message` at all.
+export type RawMessage = Record<string, unknown>;
+
 export interface StreamingMessagesState {
-	messages: Message[];
+	messages: (Message | RawMessage)[];
 	isDone: boolean;
 }
 

@@ -1,4 +1,8 @@
-import type { Message, StreamingMessagesState } from "../thoughtspot/types";
+import type {
+	Message,
+	RawMessage,
+	StreamingMessagesState,
+} from "../thoughtspot/types";
 
 /**
  * Client for the ConversationStorageServer Durable Object.
@@ -62,7 +66,7 @@ export class StorageServiceClient {
 	 */
 	async appendMessages(
 		conversationId: string,
-		messages: Message[],
+		messages: (Message | RawMessage)[],
 		isDone = false,
 	): Promise<void> {
 		const body: StreamingMessagesState = { messages, isDone };

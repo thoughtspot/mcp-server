@@ -19,6 +19,7 @@ import type {
 } from "../thoughtspot/thoughtspot-service";
 import {
 	type Answer,
+	SpotterResponseFormat,
 	type StreamingMessagesState,
 	ThoughtSpotApiError,
 } from "../thoughtspot/types";
@@ -357,10 +358,18 @@ export class MCPServer extends BaseMCPServer {
 			versionConfig.version[versionConfig.version.length - 1],
 		);
 
-		// Get base tools from version config
 		let tools = [...versionConfig.tools];
 
-		// Filter out GetDataSourceSuggestions if feature flag is not available
+		// Select which get_session_updates tool to expose based on raw session updates flag (for
+		// v1 toolset we don't do anything)
+		const toolIdxToDrop = this.ctx.props.enableRawSessionUpdates
+			? tools.findIndex((tool) => tool.name === ToolName.GetSessionUpdates)
+			: tools.findLastIndex((tool) => tool.name === ToolName.GetSessionUpdates);
+		if (toolIdxToDrop !== -1) {
+			tools.splice(toolIdxToDrop, 1);
+		}
+
+		// Filter out GetDataSourceSuggestions if feature is disabled
 		if (
 			!this.isSpotterDataSourceDiscoveryEnabled() &&
 			tools.some((tool) => tool.name === ToolName.GetDataSourceSuggestions)
@@ -370,6 +379,7 @@ export class MCPServer extends BaseMCPServer {
 			);
 		}
 
+		// Filter out orgs tools if feature is disabled
 		if (!this.areOrgToolsAvailable()) {
 			tools = tools.filter(
 				(tool) =>
@@ -789,6 +799,9 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			}).sendAgentConversationMessageStreaming(
 				analytical_session_id,
 				message,
+				this.ctx.props.enableRawSessionUpdates
+					? SpotterResponseFormat.RAW
+					: SpotterResponseFormat.SIMPLIFIED,
 				storageService.appendMessages.bind(storageService),
 				additional_context,
 			);

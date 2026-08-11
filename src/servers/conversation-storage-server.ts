@@ -1,5 +1,9 @@
 import { isBoolean } from "lodash";
-import type { Message, StreamingMessagesState } from "../thoughtspot/types";
+import type {
+	Message,
+	RawMessage,
+	StreamingMessagesState,
+} from "../thoughtspot/types";
 
 const DEFAULT_TTL_MS = 30 * 60 * 1000; // 30 minutes
 const STORAGE_BATCH_SIZE = 127; // Cloudflare DO bulk get/put limit is 128, we use 127 to be safe
@@ -93,7 +97,7 @@ export class ConversationStorageServerSQLite {
 	 * will never think the conversation is done before all messages have been written.
 	 */
 	private async appendMessagesAndRestartTtl(
-		newMessages: Message[],
+		newMessages: (Message | RawMessage)[],
 		isDone = false,
 	): Promise<void> {
 		const existingIsDone = await this.state.storage.get<boolean>(IS_DONE_KEY);
@@ -107,7 +111,10 @@ export class ConversationStorageServerSQLite {
 		}
 
 		let idx = (await this.state.storage.get<number>(WRITE_BOOKMARK_KEY)) ?? 0;
-		const entriesToStore = {} as Record<string, Message | number | boolean>;
+		const entriesToStore = {} as Record<
+			string,
+			Message | RawMessage | number | boolean
+		>;
 		for (const message of newMessages) {
 			entriesToStore[`${MESSAGE_KEY_PREFIX}${idx}`] = message;
 			idx++;
@@ -140,8 +147,8 @@ export class ConversationStorageServerSQLite {
 			keys.push(MESSAGE_KEY_PREFIX + i);
 		}
 
-		const newMessages: Message[] = [];
-		const messagesMap = await this.getInBatches<Message>(keys);
+		const newMessages: (Message | RawMessage)[] = [];
+		const messagesMap = await this.getInBatches<Message | RawMessage>(keys);
 		for (let i = readBookmark; i < writeBookmark; i++) {
 			const message = messagesMap.get(MESSAGE_KEY_PREFIX + i);
 			if (!message) {

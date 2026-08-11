@@ -5,7 +5,11 @@ import {
 	recordUpstreamStreamMessageMetric,
 } from "./metrics/runtime/tool-metrics";
 import { withSpan } from "./metrics/tracing/tracing-utils";
-import type { Message } from "./thoughtspot/types";
+import {
+	type Message,
+	type RawMessage,
+	SpotterResponseFormat,
+} from "./thoughtspot/types";
 
 /*
  * Handles processing the event stream from a send agent conversation message response. Reads from
@@ -13,14 +17,15 @@ import type { Message } from "./thoughtspot/types";
  * wrap it with a span to collect relevant metrics during processing.
  */
 export const processSendAgentConversationMessageStreamingResponse = async (
+	instanceUrl: string,
+	spotterResponseFormat: SpotterResponseFormat,
 	conversationId: string,
 	streamingResponseReader: ReadableStreamDefaultReader,
 	appendStoredMessages: (
 		conversationId: string,
-		messages: Message[],
+		messages: (Message | RawMessage)[],
 		isDone?: boolean,
 	) => Promise<void>,
-	instanceUrl: string,
 	recorder?: MetricsRecorder,
 ) => {
 	return await withSpan(
@@ -58,7 +63,7 @@ export const processSendAgentConversationMessageStreamingResponse = async (
 					buffer = lines.pop() || "";
 
 					// Loop through the lines and parse them into messages to be stored
-					const newMessages: Message[] = [];
+					const newMessages: (Message | RawMessage)[] = [];
 					for (const line of lines) {
 						// Ignore blank lines and heartbeats
 						if (line === "" || line === ": heartbeat") {
@@ -78,6 +83,83 @@ export const processSendAgentConversationMessageStreamingResponse = async (
 
 						// Loop through the items in the line and convert to messages if applicable
 						for (const item of data) {
+							// For the raw format, we don't reshape messages, but we still record
+							// metrics and flag span errors so upstream failures stay observable,
+							// and we still synthesize `answer_id` on answer events so the
+							// get_session_updates -> create_dashboard handoff keeps working.
+							if (spotterResponseFormat === SpotterResponseFormat.RAW) {
+								if (item.type === "text" || item.type === "text-chunk") {
+									if (item.metadata?.format === "markdown") {
+										nTextMessagesParsed++;
+										recordUpstreamStreamMessageMetric(
+											recorder,
+											upstreamOperation,
+											item.type === "text-chunk" ? "text_chunk" : "text",
+											item.metadata?.type === "thinking",
+										);
+									} else {
+										nMessagesIgnored++;
+									}
+								} else if (item.type === "answer") {
+									nAnswerMessagesParsed++;
+									recordUpstreamStreamMessageMetric(
+										recorder,
+										upstreamOperation,
+										"answer",
+										item.metadata?.type === "thinking",
+									);
+								} else if (item.type === "notification") {
+									if (
+										item.code === "TOOL_CALL_NOTIFICATION" &&
+										item.metadata?.tool_title
+									) {
+										nTextMessagesParsed++;
+										recordUpstreamStreamMessageMetric(
+											recorder,
+											upstreamOperation,
+											"step_notification",
+											item.metadata?.type === "thinking",
+										);
+									} else {
+										nMessagesIgnored++;
+									}
+								} else if (item.type === "error") {
+									console.error(
+										"Error event in event stream, error code",
+										item.error_code,
+									);
+									recordUpstreamStreamMessageMetric(
+										recorder,
+										upstreamOperation,
+										"error",
+										false,
+									);
+									spanHasError = true;
+									span.setStatus({
+										code: SpanStatusCode.ERROR,
+										message: `Error event in event stream, error code: ${item.error_code}`,
+									});
+								} else {
+									// Includes ack/search_datasets/file/conv_title (intentionally
+									// ignored upstream events) and any unrecognized event type.
+									nMessagesIgnored++;
+								}
+
+								newMessages.push(
+									item.type === "answer"
+										? {
+												...item,
+												answer_id: JSON.stringify({
+													session_id: item.metadata?.session_id,
+													gen_no: item.metadata?.gen_no,
+												}),
+											}
+										: { ...item },
+								);
+								continue;
+							}
+
+							// For the simplified format, we perform some further processing
 							if (item.type === "text") {
 								// Ignore non-markdown text messages
 								if (item.metadata?.format !== "markdown") {
