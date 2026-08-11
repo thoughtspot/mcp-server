@@ -62,7 +62,7 @@ const sessionInfoResponse = {
 	},
 	userName: "test-user",
 	currentOrgId: "test-org",
-	privileges: [],
+	privileges: ["DATADOWNLOADING"],
 };
 
 // A Response-like object good enough for rest-utils.postJson and the raw-fetch

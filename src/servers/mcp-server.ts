@@ -379,6 +379,11 @@ export class MCPServer extends BaseMCPServer {
 			);
 		}
 
+		// Hide fetch_data if the user lacks the data-download privilege
+		if (!this.canDownloadData()) {
+			tools = tools.filter((tool) => tool.name !== ToolName.FetchData);
+		}
+
 		// Filter out orgs tools if feature is disabled
 		if (!this.areOrgToolsAvailable()) {
 			tools = tools.filter(
@@ -1111,6 +1116,14 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		request: z.infer<typeof CallToolRequestSchema>,
 		recorder: MetricsRecorder,
 	) {
+		// Enforce the gate even if a client calls the hidden tool directly.
+		if (!this.canDownloadData()) {
+			return this.createErrorResponse(
+				"You do not have permission to download data (requires the data-download privilege).",
+				"fetch_data forbidden",
+			);
+		}
+
 		const { object_id, visualization_ids, max_rows } =
 			FetchDataInputSchema.parse(request.params.arguments);
 

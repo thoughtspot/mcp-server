@@ -45,7 +45,7 @@ describe("MCP Server", () => {
 				},
 				userName: "test-user",
 				currentOrgId: "test-org",
-				privileges: [],
+				privileges: ["DATADOWNLOADING"],
 			}),
 			searchMetadata: vi.fn().mockResolvedValue([
 				{
@@ -195,7 +195,7 @@ describe("MCP Server", () => {
 					mixpanelToken: "test-dev-token",
 					userName: "test-user",
 					currentOrgId: "test-org",
-					privileges: [],
+					privileges: ["DATADOWNLOADING"],
 					isSpotterDataSourceDiscoveryEnabled: true,
 				},
 				{
@@ -273,7 +273,7 @@ describe("MCP Server", () => {
 					},
 					userName: "test-user",
 					currentOrgId: "test-org",
-					privileges: [],
+					privileges: ["DATADOWNLOADING"],
 				}),
 				searchMetadata: vi.fn().mockResolvedValue([]),
 				instanceUrl: "https://test.thoughtspot.cloud",
@@ -297,6 +297,17 @@ describe("MCP Server", () => {
 				"get_session_updates",
 				"create_dashboard",
 			]);
+		});
+
+		it("hides fetch_data when the user lacks the data-download privilege", async () => {
+			await server.init();
+			(server as any).sessionInfo.privileges = [];
+			const { listTools } = connect(server);
+
+			const names = (await listTools()).tools?.map((t) => t.name) ?? [];
+			expect(names).not.toContain("fetch_data");
+			// Other tools are unaffected.
+			expect(names).toContain("search_objects");
 		});
 	});
 
@@ -574,6 +585,19 @@ describe("MCP Server", () => {
 				/Failed to fetch object data: upstream boom/,
 			);
 		});
+
+		it("returns a forbidden error when the user lacks the data-download privilege", async () => {
+			await server.init();
+			(server as any).sessionInfo.privileges = [];
+			const { callTool } = connect(server);
+
+			const result = await callTool("fetch_data", { object_id: "answer-123" });
+
+			expect(result.isError).toBe(true);
+			expect((result.content as any[])[0].text).toMatch(
+				/do not have permission to download data/i,
+			);
+		});
 	});
 
 	describe("Get Relevant Questions Tool", () => {
@@ -617,7 +641,7 @@ describe("MCP Server", () => {
 					},
 					userName: "test-user",
 					currentOrgId: "test-org",
-					privileges: [],
+					privileges: ["DATADOWNLOADING"],
 					enableSpotterDataSourceDiscovery: true,
 				}),
 				queryGetDecomposedQuery: vi
@@ -661,7 +685,7 @@ describe("MCP Server", () => {
 					},
 					userName: "test-user",
 					currentOrgId: "test-org",
-					privileges: [],
+					privileges: ["DATADOWNLOADING"],
 					enableSpotterDataSourceDiscovery: true,
 				}),
 				queryGetDecomposedQuery: vi
@@ -709,7 +733,7 @@ describe("MCP Server", () => {
 					},
 					userName: "test-user",
 					currentOrgId: "test-org",
-					privileges: [],
+					privileges: ["DATADOWNLOADING"],
 					enableSpotterDataSourceDiscovery: true,
 				}),
 				queryGetDecomposedQuery: vi
@@ -753,7 +777,7 @@ describe("MCP Server", () => {
 					},
 					userName: "test-user",
 					currentOrgId: "test-org",
-					privileges: [],
+					privileges: ["DATADOWNLOADING"],
 					enableSpotterDataSourceDiscovery: true,
 				}),
 				queryGetDecomposedQuery: vi.fn().mockResolvedValue({
@@ -847,7 +871,7 @@ describe("MCP Server", () => {
 					},
 					userName: "test-user",
 					currentOrgId: "test-org",
-					privileges: [],
+					privileges: ["DATADOWNLOADING"],
 					enableSpotterDataSourceDiscovery: true,
 				}),
 				singleAnswer: vi
@@ -926,7 +950,7 @@ describe("MCP Server", () => {
 					},
 					userName: "test-user",
 					currentOrgId: "test-org",
-					privileges: [],
+					privileges: ["DATADOWNLOADING"],
 					enableSpotterDataSourceDiscovery: true,
 				}),
 				exportUnsavedAnswerTML: vi.fn().mockResolvedValue({
@@ -1184,7 +1208,7 @@ describe("MCP Server", () => {
 					},
 					userName: "test-user",
 					currentOrgId: "test-org",
-					privileges: [],
+					privileges: ["DATADOWNLOADING"],
 					enableSpotterDataSourceDiscovery: true,
 				}),
 				getDataSourceSuggestions: vi.fn().mockResolvedValue({
@@ -1264,7 +1288,7 @@ describe("MCP Server", () => {
 					},
 					userName: "test-user",
 					currentOrgId: "test-org",
-					privileges: [],
+					privileges: ["DATADOWNLOADING"],
 					enableSpotterDataSourceDiscovery: true,
 				}),
 				getDataSourceSuggestions: vi.fn().mockResolvedValue({
@@ -1305,7 +1329,7 @@ describe("MCP Server", () => {
 					},
 					userName: "test-user",
 					currentOrgId: "test-org",
-					privileges: [],
+					privileges: ["DATADOWNLOADING"],
 					enableSpotterDataSourceDiscovery: true,
 				}),
 				getDataSourceSuggestions: vi.fn().mockResolvedValue({
@@ -1360,7 +1384,7 @@ describe("MCP Server", () => {
 					},
 					userName: "test-user",
 					currentOrgId: "test-org",
-					privileges: [],
+					privileges: ["DATADOWNLOADING"],
 				}),
 				createAgentConversationWithAutoMode: vi.fn().mockResolvedValue({
 					conversation_id: "conv-abc-123",
@@ -1404,7 +1428,7 @@ describe("MCP Server", () => {
 					},
 					userName: "test-user",
 					currentOrgId: "test-org",
-					privileges: [],
+					privileges: ["DATADOWNLOADING"],
 				}),
 				createAgentConversationWithAutoMode:
 					mockCreateAgentConversationWithAutoMode,
@@ -1448,7 +1472,7 @@ describe("MCP Server", () => {
 					},
 					userName: "test-user",
 					currentOrgId: "test-org",
-					privileges: [],
+					privileges: ["DATADOWNLOADING"],
 				}),
 				createAgentConversationWithAutoMode: vi
 					.fn()
@@ -1485,7 +1509,7 @@ describe("MCP Server", () => {
 					},
 					userName: "test-user",
 					currentOrgId: "test-org",
-					privileges: [],
+					privileges: ["DATADOWNLOADING"],
 				}),
 				createAgentConversationWithAutoMode: vi
 					.fn()
