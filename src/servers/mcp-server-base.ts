@@ -53,6 +53,15 @@ export type ErrorResponse = {
 
 export type ToolResponse = SuccessResponse | ErrorResponse;
 
+// Privileges that grant data download. `DATADOWNLOADING` is the classic
+// privilege; `CAN_DOWNLOAD_DETAILED_DATA` is its RBAC equivalent; admins
+// implicitly have it. Any one is sufficient.
+const DATA_DOWNLOAD_PRIVILEGES = [
+	"DATADOWNLOADING",
+	"CAN_DOWNLOAD_DETAILED_DATA",
+	"ADMINISTRATION",
+];
+
 export interface Context {
 	props: Props;
 	env: Env;
@@ -120,6 +129,23 @@ export abstract class BaseMCPServer extends Server {
 			return true;
 		}
 		return this.sessionInfo.isSpotterChatHistoryEnabled === true;
+	}
+
+	/**
+	 * Whether the user can download data (gates the fetch_data tool)
+	 */
+	protected canDownloadData(): boolean {
+		if (!this.sessionInfo) {
+			console.warn(
+				"Session info not available when checking data download privilege",
+			);
+			return true;
+		}
+		const privileges = this.sessionInfo.privileges;
+		if (!Array.isArray(privileges)) {
+			return true;
+		}
+		return privileges.some((p) => DATA_DOWNLOAD_PRIVILEGES.includes(p));
 	}
 
 	/**
