@@ -148,7 +148,13 @@ export class MCPServer extends BaseMCPServer {
 		try {
 			await this.initGlobalTokenAndReconcileWithStorage();
 		} catch (error) {
-			console.error("Failed to load/seed keep-warm token on connect:", error);
+			// Reconcile throws only when no valid token exists (stored + frozen props
+			// token both expired). Swallow here so connect still succeeds; the next
+			// getActiveToken()/tool call fails closed with a reauth prompt.
+			console.error(
+				"Failed to load/seed keep-warm global token on connect (no valid token; session will require reauth):",
+				error,
+			);
 		}
 	}
 
@@ -161,10 +167,13 @@ export class MCPServer extends BaseMCPServer {
 		try {
 			await this.ensureActiveOrg();
 		} catch (error) {
-			console.error("Failed to load active org on connect:", error);
 			// A failed bootstrap must not leave the session with an active org but
-			// no token; fall back to the global token until the next connect or the
-			// keep-warm alarm re-mints.
+			// no token; clear both and fall back to the global token until the next
+			// connect or the keep-warm alarm re-mints.
+			console.error(
+				"Failed to bootstrap active org on connect (clearing active org, falling back to global token):",
+				error,
+			);
 			this.activeOrgId = undefined;
 			this.activeOrgToken = undefined;
 		}
@@ -172,7 +181,7 @@ export class MCPServer extends BaseMCPServer {
 
 	// Connect-time bootstrap: use the DO's persisted org, else seed from the
 	// session's currentOrgId, then mint. Assumes org tools are available.
-	private async ensureActiveOrg(recorder?: MetricsRecorder): Promise<void> {
+	private async ensureActiveOrg(): Promise<void> {
 		await this.loadActiveOrg();
 		if (!this.activeOrgId) {
 			const currentOrgId =
@@ -186,7 +195,7 @@ export class MCPServer extends BaseMCPServer {
 			}
 		}
 		if (this.activeOrgId && !this.activeOrgToken) {
-			await this.forceRecreateActiveOrgToken(recorder);
+			await this.forceRecreateActiveOrgToken();
 		}
 	}
 

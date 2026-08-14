@@ -88,12 +88,21 @@ export abstract class BaseMCPServer extends Server {
 	}
 
 	/**
-	 * Whether Spotter data source discovery (Auto Mode) is enabled
+	 * Whether Spotter data source discovery (Auto Mode) is enabled.
+	 *
+	 * Fails OPEN (returns true) when sessionInfo is unavailable. sessionInfo can
+	 * be null if getSessionInfo failed at init (e.g. a transient cluster error, or
+	 * historically a post-expiry reconnect where the fetch used the dead frozen
+	 * props token — now fixed by the preInit token reorder). This flag only tunes
+	 * how a tool runs (auto datasource discovery), not whether it may run, so
+	 * defaulting it on during a brief session-info gap is the least-surprising,
+	 * non-breaking choice. Contrast getActiveToken(), which fails CLOSED because a
+	 * wrong answer there would send a dead token upstream.
 	 */
 	protected isSpotterDataSourceDiscoveryEnabled(): boolean {
 		if (!this.sessionInfo) {
 			console.warn(
-				"Session info not available when checking data source discovery flag",
+				"Session info not available when checking data source discovery flag; defaulting ON (fail-open)",
 			);
 			return true;
 		}
@@ -101,22 +110,44 @@ export abstract class BaseMCPServer extends Server {
 	}
 
 	/**
-	 * Whether Orgs feature is enabled
+	 * Whether the Orgs feature is enabled on the cluster.
+	 *
+	 * Returns true when sessionInfo is unavailable, but this does NOT by itself
+	 * expose org tools: the only caller, areOrgToolsAvailable(), also requires
+	 * authMode === "oauth", a grant refresh token, and an API version that carries
+	 * list_orgs. So a null-sessionInfo "true" here still can't surface org tools on
+	 * a bearer/pre-org/old-version session — it just avoids hiding them for a
+	 * fully-eligible session during a transient session-info gap (the same gap the
+	 * preInit reorder + listTools ensureSessionInfo close).
 	 */
 	protected isOrgsEnabled(): boolean {
 		if (!this.sessionInfo) {
-			console.warn("Session info not available when checking orgs flag");
+			console.warn(
+				"Session info not available when checking orgs flag; deferring to the other areOrgToolsAvailable() gates",
+			);
 			return true;
 		}
 		return this.sessionInfo.orgsEnabled === true;
 	}
 
 	/**
-	 * Fallback: refetch session info if it's still null (preInit normally loads the
-	 * token so the init-time fetch succeeds, but if that failed too — e.g. a
-	 * transient error — repair on demand here). Called by callers that read
-	 * session-info-gated state. No-op once populated; best-effort, so a failure
-	 * keeps the gates fail-closed.
+	 * On-demand repair of sessionInfo when it's still null.
+	 *
+	 * Background: getSessionInfo runs once at init. It authenticates with a token,
+	 * and on a post-expiry reconnect the frozen props access token is dead — so
+	 * the fetch failed and left sessionInfo null for the instance's lifetime,
+	 * which mis-gated org-tool visibility ("org tools disappear after ~24h" even
+	 * though the kept-warm DO token was still valid). preInit now loads the
+	 * kept-warm token BEFORE that init fetch, so it normally succeeds. This method
+	 * is the remaining fallback: if the init fetch still failed (e.g. a transient
+	 * cluster error), refetch on demand when a caller reads session-info-gated
+	 * state — by now the valid token is loaded, so the retry authenticates cleanly.
+	 *
+	 * No-op once populated. Concurrent callers share one in-flight fetch via
+	 * sessionInfoPromise. Best-effort: a failure leaves sessionInfo null and the
+	 * gates fall back to their documented defaults (org tools fail-closed via the
+	 * areOrgToolsAvailable() gates; Spotter feature flags fail-open). Refetch is
+	 * bounded by client (human-paced) request rate, so no back-off is needed.
 	 */
 	protected async ensureSessionInfo(): Promise<void> {
 		if (this.sessionInfo) {
@@ -131,12 +162,17 @@ export abstract class BaseMCPServer extends Server {
 	}
 
 	/**
-	 * Whether Spotter chat history (save chat) is enabled
+	 * Whether Spotter chat history (save chat) is enabled.
+	 *
+	 * Fails OPEN (returns true) when sessionInfo is unavailable, for the same
+	 * reason as isSpotterDataSourceDiscoveryEnabled: it tunes tool behavior, not
+	 * tool availability, so defaulting on during a transient session-info gap is
+	 * non-breaking.
 	 */
 	protected isSpotterChatHistoryEnabled(): boolean {
 		if (!this.sessionInfo) {
 			console.warn(
-				"Session info not available when checking chat history flag",
+				"Session info not available when checking chat history flag; defaulting ON (fail-open)",
 			);
 			return true;
 		}
@@ -453,7 +489,14 @@ export abstract class BaseMCPServer extends Server {
 			);
 			this.addTracker(mixpanel);
 		} catch (error) {
-			console.error("Error initializing session info:", error);
+			// getSessionInfo failed, so sessionInfo stays null. Downstream this hides
+			// org tools (areOrgToolsAvailable gates fail-closed) and defaults the
+			// Spotter feature flags on (fail-open). ensureSessionInfo() repairs this
+			// on the next session-info-gated call once a valid token is loaded.
+			console.error(
+				"Error initializing session info (org tools will be hidden until ensureSessionInfo repairs it):",
+				error,
+			);
 		}
 	}
 
@@ -483,9 +526,13 @@ export abstract class BaseMCPServer extends Server {
 	): Promise<any>;
 
 	async init() {
-		// Runs before initializeService() so a subclass can load the token that
-		// getSessionInfo authenticates with (else the init fetch uses the frozen
-		// props token and fails after it expires). Best-effort.
+		// preInit runs BEFORE initializeService()/getSessionInfo so a subclass can
+		// load the token that getSessionInfo authenticates with. Ordering matters:
+		// props.accessToken is frozen at login and dies after ~24h, so on a
+		// reconnect past that, an init-time getSessionInfo using it would fail and
+		// leave sessionInfo null for the instance lifetime (the "org tools vanish
+		// after 24h" bug). preInit reconciles the still-valid kept-warm DO token
+		// first, so the fetch below authenticates with a live token. Best-effort.
 		try {
 			await this.preInit();
 		} catch (error) {

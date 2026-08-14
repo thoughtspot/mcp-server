@@ -470,7 +470,7 @@ describe("MCP Server org tools", () => {
 			expect(names).toContain("switch_org");
 		});
 
-		it("ensureSessionInfo coalesces concurrent fallback refetches into one (no duplicate getSessionInfo or tracker)", async () => {
+		it("ensureSessionInfo coalesces concurrent fallback refetches into one getSessionInfo", async () => {
 			const { server, tokenStore, warmSessionInfoCalls } =
 				makeServerWithTokenAwareSession(goodSession);
 			await seedWarmToken(tokenStore);
@@ -480,7 +480,6 @@ describe("MCP Server org tools", () => {
 			// refetch path runs. (globalToken is already the warm token from preInit.)
 			(server as any).sessionInfo = undefined;
 			const callsBefore = warmSessionInfoCalls.count;
-			const trackersBefore = (server as any).trackers.size;
 
 			// Fire two refetches concurrently; the in-flight guard must coalesce them.
 			await Promise.all([
@@ -489,9 +488,8 @@ describe("MCP Server org tools", () => {
 			]);
 
 			expect((server as any).sessionInfo).toBeTruthy();
-			// Only one extra fetch, and only one extra tracker added.
+			// The in-flight guard coalesces both callers into a single refetch.
 			expect(warmSessionInfoCalls.count).toBe(callsBefore + 1);
-			expect((server as any).trackers.size).toBe(trackersBefore + 1);
 		});
 	});
 

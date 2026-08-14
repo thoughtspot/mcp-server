@@ -341,7 +341,7 @@ describe("MCP Server Base", () => {
 			await expect(testServer.init()).resolves.not.toThrow();
 
 			expect(consoleErrorSpy).toHaveBeenCalledWith(
-				"Error initializing session info:",
+				expect.stringContaining("Error initializing session info"),
 				expect.any(Error),
 			);
 			// sessionInfo should remain unset, no tracker registered
