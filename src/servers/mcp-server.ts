@@ -77,6 +77,13 @@ export class MCPServer extends BaseMCPServer {
 		if (accessToken && !MCPServer.isExpired(globalTokenExpiresAt)) {
 			return accessToken;
 		}
+		console.error(
+			`[keepwarm-debug] userGUID=${this.sessionInfo?.userGUID ?? "unknown"} REAUTH via getActiveToken: no DO keep-warm token in memory and props token ${
+				accessToken
+					? `expired (propsExpiresAt=${globalTokenExpiresAt ?? "unknown"}, now=${Date.now()})`
+					: "absent"
+			}; grantHasRefreshToken=${this.grantHasRefreshToken}`,
+		);
 		throw new ThoughtSpotApiError(
 			401,
 			"getActiveToken",
@@ -148,11 +155,8 @@ export class MCPServer extends BaseMCPServer {
 		try {
 			await this.initGlobalTokenAndReconcileWithStorage();
 		} catch (error) {
-			// Reconcile throws only when no valid token exists (stored + frozen props
-			// token both expired). Swallow here so connect still succeeds; the next
-			// getActiveToken()/tool call fails closed with a reauth prompt.
 			console.error(
-				"Failed to load/seed keep-warm global token on connect (no valid token; session will require reauth):",
+				"Failed to load/seed keep-warm global token on connect (session will require reauth):",
 				error,
 			);
 		}
@@ -168,8 +172,8 @@ export class MCPServer extends BaseMCPServer {
 			await this.ensureActiveOrg();
 		} catch (error) {
 			// A failed bootstrap must not leave the session with an active org but
-			// no token; clear both and fall back to the global token until the next
-			// connect or the keep-warm alarm re-mints.
+			// no token; fall back to the global token until the next connect or the
+			// keep-warm alarm re-mints.
 			console.error(
 				"Failed to bootstrap active org on connect (clearing active org, falling back to global token):",
 				error,
@@ -258,6 +262,15 @@ export class MCPServer extends BaseMCPServer {
 		// Nothing valid: the stored token (if any) is expired and the grant's frozen
 		// access token is expired/absent. Fail closed so callers never send a dead
 		// token; surfaces as a graceful reauth via the central 401 handler.
+		console.error(
+			`[keepwarm-debug] userGUID=${this.sessionInfo?.userGUID ?? "unknown"} REAUTH via reconcile: storedToken=${
+				storedToken ? "present" : "absent"
+			} storedExpired=${storedExpired} storedExpiresAt=${
+				existing.globalTokenExpiresAt ?? "unknown"
+			} propsExpired=${propsTokenExpired} propsExpiresAt=${
+				globalTokenExpiresAt ?? "unknown"
+			} hasRefreshToken=${!!globalRefreshToken} now=${Date.now()}`,
+		);
 		this.globalToken = undefined;
 		throw new ThoughtSpotApiError(
 			401,
