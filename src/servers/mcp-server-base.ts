@@ -112,6 +112,19 @@ export abstract class BaseMCPServer extends Server {
 	}
 
 	/**
+	 * Whether Spotter chat history (save chat) is enabled
+	 */
+	protected isSpotterChatHistoryEnabled(): boolean {
+		if (!this.sessionInfo) {
+			console.warn(
+				"Session info not available when checking chat history flag",
+			);
+			return true;
+		}
+		return this.sessionInfo.isSpotterChatHistoryEnabled === true;
+	}
+
+	/**
 	 * Fallback: refetch session info if it's still null (preInit normally loads the
 	 * token so the init-time fetch succeeds, but if that failed too — e.g. a
 	 * transient error — repair on demand here). Called by callers that read
@@ -128,19 +141,6 @@ export abstract class BaseMCPServer extends Server {
 			});
 		}
 		await this.sessionInfoPromise;
-	}
-
-	/**
-	 * Whether Spotter chat history (save chat) is enabled
-	 */
-	protected isSpotterChatHistoryEnabled(): boolean {
-		if (!this.sessionInfo) {
-			console.warn(
-				"Session info not available when checking chat history flag",
-			);
-			return true;
-		}
-		return this.sessionInfo.isSpotterChatHistoryEnabled === true;
 	}
 
 	/**
