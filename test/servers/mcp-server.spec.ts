@@ -144,20 +144,14 @@ describe("MCP Server", () => {
 				next_cursor: null,
 			}),
 			fetchData: vi.fn().mockResolvedValue({
-				id: "answer-123",
-				name: "Sales by Region",
-				type: "ANSWER",
-				description: "Revenue broken down by region",
 				data: [
 					{
 						viz_id: undefined,
 						columns: ["Region", "Revenue"],
 						data_rows: [["East", "1200000"]],
 						total_row_count: 1,
-						row_count: 1,
 					},
 				],
-				request_id: "req-2",
 			}),
 			instanceUrl: "https://test.thoughtspot.cloud",
 		} as any);
@@ -543,12 +537,6 @@ describe("MCP Server", () => {
 
 			expect(result.isError).toBeUndefined();
 			const structured = result.structuredContent as any;
-			expect(structured).toMatchObject({
-				id: "answer-123",
-				name: "Sales by Region",
-				type: "ANSWER",
-				request_id: "req-2",
-			});
 			expect(structured.data).toHaveLength(1);
 			expect(structured.data[0].columns).toEqual(["Region", "Revenue"]);
 		});

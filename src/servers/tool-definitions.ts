@@ -219,6 +219,12 @@ export const FetchDataInputSchema = z.object({
 		.describe(
 			"The GUID of the object to fetch data for, typically an `object_id` returned by a prior `search_objects` call. Supports saved Answers and Liveboards.",
 		),
+	object_type: z
+		.enum(["ANSWER", "LIVEBOARD"])
+		.optional()
+		.describe(
+			"The object's `type` from a prior `search_objects` result. Pass it to skip an internal type-resolution lookup; omit it if unknown and the tool will resolve it.",
+		),
 	visualization_ids: z
 		.array(z.string())
 		.optional()
@@ -260,10 +266,6 @@ const FetchDataVizSchema = z.object({
 		.describe(
 			"Total rows available upstream, which may exceed the rows returned when capped by `max_rows`.",
 		),
-	row_count: z
-		.number()
-		.optional()
-		.describe("Number of rows actually returned in `data_rows`."),
 	sampling_ratio: z
 		.number()
 		.optional()
@@ -273,21 +275,10 @@ const FetchDataVizSchema = z.object({
 });
 
 export const FetchDataOutputSchema = z.object({
-	id: z.string().describe("The GUID of the fetched object."),
-	name: z.string().describe("The display name of the object."),
-	type: z
-		.string()
-		.describe("The resolved object type: either 'ANSWER' or 'LIVEBOARD'."),
-	description: z.string().describe("The description of the object."),
 	data: z
 		.array(FetchDataVizSchema)
 		.describe(
 			"The object's data. A single entry for an Answer; one entry per visualization for a Liveboard.",
-		),
-	request_id: z
-		.string()
-		.describe(
-			"Correlation id sent on the upstream calls as x-request-id; trace this in ThoughtSpot's server logs.",
 		),
 });
 
@@ -639,6 +630,8 @@ export const toolDefinitionsV2 = [
 		description: [
 			"Search for objects (Answers, Liveboards, Worksheets) in ThoughtSpot matching a given search term. Supports optional filters (types, owner, tag, modified_since, verified_only) and pagination (limit, cursor). Returns `results` (ranked), plus `next_cursor`. Each result carries: object_id, title, type (LIVEBOARD | ANSWER | LIVEBOARD_VIZ | WORKSHEET; LIVEBOARD_VIZ is a viz pinned on a Liveboard — render it as 'Liveboard viz'), author_name, description, tags, last_modified (ISO-8601), verified, external_link, query (Answer/viz sage tokens; null for Liveboards) and confidence. Returns identifiers and metadata only — never the object's data or contents, and it does not run queries.",
 			"",
+			"CRITICAL — explaining an object requires its DATA, never this metadata: the fields here (title, description, `query` tokens, tags) describe an object; they are NOT its contents. If the user asks to explain, describe, summarize, analyze, interpret, or say what any returned object contains, shows, means, or 'is about', you MUST call `fetch_data` for that object FIRST and ground your answer in the rows it returns. Do NOT answer such a request from this response alone, do NOT restate the metadata as an explanation, and do NOT merely offer to fetch — just call `fetch_data`. Use the `fetch_data` tool to do this — its own schema documents how to pass the object, so don't work the arguments out here. (Worksheets are the exception — they have no saved result to fetch.) And never distinguish or explain objects from their `description` or `query` tokens: those are authoring metadata, frequently stale and often copied verbatim across sibling vizzes, so two objects can share a byte-identical description while their data differs.",
+			"",
 			"How to present the results:",
 			"• Render as a table with fixed columns in this order: Object (the name, linked to `external_link`) · Type · Owner · Verified (✓ or —) · Last Modified.",
 			"• Put the description and, for an Answer/viz, the `query` tokens as sub-lines under the name (e.g. '↳ sales by region, last 3 months') — never as their own columns.",
@@ -662,9 +655,9 @@ export const toolDefinitionsV2 = [
 	{
 		name: ToolName.FetchData,
 		description: [
-			"Fetch the full data (columns and rows) of a saved Answer or Liveboard, identified by its GUID.",
+			"Fetch the full data (columns and rows) of a saved Answer or Liveboard, identified by its GUID — typically an object found via `search_objects`. Use this to explain, describe, summarize, analyze, or interpret what a ThoughtSpot object, Liveboard, Answer, or visualization actually shows.",
 			"CALL THIS WHENEVER the user wants to explain, describe, summarize, analyze, interpret, or ask what a specific object contains or shows: any explanation of what an object contains must be grounded in the data this tool returns, so fetch it first with the object's `id`, then answer from the returned data.",
-			"Returns the object's data exactly as saved — it does not run new queries or change the object's question, filters, or columns. The result is shaped to the object's type: an Answer returns a single tabular result, a Liveboard returns one tabular result per visualization (each with its visualization id and name). To pull a single visualization pinned on a Liveboard, pass the Liveboard GUID as `object_id` and the visualization GUID in `visualization_ids`. Each result includes the column names and data rows. Use the optional `max_rows` to bound the rows returned per visualization (defaults to 25).",
+			"Runs the object's saved question (its existing filters and columns, unchanged) against the current data and returns the result, so the rows reflect the latest data and may differ from when the object was first saved. The result is shaped to the object's type: an Answer returns a single tabular result, a Liveboard returns one tabular result per visualization (each with its visualization id and name). To pull a single visualization pinned on a Liveboard, pass the Liveboard GUID as `object_id` and the visualization GUID in `visualization_ids`. Each result includes the column names and data rows. Use the optional `max_rows` to bound the rows returned per visualization (defaults to 25).",
 		].join("\n"),
 		inputSchema: z.toJSONSchema(FetchDataInputSchema),
 		outputSchema: z.toJSONSchema(FetchDataOutputSchema),

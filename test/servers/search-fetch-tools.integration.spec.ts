@@ -442,18 +442,11 @@ describe("fetch_data tool — real handler + mocked network", () => {
 
 		expect(result.isError).toBeUndefined();
 		const structured = result.structuredContent as any;
-		expect(structured).toMatchObject({
-			id: "answer-1",
-			name: "Sales by Region",
-			type: "ANSWER",
-			description: "Revenue by region",
-		});
 		expect(structured.data).toHaveLength(1);
 		expect(structured.data[0]).toMatchObject({
 			viz_id: undefined,
 			columns: ["Region", "Revenue"],
 			total_row_count: 2,
-			row_count: 2,
 			sampling_ratio: 1,
 		});
 		// Cells are returned verbatim, at full precision.
@@ -470,12 +463,37 @@ describe("fetch_data tool — real handler + mocked network", () => {
 		expect(callTo("/metadata/answer/data")).toBeDefined();
 		expect(callTo("/metadata/liveboard/data")).toBeUndefined();
 
-		// Both upstream calls share one x-request-id, echoed back for tracing.
+		// Both upstream calls share one x-request-id for tracing.
 		const [, dataInit] = callTo("/metadata/answer/data") ?? [];
 		expect(dataInit.headers["x-request-id"]).toBe(
 			metaInit.headers["x-request-id"],
 		);
-		expect(structured.request_id).toBe(metaInit.headers["x-request-id"]);
+	});
+
+	it("skips the type-resolution lookup when object_type is supplied", async () => {
+		handlers.answerData = () =>
+			jsonResponse({
+				contents: [
+					{
+						column_names: ["Region", "Revenue"],
+						data_rows: [["East", 1]],
+						available_data_row_count: 1,
+						returned_data_row_count: 1,
+					},
+				],
+			});
+
+		const server = await newServer();
+
+		const result = await callTool(server, "fetch_data", {
+			object_id: "answer-1",
+			object_type: "ANSWER",
+		});
+
+		expect(result.isError).toBeUndefined();
+		// No /metadata/search round-trip; straight to the answer data endpoint.
+		expect(callTo("/metadata/search")).toBeUndefined();
+		expect(callTo("/metadata/answer/data")).toBeDefined();
 	});
 
 	it("fetches a Liveboard viz, passing the viz filter and max_rows through", async () => {
@@ -514,7 +532,6 @@ describe("fetch_data tool — real handler + mocked network", () => {
 
 		expect(result.isError).toBeUndefined();
 		const structured = result.structuredContent as any;
-		expect(structured.type).toBe("LIVEBOARD");
 		expect(structured.data[0]).toMatchObject({
 			viz_id: "viz-1",
 			viz_name: "By Product",
@@ -590,7 +607,6 @@ describe("fetch_data tool — real handler + mocked network", () => {
 			["A", 1],
 			["B", 2],
 		]);
-		expect(structured.data[0].row_count).toBe(2);
 		expect(structured.data[0].total_row_count).toBe(3);
 
 		// Exactly one Liveboard call (no retry), with an unbounded record_size.

@@ -1694,10 +1694,6 @@ describe("ThoughtSpot Client", () => {
 
 			// FULL object rows are normalized into columns + positional rows.
 			expect(result).toEqual({
-				id: "obj-1",
-				name: "Test Answer v1",
-				type: "ANSWER",
-				description: "A description",
 				data: [
 					{
 						viz_id: undefined,
@@ -1708,11 +1704,9 @@ describe("ThoughtSpot Client", () => {
 							["Atlanta", 424496, 21161832.426],
 						],
 						total_row_count: 2,
-						row_count: 2,
 						sampling_ratio: 1,
 					},
 				],
-				request_id: dataHeaders["x-request-id"],
 			});
 			// Same correlation id is sent on both upstream calls.
 			expect((fetch as any).mock.calls[0][1].headers["x-request-id"]).toBe(
@@ -1769,8 +1763,6 @@ describe("ThoughtSpot Client", () => {
 			// No viz filter when fetching the whole Liveboard.
 			expect(dataBody.visualization_identifiers).toBeUndefined();
 
-			expect(result.type).toBe("LIVEBOARD");
-			expect(result.name).toBe("Test MCP Liveboard 1");
 			expect(result.data).toEqual([
 				{
 					viz_id: "de1240fc-2d4d-4c67-9317-02e9c6e3bf1c",
@@ -1778,7 +1770,6 @@ describe("ThoughtSpot Client", () => {
 					columns: ["item type", "Total sales"],
 					data_rows: [["Dresses", 7896217.73]],
 					total_row_count: 1,
-					row_count: 1,
 					sampling_ratio: 1,
 				},
 				{
@@ -1787,7 +1778,6 @@ describe("ThoughtSpot Client", () => {
 					columns: ["city", "Total sales"],
 					data_rows: [["Billings", 3198084.8]],
 					total_row_count: 1,
-					row_count: 1,
 					sampling_ratio: 1,
 				},
 			]);
@@ -1901,8 +1891,6 @@ describe("ThoughtSpot Client", () => {
 				["Boulder", 34070647.18],
 				["Atlanta", 21161832.426],
 			]);
-			// row_count falls back to the returned row count.
-			expect(result.data[0].row_count).toBe(2);
 		});
 
 		// Cells pass through unchanged — full precision, no rounding.

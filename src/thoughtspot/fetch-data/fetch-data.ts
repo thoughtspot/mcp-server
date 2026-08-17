@@ -14,8 +14,10 @@ export const FETCH_DATA_DEFAULT_MAX_ROWS = 25;
 export const LIVEBOARD_RECORD_SIZE = 2_147_483_647;
 
 // Only Answers and Liveboards expose fetchable data.
-const ANSWER_TYPE = "ANSWER";
-const LIVEBOARD_TYPE = "LIVEBOARD";
+enum ObjectType {
+	Answer = "ANSWER",
+	Liveboard = "LIVEBOARD",
+}
 
 // FULL rows are self-describing ({ col: value }), robust when `column_names`
 // is absent; `mapContents` normalizes either shape to columns + positional rows.
@@ -84,7 +86,6 @@ function mapContents(
 				content.available_data_row_count ??
 				content.returned_data_row_count ??
 				rows.length,
-			row_count: capped.length,
 			sampling_ratio: content.sampling_ratio,
 		};
 	});
@@ -95,38 +96,44 @@ function mapContents(
 export function addFetchData(client: any, instanceUrl: string, token: string) {
 	client.fetchData = async ({
 		objectId,
+		objectType: knownType,
 		vizIds,
 		maxRows = FETCH_DATA_DEFAULT_MAX_ROWS,
 	}: FetchDataParams): Promise<FetchDataResult> => {
-		// Shared x-request-id ties both upstream calls together for tracing.
+		// x-request-id ties the upstream call(s) together for tracing.
 		const requestId = generateRequestId();
 		const headers = buildHeaders(token, undefined, undefined, { requestId });
 
-		// Step 1: resolve the object's type — it decides the data endpoint.
-		const metaData = await postJson(
-			`${instanceUrl}/api/rest/2.0/metadata/search`,
-			headers,
-			{ metadata: [{ identifier: objectId }] },
-			"fetchData failed to resolve object",
-		);
-		const meta = metaData?.[0];
-		if (!meta) {
-			throw new Error(`fetchData found no object with id ${objectId}`);
+		// Resolve the object's type (decides the data endpoint) only when the
+		// caller didn't already supply it from a prior search_objects result.
+		let objectType = knownType ?? "";
+		if (
+			objectType !== ObjectType.Answer &&
+			objectType !== ObjectType.Liveboard
+		) {
+			const metaData = await postJson(
+				`${instanceUrl}/api/rest/2.0/metadata/search`,
+				headers,
+				{ metadata: [{ identifier: objectId }] },
+				"fetchData failed to resolve object",
+			);
+			const meta = metaData?.[0];
+			if (!meta) {
+				throw new Error(`fetchData found no object with id ${objectId}`);
+			}
+			objectType = meta.metadata_type ?? "";
 		}
-		const objectType: string = meta.metadata_type ?? "";
-		const name: string = meta.metadata_name ?? meta.metadata_header?.name ?? "";
-		const description: string = meta.metadata_header?.description ?? "";
 
-		// Step 2: fetch the data from the endpoint matching the object type.
+		// Fetch the data from the endpoint matching the object type.
 		const body: Record<string, unknown> = {
 			metadata_identifier: objectId,
 			data_format: DATA_FORMAT,
 			record_offset: 0,
 		};
 		let endpoint: string;
-		if (objectType === ANSWER_TYPE) {
+		if (objectType === ObjectType.Answer) {
 			endpoint = "/api/rest/2.0/metadata/answer/data";
-		} else if (objectType === LIVEBOARD_TYPE) {
+		} else if (objectType === ObjectType.Liveboard) {
 			endpoint = "/api/rest/2.0/metadata/liveboard/data";
 			// Omitting visualization_identifiers fetches every viz on the board.
 			if (vizIds?.length) {
@@ -141,7 +148,7 @@ export function addFetchData(client: any, instanceUrl: string, token: string) {
 		// Answers cap rows via record_size; Liveboards need the whole viz, capped
 		// client-side in mapContents.
 		const recordSize =
-			objectType === LIVEBOARD_TYPE ? LIVEBOARD_RECORD_SIZE : maxRows;
+			objectType === ObjectType.Liveboard ? LIVEBOARD_RECORD_SIZE : maxRows;
 		const data = await postJson(
 			`${instanceUrl}${endpoint}`,
 			headers,
@@ -150,13 +157,6 @@ export function addFetchData(client: any, instanceUrl: string, token: string) {
 		);
 		const contents: RawDataContent[] = data?.contents ?? [];
 
-		return {
-			id: objectId,
-			name,
-			type: objectType,
-			description,
-			data: mapContents(contents, maxRows),
-			request_id: requestId,
-		};
+		return { data: mapContents(contents, maxRows) };
 	};
 }

@@ -1124,19 +1124,20 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			);
 		}
 
-		const { object_id, visualization_ids, max_rows } =
+		const { object_id, object_type, visualization_ids, max_rows } =
 			FetchDataInputSchema.parse(request.params.arguments);
 
 		try {
 			const result = await this.getThoughtSpotService(recorder).fetchData({
 				objectId: object_id,
+				objectType: object_type,
 				vizIds: visualization_ids,
 				maxRows: max_rows,
 			});
 
 			return this.createStructuredContentSuccessResponse(
 				result,
-				`Fetched data for ${result.type} ${object_id} (${result.data.length} result(s))`,
+				`Fetched data for ${object_id} (${result.data.length} result(s))`,
 			);
 		} catch (error) {
 			// Surface the upstream message (e.g. status 401/500) so the failure is
