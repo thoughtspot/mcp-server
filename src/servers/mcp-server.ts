@@ -335,6 +335,10 @@ export class MCPServer extends BaseMCPServer {
 	protected async listTools() {
 		const span = this.initSpanWithCommonAttributes();
 		span?.setAttribute(
+			"enable_raw_session_updates",
+			this.ctx.props.enableRawSessionUpdates ?? "(not passed)",
+		);
+		span?.setAttribute(
 			"api_version_requested",
 			this.ctx.props.apiVersion ?? "(not passed)",
 		);
@@ -837,6 +841,10 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		_recorder: MetricsRecorder = NOOP_METRICS_RECORDER,
 	) {
 		const span = trace.getSpan(context.active());
+		span?.setAttribute(
+			"enable_raw_session_updates",
+			this.ctx.props.enableRawSessionUpdates ?? "(not passed)",
+		);
 		const { analytical_session_id } = GetSessionUpdatesInputSchema.parse(
 			request.params.arguments,
 		);
@@ -1015,6 +1023,7 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		} catch (error) {
 			// Surface the upstream message (e.g. status 401/500) so the failure is
 			// actionable rather than a generic "check your inputs".
+			console.error("Error searching objects:", error);
 			return this.createErrorResponse(
 				`Failed to search objects: ${(error as Error).message}`,
 				"search_objects failed",

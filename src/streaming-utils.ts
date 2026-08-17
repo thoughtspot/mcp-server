@@ -249,10 +249,7 @@ export const processSendAgentConversationMessageStreamingResponse = async (
 								// We intentionally ignore the above events
 								nMessagesIgnored++;
 							} else if (item.type === "error") {
-								console.error(
-									"Error event in event stream, error code",
-									item.error_code,
-								);
+								console.error("Error event in event stream:", item);
 								recordUpstreamStreamMessageMetric(
 									recorder,
 									upstreamOperation,

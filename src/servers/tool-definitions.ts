@@ -316,7 +316,7 @@ export const ConversationUpdateSchema = z.object({
 		.string()
 		.optional()
 		.describe(
-			"An embeddable URL for displaying the answer as an interactive visualization. Only present when `type` is `answer`. You can use this to render a live chart or table if your environment supports iframes.",
+			"An embeddable URL for displaying the answer as an interactive visualization. Only present when `type` is `answer`. If your environment supports iframes, you can use this URL as-is (do not modify it) to display an interactive chart or table. If your environment does not support iframes, you can modify the link (remove `?tsmcp=true` if present) and share it with the user to let them view the interactive visualization in a browser.",
 		),
 });
 
@@ -539,6 +539,8 @@ export const toolDefinitionsV1 = [
 
 const GET_SESSION_UPDATES_SHARED_TOOL_DEFINITION = {
 	name: ToolName.GetSessionUpdates,
+	description:
+		"Get the latest updates from the Analytics Agent. You can call this after `send_session_message` to retrieve the Agent's response. If `is_done` is false, you can call this tool again to continue polling, as the Agent is still generating a response. Even if `is_done` is false, you can use the updates to show status updates or progress to the user, so that they are informed about the ongoing process. An empty `session_updates` list while `is_done` is false is normal; it means the Agent is still thinking. When `is_done` is true, the Agent has finished and the results in `session_updates` are complete, so you can present them to the user. You can also send a follow-up message in the same session after `is_done` is true. If the completed response indicates that no data or no results were found, AND the `list_orgs` tool is available to you, the requested data may live in a different org or the user may not have access to it in the current org: tell the user this and that they can call `list_orgs` to see their orgs (the active one is marked `is_active`) and `switch_org` to switch to another org, then retry. If `list_orgs` is not available, do not mention orgs.",
 	inputSchema: z.toJSONSchema(GetSessionUpdatesInputSchema),
 	annotations: {
 		title: "Get Analysis Session Updates",
@@ -547,12 +549,6 @@ const GET_SESSION_UPDATES_SHARED_TOOL_DEFINITION = {
 		openWorldHint: false,
 	},
 };
-
-const GET_SESSION_UPDATES_STRUCTURED_DESCRIPTION =
-	"Get the latest updates from the Analytics Agent. You can call this after `send_session_message` to retrieve the Agent's response. If `is_done` is false, you can call this tool again to continue polling, as the Agent is still generating a response. Even if `is_done` is false, you can use the updates to show status updates or progress to the user, so that they are informed about the ongoing process. An empty `session_updates` list while `is_done` is false is normal; it means the Agent is still thinking. When `is_done` is true, the Agent has finished and the results in `session_updates` are complete, so you can present them to the user. You can also send a follow-up message in the same session after `is_done` is true. If the completed response indicates that no data or no results were found, AND the `list_orgs` tool is available to you, the requested data may live in a different org or the user may not have access to it in the current org: tell the user this and that they can call `list_orgs` to see their orgs (the active one is marked `is_active`) and `switch_org` to switch to another org, then retry. If `list_orgs` is not available, do not mention orgs.";
-
-const GET_SESSION_UPDATES_RAW_DESCRIPTION =
-	"Get the latest updates from the Analytics Agent, returned in their raw upstream form. You can call this after `send_session_message` to retrieve the Agent's response. If `is_done` is false, you can call this tool again to continue polling, as the Agent is still generating a response. Even if `is_done` is false, you can use the updates to show status updates or progress to the user, so that they are informed about the ongoing process. An empty `session_updates` list while `is_done` is false is normal; it means the Agent is still thinking. Each item in `session_updates` has no guaranteed shape, since it is passed through unfiltered from the upstream Agent — inspect each item's fields defensively rather than assuming a fixed structure, though answer-type items still carry an `answer_id` you can pass to `create_dashboard`. When `is_done` is true, the Agent has finished responding and no further updates will arrive for this message; you can also send a follow-up message in the same session at that point. If you cannot tell from the raw updates whether any data or results were found, AND the `list_orgs` tool is available to you, the requested data may live in a different org or the user may not have access to it in the current org: tell the user this and that they can call `list_orgs` to see their orgs (the active one is marked `is_active`) and `switch_org` to switch to another org, then retry. If `list_orgs` is not available, do not mention orgs.";
 
 export const toolDefinitionsV2 = [
 	{
@@ -623,12 +619,11 @@ export const toolDefinitionsV2 = [
 	// only the version we want based on whether the raw session updates flag is enabled or not
 	{
 		...GET_SESSION_UPDATES_SHARED_TOOL_DEFINITION,
-		description: GET_SESSION_UPDATES_STRUCTURED_DESCRIPTION,
 		outputSchema: z.toJSONSchema(GetSessionUpdatesOutputSchema),
 	},
 	{
 		...GET_SESSION_UPDATES_SHARED_TOOL_DEFINITION,
-		description: GET_SESSION_UPDATES_RAW_DESCRIPTION,
+		description: `${GET_SESSION_UPDATES_SHARED_TOOL_DEFINITION.description} The \`session_updates\` are returned in their raw and unmodified form. The shape of each update may be different, and there are no guarantees on what fields may be present. For \`answer\` updates, the \`answer_id\` field will not be present (for use with the \`create_dashboard\` tool). You can reconstruct this field using the following formula: \`answer_id = JSON.stringify({ session_id: answer_update.metadata.session_id, gen_no: answer_update.metadata.gen_no })\`.`,
 		outputSchema: z.toJSONSchema(GetSessionUpdatesRawOutputSchema),
 	},
 	{
