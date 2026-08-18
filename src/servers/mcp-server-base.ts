@@ -135,15 +135,18 @@ export abstract class BaseMCPServer extends Server {
 	 * Whether the user can download data (gates the fetch_data tool)
 	 */
 	protected canDownloadData(): boolean {
+		// Permission gate: fail CLOSED. If session info (hence privileges) is
+		// unavailable — e.g. an unauthorized token where getSessionInfo failed —
+		// we cannot confirm the privilege, so hide fetch_data rather than expose it.
 		if (!this.sessionInfo) {
 			console.warn(
-				"Session info not available when checking data download privilege",
+				"Session info not available when checking data download privilege; hiding fetch_data",
 			);
-			return true;
+			return false;
 		}
 		const privileges = this.sessionInfo.privileges;
 		if (!Array.isArray(privileges)) {
-			return true;
+			return false;
 		}
 		return privileges.some((p) => DATA_DOWNLOAD_PRIVILEGES.includes(p));
 	}

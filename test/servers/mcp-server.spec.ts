@@ -303,6 +303,16 @@ describe("MCP Server", () => {
 			// Other tools are unaffected.
 			expect(names).toContain("search_objects");
 		});
+
+		it("hides fetch_data (fails closed) when session info is unavailable", async () => {
+			await server.init();
+			// e.g. an unauthorized token where getSessionInfo threw.
+			(server as any).sessionInfo = undefined;
+			const { listTools } = connect(server);
+
+			const names = (await listTools()).tools?.map((t) => t.name) ?? [];
+			expect(names).not.toContain("fetch_data");
+		});
 	});
 
 	describe("Ping Tool", () => {
