@@ -1,11 +1,16 @@
 # Code owners for thoughtspot/mcp-server
 #
 # Every pull request targeting the default branch requires an approving review
-# from a member of @thoughtspot/mcp-dev. This is enforced by the `main`
-# repository ruleset (require_code_owner_review) and by classic branch
-# protection (require_code_owner_reviews).
+# from a code owner listed below. This is enforced by the `main` repository
+# ruleset (require_code_owner_review) and by classic branch protection
+# (require_code_owner_reviews).
 #
-# Note: the team must retain at least write access to this repository for
-# these entries to be treated as valid code owners.
+# Approval is satisfied by ANY ONE owner, not all of them.
+#
+# Owners must hold at least write access to this repository, or GitHub
+# silently ignores the entry. @mouryab is listed individually rather than via
+# the team because that account is a direct repository collaborator and not a
+# member of the thoughtspot org, so it cannot belong to @thoughtspot/mcp-dev.
+# If it later joins the org and the team, drop it from this line.
 
-*   @thoughtspot/mcp-dev
+*   @thoughtspot/mcp-dev @mouryab
