@@ -15,7 +15,35 @@ export type GlobalTokenData = {
 	instanceUrl: string;
 	globalTokenExpiresAt?: number;
 	lastSeenAt?: number;
+	// Debug counters for diagnosing early reauth; reset on a successful refresh.
+	consecutiveRefreshFailures?: number;
+	lastRefreshOkAt?: number;
 };
+
+// Log a token prefix only, never the full value.
+const tokPrefix = (t: string | null | undefined): string =>
+	t ? `${t.slice(0, 6)}…(${t.length})` : "<none>";
+
+const asHours = (ms: number): string => `${(ms / 3_600_000).toFixed(1)}h`;
+
+// One-line token-health snapshot for [keepwarm-debug] logs.
+function tokenHealth(store: GlobalTokenData): string {
+	const now = Date.now();
+	const expiresAt = store.globalTokenExpiresAt;
+	const ttl =
+		typeof expiresAt === "number"
+			? `expiresIn=${asHours(expiresAt - now)}${expiresAt <= now ? " (EXPIRED)" : ""}`
+			: "expiresIn=unknown";
+	const idle =
+		store.lastSeenAt != null
+			? `idle=${asHours(now - store.lastSeenAt)}`
+			: "idle=unknown";
+	const lastOk =
+		store.lastRefreshOkAt != null
+			? `sinceLastRefreshOk=${asHours(now - store.lastRefreshOkAt)}`
+			: "sinceLastRefreshOk=never";
+	return `token=${tokPrefix(store.globalToken)} ${ttl} ${idle} ${lastOk} consecFailures=${store.consecutiveRefreshFailures ?? 0}`;
+}
 
 // Per-user token/org DO, shared across the user's fanned-out sessions via the
 // storage-key hash. Owns the active org + org token and the keep-warm cluster
@@ -25,6 +53,12 @@ export class UserTokenStoreSQLite {
 		private state: DurableObjectState,
 		private env: Env,
 	) {}
+
+	// Stable per-user key for [keepwarm-debug] logs (DO id prefix — hash-derived,
+	// not a token). Lets you grep one user's full alarm/refresh/expiry history.
+	private userKey(): string {
+		return `user=${this.state.id?.toString().slice(0, 12) ?? "unknown"}`;
+	}
 
 	async fetch(request: Request): Promise<Response> {
 		const url = new URL(request.url);
@@ -113,6 +147,9 @@ export class UserTokenStoreSQLite {
 			...store,
 			lastSeenAt: existing?.lastSeenAt ?? Date.now(),
 		});
+		console.log(
+			`[keepwarm-debug] ${this.userKey()} seeded token ${tokPrefix(store.globalToken)}, arming alarm +${asHours(GLOBAL_TOKEN_REFRESH_INTERVAL_MS)}; ${tokenHealth(store)}`,
+		);
 		await this.state.storage.setAlarm(
 			Date.now() + GLOBAL_TOKEN_REFRESH_INTERVAL_MS,
 		);
@@ -139,14 +176,33 @@ export class UserTokenStoreSQLite {
 		const store =
 			await this.state.storage.get<GlobalTokenData>(GLOBAL_TOKEN_KEY);
 		if (!store) {
+			// Abandoned/never seeded — keep-warm state was already gone.
+			console.log(
+				`[keepwarm-debug] ${this.userKey()} alarm fired but no store present (nothing to refresh)`,
+			);
 			return;
+		}
+
+		console.log(
+			`[keepwarm-debug] ${this.userKey()} alarm fired: ${tokenHealth(store)}`,
+		);
+
+		// Explicit expiry event: the alarm found the token already past expiry, so
+		// this user's session is dead and their next call will force a reauth.
+		const expiresAt = store.globalTokenExpiresAt;
+		if (typeof expiresAt === "number" && expiresAt <= Date.now()) {
+			console.error(
+				`[keepwarm-debug] ${this.userKey()} TOKEN EXPIRED at alarm (expiredBy=${asHours(Date.now() - expiresAt)}); user will reauth. ${tokenHealth(store)}`,
+			);
 		}
 
 		if (
 			store.lastSeenAt != null &&
 			Date.now() - store.lastSeenAt >= SESSION_IDLE_TTL_MS
 		) {
-			console.log("Keep-warm session idle past TTL; abandoning");
+			console.log(
+				`[keepwarm-debug] ${this.userKey()} idle past 14d TTL; ABANDONING (expected early-reauth cause): idle=${asHours(Date.now() - store.lastSeenAt)} ${tokenHealth(store)}`,
+			);
 			await this.state.storage.delete([
 				GLOBAL_TOKEN_KEY,
 				ACTIVE_ORG_KEY,
@@ -169,7 +225,16 @@ export class UserTokenStoreSQLite {
 				globalTokenExpiresAt:
 					refreshed.globalTokenExpiresAt ?? store.globalTokenExpiresAt,
 				lastSeenAt: store.lastSeenAt,
+				consecutiveRefreshFailures: 0,
+				lastRefreshOkAt: Date.now(),
 			});
+			console.log(
+				`[keepwarm-debug] ${this.userKey()} refresh OK: ${tokPrefix(store.globalToken)} -> ${tokPrefix(refreshed.globalToken)} newExpiresIn=${
+					typeof refreshed.globalTokenExpiresAt === "number"
+						? asHours(refreshed.globalTokenExpiresAt - Date.now())
+						: "unchanged"
+				} cluster=${store.instanceUrl}`,
+			);
 			// Keep the org token as warm as the global token: re-mint it from the
 			// fresh global token so an active session never hits an expired org
 			// token mid-conversation.
@@ -178,9 +243,26 @@ export class UserTokenStoreSQLite {
 				Date.now() + GLOBAL_TOKEN_REFRESH_INTERVAL_MS,
 			);
 		} catch (error) {
+			// Prime suspect for early reauth: repeated failures across the token's
+			// ~24h life expire it well before the 14d idle TTL (no retry until the
+			// next 11h alarm).
+			const failures = (store.consecutiveRefreshFailures ?? 0) + 1;
+			await this.state.storage.put<GlobalTokenData>(GLOBAL_TOKEN_KEY, {
+				...store,
+				consecutiveRefreshFailures: failures,
+			});
+			const failExpiresAt = store.globalTokenExpiresAt;
+			const willDieBeforeNextAlarm =
+				typeof failExpiresAt === "number" &&
+				failExpiresAt - Date.now() < GLOBAL_TOKEN_REFRESH_INTERVAL_MS;
 			console.error(
-				"Token keep-warm refresh failed; will retry on next interval:",
-				error instanceof Error ? error.message : String(error),
+				`[keepwarm-debug] ${this.userKey()} refresh FAILED (consecutive=${failures}${
+					willDieBeforeNextAlarm
+						? ", TOKEN WILL EXPIRE BEFORE NEXT ALARM -> user will reauth"
+						: ""
+				}): ${tokenHealth(store)} cluster=${store.instanceUrl} err=${
+					error instanceof Error ? error.message : String(error)
+				}`,
 			);
 			await this.state.storage.setAlarm(
 				Date.now() + GLOBAL_TOKEN_REFRESH_INTERVAL_MS,

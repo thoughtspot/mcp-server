@@ -67,7 +67,10 @@ function createMockStorage() {
 }
 
 function createServer(mock: ReturnType<typeof createMockStorage>) {
-	const state = { storage: mock.storage } as unknown as DurableObjectState;
+	const state = {
+		storage: mock.storage,
+		id: { toString: () => "test-do-id-000000" },
+	} as unknown as DurableObjectState;
 	return new UserTokenStoreSQLite(state, {} as Env);
 }
 
