@@ -6,7 +6,7 @@
 export interface SearchObjectHeader {
 	id: string;
 	// Present only for a visualization pinned on a Liveboard: `id` is the parent
-	// Liveboard, this is the viz to pass as fetch_data `visualization_ids`.
+	// Liveboard, this is the viz to pass as get_object_data `visualization_ids`.
 	visualization_id?: string;
 	name: string;
 	type: string;

@@ -29,9 +29,9 @@ import {
 	CreateAnalysisSessionInputSchema,
 	CreateDashboardInputSchema,
 	CreateLiveboardSchema,
-	FetchDataInputSchema,
 	GetAnswerSchema,
 	GetDataSourceSuggestionsSchema,
+	GetObjectDataInputSchema,
 	GetRelevantQuestionsSchema,
 	GetSessionUpdatesInputSchema,
 	SearchObjectsInputSchema,
@@ -379,9 +379,9 @@ export class MCPServer extends BaseMCPServer {
 			);
 		}
 
-		// Hide fetch_data if the user lacks the data-download privilege
+		// Hide get_object_data if the user lacks the data-download privilege
 		if (!this.canDownloadData()) {
-			tools = tools.filter((tool) => tool.name !== ToolName.FetchData);
+			tools = tools.filter((tool) => tool.name !== ToolName.GetObjectData);
 		}
 
 		// Filter out orgs tools if feature is disabled
@@ -534,8 +534,8 @@ export class MCPServer extends BaseMCPServer {
 				return this.callSearchObjects(request, recorder);
 			}
 
-			case ToolName.FetchData: {
-				return this.callFetchData(request, recorder);
+			case ToolName.GetObjectData: {
+				return this.callGetObjectData(request, recorder);
 			}
 
 			case ToolName.CheckConnectivity: {
@@ -1111,8 +1111,8 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		);
 	}
 
-	@WithSpan("call-fetch-data")
-	async callFetchData(
+	@WithSpan("call-get-object-data")
+	async callGetObjectData(
 		request: z.infer<typeof CallToolRequestSchema>,
 		recorder: MetricsRecorder,
 	) {
@@ -1120,15 +1120,15 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		if (!this.canDownloadData()) {
 			return this.createErrorResponse(
 				"You do not have permission to download data (requires the data-download privilege).",
-				"fetch_data forbidden",
+				"get_object_data forbidden",
 			);
 		}
 
 		const { object_id, object_type, visualization_ids, max_rows } =
-			FetchDataInputSchema.parse(request.params.arguments);
+			GetObjectDataInputSchema.parse(request.params.arguments);
 
 		try {
-			const result = await this.getThoughtSpotService(recorder).fetchData({
+			const result = await this.getThoughtSpotService(recorder).getObjectData({
 				objectId: object_id,
 				objectType: object_type,
 				vizIds: visualization_ids,
@@ -1144,7 +1144,7 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			// actionable rather than a generic "check the object id".
 			return this.createErrorResponse(
 				`Failed to fetch object data: ${(error as Error).message}`,
-				"fetch_data failed",
+				"get_object_data failed",
 			);
 		}
 	}

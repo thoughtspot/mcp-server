@@ -22,8 +22,8 @@ import {
 import { WithSpan, getActiveSpan } from "../metrics/tracing/tracing-utils";
 import { processSendAgentConversationMessageStreamingResponse } from "../streaming-utils";
 import type {
-	FetchDataParams,
-	FetchDataResult,
+	GetObjectDataParams,
+	GetObjectDataResult,
 	SearchObjectsParams,
 	SearchObjectsResponse,
 } from "./thoughtspot-client";
@@ -786,14 +786,16 @@ export class ThoughtSpotService {
 	 * Fetch the full data of a saved Answer or Liveboard by its GUID, shaped to
 	 * its object type.
 	 */
-	@WithSpan("fetch-data")
-	async fetchData(params: FetchDataParams): Promise<FetchDataResult> {
+	@WithSpan("get-object-data")
+	async getObjectData(
+		params: GetObjectDataParams,
+	): Promise<GetObjectDataResult> {
 		const span = getActiveSpan();
 		span?.setAttribute("object_id", params.objectId);
 
 		const result = await this.observeUpstreamCall(
-			UPSTREAM_OPERATION_NAMES.fetchData,
-			() => (this.client as any).fetchData(params),
+			UPSTREAM_OPERATION_NAMES.getObjectData,
+			() => (this.client as any).getObjectData(params),
 		);
 
 		span?.setAttribute("object_type", params.objectType);

@@ -132,12 +132,12 @@ export abstract class BaseMCPServer extends Server {
 	}
 
 	/**
-	 * Whether the user can download data (gates the fetch_data tool)
+	 * Whether the user can download data (gates the get_object_data tool)
 	 */
 	protected canDownloadData(): boolean {
 		// Permission gate: fail CLOSED. If session info (hence privileges) is
 		// unavailable — e.g. an unauthorized token where getSessionInfo failed —
-		// we cannot confirm the privilege, so hide fetch_data rather than expose it.
+		// we cannot confirm the privilege, so hide get_object_data rather than expose it.
 		if (!this.sessionInfo) {
 			return false;
 		}

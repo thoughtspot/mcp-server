@@ -49,7 +49,7 @@ function toQuery(resultType: string, sageQuery: unknown): string | null {
 // Eureka returns ALL sub-objects on every result; only the one matching
 // resultType is populated (the rest are empty stubs with id/title ""). So
 // dispatch strictly on resultType, never on which sub-object is "present".
-// For a pinboard-viz hit the parent Liveboard is the `id` (fetch_data resolves
+// For a pinboard-viz hit the parent Liveboard is the `id` (get_object_data resolves
 // it) and the viz id is surfaced separately.
 function resolveResultShape(result: any): {
 	id?: string;

@@ -5,7 +5,7 @@ import {
 import type { ResponseContext } from "@thoughtspot/rest-api-sdk";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import YAML from "yaml";
-import { LIVEBOARD_RECORD_SIZE } from "../../src/thoughtspot/fetch-data/fetch-data";
+import { LIVEBOARD_RECORD_SIZE } from "../../src/thoughtspot/get-object-data/get-object-data";
 import { getThoughtSpotClient } from "../../src/thoughtspot/thoughtspot-client";
 
 // Mock the ThoughtSpot REST API SDK
@@ -1248,7 +1248,7 @@ describe("ThoughtSpot Client", () => {
 
 			expect(result.results).toHaveLength(1);
 			const obj = result.results[0] as any;
-			// fetch_data resolves the Liveboard id; the viz is passed via
+			// get_object_data resolves the Liveboard id; the viz is passed via
 			// visualization_ids to fetch just this visualization.
 			expect(obj.object_id).toBe("lb-1");
 			expect(obj.visualization_id).toBe("viz-1");
@@ -1612,7 +1612,7 @@ describe("ThoughtSpot Client", () => {
 		});
 	});
 
-	describe("fetchData", () => {
+	describe("getObjectData", () => {
 		let client: any;
 
 		beforeEach(() => {
@@ -1652,7 +1652,7 @@ describe("ThoughtSpot Client", () => {
 				}),
 			});
 
-			const result = await client.fetchData({
+			const result = await client.getObjectData({
 				objectId: "obj-1",
 				objectType: "ANSWER",
 			});
@@ -1722,7 +1722,7 @@ describe("ThoughtSpot Client", () => {
 				}),
 			});
 
-			const result = await client.fetchData({
+			const result = await client.getObjectData({
 				objectId: "obj-1",
 				objectType: "LIVEBOARD",
 				maxRows: 50,
@@ -1782,7 +1782,7 @@ describe("ThoughtSpot Client", () => {
 				}),
 			});
 
-			const result = await client.fetchData({
+			const result = await client.getObjectData({
 				objectId: "obj-1",
 				objectType: "LIVEBOARD",
 				vizIds: ["de1240fc-2d4d-4c67-9317-02e9c6e3bf1c"],
@@ -1823,7 +1823,7 @@ describe("ThoughtSpot Client", () => {
 				}),
 			});
 
-			const result = await client.fetchData({
+			const result = await client.getObjectData({
 				objectId: "obj-1",
 				objectType: "ANSWER",
 			});
@@ -1855,7 +1855,7 @@ describe("ThoughtSpot Client", () => {
 				}),
 			});
 
-			const result = await client.fetchData({
+			const result = await client.getObjectData({
 				objectId: "obj-1",
 				objectType: "ANSWER",
 			});
@@ -1887,7 +1887,7 @@ describe("ThoughtSpot Client", () => {
 				}),
 			});
 
-			const result = await client.fetchData({
+			const result = await client.getObjectData({
 				objectId: "obj-1",
 				objectType: "ANSWER",
 			});
@@ -1914,7 +1914,7 @@ describe("ThoughtSpot Client", () => {
 				}),
 			});
 
-			const result = await client.fetchData({
+			const result = await client.getObjectData({
 				objectId: "obj-1",
 				objectType: "ANSWER",
 			});
@@ -1944,7 +1944,7 @@ describe("ThoughtSpot Client", () => {
 				}),
 			});
 
-			const result = await client.fetchData({
+			const result = await client.getObjectData({
 				objectId: "obj-1",
 				objectType: "ANSWER",
 			});
@@ -1974,7 +1974,7 @@ describe("ThoughtSpot Client", () => {
 				}),
 			});
 
-			const result = await client.fetchData({
+			const result = await client.getObjectData({
 				objectId: "obj-1",
 				objectType: "ANSWER",
 			});
@@ -2001,7 +2001,7 @@ describe("ThoughtSpot Client", () => {
 				}),
 			});
 
-			const result = await client.fetchData({
+			const result = await client.getObjectData({
 				objectId: "obj-1",
 				objectType: "ANSWER",
 			});
@@ -2014,7 +2014,10 @@ describe("ThoughtSpot Client", () => {
 
 		it("throws for an unsupported object type", async () => {
 			await expect(
-				client.fetchData({ objectId: "obj-1", objectType: "LOGICAL_TABLE" }),
+				client.getObjectData({
+					objectId: "obj-1",
+					objectType: "LOGICAL_TABLE",
+				}),
 			).rejects.toThrow(/does not support object type "LOGICAL_TABLE"/);
 			// No data call is made for unsupported types.
 			expect((fetch as any).mock.calls.length).toBe(0);
@@ -2028,8 +2031,8 @@ describe("ThoughtSpot Client", () => {
 			});
 
 			await expect(
-				client.fetchData({ objectId: "obj-1", objectType: "ANSWER" }),
-			).rejects.toThrow(/fetchData failed with status 403/);
+				client.getObjectData({ objectId: "obj-1", objectType: "ANSWER" }),
+			).rejects.toThrow(/getObjectData failed with status 403/);
 		});
 	});
 

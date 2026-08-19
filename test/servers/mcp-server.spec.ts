@@ -143,7 +143,7 @@ describe("MCP Server", () => {
 				],
 				next_cursor: null,
 			}),
-			fetchData: vi.fn().mockResolvedValue({
+			getObjectData: vi.fn().mockResolvedValue({
 				data: [
 					{
 						viz_id: undefined,
@@ -212,7 +212,7 @@ describe("MCP Server", () => {
 			expect(result.tools).toHaveLength(7);
 			expect(result.tools?.map((t) => t.name)).toEqual([
 				"search_objects",
-				"fetch_data",
+				"get_object_data",
 				"check_connectivity",
 				"create_analysis_session",
 				"send_session_message",
@@ -284,7 +284,7 @@ describe("MCP Server", () => {
 			expect(result.tools).toHaveLength(7);
 			expect(result.tools?.map((t) => t.name)).toEqual([
 				"search_objects",
-				"fetch_data",
+				"get_object_data",
 				"check_connectivity",
 				"create_analysis_session",
 				"send_session_message",
@@ -293,25 +293,25 @@ describe("MCP Server", () => {
 			]);
 		});
 
-		it("hides fetch_data when the user lacks the data-download privilege", async () => {
+		it("hides get_object_data when the user lacks the data-download privilege", async () => {
 			await server.init();
 			(server as any).sessionInfo.privileges = [];
 			const { listTools } = connect(server);
 
 			const names = (await listTools()).tools?.map((t) => t.name) ?? [];
-			expect(names).not.toContain("fetch_data");
+			expect(names).not.toContain("get_object_data");
 			// Other tools are unaffected.
 			expect(names).toContain("search_objects");
 		});
 
-		it("hides fetch_data (fails closed) when session info is unavailable", async () => {
+		it("hides get_object_data (fails closed) when session info is unavailable", async () => {
 			await server.init();
 			// e.g. an unauthorized token where getSessionInfo threw.
 			(server as any).sessionInfo = undefined;
 			const { listTools } = connect(server);
 
 			const names = (await listTools()).tools?.map((t) => t.name) ?? [];
-			expect(names).not.toContain("fetch_data");
+			expect(names).not.toContain("get_object_data");
 		});
 	});
 
@@ -543,7 +543,7 @@ describe("MCP Server", () => {
 			await server.init();
 			const { callTool } = connect(server);
 
-			const result = await callTool("fetch_data", {
+			const result = await callTool("get_object_data", {
 				object_id: "answer-123",
 				object_type: "ANSWER",
 			});
@@ -563,13 +563,13 @@ describe("MCP Server", () => {
 				"test-access-token",
 			);
 
-			await callTool("fetch_data", {
+			await callTool("get_object_data", {
 				object_id: "answer-123",
 				object_type: "ANSWER",
 				max_rows: 50,
 			});
 
-			expect((client as any).fetchData).toHaveBeenCalledWith(
+			expect((client as any).getObjectData).toHaveBeenCalledWith(
 				expect.objectContaining({
 					objectId: "answer-123",
 					objectType: "ANSWER",
@@ -579,14 +579,15 @@ describe("MCP Server", () => {
 		});
 
 		it("should return an error response when the fetch fails", async () => {
-			vi.spyOn(ThoughtSpotService.prototype, "fetchData").mockRejectedValueOnce(
-				new Error("upstream boom"),
-			);
+			vi.spyOn(
+				ThoughtSpotService.prototype,
+				"getObjectData",
+			).mockRejectedValueOnce(new Error("upstream boom"));
 
 			await server.init();
 			const { callTool } = connect(server);
 
-			const result = await callTool("fetch_data", {
+			const result = await callTool("get_object_data", {
 				object_id: "answer-123",
 				object_type: "ANSWER",
 			});
@@ -603,7 +604,9 @@ describe("MCP Server", () => {
 			(server as any).sessionInfo.privileges = [];
 			const { callTool } = connect(server);
 
-			const result = await callTool("fetch_data", { object_id: "answer-123" });
+			const result = await callTool("get_object_data", {
+				object_id: "answer-123",
+			});
 
 			expect(result.isError).toBe(true);
 			expect((result.content as any[])[0].text).toMatch(

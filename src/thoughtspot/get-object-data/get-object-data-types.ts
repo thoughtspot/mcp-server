@@ -1,6 +1,6 @@
-// Interfaces for the `fetch_data` tool: full data of an Answer/Liveboard GUID.
+// Interfaces for the `get_object_data` tool: full data of an Answer/Liveboard GUID.
 
-export interface FetchDataParams {
+export interface GetObjectDataParams {
 	// GUID of an Answer or Liveboard, typically from `search_objects`.
 	objectId: string;
 	// Required type ("ANSWER"/"LIVEBOARD") from search_objects; picks the endpoint.
@@ -12,7 +12,7 @@ export interface FetchDataParams {
 }
 
 // One tabular result: one for an Answer, one per Liveboard visualization.
-export interface FetchDataViz {
+export interface GetObjectDataViz {
 	// Viz GUID; undefined for a standalone Answer.
 	viz_id?: string;
 	viz_name?: string;
@@ -25,7 +25,7 @@ export interface FetchDataViz {
 	sampling_ratio?: number;
 }
 
-export interface FetchDataResult {
+export interface GetObjectDataResult {
 	// One entry for an Answer; one per visualization for a Liveboard.
-	data: FetchDataViz[];
+	data: GetObjectDataViz[];
 }

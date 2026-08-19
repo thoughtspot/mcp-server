@@ -1,13 +1,13 @@
 /**
- * Integration tests for the `search_objects` and `fetch_data` tools.
+ * Integration tests for the `search_objects` and `get_object_data` tools.
  *
  * Unlike the unit tests in mcp-server.spec.ts — which mock the whole
- * ThoughtSpot client and stub `searchObjects`/`fetchData` outright — these wire
+ * ThoughtSpot client and stub `searchObjects`/`getObjectData` outright — these wire
  * the real components together and mock ONLY the external network boundary
  * (`fetch`). Every call flows through:
  *
- *   server.callSearchObjects / callFetchData → real ThoughtSpotService →
- *   real handler (addSearchObjects / addFetchData) → rest-utils.postJson →
+ *   server.callSearchObjects / callGetObjectData → real ThoughtSpotService →
+ *   real handler (addSearchObjects / addGetObjectData) → rest-utils.postJson →
  *   fetch (mocked).
  *
  * This exercises the request building (endpoints, headers, x-request-id,
@@ -19,7 +19,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MCPServer } from "../../src/servers/mcp-server";
-import { LIVEBOARD_RECORD_SIZE } from "../../src/thoughtspot/fetch-data/fetch-data";
+import { LIVEBOARD_RECORD_SIZE } from "../../src/thoughtspot/get-object-data/get-object-data";
 import { ThoughtSpotService } from "../../src/thoughtspot/thoughtspot-service";
 import { makeRequest } from "./helpers";
 
@@ -134,7 +134,7 @@ function callTool(
 	const request = makeRequest(name, args) as any;
 	return name === "search_objects"
 		? server.callSearchObjects(request, undefined as any)
-		: server.callFetchData(request, undefined as any);
+		: server.callGetObjectData(request, undefined as any);
 }
 
 beforeEach(() => {
@@ -399,10 +399,10 @@ describe("search_objects tool — real handler + mocked network", () => {
 });
 
 // ---------------------------------------------------------------------------
-// fetch_data
+// get_object_data
 // ---------------------------------------------------------------------------
 
-describe("fetch_data tool — real handler + mocked network", () => {
+describe("get_object_data tool — real handler + mocked network", () => {
 	it("hits the answer endpoint (no type lookup) and returns full-precision cells", async () => {
 		// COMPACT positional rows with fractional cells; returned verbatim.
 		handlers.answerData = () =>
@@ -423,7 +423,7 @@ describe("fetch_data tool — real handler + mocked network", () => {
 
 		const server = await newServer();
 
-		const result = await callTool(server, "fetch_data", {
+		const result = await callTool(server, "get_object_data", {
 			object_id: "answer-1",
 			object_type: "ANSWER",
 		});
@@ -470,7 +470,7 @@ describe("fetch_data tool — real handler + mocked network", () => {
 
 		const server = await newServer();
 
-		const result = await callTool(server, "fetch_data", {
+		const result = await callTool(server, "get_object_data", {
 			object_id: "liveboard-1",
 			object_type: "LIVEBOARD",
 			visualization_ids: ["viz-1"],
@@ -533,7 +533,7 @@ describe("fetch_data tool — real handler + mocked network", () => {
 
 		const server = await newServer();
 
-		const result = await callTool(server, "fetch_data", {
+		const result = await callTool(server, "get_object_data", {
 			object_id: "liveboard-1",
 			object_type: "LIVEBOARD",
 			visualization_ids: ["viz-1"],
@@ -564,7 +564,7 @@ describe("fetch_data tool — real handler + mocked network", () => {
 
 		// object_type is a required input; the schema parse rejects without it.
 		await expect(
-			callTool(server, "fetch_data", { object_id: "answer-1" }),
+			callTool(server, "get_object_data", { object_id: "answer-1" }),
 		).rejects.toThrow();
 	});
 
@@ -573,7 +573,7 @@ describe("fetch_data tool — real handler + mocked network", () => {
 
 		const server = await newServer();
 
-		const result = await callTool(server, "fetch_data", {
+		const result = await callTool(server, "get_object_data", {
 			object_id: "answer-1",
 			object_type: "ANSWER",
 		});

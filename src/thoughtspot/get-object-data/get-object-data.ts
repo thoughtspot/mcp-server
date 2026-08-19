@@ -1,13 +1,13 @@
 import { buildHeaders, generateRequestId, postJson } from "../rest-utils";
 import type {
-	FetchDataParams,
-	FetchDataResult,
-	FetchDataViz,
-} from "./fetch-data-types";
+	GetObjectDataParams,
+	GetObjectDataResult,
+	GetObjectDataViz,
+} from "./get-object-data-types";
 
 // Default row cap per visualization; unbounded results overwhelm LLM context.
 // Keep in sync with the `max_rows` description in tool-definitions.ts.
-export const FETCH_DATA_DEFAULT_MAX_ROWS = 25;
+export const GET_OBJECT_DATA_DEFAULT_MAX_ROWS = 25;
 
 // "Unbounded" record_size for Liveboards (they 500 if it can't hold the whole
 // viz). Max 32-bit signed int — the endpoint reads it as a GraphQL Int.
@@ -70,11 +70,11 @@ function normalizeRows(content: RawDataContent): {
 function mapContents(
 	contents: RawDataContent[],
 	maxRows: number,
-): FetchDataViz[] {
+): GetObjectDataViz[] {
 	return contents.map((content) => {
 		const { columns, rows } = normalizeRows(content);
 		// Cap client-side: the Liveboard endpoint can't truncate upstream (see
-		// fetchData), so it may return the full viz; keep `total_row_count` at the
+		// getObjectData), so it may return the full viz; keep `total_row_count` at the
 		// upstream total so the caller still sees how many rows exist.
 		const capped = rows.slice(0, maxRows);
 		return {
@@ -93,13 +93,17 @@ function mapContents(
 
 // Custom handler: the rest-api-sdk has no single call that resolves a GUID's
 // type and fetches its data from the matching endpoint.
-export function addFetchData(client: any, instanceUrl: string, token: string) {
-	client.fetchData = async ({
+export function addGetObjectData(
+	client: any,
+	instanceUrl: string,
+	token: string,
+) {
+	client.getObjectData = async ({
 		objectId,
 		objectType,
 		vizIds,
-		maxRows = FETCH_DATA_DEFAULT_MAX_ROWS,
-	}: FetchDataParams): Promise<FetchDataResult> => {
+		maxRows = GET_OBJECT_DATA_DEFAULT_MAX_ROWS,
+	}: GetObjectDataParams): Promise<GetObjectDataResult> => {
 		// x-request-id ties the upstream call to tracing.
 		const requestId = generateRequestId();
 		const headers = buildHeaders(token, undefined, undefined, { requestId });
@@ -121,7 +125,7 @@ export function addFetchData(client: any, instanceUrl: string, token: string) {
 			}
 		} else {
 			throw new Error(
-				`fetchData does not support object type "${objectType}" (id ${objectId}); only Answers and Liveboards expose fetchable data.`,
+				`getObjectData does not support object type "${objectType}" (id ${objectId}); only Answers and Liveboards expose fetchable data.`,
 			);
 		}
 
@@ -133,7 +137,7 @@ export function addFetchData(client: any, instanceUrl: string, token: string) {
 			`${instanceUrl}${endpoint}`,
 			headers,
 			{ ...body, record_size: recordSize },
-			"fetchData failed",
+			"getObjectData failed",
 		);
 		const contents: RawDataContent[] = data?.contents ?? [];
 
