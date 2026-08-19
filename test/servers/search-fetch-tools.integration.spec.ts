@@ -81,7 +81,6 @@ function jsonResponse(body: unknown, status = 200) {
 // only the routes it needs.
 interface UpstreamHandlers {
 	eureka?: (body: any) => unknown;
-	metaSearch?: (body: any) => unknown;
 	answerData?: (body: any) => unknown;
 	liveboardData?: (body: any) => unknown;
 }
@@ -97,10 +96,6 @@ function installRouter() {
 		if (u.includes("op=GetEurekaResults")) {
 			if (!handlers.eureka) throw new Error(`unexpected eureka call: ${u}`);
 			return handlers.eureka(body);
-		}
-		if (u.includes("/api/rest/2.0/metadata/search")) {
-			if (!handlers.metaSearch) throw new Error(`unexpected metaSearch: ${u}`);
-			return handlers.metaSearch(body);
 		}
 		if (u.includes("/api/rest/2.0/metadata/answer/data")) {
 			if (!handlers.answerData) throw new Error(`unexpected answerData: ${u}`);
@@ -408,15 +403,7 @@ describe("search_objects tool — real handler + mocked network", () => {
 // ---------------------------------------------------------------------------
 
 describe("fetch_data tool — real handler + mocked network", () => {
-	it("resolves an Answer's type, hits the answer endpoint, and returns full-precision cells", async () => {
-		handlers.metaSearch = () =>
-			jsonResponse([
-				{
-					metadata_type: "ANSWER",
-					metadata_name: "Sales by Region",
-					metadata_header: { description: "Revenue by region" },
-				},
-			]);
+	it("hits the answer endpoint (no type lookup) and returns full-precision cells", async () => {
 		// COMPACT positional rows with fractional cells; returned verbatim.
 		handlers.answerData = () =>
 			jsonResponse({
@@ -438,6 +425,7 @@ describe("fetch_data tool — real handler + mocked network", () => {
 
 		const result = await callTool(server, "fetch_data", {
 			object_id: "answer-1",
+			object_type: "ANSWER",
 		});
 
 		expect(result.isError).toBeUndefined();
@@ -455,56 +443,14 @@ describe("fetch_data tool — real handler + mocked network", () => {
 			["West", 0.0456],
 		]);
 
-		// Step 1 body resolves the id; the data endpoint matches the resolved type.
-		const [, metaInit] = callTo("/metadata/search") ?? [];
-		expect(JSON.parse(metaInit.body)).toEqual({
-			metadata: [{ identifier: "answer-1" }],
-		});
-		expect(callTo("/metadata/answer/data")).toBeDefined();
-		expect(callTo("/metadata/liveboard/data")).toBeUndefined();
-
-		// Both upstream calls share one x-request-id for tracing.
-		const [, dataInit] = callTo("/metadata/answer/data") ?? [];
-		expect(dataInit.headers["x-request-id"]).toBe(
-			metaInit.headers["x-request-id"],
-		);
-	});
-
-	it("skips the type-resolution lookup when object_type is supplied", async () => {
-		handlers.answerData = () =>
-			jsonResponse({
-				contents: [
-					{
-						column_names: ["Region", "Revenue"],
-						data_rows: [["East", 1]],
-						available_data_row_count: 1,
-						returned_data_row_count: 1,
-					},
-				],
-			});
-
-		const server = await newServer();
-
-		const result = await callTool(server, "fetch_data", {
-			object_id: "answer-1",
-			object_type: "ANSWER",
-		});
-
-		expect(result.isError).toBeUndefined();
-		// No /metadata/search round-trip; straight to the answer data endpoint.
+		// The caller-supplied type routes straight to the data endpoint — no
+		// /metadata/search round-trip.
 		expect(callTo("/metadata/search")).toBeUndefined();
 		expect(callTo("/metadata/answer/data")).toBeDefined();
+		expect(callTo("/metadata/liveboard/data")).toBeUndefined();
 	});
 
 	it("fetches a Liveboard viz, passing the viz filter and max_rows through", async () => {
-		handlers.metaSearch = () =>
-			jsonResponse([
-				{
-					metadata_type: "LIVEBOARD",
-					metadata_name: "Sales Board",
-					metadata_header: { description: "board" },
-				},
-			]);
 		// FULL self-describing rows; columns come from the row keys.
 		handlers.liveboardData = () =>
 			jsonResponse({
@@ -526,6 +472,7 @@ describe("fetch_data tool — real handler + mocked network", () => {
 
 		const result = await callTool(server, "fetch_data", {
 			object_id: "liveboard-1",
+			object_type: "LIVEBOARD",
 			visualization_ids: ["viz-1"],
 			max_rows: 50,
 		});
@@ -553,14 +500,6 @@ describe("fetch_data tool — real handler + mocked network", () => {
 	});
 
 	it("requests the full viz in one call and caps to max_rows client-side", async () => {
-		handlers.metaSearch = () =>
-			jsonResponse([
-				{
-					metadata_type: "LIVEBOARD",
-					metadata_name: "Sales Board",
-					metadata_header: { description: "board" },
-				},
-			]);
 		const allRows = [
 			{ Product: "A", Units: 1 },
 			{ Product: "B", Units: 2 },
@@ -596,6 +535,7 @@ describe("fetch_data tool — real handler + mocked network", () => {
 
 		const result = await callTool(server, "fetch_data", {
 			object_id: "liveboard-1",
+			object_type: "LIVEBOARD",
 			visualization_ids: ["viz-1"],
 			max_rows: 2,
 		});
@@ -619,48 +559,23 @@ describe("fetch_data tool — real handler + mocked network", () => {
 		);
 	});
 
-	it("returns an error response for an unsupported object type", async () => {
-		handlers.metaSearch = () =>
-			jsonResponse([
-				{
-					metadata_type: "WORKSHEET",
-					metadata_name: "Sales Data",
-					metadata_header: { description: "a worksheet" },
-				},
-			]);
-
+	it("rejects when object_type is not supplied", async () => {
 		const server = await newServer();
 
-		const result = await callTool(server, "fetch_data", { object_id: "ws-1" });
-
-		expect(result.isError).toBe(true);
-		expect((result.content as any[])[0].text).toMatch(
-			/Failed to fetch object data: .*does not support object type "WORKSHEET"/,
-		);
+		// object_type is a required input; the schema parse rejects without it.
+		await expect(
+			callTool(server, "fetch_data", { object_id: "answer-1" }),
+		).rejects.toThrow();
 	});
 
-	it("returns an error response when the object id resolves to nothing", async () => {
-		handlers.metaSearch = () => jsonResponse([]);
-
-		const server = await newServer();
-
-		const result = await callTool(server, "fetch_data", {
-			object_id: "missing",
-		});
-
-		expect(result.isError).toBe(true);
-		expect((result.content as any[])[0].text).toMatch(
-			/Failed to fetch object data: .*found no object with id missing/,
-		);
-	});
-
-	it("surfaces an upstream non-2xx as an error response", async () => {
-		handlers.metaSearch = () => jsonResponse({ message: "boom" }, 500);
+	it("surfaces an upstream non-2xx from the data endpoint as an error response", async () => {
+		handlers.answerData = () => jsonResponse({ message: "boom" }, 500);
 
 		const server = await newServer();
 
 		const result = await callTool(server, "fetch_data", {
 			object_id: "answer-1",
+			object_type: "ANSWER",
 		});
 
 		expect(result.isError).toBe(true);

@@ -1619,69 +1619,48 @@ describe("ThoughtSpot Client", () => {
 			client = getThoughtSpotClient(mockInstanceUrl, mockBearerToken) as any;
 		});
 
-		const metaResponse = (type: string, name = "My Object") => ({
-			ok: true,
-			json: vi.fn().mockResolvedValue([
-				{
-					metadata_id: "obj-1",
-					metadata_name: name,
-					metadata_type: type,
-					metadata_header: { description: "A description" },
-				},
-			]),
-		});
-
 		// Mirrors the real /metadata/answer/data FULL response: column_names plus
-		// object rows keyed by column name.
+		// object rows keyed by column name. The caller supplies object_type.
 		it("fetches and maps a saved Answer", async () => {
-			(fetch as any)
-				.mockResolvedValueOnce(metaResponse("ANSWER", "Test Answer v1"))
-				.mockResolvedValueOnce({
-					ok: true,
-					json: vi.fn().mockResolvedValue({
-						metadata_id: "obj-1",
-						metadata_name: "Test Answer v1",
-						contents: [
-							{
-								available_data_row_count: 2,
-								column_names: [
-									"city",
-									"Total quantity purchased",
-									"Total sales",
-								],
-								data_rows: [
-									{
-										city: "Boulder",
-										"Total quantity purchased": 677792,
-										"Total sales": 34070647.18,
-									},
-									{
-										city: "Atlanta",
-										"Total quantity purchased": 424496,
-										"Total sales": 21161832.426,
-									},
-								],
-								record_offset: 0,
-								record_size: 10,
-								returned_data_row_count: 2,
-								sampling_ratio: 1,
-							},
-						],
-					}),
-				});
+			(fetch as any).mockResolvedValueOnce({
+				ok: true,
+				json: vi.fn().mockResolvedValue({
+					metadata_id: "obj-1",
+					metadata_name: "Test Answer v1",
+					contents: [
+						{
+							available_data_row_count: 2,
+							column_names: ["city", "Total quantity purchased", "Total sales"],
+							data_rows: [
+								{
+									city: "Boulder",
+									"Total quantity purchased": 677792,
+									"Total sales": 34070647.18,
+								},
+								{
+									city: "Atlanta",
+									"Total quantity purchased": 424496,
+									"Total sales": 21161832.426,
+								},
+							],
+							record_offset: 0,
+							record_size: 10,
+							returned_data_row_count: 2,
+							sampling_ratio: 1,
+						},
+					],
+				}),
+			});
 
-			const result = await client.fetchData({ objectId: "obj-1" });
+			const result = await client.fetchData({
+				objectId: "obj-1",
+				objectType: "ANSWER",
+			});
 
-			// First call resolves the type via metadata search.
-			const metaUrl = (fetch as any).mock.calls[0][0];
-			const metaBody = JSON.parse((fetch as any).mock.calls[0][1].body);
-			expect(metaUrl).toBe(`${mockInstanceUrl}/api/rest/2.0/metadata/search`);
-			expect(metaBody).toEqual({ metadata: [{ identifier: "obj-1" }] });
-
-			// Second call fetches the answer data.
-			const dataUrl = (fetch as any).mock.calls[1][0];
-			const dataBody = JSON.parse((fetch as any).mock.calls[1][1].body);
-			const dataHeaders = (fetch as any).mock.calls[1][1].headers;
+			// A single call fetches the answer data (no type-resolution round-trip).
+			expect((fetch as any).mock.calls.length).toBe(1);
+			const dataUrl = (fetch as any).mock.calls[0][0];
+			const dataBody = JSON.parse((fetch as any).mock.calls[0][1].body);
 			expect(dataUrl).toBe(
 				`${mockInstanceUrl}/api/rest/2.0/metadata/answer/data`,
 			);
@@ -1708,53 +1687,49 @@ describe("ThoughtSpot Client", () => {
 					},
 				],
 			});
-			// Same correlation id is sent on both upstream calls.
-			expect((fetch as any).mock.calls[0][1].headers["x-request-id"]).toBe(
-				dataHeaders["x-request-id"],
-			);
 		});
 
 		// Mirrors the real /metadata/liveboard/data FULL response: one content
 		// entry per visualization, each with visualization_id/name.
 		it("fetches a Liveboard with one entry per visualization", async () => {
-			(fetch as any)
-				.mockResolvedValueOnce(
-					metaResponse("LIVEBOARD", "Test MCP Liveboard 1"),
-				)
-				.mockResolvedValueOnce({
-					ok: true,
-					json: vi.fn().mockResolvedValue({
-						metadata_id: "obj-1",
-						metadata_name: "Test MCP Liveboard 1",
-						contents: [
-							{
-								available_data_row_count: 1,
-								column_names: ["item type", "Total sales"],
-								data_rows: [
-									{ "item type": "Dresses", "Total sales": 7896217.73 },
-								],
-								returned_data_row_count: 1,
-								sampling_ratio: 1,
-								visualization_id: "de1240fc-2d4d-4c67-9317-02e9c6e3bf1c",
-								visualization_name: "Total sales by item type by year",
-							},
-							{
-								available_data_row_count: 1,
-								column_names: ["city", "Total sales"],
-								data_rows: [{ city: "Billings", "Total sales": 3198084.8 }],
-								returned_data_row_count: 1,
-								sampling_ratio: 1,
-								visualization_id: "cf049bb9-f3b7-466b-9000-41d814d3967a",
-								visualization_name: "Total sales by city (this year, 2026)",
-							},
-						],
-					}),
-				});
+			(fetch as any).mockResolvedValueOnce({
+				ok: true,
+				json: vi.fn().mockResolvedValue({
+					metadata_id: "obj-1",
+					metadata_name: "Test MCP Liveboard 1",
+					contents: [
+						{
+							available_data_row_count: 1,
+							column_names: ["item type", "Total sales"],
+							data_rows: [
+								{ "item type": "Dresses", "Total sales": 7896217.73 },
+							],
+							returned_data_row_count: 1,
+							sampling_ratio: 1,
+							visualization_id: "de1240fc-2d4d-4c67-9317-02e9c6e3bf1c",
+							visualization_name: "Total sales by item type by year",
+						},
+						{
+							available_data_row_count: 1,
+							column_names: ["city", "Total sales"],
+							data_rows: [{ city: "Billings", "Total sales": 3198084.8 }],
+							returned_data_row_count: 1,
+							sampling_ratio: 1,
+							visualization_id: "cf049bb9-f3b7-466b-9000-41d814d3967a",
+							visualization_name: "Total sales by city (this year, 2026)",
+						},
+					],
+				}),
+			});
 
-			const result = await client.fetchData({ objectId: "obj-1", maxRows: 50 });
+			const result = await client.fetchData({
+				objectId: "obj-1",
+				objectType: "LIVEBOARD",
+				maxRows: 50,
+			});
 
-			const dataUrl = (fetch as any).mock.calls[1][0];
-			const dataBody = JSON.parse((fetch as any).mock.calls[1][1].body);
+			const dataUrl = (fetch as any).mock.calls[0][0];
+			const dataBody = JSON.parse((fetch as any).mock.calls[0][1].body);
 			expect(dataUrl).toBe(
 				`${mockInstanceUrl}/api/rest/2.0/metadata/liveboard/data`,
 			);
@@ -1786,38 +1761,35 @@ describe("ThoughtSpot Client", () => {
 		// An answer pinned inside a Liveboard: pass the Liveboard GUID plus the
 		// visualization GUID; the request carries visualization_identifiers.
 		it("fetches a specific visualization inside a Liveboard", async () => {
-			(fetch as any)
-				.mockResolvedValueOnce(
-					metaResponse("LIVEBOARD", "Test MCP Liveboard 1"),
-				)
-				.mockResolvedValueOnce({
-					ok: true,
-					json: vi.fn().mockResolvedValue({
-						metadata_id: "obj-1",
-						metadata_name: "Test MCP Liveboard 1",
-						contents: [
-							{
-								available_data_row_count: 1,
-								column_names: ["item type", "Total sales"],
-								data_rows: [
-									{ "item type": "Dresses", "Total sales": 7896217.73 },
-								],
-								returned_data_row_count: 1,
-								sampling_ratio: 1,
-								visualization_id: "de1240fc-2d4d-4c67-9317-02e9c6e3bf1c",
-								visualization_name: "Total sales by item type by year",
-							},
-						],
-					}),
-				});
+			(fetch as any).mockResolvedValueOnce({
+				ok: true,
+				json: vi.fn().mockResolvedValue({
+					metadata_id: "obj-1",
+					metadata_name: "Test MCP Liveboard 1",
+					contents: [
+						{
+							available_data_row_count: 1,
+							column_names: ["item type", "Total sales"],
+							data_rows: [
+								{ "item type": "Dresses", "Total sales": 7896217.73 },
+							],
+							returned_data_row_count: 1,
+							sampling_ratio: 1,
+							visualization_id: "de1240fc-2d4d-4c67-9317-02e9c6e3bf1c",
+							visualization_name: "Total sales by item type by year",
+						},
+					],
+				}),
+			});
 
 			const result = await client.fetchData({
 				objectId: "obj-1",
+				objectType: "LIVEBOARD",
 				vizIds: ["de1240fc-2d4d-4c67-9317-02e9c6e3bf1c"],
 			});
 
-			const dataUrl = (fetch as any).mock.calls[1][0];
-			const dataBody = JSON.parse((fetch as any).mock.calls[1][1].body);
+			const dataUrl = (fetch as any).mock.calls[0][0];
+			const dataBody = JSON.parse((fetch as any).mock.calls[0][1].body);
 			expect(dataUrl).toBe(
 				`${mockInstanceUrl}/api/rest/2.0/metadata/liveboard/data`,
 			);
@@ -1833,27 +1805,28 @@ describe("ThoughtSpot Client", () => {
 		// COMPACT format returns positional rows alongside column_names; the
 		// handler should pass them through aligned to the columns.
 		it("tolerates COMPACT positional rows", async () => {
-			(fetch as any)
-				.mockResolvedValueOnce(metaResponse("ANSWER", "Compact Answer"))
-				.mockResolvedValueOnce({
-					ok: true,
-					json: vi.fn().mockResolvedValue({
-						metadata_id: "obj-1",
-						metadata_name: "Compact Answer",
-						contents: [
-							{
-								column_names: ["city", "Total sales"],
-								data_rows: [
-									["Boulder", 34070647.18],
-									["Atlanta", 21161832.426],
-								],
-								returned_data_row_count: 2,
-							},
-						],
-					}),
-				});
+			(fetch as any).mockResolvedValueOnce({
+				ok: true,
+				json: vi.fn().mockResolvedValue({
+					metadata_id: "obj-1",
+					metadata_name: "Compact Answer",
+					contents: [
+						{
+							column_names: ["city", "Total sales"],
+							data_rows: [
+								["Boulder", 34070647.18],
+								["Atlanta", 21161832.426],
+							],
+							returned_data_row_count: 2,
+						},
+					],
+				}),
+			});
 
-			const result = await client.fetchData({ objectId: "obj-1" });
+			const result = await client.fetchData({
+				objectId: "obj-1",
+				objectType: "ANSWER",
+			});
 
 			expect(result.data[0]).toMatchObject({
 				columns: ["city", "Total sales"],
@@ -1866,25 +1839,26 @@ describe("ThoughtSpot Client", () => {
 
 		// FULL rows without column_names: columns are derived from row keys.
 		it("derives columns from row keys when column_names is absent", async () => {
-			(fetch as any)
-				.mockResolvedValueOnce(metaResponse("ANSWER", "No Columns"))
-				.mockResolvedValueOnce({
-					ok: true,
-					json: vi.fn().mockResolvedValue({
-						metadata_id: "obj-1",
-						metadata_name: "No Columns",
-						contents: [
-							{
-								data_rows: [
-									{ city: "Boulder", "Total sales": 34070647.18 },
-									{ city: "Atlanta", "Total sales": 21161832.426 },
-								],
-							},
-						],
-					}),
-				});
+			(fetch as any).mockResolvedValueOnce({
+				ok: true,
+				json: vi.fn().mockResolvedValue({
+					metadata_id: "obj-1",
+					metadata_name: "No Columns",
+					contents: [
+						{
+							data_rows: [
+								{ city: "Boulder", "Total sales": 34070647.18 },
+								{ city: "Atlanta", "Total sales": 21161832.426 },
+							],
+						},
+					],
+				}),
+			});
 
-			const result = await client.fetchData({ objectId: "obj-1" });
+			const result = await client.fetchData({
+				objectId: "obj-1",
+				objectType: "ANSWER",
+			});
 
 			expect(result.data[0].columns).toEqual(["city", "Total sales"]);
 			expect(result.data[0].data_rows).toEqual([
@@ -1895,27 +1869,28 @@ describe("ThoughtSpot Client", () => {
 
 		// Cells pass through unchanged — full precision, no rounding.
 		it("returns numeric cells at full precision in COMPACT rows", async () => {
-			(fetch as any)
-				.mockResolvedValueOnce(metaResponse("ANSWER", "Noisy Answer"))
-				.mockResolvedValueOnce({
-					ok: true,
-					json: vi.fn().mockResolvedValue({
-						metadata_id: "obj-1",
-						metadata_name: "Noisy Answer",
-						contents: [
-							{
-								column_names: ["city", "Total sales", "Avg", "Orders"],
-								data_rows: [
-									["Boulder", 10679247.690000001, 120.030833623, 42],
-									["Atlanta", 0.1 + 0.2, 121.694679091, null],
-								],
-								returned_data_row_count: 2,
-							},
-						],
-					}),
-				});
+			(fetch as any).mockResolvedValueOnce({
+				ok: true,
+				json: vi.fn().mockResolvedValue({
+					metadata_id: "obj-1",
+					metadata_name: "Noisy Answer",
+					contents: [
+						{
+							column_names: ["city", "Total sales", "Avg", "Orders"],
+							data_rows: [
+								["Boulder", 10679247.690000001, 120.030833623, 42],
+								["Atlanta", 0.1 + 0.2, 121.694679091, null],
+							],
+							returned_data_row_count: 2,
+						},
+					],
+				}),
+			});
 
-			const result = await client.fetchData({ objectId: "obj-1" });
+			const result = await client.fetchData({
+				objectId: "obj-1",
+				objectType: "ANSWER",
+			});
 
 			expect(result.data[0].data_rows).toEqual([
 				["Boulder", 10679247.690000001, 120.030833623, 42],
@@ -1924,24 +1899,25 @@ describe("ThoughtSpot Client", () => {
 		});
 
 		it("returns numeric cells at full precision in FULL rows", async () => {
-			(fetch as any)
-				.mockResolvedValueOnce(metaResponse("ANSWER", "Noisy Full"))
-				.mockResolvedValueOnce({
-					ok: true,
-					json: vi.fn().mockResolvedValue({
-						metadata_id: "obj-1",
-						metadata_name: "Noisy Full",
-						contents: [
-							{
-								data_rows: [
-									{ city: "Boulder", "Total sales": 10679247.690000001 },
-								],
-							},
-						],
-					}),
-				});
+			(fetch as any).mockResolvedValueOnce({
+				ok: true,
+				json: vi.fn().mockResolvedValue({
+					metadata_id: "obj-1",
+					metadata_name: "Noisy Full",
+					contents: [
+						{
+							data_rows: [
+								{ city: "Boulder", "Total sales": 10679247.690000001 },
+							],
+						},
+					],
+				}),
+			});
 
-			const result = await client.fetchData({ objectId: "obj-1" });
+			const result = await client.fetchData({
+				objectId: "obj-1",
+				objectType: "ANSWER",
+			});
 
 			expect(result.data[0].data_rows).toEqual([
 				["Boulder", 10679247.690000001],
@@ -1950,27 +1926,28 @@ describe("ThoughtSpot Client", () => {
 
 		// Small-magnitude values (rates, ratios) are returned exactly as stored.
 		it("preserves small-magnitude values exactly", async () => {
-			(fetch as any)
-				.mockResolvedValueOnce(metaResponse("ANSWER", "Rates"))
-				.mockResolvedValueOnce({
-					ok: true,
-					json: vi.fn().mockResolvedValue({
-						metadata_id: "obj-1",
-						metadata_name: "Rates",
-						contents: [
-							{
-								column_names: ["metric", "rate"],
-								data_rows: [
-									["conversion", 0.0043],
-									["ratio", 0.014],
-									["zero", 0],
-								],
-							},
-						],
-					}),
-				});
+			(fetch as any).mockResolvedValueOnce({
+				ok: true,
+				json: vi.fn().mockResolvedValue({
+					metadata_id: "obj-1",
+					metadata_name: "Rates",
+					contents: [
+						{
+							column_names: ["metric", "rate"],
+							data_rows: [
+								["conversion", 0.0043],
+								["ratio", 0.014],
+								["zero", 0],
+							],
+						},
+					],
+				}),
+			});
 
-			const result = await client.fetchData({ objectId: "obj-1" });
+			const result = await client.fetchData({
+				objectId: "obj-1",
+				objectType: "ANSWER",
+			});
 
 			expect(result.data[0].data_rows).toEqual([
 				["conversion", 0.0043],
@@ -1983,49 +1960,51 @@ describe("ThoughtSpot Client", () => {
 		it("preserves large integers exactly", async () => {
 			const bigId = 90071992547409936;
 			const microTs = 1735689600000000;
-			(fetch as any)
-				.mockResolvedValueOnce(metaResponse("ANSWER", "IDs"))
-				.mockResolvedValueOnce({
-					ok: true,
-					json: vi.fn().mockResolvedValue({
-						metadata_id: "obj-1",
-						metadata_name: "IDs",
-						contents: [
-							{
-								column_names: ["record_id", "created_us"],
-								data_rows: [[bigId, microTs]],
-							},
-						],
-					}),
-				});
+			(fetch as any).mockResolvedValueOnce({
+				ok: true,
+				json: vi.fn().mockResolvedValue({
+					metadata_id: "obj-1",
+					metadata_name: "IDs",
+					contents: [
+						{
+							column_names: ["record_id", "created_us"],
+							data_rows: [[bigId, microTs]],
+						},
+					],
+				}),
+			});
 
-			const result = await client.fetchData({ objectId: "obj-1" });
+			const result = await client.fetchData({
+				objectId: "obj-1",
+				objectType: "ANSWER",
+			});
 
 			expect(result.data[0].data_rows).toEqual([[bigId, microTs]]);
 		});
 
 		// Null entries mixed into data_rows must not crash the row mapper.
 		it("drops null rows instead of crashing", async () => {
-			(fetch as any)
-				.mockResolvedValueOnce(metaResponse("ANSWER", "Sparse"))
-				.mockResolvedValueOnce({
-					ok: true,
-					json: vi.fn().mockResolvedValue({
-						metadata_id: "obj-1",
-						metadata_name: "Sparse",
-						contents: [
-							{
-								data_rows: [
-									{ city: "Boulder", sales: 1.5 },
-									null,
-									{ city: "Atlanta", sales: 2.5 },
-								],
-							},
-						],
-					}),
-				});
+			(fetch as any).mockResolvedValueOnce({
+				ok: true,
+				json: vi.fn().mockResolvedValue({
+					metadata_id: "obj-1",
+					metadata_name: "Sparse",
+					contents: [
+						{
+							data_rows: [
+								{ city: "Boulder", sales: 1.5 },
+								null,
+								{ city: "Atlanta", sales: 2.5 },
+							],
+						},
+					],
+				}),
+			});
 
-			const result = await client.fetchData({ objectId: "obj-1" });
+			const result = await client.fetchData({
+				objectId: "obj-1",
+				objectType: "ANSWER",
+			});
 
 			expect(result.data[0].data_rows).toEqual([
 				["Boulder", 1.5],
@@ -2034,50 +2013,23 @@ describe("ThoughtSpot Client", () => {
 		});
 
 		it("throws for an unsupported object type", async () => {
-			(fetch as any).mockResolvedValueOnce(metaResponse("LOGICAL_TABLE"));
-
-			await expect(client.fetchData({ objectId: "obj-1" })).rejects.toThrow(
-				/does not support object type "LOGICAL_TABLE"/,
-			);
+			await expect(
+				client.fetchData({ objectId: "obj-1", objectType: "LOGICAL_TABLE" }),
+			).rejects.toThrow(/does not support object type "LOGICAL_TABLE"/);
 			// No data call is made for unsupported types.
-			expect((fetch as any).mock.calls.length).toBe(1);
-		});
-
-		it("throws when no object matches the id", async () => {
-			(fetch as any).mockResolvedValueOnce({
-				ok: true,
-				json: vi.fn().mockResolvedValue([]),
-			});
-
-			await expect(client.fetchData({ objectId: "missing" })).rejects.toThrow(
-				/found no object with id missing/,
-			);
-		});
-
-		it("throws when metadata resolution is not ok", async () => {
-			(fetch as any).mockResolvedValueOnce({
-				ok: false,
-				status: 404,
-				text: vi.fn().mockResolvedValue("not found"),
-			});
-
-			await expect(client.fetchData({ objectId: "obj-1" })).rejects.toThrow(
-				/failed to resolve object with status 404/,
-			);
+			expect((fetch as any).mock.calls.length).toBe(0);
 		});
 
 		it("throws when the data fetch is not ok", async () => {
-			(fetch as any)
-				.mockResolvedValueOnce(metaResponse("ANSWER"))
-				.mockResolvedValueOnce({
-					ok: false,
-					status: 403,
-					text: vi.fn().mockResolvedValue("forbidden"),
-				});
+			(fetch as any).mockResolvedValueOnce({
+				ok: false,
+				status: 403,
+				text: vi.fn().mockResolvedValue("forbidden"),
+			});
 
-			await expect(client.fetchData({ objectId: "obj-1" })).rejects.toThrow(
-				/fetchData failed with status 403/,
-			);
+			await expect(
+				client.fetchData({ objectId: "obj-1", objectType: "ANSWER" }),
+			).rejects.toThrow(/fetchData failed with status 403/);
 		});
 	});
 

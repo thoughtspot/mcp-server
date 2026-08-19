@@ -796,7 +796,7 @@ export class ThoughtSpotService {
 			() => (this.client as any).fetchData(params),
 		);
 
-		span?.setAttribute("object_type", params.objectType ?? "unknown");
+		span?.setAttribute("object_type", params.objectType);
 		span?.setAttribute("viz_count", result.data.length);
 		return result;
 	}

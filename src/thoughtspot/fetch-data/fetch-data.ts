@@ -96,35 +96,15 @@ function mapContents(
 export function addFetchData(client: any, instanceUrl: string, token: string) {
 	client.fetchData = async ({
 		objectId,
-		objectType: knownType,
+		objectType,
 		vizIds,
 		maxRows = FETCH_DATA_DEFAULT_MAX_ROWS,
 	}: FetchDataParams): Promise<FetchDataResult> => {
-		// x-request-id ties the upstream call(s) together for tracing.
+		// x-request-id ties the upstream call to tracing.
 		const requestId = generateRequestId();
 		const headers = buildHeaders(token, undefined, undefined, { requestId });
 
-		// Resolve the object's type (decides the data endpoint) only when the
-		// caller didn't already supply it from a prior search_objects result.
-		let objectType = knownType ?? "";
-		if (
-			objectType !== ObjectType.Answer &&
-			objectType !== ObjectType.Liveboard
-		) {
-			const metaData = await postJson(
-				`${instanceUrl}/api/rest/2.0/metadata/search`,
-				headers,
-				{ metadata: [{ identifier: objectId }] },
-				"fetchData failed to resolve object",
-			);
-			const meta = metaData?.[0];
-			if (!meta) {
-				throw new Error(`fetchData found no object with id ${objectId}`);
-			}
-			objectType = meta.metadata_type ?? "";
-		}
-
-		// Fetch the data from the endpoint matching the object type.
+		// The caller-supplied type (from search_objects) picks the data endpoint.
 		const body: Record<string, unknown> = {
 			metadata_identifier: objectId,
 			data_format: DATA_FORMAT,

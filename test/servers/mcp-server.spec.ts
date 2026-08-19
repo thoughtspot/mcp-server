@@ -543,7 +543,10 @@ describe("MCP Server", () => {
 			await server.init();
 			const { callTool } = connect(server);
 
-			const result = await callTool("fetch_data", { object_id: "answer-123" });
+			const result = await callTool("fetch_data", {
+				object_id: "answer-123",
+				object_type: "ANSWER",
+			});
 
 			expect(result.isError).toBeUndefined();
 			const structured = result.structuredContent as any;
@@ -560,10 +563,18 @@ describe("MCP Server", () => {
 				"test-access-token",
 			);
 
-			await callTool("fetch_data", { object_id: "answer-123", max_rows: 50 });
+			await callTool("fetch_data", {
+				object_id: "answer-123",
+				object_type: "ANSWER",
+				max_rows: 50,
+			});
 
 			expect((client as any).fetchData).toHaveBeenCalledWith(
-				expect.objectContaining({ objectId: "answer-123", maxRows: 50 }),
+				expect.objectContaining({
+					objectId: "answer-123",
+					objectType: "ANSWER",
+					maxRows: 50,
+				}),
 			);
 		});
 
@@ -575,7 +586,10 @@ describe("MCP Server", () => {
 			await server.init();
 			const { callTool } = connect(server);
 
-			const result = await callTool("fetch_data", { object_id: "answer-123" });
+			const result = await callTool("fetch_data", {
+				object_id: "answer-123",
+				object_type: "ANSWER",
+			});
 
 			expect(result.isError).toBe(true);
 			// Surfaces the upstream error message so the failure is actionable.

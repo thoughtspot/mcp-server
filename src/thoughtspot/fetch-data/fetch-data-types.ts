@@ -3,8 +3,8 @@
 export interface FetchDataParams {
 	// GUID of an Answer or Liveboard, typically from `search_objects`.
 	objectId: string;
-	// Known type ("ANSWER"/"LIVEBOARD") from search_objects; skips the type lookup.
-	objectType?: string;
+	// Required type ("ANSWER"/"LIVEBOARD") from search_objects; picks the endpoint.
+	objectType: string;
 	// Liveboards only: restrict to these viz GUIDs; omit for all vizzes.
 	vizIds?: string[];
 	// Row cap per viz (upstream `record_size`); defaults protect LLM context.

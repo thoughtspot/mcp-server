@@ -139,9 +139,6 @@ export abstract class BaseMCPServer extends Server {
 		// unavailable — e.g. an unauthorized token where getSessionInfo failed —
 		// we cannot confirm the privilege, so hide fetch_data rather than expose it.
 		if (!this.sessionInfo) {
-			console.warn(
-				"Session info not available when checking data download privilege; hiding fetch_data",
-			);
 			return false;
 		}
 		const privileges = this.sessionInfo.privileges;
