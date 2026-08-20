@@ -201,8 +201,8 @@ describe("MCP Server", () => {
 			// V2 tools (latest version): 6 tools
 			expect(result.tools).toHaveLength(6);
 			expect(result.tools?.map((t) => t.name)).toEqual([
-				"search_objects",
 				"check_connectivity",
+				"search_objects",
 				"create_analysis_session",
 				"send_session_message",
 				"get_session_updates",
@@ -272,8 +272,8 @@ describe("MCP Server", () => {
 			// V2 tools don't have a datasource discovery tool, so filtering has no effect
 			expect(result.tools).toHaveLength(6);
 			expect(result.tools?.map((t) => t.name)).toEqual([
-				"search_objects",
 				"check_connectivity",
+				"search_objects",
 				"create_analysis_session",
 				"send_session_message",
 				"get_session_updates",

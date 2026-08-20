@@ -467,8 +467,8 @@ export enum ToolName {
 	CreateLiveboard = "createLiveboard",
 	GetDataSourceSuggestions = "getDataSourceSuggestions",
 	// V2 (Spotter 3)
-	SearchObjects = "search_objects",
 	CheckConnectivity = "check_connectivity",
+	SearchObjects = "search_objects",
 	CreateAnalysisSession = "create_analysis_session",
 	SendSessionMessage = "send_session_message",
 	GetSessionUpdates = "get_session_updates",
@@ -552,6 +552,19 @@ const GET_SESSION_UPDATES_SHARED_TOOL_DEFINITION = {
 
 export const toolDefinitionsV2 = [
 	{
+		name: ToolName.CheckConnectivity,
+		description:
+			"Ping tool to test connectivity and authentication. You can use this if other tool calls are failing to verify if the connection is working.",
+		inputSchema: z.toJSONSchema(CheckConnectivityInputSchema),
+		outputSchema: z.toJSONSchema(CheckConnectivityOutputSchema),
+		annotations: {
+			title: "Check Connectivity",
+			readOnlyHint: true,
+			destructiveHint: false,
+			openWorldHint: false,
+		},
+	},
+	{
 		name: ToolName.SearchObjects,
 		description: [
 			"Search for objects (Answers, Liveboards, Worksheets) in ThoughtSpot matching a given search term. Supports optional filters (types, owner, tag, modified_since, verified_only) and pagination (limit, cursor). Returns `results` (ranked), plus `next_cursor`. Each result carries: object_id, title, type (LIVEBOARD | ANSWER | LIVEBOARD_VIZ | WORKSHEET; LIVEBOARD_VIZ is a viz pinned on a Liveboard — render it as 'Liveboard viz'), author_name, description, tags, last_modified (ISO-8601), verified, external_link, query (Answer/viz sage tokens; null for Liveboards) and confidence. Returns identifiers and metadata only — never the object's data or contents, and it does not run queries.",
@@ -577,19 +590,6 @@ export const toolDefinitionsV2 = [
 		},
 	},
 	{
-		name: ToolName.CheckConnectivity,
-		description:
-			"Ping tool to test connectivity and authentication. You can use this if other tool calls are failing to verify if the connection is working.",
-		inputSchema: z.toJSONSchema(CheckConnectivityInputSchema),
-		outputSchema: z.toJSONSchema(CheckConnectivityOutputSchema),
-		annotations: {
-			title: "Check Connectivity",
-			readOnlyHint: true,
-			destructiveHint: false,
-			openWorldHint: false,
-		},
-	},
-	{
 		name: ToolName.CreateAnalysisSession,
 		description:
 			"Start an analytical session with the Analytics Agent. This is the first step in a three-step workflow: create a session, send a message, then poll for updates. Once created, you can use the returned `analytical_session_id` to send analytical questions via `send_session_message` and retrieve answers via `get_session_updates`. Sessions are conversational, so you can ask follow-up questions in the same session without creating a new one. Using a single analytical session is preferable, because it reuses the same data source selection.",
@@ -597,7 +597,7 @@ export const toolDefinitionsV2 = [
 		outputSchema: z.toJSONSchema(CreateAnalysisSessionOutputSchema),
 		annotations: {
 			title: "Create Analysis Session",
-			readOnlyHint: false,
+			readOnlyHint: true,
 			destructiveHint: false,
 			openWorldHint: false,
 		},
@@ -610,7 +610,7 @@ export const toolDefinitionsV2 = [
 		outputSchema: z.toJSONSchema(SendSessionMessageOutputSchema),
 		annotations: {
 			title: "Send Analysis Session Message",
-			readOnlyHint: false,
+			readOnlyHint: true,
 			destructiveHint: false,
 			openWorldHint: false,
 		},
@@ -660,7 +660,7 @@ export const toolDefinitionsV2 = [
 		outputSchema: z.toJSONSchema(SwitchOrgOutputSchema),
 		annotations: {
 			title: "Switch Org",
-			readOnlyHint: false,
+			readOnlyHint: true,
 			destructiveHint: false,
 			openWorldHint: false,
 		},
