@@ -206,6 +206,7 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 			true,
 		);
 		expect(tracingState.span?.setAttributes).toHaveBeenCalledWith({
+			spotter_response_format: SpotterResponseFormat.SIMPLIFIED,
 			total_messages_parsed: 0,
 			total_text_messages_parsed: 0,
 			total_answer_messages_parsed: 0,
@@ -233,6 +234,7 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 			true,
 		);
 		expect(tracingState.span?.setAttributes).toHaveBeenCalledWith({
+			spotter_response_format: SpotterResponseFormat.SIMPLIFIED,
 			total_messages_parsed: 0,
 			total_text_messages_parsed: 0,
 			total_answer_messages_parsed: 0,
@@ -281,6 +283,7 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 			true,
 		);
 		expect(tracingState.span?.setAttributes).toHaveBeenCalledWith({
+			spotter_response_format: SpotterResponseFormat.SIMPLIFIED,
 			total_messages_parsed: 0,
 			total_text_messages_parsed: 0,
 			total_answer_messages_parsed: 0,
@@ -308,6 +311,7 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 			true,
 		);
 		expect(tracingState.span?.setAttributes).toHaveBeenCalledWith({
+			spotter_response_format: SpotterResponseFormat.SIMPLIFIED,
 			total_messages_parsed: 0,
 			total_text_messages_parsed: 0,
 			total_answer_messages_parsed: 0,
@@ -343,6 +347,7 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 			{ is_thinking: false, type: "text_chunk", text: "keep chunk" },
 		]);
 		expect(tracingState.span?.setAttributes).toHaveBeenCalledWith({
+			spotter_response_format: SpotterResponseFormat.SIMPLIFIED,
 			total_messages_parsed: 2,
 			total_text_messages_parsed: 2,
 			total_answer_messages_parsed: 0,
@@ -471,6 +476,7 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		);
 
 		expect(tracingState.span?.setAttributes).toHaveBeenCalledWith({
+			spotter_response_format: SpotterResponseFormat.SIMPLIFIED,
 			total_messages_parsed: 0,
 			total_text_messages_parsed: 0,
 			total_answer_messages_parsed: 0,
@@ -581,7 +587,7 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 
 		expect(consoleWarnSpy).toHaveBeenCalledWith(
 			"Unknown event in event stream:",
-			"mystery_event",
+			{ type: "mystery_event" },
 		);
 		expect(storage.appendMessagesAndRestartTtl).toHaveBeenCalledOnce();
 	});
@@ -746,6 +752,7 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		);
 
 		expect(tracingState.span?.setAttributes).toHaveBeenCalledWith({
+			spotter_response_format: SpotterResponseFormat.SIMPLIFIED,
 			total_messages_parsed: 1,
 			total_text_messages_parsed: 1,
 			total_answer_messages_parsed: 0,
@@ -773,6 +780,7 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 			true,
 		);
 		expect(tracingState.span?.setAttributes).toHaveBeenCalledWith({
+			spotter_response_format: SpotterResponseFormat.SIMPLIFIED,
 			total_messages_parsed: 0,
 			total_text_messages_parsed: 0,
 			total_answer_messages_parsed: 0,
@@ -800,6 +808,7 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 			true,
 		);
 		expect(tracingState.span?.setAttributes).toHaveBeenCalledWith({
+			spotter_response_format: SpotterResponseFormat.SIMPLIFIED,
 			total_messages_parsed: 0,
 			total_text_messages_parsed: 0,
 			total_answer_messages_parsed: 0,
@@ -937,7 +946,7 @@ describe("processSendAgentConversationMessageStreamingResponse — raw format", 
 		expect(messages[0]).not.toHaveProperty("iframe_url");
 	});
 
-	it("passes an error event through unmodified while still logging and flagging the span", async () => {
+	it("passes an error event through unmodified without special logging or span flagging", async () => {
 		const storage = makeMockStorage();
 		const item = {
 			type: "error",
@@ -948,16 +957,13 @@ describe("processSendAgentConversationMessageStreamingResponse — raw format", 
 
 		await processRaw(reader, storage);
 
-		// Raw mode does not reshape the item (no fallback text message is built),
-		// but it still surfaces the error for observability.
+		// Raw mode does not reshape the item or apply any error-specific handling;
+		// the item is passed through untouched.
 		expect(storage.appendMessagesAndRestartTtl).toHaveBeenCalledWith(CONV_ID, [
 			item,
 		]);
-		expect(consoleErrorSpy).toHaveBeenCalledWith(
-			"Error event in event stream, error code",
-			"SPOTTER_500",
-		);
-		expect(tracingState.span?.setStatus).toHaveBeenCalledWith({
+		expect(consoleErrorSpy).not.toHaveBeenCalled();
+		expect(tracingState.span?.setStatus).not.toHaveBeenCalledWith({
 			code: SpanStatusCode.ERROR,
 			message: "Error event in event stream, error code: SPOTTER_500",
 		});
@@ -1030,19 +1036,16 @@ describe("processSendAgentConversationMessageStreamingResponse — raw format", 
 
 		await processRaw(reader, storage, recorder);
 
-		// Raw mode does not reshape messages, but it still classifies each item by
-		// type so metrics/counters stay accurate for observability.
+		// Raw mode does not reshape or per-type classify messages; every item is
+		// recorded as `raw_untyped`, while parse counters stay accurate.
+		expect(recorder.count).toHaveBeenCalledTimes(2);
 		expect(recorder.count).toHaveBeenCalledWith(
 			METRIC_NAMES.upstreamStreamMessagesTotal,
 			1,
-			expect.objectContaining({ message_type: "text" }),
-		);
-		expect(recorder.count).toHaveBeenCalledWith(
-			METRIC_NAMES.upstreamStreamMessagesTotal,
-			1,
-			expect.objectContaining({ message_type: "answer" }),
+			expect.objectContaining({ message_type: "raw_untyped" }),
 		);
 		expect(tracingState.span?.setAttributes).toHaveBeenCalledWith({
+			spotter_response_format: SpotterResponseFormat.RAW,
 			total_messages_parsed: 2,
 			total_text_messages_parsed: 1,
 			total_answer_messages_parsed: 1,

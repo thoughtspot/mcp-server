@@ -83,79 +83,29 @@ export const processSendAgentConversationMessageStreamingResponse = async (
 
 						// Loop through the items in the line and convert to messages if applicable
 						for (const item of data) {
-							// For the raw format, we don't reshape messages, but we still record
-							// metrics and flag span errors so upstream failures stay observable,
-							// and we still synthesize `answer_id` on answer events so the
-							// get_session_updates -> create_dashboard handoff keeps working.
+							// For the raw format, we don't need to perform any post-processing, so
+							// just add the messages directly. The one exception is for answer
+							// messages, where we generate the answer_id field for convenience.
 							if (spotterResponseFormat === SpotterResponseFormat.RAW) {
-								if (item.type === "text" || item.type === "text-chunk") {
-									if (item.metadata?.format === "markdown") {
-										nTextMessagesParsed++;
-										recordUpstreamStreamMessageMetric(
-											recorder,
-											upstreamOperation,
-											item.type === "text-chunk" ? "text_chunk" : "text",
-											item.metadata?.type === "thinking",
-										);
-									} else {
-										nMessagesIgnored++;
-									}
-								} else if (item.type === "answer") {
+								recordUpstreamStreamMessageMetric(
+									recorder,
+									upstreamOperation,
+									"raw_untyped",
+									item.metadata?.type === "thinking",
+								);
+								if (item.type === "answer") {
 									nAnswerMessagesParsed++;
-									recordUpstreamStreamMessageMetric(
-										recorder,
-										upstreamOperation,
-										"answer",
-										item.metadata?.type === "thinking",
-									);
-								} else if (item.type === "notification") {
-									if (
-										item.code === "TOOL_CALL_NOTIFICATION" &&
-										item.metadata?.tool_title
-									) {
-										nTextMessagesParsed++;
-										recordUpstreamStreamMessageMetric(
-											recorder,
-											upstreamOperation,
-											"step_notification",
-											item.metadata?.type === "thinking",
-										);
-									} else {
-										nMessagesIgnored++;
-									}
-								} else if (item.type === "error") {
-									console.error(
-										"Error event in event stream, error code",
-										item.error_code,
-									);
-									recordUpstreamStreamMessageMetric(
-										recorder,
-										upstreamOperation,
-										"error",
-										false,
-									);
-									spanHasError = true;
-									span.setStatus({
-										code: SpanStatusCode.ERROR,
-										message: `Error event in event stream, error code: ${item.error_code}`,
+									newMessages.push({
+										...item,
+										answer_id: JSON.stringify({
+											session_id: item.metadata?.session_id,
+											gen_no: item.metadata?.gen_no,
+										}),
 									});
 								} else {
-									// Includes ack/search_datasets/file/conv_title (intentionally
-									// ignored upstream events) and any unrecognized event type.
-									nMessagesIgnored++;
+									nTextMessagesParsed++;
+									newMessages.push({ ...item });
 								}
-
-								newMessages.push(
-									item.type === "answer"
-										? {
-												...item,
-												answer_id: JSON.stringify({
-													session_id: item.metadata?.session_id,
-													gen_no: item.metadata?.gen_no,
-												}),
-											}
-										: { ...item },
-								);
 								continue;
 							}
 
@@ -267,7 +217,7 @@ export const processSendAgentConversationMessageStreamingResponse = async (
 									text: item.display_message || "Something went wrong",
 								});
 							} else {
-								console.warn("Unknown event in event stream:", item.type);
+								console.warn("Unknown event in event stream:", item);
 								nMessagesIgnored++;
 							}
 						}
@@ -288,6 +238,7 @@ export const processSendAgentConversationMessageStreamingResponse = async (
 			}
 
 			span.setAttributes({
+				spotter_response_format: spotterResponseFormat,
 				total_messages_parsed: nTextMessagesParsed + nAnswerMessagesParsed,
 				total_text_messages_parsed: nTextMessagesParsed,
 				total_answer_messages_parsed: nAnswerMessagesParsed,
