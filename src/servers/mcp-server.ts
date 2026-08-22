@@ -79,6 +79,13 @@ export class MCPServer extends BaseMCPServer {
 		if (accessToken && !MCPServer.isExpired(globalTokenExpiresAt)) {
 			return accessToken;
 		}
+		console.error(
+			`[keepwarm-debug] userGUID=${this.sessionInfo?.userGUID ?? "unknown"} REAUTH via getActiveToken: no DO keep-warm token in memory and props token ${
+				accessToken
+					? `expired (propsExpiresAt=${globalTokenExpiresAt ?? "unknown"}, now=${Date.now()})`
+					: "absent"
+			}; grantHasRefreshToken=${this.grantHasRefreshToken}`,
+		);
 		throw new ThoughtSpotApiError(
 			401,
 			"getActiveToken",
@@ -138,7 +145,10 @@ export class MCPServer extends BaseMCPServer {
 		await this.setActiveOrg(this.activeOrgId, orgToken);
 	}
 
-	protected async postInit(): Promise<void> {
+	// Runs before initializeService()/getSessionInfo so this.globalToken holds the
+	// kept-warm DO token — otherwise getSessionInfo authenticates with the frozen
+	// props token, which on a post-expiry reconnect is dead.
+	protected async preInit(): Promise<void> {
 		if (this.ctx.props.authMode !== "oauth") {
 			return;
 		}
@@ -147,38 +157,51 @@ export class MCPServer extends BaseMCPServer {
 		try {
 			await this.initGlobalTokenAndReconcileWithStorage();
 		} catch (error) {
-			console.error("Failed to load/seed keep-warm token on connect:", error);
+			console.error(
+				"Failed to load/seed keep-warm global token on connect (session will require reauth):",
+				error,
+			);
 		}
+	}
 
+	protected async postInit(): Promise<void> {
+		// areOrgToolsAvailable() already requires authMode === "oauth", so this
+		// gates the whole active-org bootstrap on oauth + orgs-enabled + refresh token.
 		if (!this.areOrgToolsAvailable()) {
 			return;
 		}
 		try {
-			await this.loadActiveOrg();
-			if (!this.activeOrgId) {
-				const currentOrgId =
-					this.sessionInfo?.currentOrgId != null
-						? String(this.sessionInfo.currentOrgId)
-						: undefined;
-				if (currentOrgId) {
-					// Set only in memory; do NOT persist the id yet. If the mint below
-					// fails (e.g. a transient 5xx), persisting a tokenless active org
-					// would poison every later call — getActiveToken() throws on an
-					// active org with no token. forceRecreateActiveOrgToken persists the
-					// id and token together only once the mint succeeds.
-					this.activeOrgId = currentOrgId;
-				}
-			}
-			if (this.activeOrgId && !this.activeOrgToken) {
-				await this.forceRecreateActiveOrgToken();
-			}
+			await this.ensureActiveOrg();
 		} catch (error) {
-			console.error("Failed to load active org on connect:", error);
 			// A failed bootstrap must not leave the session with an active org but
 			// no token; fall back to the global token until the next connect or the
 			// keep-warm alarm re-mints.
+			console.error(
+				"Failed to bootstrap active org on connect (clearing active org, falling back to global token):",
+				error,
+			);
 			this.activeOrgId = undefined;
 			this.activeOrgToken = undefined;
+		}
+	}
+
+	// Connect-time bootstrap: use the DO's persisted org, else seed from the
+	// session's currentOrgId, then mint. Assumes org tools are available.
+	private async ensureActiveOrg(): Promise<void> {
+		await this.loadActiveOrg();
+		if (!this.activeOrgId) {
+			const currentOrgId =
+				this.sessionInfo?.currentOrgId != null
+					? String(this.sessionInfo.currentOrgId)
+					: undefined;
+			if (currentOrgId) {
+				// In memory only; persisted with the token once the mint succeeds, so
+				// a mint failure never leaves a tokenless active org in the DO.
+				this.activeOrgId = currentOrgId;
+			}
+		}
+		if (this.activeOrgId && !this.activeOrgToken) {
+			await this.forceRecreateActiveOrgToken();
 		}
 	}
 
@@ -241,6 +264,15 @@ export class MCPServer extends BaseMCPServer {
 		// Nothing valid: the stored token (if any) is expired and the grant's frozen
 		// access token is expired/absent. Fail closed so callers never send a dead
 		// token; surfaces as a graceful reauth via the central 401 handler.
+		console.error(
+			`[keepwarm-debug] userGUID=${this.sessionInfo?.userGUID ?? "unknown"} REAUTH via reconcile: storedToken=${
+				storedToken ? "present" : "absent"
+			} storedExpired=${storedExpired} storedExpiresAt=${
+				existing.globalTokenExpiresAt ?? "unknown"
+			} propsExpired=${propsTokenExpired} propsExpiresAt=${
+				globalTokenExpiresAt ?? "unknown"
+			} hasRefreshToken=${!!globalRefreshToken} now=${Date.now()}`,
+		);
 		this.globalToken = undefined;
 		throw new ThoughtSpotApiError(
 			401,
@@ -334,7 +366,14 @@ export class MCPServer extends BaseMCPServer {
 
 	@WithSpan("call-list-tools")
 	protected async listTools() {
+		// Repair session info (see ensureSessionInfo) so the gates below are real.
+		await this.ensureSessionInfo();
+
 		const span = this.initSpanWithCommonAttributes();
+		span?.setAttribute(
+			"enable_raw_session_updates",
+			this.ctx.props.enableRawSessionUpdates ?? "(not passed)",
+		);
 		span?.setAttribute(
 			"api_version_requested",
 			this.ctx.props.apiVersion ?? "(not passed)",
@@ -450,17 +489,15 @@ export class MCPServer extends BaseMCPServer {
 		}
 
 		if (this.areOrgToolsAvailable()) {
-			// The active org is shared across the user's sessions via the token DO,
-			// so reload per call — a switch_org in one session must be seen by the
-			// others on their next tool call (an instance-cached value would go stale).
+			// Reload the shared active org from the DO per call so a switch_org in
+			// another session is picked up (an instance-cached value would go stale).
 			await this.loadActiveOrg();
 			if (this.activeOrgId && !this.activeOrgToken) {
 				try {
 					await this.forceRecreateActiveOrgToken(recorder);
 				} catch (error) {
-					// The mint can fail if the user lost access to the active org
-					// (e.g. a 403). Return a graceful, actionable error instead of
-					// letting it propagate as a raw JSON-RPC error.
+					// Mint can fail if the user lost access to the org (e.g. 403);
+					// return a graceful error rather than a raw throw.
 					console.error("Failed to mint active org token on call:", error);
 					return this.createErrorResponse(
 						`Could not access the active org "${this.activeOrgId}"; it may no longer be available to you. Call list_orgs to see your orgs and switch_org to select a different one.`,
@@ -471,11 +508,9 @@ export class MCPServer extends BaseMCPServer {
 		}
 
 		try {
-			// Non-orgs OAuth data tools authenticate with the global token directly
-			// (no org preamble above refreshed it), so reconcile it from the DO per
-			// call. Kept inside this try so its fail-closed 401 (expired token) is
-			// caught by the central handler below rather than escaping raw.
-			if (!this.areOrgToolsAvailable() && this.ctx.props.authMode === "oauth") {
+			// No active org token → the call uses the global token, so reconcile it
+			// from the DO per call. In the try so its fail-closed 401 is handled below.
+			if (this.ctx.props.authMode === "oauth" && !this.activeOrgToken) {
 				await this.initGlobalTokenAndReconcileWithStorage();
 			}
 			return await this.dispatchTool(name, request, recorder);
@@ -847,6 +882,10 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		_recorder: MetricsRecorder = NOOP_METRICS_RECORDER,
 	) {
 		const span = trace.getSpan(context.active());
+		span?.setAttribute(
+			"enable_raw_session_updates",
+			this.ctx.props.enableRawSessionUpdates ?? "(not passed)",
+		);
 		const { analytical_session_id } = GetSessionUpdatesInputSchema.parse(
 			request.params.arguments,
 		);
@@ -1025,6 +1064,7 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		} catch (error) {
 			// Surface the upstream message (e.g. status 401/500) so the failure is
 			// actionable rather than a generic "check your inputs".
+			console.error("Error searching objects:", error);
 			return this.createErrorResponse(
 				`Failed to search objects: ${(error as Error).message}`,
 				"search_objects failed",

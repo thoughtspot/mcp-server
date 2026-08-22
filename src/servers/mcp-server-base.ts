@@ -71,6 +71,8 @@ export interface Context {
 export abstract class BaseMCPServer extends Server {
 	protected trackers: Trackers = new Trackers();
 	protected sessionInfo: SessionInfo | undefined;
+	// In-flight ensureSessionInfo() refetch, so concurrent callers share one fetch.
+	private sessionInfoPromise?: Promise<void>;
 
 	constructor(
 		protected ctx: Context,
@@ -129,6 +131,25 @@ export abstract class BaseMCPServer extends Server {
 			return true;
 		}
 		return this.sessionInfo.isSpotterChatHistoryEnabled === true;
+	}
+
+	/**
+	 * Fallback: refetch session info if it's still null (preInit normally loads the
+	 * token so the init-time fetch succeeds, but if that failed too — e.g. a
+	 * transient error — repair on demand here). Called by callers that read
+	 * session-info-gated state. No-op once populated; best-effort, so a failure
+	 * keeps the gates fail-closed.
+	 */
+	protected async ensureSessionInfo(): Promise<void> {
+		if (this.sessionInfo) {
+			return;
+		}
+		if (!this.sessionInfoPromise) {
+			this.sessionInfoPromise = this.initializeService().finally(() => {
+				this.sessionInfoPromise = undefined;
+			});
+		}
+		await this.sessionInfoPromise;
 	}
 
 	/**
@@ -488,6 +509,15 @@ export abstract class BaseMCPServer extends Server {
 	): Promise<any>;
 
 	async init() {
+		// Runs before initializeService() so a subclass can load the token that
+		// getSessionInfo authenticates with (else the init fetch uses the frozen
+		// props token and fails after it expires). Best-effort.
+		try {
+			await this.preInit();
+		} catch (error) {
+			console.error("preInit failed:", error);
+		}
+
 		// Initialize the service-specific functionality
 		await this.initializeService();
 
@@ -541,6 +571,12 @@ export abstract class BaseMCPServer extends Server {
 			console.error("postInit failed:", error);
 		}
 	}
+
+	/**
+	 * Optional hook for subclasses to run setup BEFORE initializeService()
+	 * (i.e. before getSessionInfo). Default no-op.
+	 */
+	protected async preInit(): Promise<void> {}
 
 	/**
 	 * Optional hook for subclasses to run setup after init(). Default no-op.

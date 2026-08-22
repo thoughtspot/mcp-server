@@ -363,6 +363,136 @@ describe("MCP Server org tools", () => {
 		});
 	});
 
+	describe("session info under an expired props token + warm DO token", () => {
+		// preInit reconciles the warm DO token before initializeService, so the
+		// init-time getSessionInfo authenticates with the warm token (not the
+		// expired props token) and succeeds — org tools are available straight after
+		// init. ensureSessionInfo remains a fallback and its concurrency guard is
+		// still exercised below.
+		function makeServerWithTokenAwareSession(goodSession: any) {
+			const store = new Map<
+				string,
+				{ activeOrgId?: string; orgToken?: string }
+			>();
+			const tokenStore = new Map<string, any>();
+			const namespace = makeStorageNamespace(store, tokenStore);
+			// Count getSessionInfo calls made with the warm token (i.e. successful
+			// refetches) so a test can assert they aren't duplicated under concurrency.
+			const warmSessionInfoCalls = { count: 0 };
+			// getSessionInfo fails when the client was built with the expired props
+			// getSessionInfo fails only for the expired props token; any reconciled
+			// token (warm DO token or a minted org token) succeeds.
+			vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockImplementation(
+				(_instanceUrl: string, bearerToken: string) =>
+					({
+						getSessionInfo: vi.fn(async () => {
+							if (bearerToken === "expired-props-token") {
+								throw new Error("getSessionInfo: status 401: expired token");
+							}
+							warmSessionInfoCalls.count++;
+							return goodSession;
+						}),
+						searchOrgs: vi.fn().mockResolvedValue([]),
+						listOrgs: vi.fn().mockResolvedValue([]),
+						fetchOrgBearerToken: vi.fn().mockResolvedValue("org-scoped-token"),
+						validateConnection: vi.fn().mockResolvedValue(true),
+						instanceUrl: "https://test.thoughtspot.cloud",
+					}) as any,
+			);
+			const props = {
+				instanceUrl: "https://test.thoughtspot.cloud",
+				accessToken: "expired-props-token",
+				globalRefreshToken: "refresh-token",
+				globalTokenExpiresAt: 1, // props token already expired
+				authMode: "oauth",
+				apiVersion: "latest",
+				clientName: { clientId: "c", clientName: "c", registrationDate: 0 },
+			};
+			const env = {
+				CONVERSATION_STORAGE_OBJECT: namespace,
+				USER_TOKEN_OBJECT: namespace,
+			} as any;
+			return {
+				server: new MCPServer({ props, env }),
+				tokenStore,
+				warmSessionInfoCalls,
+			};
+		}
+
+		const goodSession = {
+			clusterId: "test-cluster-123",
+			clusterName: "test-cluster",
+			releaseVersion: "10.13.0.cl-110",
+			userGUID: "test-user-123",
+			userName: "test-user",
+			currentOrgId: "0",
+			privileges: [],
+			configInfo: {
+				mixpanelConfig: { devSdkKey: "k", prodSdkKey: "k", production: false },
+				selfClusterName: "test-cluster",
+				selfClusterId: "test-cluster-123",
+				enableSpotterDataSourceDiscovery: false,
+				orgsConfiguration: { enabled: true },
+			},
+		};
+
+		// The DO name is `<storage-key-hash>:__active_org__` (hash of the refresh
+		// token); seed a valid keep-warm token under it before connect.
+		async function seedWarmToken(tokenStore: Map<string, any>) {
+			const keyHash = Buffer.from(
+				await crypto.subtle.digest(
+					"SHA-256",
+					new TextEncoder().encode("refresh-token"),
+				),
+			).toString("base64url");
+			tokenStore.set(`${keyHash}:__active_org__`, {
+				globalToken: "warm-do-token",
+				globalRefreshToken: "refresh-token",
+				instanceUrl: "https://test.thoughtspot.cloud",
+				globalTokenExpiresAt: 1893456000000,
+			});
+		}
+
+		it("init succeeds via the warm DO token (getSessionInfo never uses the expired props token) so org tools are available", async () => {
+			const { server, tokenStore } =
+				makeServerWithTokenAwareSession(goodSession);
+			await seedWarmToken(tokenStore);
+
+			await server.init();
+			// preInit loaded the warm token before getSessionInfo, so init succeeded
+			// on the first try — no lazy repair needed.
+			expect((server as any).globalToken).toBe("warm-do-token");
+			expect((server as any).sessionInfo).toBeTruthy();
+
+			const { listTools } = connect(server);
+			const names = (await listTools()).tools?.map((t) => t.name) ?? [];
+			expect(names).toContain("list_orgs");
+			expect(names).toContain("switch_org");
+		});
+
+		it("ensureSessionInfo coalesces concurrent fallback refetches into one getSessionInfo", async () => {
+			const { server, tokenStore, warmSessionInfoCalls } =
+				makeServerWithTokenAwareSession(goodSession);
+			await seedWarmToken(tokenStore);
+
+			await server.init();
+			// Simulate sessionInfo having been lost, so ensureSessionInfo's fallback
+			// refetch path runs. (globalToken is already the warm token from preInit.)
+			(server as any).sessionInfo = undefined;
+			const callsBefore = warmSessionInfoCalls.count;
+
+			// Fire two refetches concurrently; the in-flight guard must coalesce them.
+			await Promise.all([
+				(server as any).ensureSessionInfo(),
+				(server as any).ensureSessionInfo(),
+			]);
+
+			expect((server as any).sessionInfo).toBeTruthy();
+			// The in-flight guard coalesces both callers into a single refetch.
+			expect(warmSessionInfoCalls.count).toBe(callsBefore + 1);
+		});
+	});
+
 	describe("non-org cluster (orgs disabled): no org overlay on connect", () => {
 		it("does NOT mint an org token or set an active org when orgs are disabled", async () => {
 			const mint = vi.fn().mockResolvedValue("org-scoped-token");
