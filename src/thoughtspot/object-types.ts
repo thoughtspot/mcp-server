@@ -27,7 +27,7 @@ export function resolveObjectTypeFacets(types: string[]): string[] {
 
 // Eureka resultType -> canonical concept surfaced as `type`. A viz pinned on a
 // Liveboard ("Liveboard viz") is distinct from a standalone Answer: `id` is the
-// parent Liveboard and `visualization_id` the viz (for fetch_data).
+// parent Liveboard and `visualization_id` the viz (for get_object_data).
 const RESULT_TYPE_TO_CANONICAL: Record<string, string> = {
 	ANSWER_RESULT: "Answer",
 	PINBOARD_RESULT: "Liveboard",

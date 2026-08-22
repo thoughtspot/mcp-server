@@ -53,6 +53,15 @@ export type ErrorResponse = {
 
 export type ToolResponse = SuccessResponse | ErrorResponse;
 
+// Privileges that grant data download. `DATADOWNLOADING` is the classic
+// privilege; `CAN_DOWNLOAD_DETAILED_DATA` is its RBAC equivalent; admins
+// implicitly have it. Any one is sufficient.
+const DATA_DOWNLOAD_PRIVILEGES = [
+	"DATADOWNLOADING",
+	"CAN_DOWNLOAD_DETAILED_DATA",
+	"ADMINISTRATION",
+];
+
 export interface Context {
 	props: Props;
 	env: Env;
@@ -141,6 +150,23 @@ export abstract class BaseMCPServer extends Server {
 			});
 		}
 		await this.sessionInfoPromise;
+	}
+
+	/**
+	 * Whether the user can download data (gates the get_object_data tool)
+	 */
+	protected canDownloadData(): boolean {
+		// Permission gate: fail CLOSED. If session info (hence privileges) is
+		// unavailable — e.g. an unauthorized token where getSessionInfo failed —
+		// we cannot confirm the privilege, so hide get_object_data rather than expose it.
+		if (!this.sessionInfo) {
+			return false;
+		}
+		const privileges = this.sessionInfo.privileges;
+		if (!Array.isArray(privileges)) {
+			return false;
+		}
+		return privileges.some((p) => DATA_DOWNLOAD_PRIVILEGES.includes(p));
 	}
 
 	/**

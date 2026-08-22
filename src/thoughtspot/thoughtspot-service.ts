@@ -22,6 +22,8 @@ import {
 import { WithSpan, getActiveSpan } from "../metrics/tracing/tracing-utils";
 import { processSendAgentConversationMessageStreamingResponse } from "../streaming-utils";
 import type {
+	GetObjectDataParams,
+	GetObjectDataResult,
 	SearchObjectsParams,
 	SearchObjectsResponse,
 } from "./thoughtspot-client";
@@ -777,6 +779,27 @@ export class ThoughtSpotService {
 		);
 
 		span?.setAttribute("results_count", result.results.length);
+		return result;
+	}
+
+	/**
+	 * Fetch the full data of a saved Answer or Liveboard by its GUID, shaped to
+	 * its object type.
+	 */
+	@WithSpan("get-object-data")
+	async getObjectData(
+		params: GetObjectDataParams,
+	): Promise<GetObjectDataResult> {
+		const span = getActiveSpan();
+		span?.setAttribute("object_id", params.objectId);
+
+		const result = await this.observeUpstreamCall(
+			UPSTREAM_OPERATION_NAMES.getObjectData,
+			() => (this.client as any).getObjectData(params),
+		);
+
+		span?.setAttribute("object_type", params.objectType);
+		span?.setAttribute("viz_count", result.data.length);
 		return result;
 	}
 

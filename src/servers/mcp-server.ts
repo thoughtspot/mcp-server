@@ -31,6 +31,7 @@ import {
 	CreateLiveboardSchema,
 	GetAnswerSchema,
 	GetDataSourceSuggestionsSchema,
+	GetObjectDataInputSchema,
 	GetRelevantQuestionsSchema,
 	GetSessionUpdatesInputSchema,
 	SearchObjectsInputSchema,
@@ -417,6 +418,11 @@ export class MCPServer extends BaseMCPServer {
 			);
 		}
 
+		// Hide get_object_data if the user lacks the data-download privilege
+		if (!this.canDownloadData()) {
+			tools = tools.filter((tool) => tool.name !== ToolName.GetObjectData);
+		}
+
 		// Filter out orgs tools if feature is disabled
 		if (!this.areOrgToolsAvailable()) {
 			tools = tools.filter(
@@ -561,6 +567,10 @@ export class MCPServer extends BaseMCPServer {
 
 			case ToolName.SearchObjects: {
 				return this.callSearchObjects(request, recorder);
+			}
+
+			case ToolName.GetObjectData: {
+				return this.callGetObjectData(request, recorder);
 			}
 
 			case ToolName.CheckConnectivity: {
@@ -1139,6 +1149,44 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			{ success: true, active_org_id: org_id },
 			`Switched to org ${orgId}`,
 		);
+	}
+
+	@WithSpan("call-get-object-data")
+	async callGetObjectData(
+		request: z.infer<typeof CallToolRequestSchema>,
+		recorder: MetricsRecorder,
+	) {
+		// Enforce the gate even if a client calls the hidden tool directly.
+		if (!this.canDownloadData()) {
+			return this.createErrorResponse(
+				"You do not have permission to download data (requires the data-download privilege).",
+				"get_object_data forbidden",
+			);
+		}
+
+		const { object_id, object_type, visualization_ids, max_rows } =
+			GetObjectDataInputSchema.parse(request.params.arguments);
+
+		try {
+			const result = await this.getThoughtSpotService(recorder).getObjectData({
+				objectId: object_id,
+				objectType: object_type,
+				vizIds: visualization_ids,
+				maxRows: max_rows,
+			});
+
+			return this.createStructuredContentSuccessResponse(
+				result,
+				`Fetched data for ${object_id} (${result.data.length} result(s))`,
+			);
+		} catch (error) {
+			// Surface the upstream message (e.g. status 401/500) so the failure is
+			// actionable rather than a generic "check the object id".
+			return this.createErrorResponse(
+				`Failed to fetch object data: ${(error as Error).message}`,
+				"get_object_data failed",
+			);
+		}
 	}
 
 	private _sources: {
