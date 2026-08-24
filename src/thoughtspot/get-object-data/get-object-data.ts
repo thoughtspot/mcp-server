@@ -1,4 +1,5 @@
 import { buildHeaders, generateRequestId, postJson } from "../rest-utils";
+import { GET_OBJECT_DATA_SUPPORTED_TYPES } from "./get-object-data-constants";
 import type {
 	GetObjectDataParams,
 	GetObjectDataResult,
@@ -14,10 +15,7 @@ export const GET_OBJECT_DATA_DEFAULT_MAX_ROWS = 25;
 export const LIVEBOARD_RECORD_SIZE = 2_147_483_647;
 
 // Only Answers and Liveboards expose fetchable data.
-enum ObjectType {
-	Answer = "ANSWER",
-	Liveboard = "LIVEBOARD",
-}
+const [ANSWER_TYPE, LIVEBOARD_TYPE] = GET_OBJECT_DATA_SUPPORTED_TYPES;
 
 // FULL rows are self-describing ({ col: value }), robust when `column_names`
 // is absent; `mapContents` normalizes either shape to columns + positional rows.
@@ -115,9 +113,9 @@ export function addGetObjectData(
 			record_offset: 0,
 		};
 		let endpoint: string;
-		if (objectType === ObjectType.Answer) {
+		if (objectType === ANSWER_TYPE) {
 			endpoint = "/api/rest/2.0/metadata/answer/data";
-		} else if (objectType === ObjectType.Liveboard) {
+		} else if (objectType === LIVEBOARD_TYPE) {
 			endpoint = "/api/rest/2.0/metadata/liveboard/data";
 			// Omitting visualization_identifiers fetches every viz on the board.
 			if (vizIds?.length) {
@@ -132,7 +130,7 @@ export function addGetObjectData(
 		// Answers cap rows via record_size; Liveboards need the whole viz, capped
 		// client-side in mapContents.
 		const recordSize =
-			objectType === ObjectType.Liveboard ? LIVEBOARD_RECORD_SIZE : maxRows;
+			objectType === LIVEBOARD_TYPE ? LIVEBOARD_RECORD_SIZE : maxRows;
 		const data = await postJson(
 			`${instanceUrl}${endpoint}`,
 			headers,

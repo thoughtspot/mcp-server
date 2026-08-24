@@ -1183,7 +1183,7 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			// Surface the upstream message (e.g. status 401/500) so the failure is
 			// actionable rather than a generic "check the object id".
 			return this.createErrorResponse(
-				`Failed to fetch object data: ${(error as Error).message}`,
+				`Failed to fetch object data: ${error instanceof Error ? error.message : String(error)}`,
 				"get_object_data failed",
 			);
 		}

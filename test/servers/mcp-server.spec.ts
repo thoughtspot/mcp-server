@@ -305,10 +305,17 @@ describe("MCP Server", () => {
 		});
 
 		it("hides get_object_data (fails closed) when session info is unavailable", async () => {
-			await server.init();
-			// e.g. an unauthorized token where getSessionInfo threw.
-			(server as any).sessionInfo = undefined;
-			const { listTools } = connect(server);
+			// getSessionInfo fails at init AND the listTools ensureSessionInfo
+			// refetch, so sessionInfo never loads and the gate stays closed.
+			vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
+				getSessionInfo: vi.fn().mockRejectedValue(new Error("unauthorized")),
+				instanceUrl: "https://test.thoughtspot.cloud",
+			} as any);
+
+			const testServer = new MCPServer({ props: mockProps, env: {} as any });
+			await testServer.init();
+			expect((testServer as any).sessionInfo).toBeUndefined();
+			const { listTools } = connect(testServer);
 
 			const names = (await listTools()).tools?.map((t) => t.name) ?? [];
 			expect(names).not.toContain("get_object_data");

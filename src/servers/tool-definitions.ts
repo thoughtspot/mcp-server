@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { GET_OBJECT_DATA_SUPPORTED_TYPES } from "../thoughtspot/get-object-data/get-object-data-constants";
 
 export const PingSchema = z.object({});
 
@@ -220,7 +221,7 @@ export const GetObjectDataInputSchema = z.object({
 			"The GUID of the object to fetch data for, typically an `object_id` returned by a prior `search_objects` call. Supports saved Answers and Liveboards.",
 		),
 	object_type: z
-		.enum(["ANSWER", "LIVEBOARD"])
+		.enum(GET_OBJECT_DATA_SUPPORTED_TYPES)
 		.describe(
 			"The object's type. Required. Use the `type` from the prior `search_objects` result: `ANSWER` for an Answer; `LIVEBOARD` for a Liveboard or a LIVEBOARD_VIZ.",
 		),
