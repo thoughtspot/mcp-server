@@ -909,3 +909,67 @@ export const toolDefinitionsV3 = [
 		},
 	},
 ];
+
+// V3 — Spotter Model (agentic model creation). Includes all V2 tools plus the model tools.
+export const toolDefinitionsV3 = [
+	...toolDefinitionsV2,
+	{
+		name: ToolName.SendModelMessage,
+		description:
+			"Build a ThoughtSpot data model conversationally with the Lumos agent. This one tool runs the " +
+			"whole build — it CREATES the session on the first call and CONTINUES it after.\n" +
+			"- FIRST call: pass `connection_identifier` (the warehouse connection to build on — confirm it " +
+			"with the user first; never assume or reuse a previous model's connection) and a `message` " +
+			"describing the model (e.g. 'create a model for sales from the ORDERS and CUSTOMERS tables'). " +
+			"Omit model_session_id. The response returns a `model_session_id` — reuse it on every later call.\n" +
+			"- LATER calls: pass `model_session_id` and a `message` (a follow-up or correction), or " +
+			"`selected_option_ids` to answer a clarification.\n" +
+			"- CONTINUE a long turn: if a call returns is_done=false, call again with the same " +
+			"model_session_id and NO message to fetch more updates, until is_done=true. A build can take " +
+			"1–2 min; is_done=false with few updates just means it's still working, not stalled.\n" +
+			"React to the update types the builder returns:\n" +
+			"- `choice` — a clarifying question: present the options and answer via selected_option_ids.\n" +
+			"- `mrd` — a proposed plan (Model Requirements Document). This is a HARD STOP: show the plan to " +
+			"the user and WAIT for their explicit approval (or edits). NEVER auto-approve it or send a " +
+			"'build it'/'yes' message yourself — the user must approve before you send the build message. " +
+			"(If a build starts without any `mrd` — a backend config that skips the plan step — tell the " +
+			"user the plan step was skipped rather than treating it as approved.)\n" +
+			"- `todo` — the build's task tracker (e.g. Tables → Joins → Columns, each PENDING/IN_PROGRESS/" +
+			"COMPLETED). SHOW this to the user as a live progress checklist and update it as new `todo` " +
+			"updates arrive, so they can watch the build proceed.\n" +
+			"- `notification` — a short progress line (e.g. 'Adding joins to model'): surface each one to " +
+			"the user as it arrives.\n" +
+			"- `text` / `model_state` — results/progress: relay the meaningful parts.\n" +
+			"ADDING FORMULAS: before you instruct the builder to add formulas/measures, first tell the user " +
+			"the specific formulas you intend to add and get their confirmation — do not add formulas " +
+			"without the user signing off on them.\n" +
+			"The builder drives the conversation — don't invent your own questions. Relay its output in " +
+			"plain, non-technical terms and keep mechanics (is_done, generation numbers, IDs, polling) " +
+			"internal. Once the model is built and the user is happy, call finalize_model to save.",
+		inputSchema: z.toJSONSchema(SendModelMessageInputSchema),
+		outputSchema: z.toJSONSchema(SendModelMessageOutputSchema),
+		annotations: {
+			title: "Build Model",
+			readOnlyHint: false,
+			destructiveHint: false,
+			openWorldHint: false,
+		},
+	},
+	{
+		name: ToolName.FinalizeModel,
+		description:
+			"Save the model. Call first WITHOUT confirm to get a summary for review, then let the user " +
+			"decide: to make more changes, go back to send_model_message; to save, call again with " +
+			"confirm=true to persist and get the URL. confirm=true is the only step that saves. Don't " +
+			"finalize until the model is actually built — if the builder has only returned a plan (an " +
+			"mrd update) and nothing has been built, there is nothing to save.",
+		inputSchema: z.toJSONSchema(FinalizeModelInputSchema),
+		outputSchema: z.toJSONSchema(FinalizeModelOutputSchema),
+		annotations: {
+			title: "Save Model",
+			readOnlyHint: false,
+			destructiveHint: false,
+			openWorldHint: false,
+		},
+	},
+];
