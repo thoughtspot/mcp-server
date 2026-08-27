@@ -34,6 +34,7 @@ import {
 	GetObjectDataInputSchema,
 	GetRelevantQuestionsSchema,
 	GetSessionUpdatesInputSchema,
+	SEARCH_OBJECTS_GET_OBJECT_DATA_DIRECTIVE,
 	SearchObjectsInputSchema,
 	SendSessionMessageInputSchema,
 	SwitchOrgInputSchema,
@@ -418,9 +419,22 @@ export class MCPServer extends BaseMCPServer {
 			);
 		}
 
-		// Hide get_object_data if the user lacks the data-download privilege
+		// Hide get_object_data if the user lacks the data-download privilege, and
+		// drop search_objects' directive to call it (else it points at a hidden tool).
 		if (!this.canDownloadData()) {
-			tools = tools.filter((tool) => tool.name !== ToolName.GetObjectData);
+			tools = tools
+				.filter((tool) => tool.name !== ToolName.GetObjectData)
+				.map((tool) =>
+					tool.name === ToolName.SearchObjects
+						? {
+								...tool,
+								description: tool.description.replace(
+									`\n\n${SEARCH_OBJECTS_GET_OBJECT_DATA_DIRECTIVE}`,
+									"",
+								),
+							}
+						: tool,
+				);
 		}
 
 		// Filter out orgs tools if feature is disabled
@@ -1156,6 +1170,9 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		request: z.infer<typeof CallToolRequestSchema>,
 		recorder: MetricsRecorder,
 	) {
+		// Repair session info (see ensureSessionInfo) so the gate below is real,
+		// matching listTools.
+		await this.ensureSessionInfo();
 		// Enforce the gate even if a client calls the hidden tool directly.
 		if (!this.canDownloadData()) {
 			return this.createErrorResponse(
@@ -1180,7 +1197,12 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 				`Fetched data for ${object_id} (${result.data.length} result(s))`,
 			);
 		} catch (error) {
-			// Surface the upstream message (e.g. status 401/500) so the failure is
+			// Let a 401 propagate to the central reauth handler in callTool, which
+			// returns an explicit "reauthenticate" message.
+			if (this.apiErrorStatus(error) === 401) {
+				throw error;
+			}
+			// Surface other upstream messages (e.g. status 500) so the failure is
 			// actionable rather than a generic "check the object id".
 			return this.createErrorResponse(
 				`Failed to fetch object data: ${error instanceof Error ? error.message : String(error)}`,
