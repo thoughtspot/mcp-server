@@ -308,4 +308,90 @@ describe("StorageServiceClient", () => {
 			);
 		});
 	});
+
+	// -------------------------------------------------------------------------
+	// putSessionState
+	// -------------------------------------------------------------------------
+
+	describe("putSessionState", () => {
+		// Shaped like a Spotter Model session; the client is generic over the payload.
+		const state = { transactionId: "txn-1", generationNo: 3 };
+
+		it("sends POST to /storage/<id>/state with the state as the body", async () => {
+			await client.putSessionState(CONVERSATION_ID, state);
+
+			const req = lastRequest();
+			expect(req.url).toBe(`https://internal/storage/${CONVERSATION_ID}/state`);
+			expect(req.method).toBe("POST");
+			expect(await req.json()).toEqual(state);
+		});
+
+		it("URL-encodes the conversation ID", async () => {
+			await client.putSessionState("conv with spaces/and-slash", state);
+
+			expect(lastRequest().url).toBe(
+				"https://internal/storage/conv%20with%20spaces%2Fand-slash/state",
+			);
+		});
+
+		it("resolves without error on a 200 response", async () => {
+			await expect(
+				client.putSessionState(CONVERSATION_ID, state),
+			).resolves.toBeUndefined();
+		});
+
+		it("throws with the status and body on a failure response", async () => {
+			namespaceMock = makeNamespaceMock("boom", 500);
+			client = new StorageServiceClient(namespaceMock, TOKEN_HASH);
+
+			await expect(
+				client.putSessionState(CONVERSATION_ID, state),
+			).rejects.toThrow("Failed to put session state (500): boom");
+		});
+
+		it("routes to the per-user DO key", async () => {
+			await client.putSessionState(CONVERSATION_ID, state);
+
+			expect(namespaceMock.idFromName).toHaveBeenCalledWith(
+				`${TOKEN_HASH}:${CONVERSATION_ID}`,
+			);
+		});
+	});
+
+	// -------------------------------------------------------------------------
+	// getSessionState
+	// -------------------------------------------------------------------------
+
+	describe("getSessionState", () => {
+		it("sends GET to /storage/<id>/state and returns the parsed state", async () => {
+			const state = { transactionId: "txn-1", genNoWorkingSet: [2, 3] };
+			namespaceMock = makeNamespaceMock(state);
+			client = new StorageServiceClient(namespaceMock, TOKEN_HASH);
+
+			const result =
+				await client.getSessionState<typeof state>(CONVERSATION_ID);
+
+			expect(lastRequest().url).toBe(
+				`https://internal/storage/${CONVERSATION_ID}/state`,
+			);
+			expect(lastRequest().method).toBe("GET");
+			expect(result).toEqual(state);
+		});
+
+		it("returns null when no state has been stored", async () => {
+			namespaceMock = makeNamespaceMock(null);
+			client = new StorageServiceClient(namespaceMock, TOKEN_HASH);
+
+			expect(await client.getSessionState(CONVERSATION_ID)).toBeNull();
+		});
+
+		it("throws with the status and body on a failure response", async () => {
+			namespaceMock = makeNamespaceMock("nope", 500);
+			client = new StorageServiceClient(namespaceMock, TOKEN_HASH);
+
+			await expect(client.getSessionState(CONVERSATION_ID)).rejects.toThrow(
+				"Failed to get session state (500): nope",
+			);
+		});
+	});
 });

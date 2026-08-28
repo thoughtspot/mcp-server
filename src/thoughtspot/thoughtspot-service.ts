@@ -22,6 +22,13 @@ import {
 import { WithSpan, getActiveSpan } from "../metrics/tracing/tracing-utils";
 import { processSendAgentConversationMessageStreamingResponse } from "../streaming-utils";
 import type {
+	CreateModelSessionResult,
+	FetchWorksheetModelParams,
+	SaveModelParams,
+	SaveModelResult,
+	SendModelMessageParams,
+} from "./spotter-model/spotter-model-types";
+import type {
 	SearchObjectsParams,
 	SearchObjectsResponse,
 } from "./thoughtspot-client";
@@ -798,17 +805,14 @@ export class ThoughtSpotService {
 	}
 
 	// ── Spotter Model (Lumos) — thin wrappers over the client's /lumos handlers ──
+	// Types and request/response shapes live in ./spotter-model/spotter-model-types.
 
 	// Pass modelIdentifier to open an EXISTING model for editing; connectionIdentifier to build a
 	// new one. Exactly one is expected.
 	async createModelSession(
 		connectionIdentifier?: string,
 		modelIdentifier?: string,
-	): Promise<{
-		conversation_id: string;
-		transaction_id: string;
-		generation_no: number;
-	}> {
+	): Promise<CreateModelSessionResult> {
 		return (this.client as any).createModelSession({
 			connectionIdentifier,
 			modelIdentifier,
@@ -819,33 +823,17 @@ export class ThoughtSpotService {
 		return (this.client as any).mintSessionCookie();
 	}
 
-	async sendModelMessageStreaming(params: {
-		conversation_identifier: string;
-		transaction_id: string;
-		generation_no: number;
-		gen_no_working_set?: number[];
-		session_cookie?: string;
-		message: string;
-		choice?: unknown;
-	}): Promise<Response> {
+	async sendModelMessageStreaming(
+		params: SendModelMessageParams,
+	): Promise<Response> {
 		return (this.client as any).sendModelMessageStreaming(params);
 	}
 
-	async saveModel(params: {
-		transaction_id: string;
-		generation_no: number;
-		gen_no_working_set?: number[];
-		name?: string;
-		description?: string;
-	}): Promise<{ model_identifier: string; url?: string }> {
+	async saveModel(params: SaveModelParams): Promise<SaveModelResult> {
 		return (this.client as any).saveModel(params);
 	}
 
-	async fetchWorksheetModel(params: {
-		session_identifier: string;
-		generation_number: number;
-		gen_no_working_set?: number[];
-	}): Promise<any> {
+	async fetchWorksheetModel(params: FetchWorksheetModelParams): Promise<any> {
 		return (this.client as any).fetchWorksheetModel(params);
 	}
 }

@@ -1,8 +1,5 @@
 import type {
 	Message,
-	ModelSessionState,
-	ModelUpdate,
-	ModelUpdatesState,
 	RawMessage,
 	StreamingMessagesState,
 } from "../thoughtspot/types";
@@ -15,8 +12,8 @@ import type {
  *   POST  /storage/<storageId>/initialize —> initializeConversation
  *   POST  /storage/<storageId>/append     —> appendMessagesAndRestartTtl
  *   GET   /storage/<storageId>/messages   —> getNewMessagesAndUpdateBookmark
- *   POST  /storage/<storageId>/model-put  —> putModelSession
- *   GET   /storage/<storageId>/model-get  —> getModelSession
+ *   POST  /storage/<storageId>/state      —> putSessionState
+ *   GET   /storage/<storageId>/state      —> getSessionState
  *
  * The storageId is derived by taking a hash of the user's access token and combining it with the
  * conversationId, to ensure no users can access each other's conversations.
@@ -110,86 +107,39 @@ export class StorageServiceClient {
 		return response.json() as Promise<StreamingMessagesState>;
 	}
 
-	// Persist the full state of a Spotter model session, keyed by model_session_id (overwrites).
-	async putModelSession(
-		modelSessionId: string,
-		state: ModelSessionState,
-	): Promise<void> {
-		const response = await this.stubFor(modelSessionId).fetch(
-			this.url(modelSessionId, "model-put"),
+	/**
+	 * Persist a conversation's scalar state as a single blob (overwrites). Used by flows that must
+	 * carry state between tool calls — e.g. a Spotter Model session's transaction id and generation
+	 * working set. The message stream is stored separately and is unaffected.
+	 */
+	async putSessionState<T>(conversationId: string, state: T): Promise<void> {
+		const response = await this.stubFor(conversationId).fetch(
+			this.url(conversationId, "state"),
 			{ method: "POST", headers: this.headers(), body: JSON.stringify(state) },
 		);
 
 		if (!response.ok) {
 			const text = await response.text();
 			throw new Error(
-				`Failed to put model session (${response.status}): ${text}`,
+				`Failed to put session state (${response.status}): ${text}`,
 			);
 		}
 	}
 
-	// Retrieve a model session's state, or null if it does not exist / has expired.
-	async getModelSession(
-		modelSessionId: string,
-	): Promise<ModelSessionState | null> {
-		const response = await this.stubFor(modelSessionId).fetch(
-			this.url(modelSessionId, "model-get"),
+	// Retrieve a conversation's scalar state, or null if it does not exist / has expired.
+	async getSessionState<T>(conversationId: string): Promise<T | null> {
+		const response = await this.stubFor(conversationId).fetch(
+			this.url(conversationId, "state"),
 			{ method: "GET", headers: this.headers() },
 		);
 
 		if (!response.ok) {
 			const text = await response.text();
 			throw new Error(
-				`Failed to get model session (${response.status}): ${text}`,
+				`Failed to get session state (${response.status}): ${text}`,
 			);
 		}
 
-		return response.json() as Promise<ModelSessionState | null>;
-	}
-
-	// Append streamed model updates. resetDone clears the done flag for a new turn; isDone marks the
-	// current turn complete. Safe to call repeatedly as the stream is consumed.
-	async appendModelUpdates(
-		modelSessionId: string,
-		updates: ModelUpdate[],
-		opts: { isDone?: boolean; resetDone?: boolean } = {},
-	): Promise<void> {
-		const response = await this.stubFor(modelSessionId).fetch(
-			this.url(modelSessionId, "model-append"),
-			{
-				method: "POST",
-				headers: this.headers(),
-				body: JSON.stringify({
-					updates,
-					isDone: opts.isDone ?? false,
-					resetDone: opts.resetDone ?? false,
-				}),
-			},
-		);
-
-		if (!response.ok) {
-			const text = await response.text();
-			throw new Error(
-				`Failed to append model updates (${response.status}): ${text}`,
-			);
-		}
-	}
-
-	// Retrieve all model updates appended since the last call (advances a per-session read bookmark),
-	// plus whether the current turn is done. Polled after send_model_message.
-	async getNewModelUpdates(modelSessionId: string): Promise<ModelUpdatesState> {
-		const response = await this.stubFor(modelSessionId).fetch(
-			this.url(modelSessionId, "model-updates"),
-			{ method: "GET", headers: this.headers() },
-		);
-
-		if (!response.ok) {
-			const text = await response.text();
-			throw new Error(
-				`Failed to get model updates (${response.status}): ${text}`,
-			);
-		}
-
-		return response.json() as Promise<ModelUpdatesState>;
+		return response.json() as Promise<T | null>;
 	}
 }

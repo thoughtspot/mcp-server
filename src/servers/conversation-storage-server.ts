@@ -1,9 +1,6 @@
 import { isBoolean } from "lodash";
 import type {
 	Message,
-	ModelSessionState,
-	ModelUpdate,
-	ModelUpdatesState,
 	RawMessage,
 	StreamingMessagesState,
 } from "../thoughtspot/types";
@@ -16,14 +13,10 @@ const IS_DONE_KEY = "is-done";
 const WRITE_BOOKMARK_KEY = "write-bookmark";
 const READ_BOOKMARK_KEY = "read-bookmark";
 
-// Spotter model-session state: single blob in a separate DO instance (routed by model_session_id).
-const MODEL_SESSION_KEY = "model-session";
-
-// Streamed model updates: own write/read bookmarks + per-index keys; consumer appends while reader polls (each DO op is atomic).
-const MODEL_UPDATE_KEY_PREFIX = "model-update-";
-const MODEL_WRITE_BOOKMARK_KEY = "model-write-bookmark";
-const MODEL_READ_BOOKMARK_KEY = "model-read-bookmark";
-const MODEL_UPDATES_DONE_KEY = "model-updates-done";
+// Opaque per-conversation scalar state, stored as a single blob alongside the message stream. Used
+// by flows that must carry state between calls (the Spotter Model session's transaction id and
+// generation working set); the message stream itself is unaffected.
+const SESSION_STATE_KEY = "session-state";
 
 /**
  * A Durable Object that stores streaming conversation messages and exposes them over HTTP.
@@ -36,6 +29,8 @@ const MODEL_UPDATES_DONE_KEY = "model-updates-done";
  *   POST  /storage/<conversation-id>/initialize —> initializeConversation
  *   POST  /storage/<conversation-id>/append     —> appendMessagesAndRestartTtl
  *   GET   /storage/<conversation-id>/messages   —> getNewMessagesAndUpdateBookmark
+ *   POST  /storage/<conversation-id>/state      —> putSessionState
+ *   GET   /storage/<conversation-id>/state      —> getSessionState
  */
 export class ConversationStorageServerSQLite {
 	private conversationId = "";
@@ -72,33 +67,14 @@ export class ConversationStorageServerSQLite {
 					return Response.json(state);
 				}
 
-				case "POST /model-put": {
-					const body = (await request.json()) as ModelSessionState;
-					await this.putModelSession(body);
+				case "POST /state": {
+					const body = await request.json();
+					await this.putSessionState(body);
 					return Response.json({ ok: true });
 				}
 
-				case "GET /model-get": {
-					const state = await this.getModelSession();
-					return Response.json(state);
-				}
-
-				case "POST /model-append": {
-					const body = (await request.json()) as {
-						updates?: ModelUpdate[];
-						isDone?: boolean;
-						resetDone?: boolean;
-					};
-					await this.appendModelUpdates(
-						body.updates ?? [],
-						body.isDone ?? false,
-						body.resetDone ?? false,
-					);
-					return Response.json({ ok: true });
-				}
-
-				case "GET /model-updates": {
-					const state = await this.getNewModelUpdatesAndAdvanceBookmark();
+				case "GET /state": {
+					const state = await this.getSessionState();
 					return Response.json(state);
 				}
 
@@ -184,26 +160,30 @@ export class ConversationStorageServerSQLite {
 			throw new Error(`Conversation ${this.conversationId} not found`);
 		}
 
-		const keys = [];
-		for (let i = readBookmark; i < writeBookmark; i++) {
-			keys.push(MESSAGE_KEY_PREFIX + i);
-		}
-
 		const newMessages: (Message | RawMessage)[] = [];
-		const messagesMap = await this.getInBatches<Message | RawMessage>(keys);
-		for (let i = readBookmark; i < writeBookmark; i++) {
-			const message = messagesMap.get(MESSAGE_KEY_PREFIX + i);
-			if (!message) {
-				console.warn(
-					`Expected message at index ${i} for conversation ${this.conversationId} not found`,
-					{ readBookmark, writeBookmark },
-				);
-				continue;
+		// Idle poll (nothing new written): skip the fetch and the bookmark write entirely, so each
+		// long-poll iteration costs a single read and adds no DO write contention.
+		if (writeBookmark > readBookmark) {
+			const keys = [];
+			for (let i = readBookmark; i < writeBookmark; i++) {
+				keys.push(MESSAGE_KEY_PREFIX + i);
 			}
-			newMessages.push(message);
-		}
 
-		await this.state.storage.put<number>(READ_BOOKMARK_KEY, writeBookmark);
+			const messagesMap = await this.getInBatches<Message | RawMessage>(keys);
+			for (let i = readBookmark; i < writeBookmark; i++) {
+				const message = messagesMap.get(MESSAGE_KEY_PREFIX + i);
+				if (!message) {
+					console.warn(
+						`Expected message at index ${i} for conversation ${this.conversationId} not found`,
+						{ readBookmark, writeBookmark },
+					);
+					continue;
+				}
+				newMessages.push(message);
+			}
+
+			await this.state.storage.put<number>(READ_BOOKMARK_KEY, writeBookmark);
+		}
 
 		return {
 			messages: newMessages,
@@ -211,79 +191,17 @@ export class ConversationStorageServerSQLite {
 		};
 	}
 
-	// Store the full model-session state as a single blob and restart the TTL.
-	private async putModelSession(state: ModelSessionState): Promise<void> {
-		await this.state.storage.put<ModelSessionState>(MODEL_SESSION_KEY, state);
+	// Store this conversation's scalar state as a single opaque blob and restart the TTL. The DO does
+	// not interpret the payload; the caller owns its shape.
+	private async putSessionState(state: unknown): Promise<void> {
+		await this.state.storage.put<unknown>(SESSION_STATE_KEY, state);
 		await this.restartTtl();
 	}
 
-	// Retrieve the model-session state, or null if never created / expired.
-	private async getModelSession(): Promise<ModelSessionState | null> {
-		const state =
-			await this.state.storage.get<ModelSessionState>(MODEL_SESSION_KEY);
+	// Retrieve the conversation's scalar state, or null if never stored / expired.
+	private async getSessionState(): Promise<unknown | null> {
+		const state = await this.state.storage.get<unknown>(SESSION_STATE_KEY);
 		return state ?? null;
-	}
-
-	// Append updates at MODEL_WRITE_BOOKMARK, advancing it. resetDone/isDone go in the same atomic
-	// batch as their updates, so a reader never sees the done flag out of order.
-	private async appendModelUpdates(
-		updates: ModelUpdate[],
-		isDone: boolean,
-		resetDone: boolean,
-	): Promise<void> {
-		let idx =
-			(await this.state.storage.get<number>(MODEL_WRITE_BOOKMARK_KEY)) ?? 0;
-		const entriesToStore = {} as Record<string, ModelUpdate | number | boolean>;
-		if (resetDone) {
-			entriesToStore[MODEL_UPDATES_DONE_KEY] = false;
-		}
-		for (const update of updates) {
-			entriesToStore[`${MODEL_UPDATE_KEY_PREFIX}${idx}`] = update;
-			idx++;
-		}
-		entriesToStore[MODEL_WRITE_BOOKMARK_KEY] = idx;
-		if (isDone) {
-			entriesToStore[MODEL_UPDATES_DONE_KEY] = true;
-		}
-
-		await this.putInBatches(entriesToStore);
-		await this.restartTtl();
-	}
-
-	/*
-	 * Return all model updates appended since the last call, advancing MODEL_READ_BOOKMARK. The read
-	 * is atomic within the DO, so it is safe to poll while the stream consumer is still appending.
-	 */
-	private async getNewModelUpdatesAndAdvanceBookmark(): Promise<ModelUpdatesState> {
-		const stored = await this.state.storage.get<boolean | number>([
-			MODEL_UPDATES_DONE_KEY,
-			MODEL_READ_BOOKMARK_KEY,
-			MODEL_WRITE_BOOKMARK_KEY,
-		]);
-		const isDone = (stored.get(MODEL_UPDATES_DONE_KEY) as boolean) ?? false;
-		const readBookmark = (stored.get(MODEL_READ_BOOKMARK_KEY) as number) ?? 0;
-		const writeBookmark = (stored.get(MODEL_WRITE_BOOKMARK_KEY) as number) ?? 0;
-
-		const updates: ModelUpdate[] = [];
-		// Idle poll (no new updates): skip the fetch and the bookmark write entirely, so it costs a
-		// single read and adds no DO write contention.
-		if (writeBookmark > readBookmark) {
-			const keys = [];
-			for (let i = readBookmark; i < writeBookmark; i++) {
-				keys.push(MODEL_UPDATE_KEY_PREFIX + i);
-			}
-			const updatesMap = await this.getInBatches<ModelUpdate>(keys);
-			for (const key of keys) {
-				const update = updatesMap.get(key);
-				if (update) updates.push(update);
-			}
-			await this.state.storage.put<number>(
-				MODEL_READ_BOOKMARK_KEY,
-				writeBookmark,
-			);
-		}
-
-		return { updates, isDone };
 	}
 
 	/*

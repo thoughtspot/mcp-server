@@ -535,4 +535,108 @@ describe("ConversationStorageServerSQLite", () => {
 			expect(res.status).toBe(200);
 		});
 	});
+
+	// -------------------------------------------------------------------------
+	// Session state (opaque per-conversation blob)
+	// -------------------------------------------------------------------------
+
+	describe("session state", () => {
+		// Shaped like a Spotter Model session, but the DO treats it as opaque JSON.
+		const state = {
+			transactionId: "txn-1",
+			generationNo: 3,
+			genNoWorkingSet: [2, 3],
+		};
+
+		it("returns null before anything is stored", async () => {
+			const res = await server.fetch(makeRequest("GET", "state"));
+
+			expect(res.status).toBe(200);
+			expect(await res.json()).toBeNull();
+		});
+
+		it("stores and returns the blob unchanged", async () => {
+			const put = await server.fetch(makeRequest("POST", "state", state));
+			expect(put.status).toBe(200);
+			expect(await put.json()).toEqual({ ok: true });
+
+			const res = await server.fetch(makeRequest("GET", "state"));
+			expect(await res.json()).toEqual(state);
+		});
+
+		it("overwrites on a second put", async () => {
+			await server.fetch(makeRequest("POST", "state", state));
+			await server.fetch(
+				makeRequest("POST", "state", { ...state, generationNo: 4 }),
+			);
+
+			const res = await server.fetch(makeRequest("GET", "state"));
+			expect((await res.json()) as any).toMatchObject({ generationNo: 4 });
+		});
+
+		it("restarts the TTL on write", async () => {
+			await server.fetch(makeRequest("POST", "state", state));
+
+			expect(mock.storage.setAlarm).toHaveBeenCalled();
+			expect(mock.alarm).not.toBeNull();
+		});
+
+		it("is independent of the message stream", async () => {
+			await server.fetch(makeRequest("POST", "initialize"));
+			await server.fetch(makeRequest("POST", "state", state));
+			await server.fetch(
+				makeRequest("POST", "append", { messages: [textMessage] }),
+			);
+
+			// Both live in the same DO instance without clobbering each other.
+			const stateRes = await server.fetch(makeRequest("GET", "state"));
+			expect(await stateRes.json()).toEqual(state);
+
+			const messagesRes = await server.fetch(makeRequest("GET", "messages"));
+			const body = (await messagesRes.json()) as StreamingMessagesState;
+			expect(body.messages).toEqual([textMessage]);
+		});
+
+		it("survives the TTL alarm only until it fires", async () => {
+			await server.fetch(makeRequest("POST", "state", state));
+			await server.alarm();
+
+			const res = await server.fetch(makeRequest("GET", "state"));
+			expect(await res.json()).toBeNull();
+		});
+	});
+
+	// -------------------------------------------------------------------------
+	// Idle-poll optimization
+	// -------------------------------------------------------------------------
+
+	describe("GET /messages with nothing new", () => {
+		it("does not write the read bookmark on an idle poll", async () => {
+			await server.fetch(makeRequest("POST", "initialize"));
+			await server.fetch(
+				makeRequest("POST", "append", { messages: [textMessage] }),
+			);
+			// First read drains the message and advances the bookmark.
+			await server.fetch(makeRequest("GET", "messages"));
+
+			const writesBefore = mock.storage.put.mock.calls.length;
+			const res = await server.fetch(makeRequest("GET", "messages"));
+
+			// A long poll runs this many times per call, so an idle read must cost no writes.
+			expect(mock.storage.put.mock.calls.length).toBe(writesBefore);
+			const body = (await res.json()) as StreamingMessagesState;
+			expect(body.messages).toEqual([]);
+		});
+
+		it("still reports the done flag while idle", async () => {
+			await server.fetch(makeRequest("POST", "initialize"));
+			await server.fetch(
+				makeRequest("POST", "append", { messages: [], isDone: true }),
+			);
+
+			const res = await server.fetch(makeRequest("GET", "messages"));
+			const body = (await res.json()) as StreamingMessagesState;
+			expect(body).toEqual({ messages: [], isDone: true });
+		});
+	});
 });
