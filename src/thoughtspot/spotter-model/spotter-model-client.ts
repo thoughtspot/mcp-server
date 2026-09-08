@@ -135,10 +135,22 @@ function addCreateModelSession(
 		}
 		// Tolerate either snake_case or camelCase in the response.
 		const data = (await response.json()) as any;
+		const conversationId = data.conversation_id ?? data.conversationId;
+		const transactionId = data.transaction_id ?? data.transactionId;
+		const generationNo = data.generation_no ?? data.generationNo;
+		// A 200 carrying an unexpected shape has to fail HERE. Downstream, a missing conversation id
+		// becomes the tool's required model_session_id (breaking its output schema) and routes session
+		// storage to a Durable Object keyed "undefined"; a missing generation becomes NaN and corrupts
+		// the generation working set that the save depends on.
+		if (!conversationId || !transactionId || generationNo == null) {
+			throw new Error(
+				`createModelSession returned an unexpected response shape: ${JSON.stringify(data)}`,
+			);
+		}
 		return {
-			conversation_id: data.conversation_id ?? data.conversationId,
-			transaction_id: data.transaction_id ?? data.transactionId,
-			generation_no: data.generation_no ?? data.generationNo,
+			conversation_id: conversationId,
+			transaction_id: transactionId,
+			generation_no: generationNo,
 		};
 	};
 }

@@ -101,9 +101,12 @@ export async function consumeModelStream({
 	const flush = async (isDone = false): Promise<void> => {
 		// Disjoint keys on the same DO, so fire both writes concurrently rather than sequentially.
 		const writes: Promise<unknown>[] = [];
+		// Keep scalarDirty set until the write RESOLVES, so a failed putSession stays pending and the
+		// next flush (including the error path's final one) retries it. Clearing it up front loses the
+		// generation advance and its genNoWorkingSet entry, which then under-pins the save.
+		const sessionWriteScheduled = scalarDirty;
 		if (scalarDirty) {
 			writes.push(sink.putSession(session));
-			scalarDirty = false;
 		}
 		if (pending.length > 0 || isDone) {
 			const batch = pending.splice(0, pending.length);
@@ -111,6 +114,9 @@ export async function consumeModelStream({
 		}
 		if (writes.length > 0) {
 			await Promise.all(writes);
+		}
+		if (sessionWriteScheduled) {
+			scalarDirty = false;
 		}
 	};
 
@@ -150,7 +156,12 @@ export async function consumeModelStream({
 				if (metaChoice.choice && typeof metaChoice.choice === "object") {
 					session.pendingChoice = metaChoice.choice;
 				}
-				advanceGeneration(session, metaChoice.generationNo);
+				// The sibling META_MODEL_STATE carries this as snake_case generation_no on the wire, so
+				// accept either casing here rather than depending on which one this event uses.
+				advanceGeneration(
+					session,
+					metaChoice.generation_no ?? metaChoice.generationNo,
+				);
 				scalarDirty = true;
 				pending.push({ type: "choice", choice: metaChoice });
 				return true;

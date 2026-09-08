@@ -1349,11 +1349,6 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			);
 		}
 
-		// The pending clarification is consumed by answering it; the stream re-emits META_CHOICE if
-		// another is needed.
-		session.pendingChoice = null;
-		await storageService.putSessionState(model_session_id, session);
-
 		// Open the upstream stream synchronously (so connection/auth failures surface in this call),
 		// then consume it in the BACKGROUND while get_model_updates long-polls the store — the same
 		// fire-and-forget split the V2 analytical-session tools use.
@@ -1371,12 +1366,22 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 				choice,
 			});
 		} catch (error) {
-			// Mark the turn done so a poller doesn't wait forever, then report the failure.
+			// Mark the turn done so a poller doesn't wait forever, then report the failure. The pending
+			// clarification is deliberately left in place: the send never landed, so a retry with the
+			// same selected_option_ids must still find the choice to echo back.
 			await storageService.appendMessages(model_session_id, [], true);
 			return this.createErrorResponse(
 				"Encountered an error while updating the model.",
 				`Error sending model message: ${(error as Error).message}`,
 			);
+		}
+
+		// The pending clarification is consumed only once the send has landed; the stream re-emits
+		// META_CHOICE if another is needed. Cleared after the send rather than before it, so a failed
+		// send leaves the clarification intact for a retry.
+		if (session.pendingChoice) {
+			session.pendingChoice = null;
+			await storageService.putSessionState(model_session_id, session);
 		}
 
 		// consumeModelStream is self-contained: it catches its own errors and always marks the
