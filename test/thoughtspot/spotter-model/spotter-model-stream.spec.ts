@@ -103,6 +103,24 @@ describe("looksLikeMrd", () => {
 		);
 	});
 
+	it("ignores the section words in ordinary prose", () => {
+		// Two bare words used to be enough, so a non-building turn that merely talked about the data
+		// was tagged as a plan and stopped for an approval the user never needed to give.
+		expect(looksLikeMrd("The goal is to track sales metrics for you")).toBe(
+			false,
+		);
+		expect(looksLikeMrd("I can add dimensions and metrics to this model")).toBe(
+			false,
+		);
+	});
+
+	it("still matches the section words when they are headings", () => {
+		expect(looksLikeMrd("Metrics: revenue\nDimensions: city")).toBe(true);
+		expect(looksLikeMrd("**Goal:** grow revenue\n**Metrics**: bookings")).toBe(
+			true,
+		);
+	});
+
 	it("matches a realistic plan", () => {
 		const plan =
 			"**Model Requirements**\nGoal: analyse occupancy\nKey Entities: listings\nMetrics: revenue\nDimensions: city";
@@ -246,6 +264,28 @@ describe("consumeModelStream", () => {
 		expect(mrd?.text).toBe("**Goal**: analyse revenue<br>Key Entities: orders");
 		// A plan is not a built model, so no plain text update duplicates it.
 		expect(updates.some((u) => u.type === "text")).toBe(false);
+	});
+
+	it("does not tag prose mentioning the section words as mrd", async () => {
+		const { sink, updates } = makeSink();
+		await consumeModelStream({
+			response: sseResponse([
+				event("MESSAGE_DELTA", {
+					message_delta: {
+						content:
+							"The goal is to track sales metrics, so which tables should I use?",
+					},
+				}),
+				event("MESSAGE_END", { message_end: { status: "completed" } }),
+			]),
+			modelSessionId: "session-1",
+			// Generation does NOT advance, so the structural gate alone would not save us here.
+			session: newSession(),
+			sink,
+		});
+
+		expect(updates.some((u) => u.type === "mrd")).toBe(false);
+		expect(updates.some((u) => u.type === "text")).toBe(true);
 	});
 
 	it("does not tag MRD-looking text on a turn that advanced the generation", async () => {

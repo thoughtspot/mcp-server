@@ -25,7 +25,12 @@ export const MRD_MARKERS = [
 	/model requirements/i,
 	/key entities/i,
 	/key analyses/i,
-	/\bmetrics\b/i,
-	/\bdimensions\b/i,
-	/\bgoal\b/i,
+	// Colon-anchored so these single words only match as section HEADINGS ("Goal:",
+	// "**Metrics**:") and never in running prose — "the goal is to track sales metrics" hits two
+	// bare words, and looksLikeMrd needs only two to declare a plan awaiting approval. Matches the
+	// shape extractMrdPlan already uses for its "Goal:" heading. Deliberately NOT anchored to a
+	// line start: the plan arrives with <br> separators, so ^ in multiline mode may never match.
+	/\bmetrics\b\s*\*{0,2}\s*:/i,
+	/\bdimensions\b\s*\*{0,2}\s*:/i,
+	/\bgoal\b\s*\*{0,2}\s*:/i,
 ];
