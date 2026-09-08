@@ -25,6 +25,12 @@ export interface ModelSessionState {
 	// The builder does not send a choice_id, so to answer we echo this object back upstream with
 	// each option's is_selected flag set per the user's selection. Null when nothing is pending.
 	pendingChoice?: Record<string, unknown> | null;
+	// True when the session was opened on an existing model (model_identifier) rather than on a
+	// connection. finalize_model needs it to require a name for a NEW model: saveModel omits the
+	// name/description request when no name is given, which preserves an existing model's name on an
+	// edit-save but would persist a brand-new worksheet unnamed. Optional because a session stored
+	// before this field existed has no value, and such a session must not be refused a save.
+	isEdit?: boolean;
 }
 
 // A single normalized streamed update (e.g. { type: "text", text }, { type: "choice", ... }).

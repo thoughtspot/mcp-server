@@ -242,16 +242,21 @@ describe("Spotter Model tools + real storage integration", () => {
 				generationNo: 1,
 				genNoWorkingSet: [],
 				sessionCookie: "JSESSIONID=abc",
+				// finalize_model reads this to decide whether a name is required.
+				isEdit: false,
 			});
 		});
 
 		it("opens an existing model for editing", async () => {
-			await createSession({ model_identifier: "model-guid" });
+			const sessionId = await createSession({ model_identifier: "model-guid" });
 
 			expect(upstream.createModelSession).toHaveBeenCalledWith(
 				undefined,
 				"model-guid",
 			);
+
+			const state = await storage.getSessionState<ModelSessionState>(sessionId);
+			expect(state).toMatchObject({ isEdit: true });
 		});
 
 		it("rejects a call with neither a connection nor a model", async () => {
@@ -702,6 +707,66 @@ describe("Spotter Model tools + real storage integration", () => {
 			expect((result.content as any[])[0].text).toContain(
 				"error while saving the model",
 			);
+		});
+
+		it("rejects a confirmed save of a new model with no name", async () => {
+			const sessionId = await createSession();
+
+			const result = await server.callFinalizeModel(
+				makeRequest("finalize_model", {
+					model_session_id: sessionId,
+					confirm: true,
+				}),
+				NOOP_METRICS_RECORDER,
+			);
+
+			expect(result.isError).toBe(true);
+			expect((result.content as any[])[0].text).toContain(
+				"A name is required to save a new model",
+			);
+			expect(upstream.saveModel).not.toHaveBeenCalled();
+		});
+
+		it("saves an edit with no name, keeping the model's current name", async () => {
+			const sessionId = await createSession({ model_identifier: "model-guid" });
+
+			const result = await server.callFinalizeModel(
+				makeRequest("finalize_model", {
+					model_session_id: sessionId,
+					confirm: true,
+				}),
+				NOOP_METRICS_RECORDER,
+			);
+
+			expect(result.isError).toBeUndefined();
+			expect((result.structuredContent as any).saved).toBe(true);
+			// No name reaches saveModel, which is what preserves the existing one.
+			expect(upstream.saveModel.mock.calls[0][0].name).toBeUndefined();
+		});
+
+		it("saves a session stored before isEdit existed instead of refusing it", async () => {
+			const sessionId = await createSession();
+			const state = (await storage.getSessionState<ModelSessionState>(
+				sessionId,
+			)) as ModelSessionState;
+			// State as an earlier deploy would have written it: no isEdit at all.
+			await storage.putSessionState(sessionId, {
+				transactionId: state.transactionId,
+				generationNo: state.generationNo,
+				genNoWorkingSet: state.genNoWorkingSet,
+				sessionCookie: state.sessionCookie,
+			});
+
+			const result = await server.callFinalizeModel(
+				makeRequest("finalize_model", {
+					model_session_id: sessionId,
+					confirm: true,
+				}),
+				NOOP_METRICS_RECORDER,
+			);
+
+			expect(result.isError).toBeUndefined();
+			expect((result.structuredContent as any).saved).toBe(true);
 		});
 
 		it("rejects an unknown model_session_id", async () => {

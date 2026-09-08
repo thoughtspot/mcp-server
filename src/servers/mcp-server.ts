@@ -1273,6 +1273,8 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 				generationNo: Number(resp.generation_no),
 				genNoWorkingSet: [],
 				sessionCookie: sessionCookie ?? undefined,
+				// Recorded so finalize_model can require a name for a new model but not for an edit.
+				isEdit: Boolean(model_identifier),
 			};
 			sessionId = resp.conversation_id;
 			await storageService.putSessionState(sessionId, session);
@@ -1556,6 +1558,18 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			return this.createStructuredContentSuccessResponse(
 				{ summary, saved: false },
 				"Model summary for review",
+			);
+		}
+
+		// saveModel omits the name/description request when no name is given. That is what preserves
+		// an existing model's name on an edit-save, but it would leave a NEW model persisted unnamed.
+		// Only block when we positively know the session is new: a session stored before isEdit
+		// existed reports undefined, and refusing to save it would be worse than an unnamed model.
+		if (session.isEdit === false && !name) {
+			return this.createErrorResponse(
+				"A name is required to save a new model. Ask the user what to call it, then call " +
+					"finalize_model again with confirm=true and that name.",
+				"finalize_model called with confirm=true and no name for a new model",
 			);
 		}
 
