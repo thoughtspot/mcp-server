@@ -409,7 +409,7 @@ export abstract class BaseMCPServer extends Server {
 		};
 	}
 
-	private getMetricsWaitUntil() {
+	protected getMetricsWaitUntil() {
 		return this.ctx.ctx?.waitUntil?.bind(this.ctx.ctx);
 	}
 

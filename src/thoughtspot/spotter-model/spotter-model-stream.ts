@@ -227,8 +227,9 @@ export async function consumeModelStream({
 		}
 	};
 
+	let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
 	try {
-		const reader = response.body?.getReader();
+		reader = response.body?.getReader();
 		if (!reader) {
 			throw new Error("Failed to get reader from model stream response");
 		}
@@ -269,5 +270,9 @@ export async function consumeModelStream({
 				(flushError as Error).message,
 			);
 		}
+	} finally {
+		// MESSAGE_END breaks the read loop while the upstream connection may still be open, so
+		// release it explicitly instead of leaving one SSE body dangling per turn.
+		await reader?.cancel().catch(() => {});
 	}
 }

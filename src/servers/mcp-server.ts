@@ -1369,7 +1369,15 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			// Mark the turn done so a poller doesn't wait forever, then report the failure. The pending
 			// clarification is deliberately left in place: the send never landed, so a retry with the
 			// same selected_option_ids must still find the choice to echo back.
-			await storageService.appendMessages(model_session_id, [], true);
+			// Guarded: if this DO write also fails, its error must not replace the upstream one.
+			try {
+				await storageService.appendMessages(model_session_id, [], true);
+			} catch (appendError) {
+				console.error(
+					`Failed to mark model turn done after a send failure for session ${model_session_id}:`,
+					(appendError as Error).message,
+				);
+			}
 			return this.createErrorResponse(
 				"Encountered an error while updating the model.",
 				`Error sending model message: ${(error as Error).message}`,
@@ -1386,7 +1394,7 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 
 		// consumeModelStream is self-contained: it catches its own errors and always marks the
 		// turn done, so the floating promise never rejects and a long-poller never hangs forever.
-		void consumeModelStream({
+		const streamPromise = consumeModelStream({
 			response,
 			modelSessionId: model_session_id,
 			session,
@@ -1397,6 +1405,25 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 				(error as Error).message,
 			);
 		});
+
+		// A 1-2 min build far outlives this tool response, so the runtime has to be told to keep the
+		// invocation alive - the same reason the V2 analytical-session stream is handed to waitUntil.
+		// Without it the consumer can be killed mid-build: the turn never reaches is_done and
+		// get_model_updates long-polls its full window forever. Tests and non-Worker runtimes expose
+		// no waitUntil, so fall back to leaving the promise floating there.
+		const waitUntil = this.getMetricsWaitUntil();
+		if (waitUntil) {
+			try {
+				waitUntil(streamPromise);
+			} catch (error) {
+				console.error(
+					"Failed to schedule background model stream processing",
+					error,
+				);
+			}
+		} else {
+			void streamPromise;
+		}
 
 		return this.createStructuredContentSuccessResponse(
 			{ success: true },
