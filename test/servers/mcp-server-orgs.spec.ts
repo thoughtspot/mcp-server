@@ -639,6 +639,21 @@ describe("MCP Server org tools", () => {
 			expect(rec.orgToken).toBe("org-scoped-token");
 		});
 
+		it("clears cached session info on switch so gates re-derive under the new org", async () => {
+			const { server } = makeServer({
+				authMode: "oauth",
+				session: { orgsEnabled: true, currentOrgId: "0" },
+			});
+			await server.init();
+			expect((server as any).sessionInfo).toBeTruthy();
+
+			await connect(server).callTool("switch_org", { org_id: 101 });
+
+			// Privileges are per-org; sessionInfo must be dropped so the next gated
+			// read (canDownloadData) refetches under the org token.
+			expect((server as any).sessionInfo).toBeUndefined();
+		});
+
 		it("notifies the client to re-list resources on a successful switch (org-specific datasources)", async () => {
 			const { server } = makeServer({
 				authMode: "oauth",

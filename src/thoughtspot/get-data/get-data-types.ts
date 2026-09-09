@@ -1,6 +1,6 @@
-// Interfaces for the `get_object_data` tool: full data of an Answer/Liveboard GUID.
+// Interfaces for the `get_data` tool: full data of an Answer/Liveboard GUID.
 
-export interface GetObjectDataParams {
+export interface GetDataParams {
 	// GUID of an Answer or Liveboard, typically from `search_objects`.
 	objectId: string;
 	// Required type ("ANSWER"/"LIVEBOARD") from search_objects; picks the endpoint.
@@ -12,7 +12,7 @@ export interface GetObjectDataParams {
 }
 
 // One tabular result: one for an Answer, one per Liveboard visualization.
-export interface GetObjectDataViz {
+export interface GetDataViz {
 	// Viz GUID; undefined for a standalone Answer.
 	viz_id?: string;
 	viz_name?: string;
@@ -25,7 +25,7 @@ export interface GetObjectDataViz {
 	sampling_ratio?: number;
 }
 
-export interface GetObjectDataResult {
+export interface GetDataResult {
 	// One entry for an Answer; one per visualization for a Liveboard.
-	data: GetObjectDataViz[];
+	data: GetDataViz[];
 }

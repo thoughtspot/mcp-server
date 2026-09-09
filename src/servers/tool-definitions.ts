@@ -1,11 +1,11 @@
 import { z } from "zod";
-import { GET_OBJECT_DATA_SUPPORTED_TYPES } from "../thoughtspot/get-object-data/get-object-data-constants";
+import { GET_DATA_SUPPORTED_TYPES } from "../thoughtspot/get-data/get-data-constants";
 
-// search_objects' directive to ground explanations in get_object_data. Exported
-// so listTools can strip it when get_object_data is gated out (no download
+// search_objects' directive to ground explanations in get_data. Exported
+// so listTools can strip it when get_data is gated out (no download
 // privilege) — otherwise search_objects would point at a hidden tool.
-export const SEARCH_OBJECTS_GET_OBJECT_DATA_DIRECTIVE =
-	"Explaining an object is best grounded in its DATA, not this metadata: the fields here (title, description, `query` tokens, tags) describe an object, not its contents. When the user asks to explain, describe, summarize, analyze, interpret, or say what a returned object contains, shows, or means, you should call `get_object_data` for that object and base your answer on the rows it returns, rather than characterizing it from this response alone. `get_object_data`'s own schema documents how to pass the object. (Worksheets have no saved result to fetch.) Note that `description` and `query` tokens are authoring metadata — they can be stale and are often copied verbatim across sibling vizzes, so two objects can share a byte-identical description while their data differs, which makes them unreliable for telling objects apart or explaining them.";
+export const SEARCH_OBJECTS_GET_DATA_DIRECTIVE =
+	"Explaining an object is best grounded in its DATA, not this metadata: the fields here (title, description, `query` tokens, tags) describe an object, not its contents. When the user asks to explain, describe, summarize, analyze, interpret, or say what a returned object contains, shows, or means, you should call `get_data` for that object and base your answer on the rows it returns, rather than characterizing it from this response alone. `get_data`'s own schema documents how to pass the object. (Worksheets have no saved result to fetch.) Note that `description` and `query` tokens are authoring metadata — they can be stale and are often copied verbatim across sibling vizzes, so two objects can share a byte-identical description while their data differs, which makes them unreliable for telling objects apart or explaining them.";
 
 export const PingSchema = z.object({});
 
@@ -126,13 +126,13 @@ const SearchObjectResultSchema = z.object({
 	object_id: z
 		.string()
 		.describe(
-			"The GUID to pass to get_object_data as `object_id`. For a visualization pinned on a Liveboard this is the parent Liveboard's GUID (see `visualization_id`).",
+			"The GUID to pass to get_data as `object_id`. For a visualization pinned on a Liveboard this is the parent Liveboard's GUID (see `visualization_id`).",
 		),
 	visualization_id: z
 		.string()
 		.optional()
 		.describe(
-			"Set only when this result is a specific visualization on a Liveboard: `object_id` is the Liveboard and this is the visualization. Pass it to get_object_data as `visualization_ids` to fetch just this viz.",
+			"Set only when this result is a specific visualization on a Liveboard: `object_id` is the Liveboard and this is the visualization. Pass it to get_data as `visualization_ids` to fetch just this viz.",
 		),
 	title: z.string().describe("The display name/title of the object."),
 	type: z
@@ -220,16 +220,16 @@ export const SearchObjectsResponseSchema = z.object({
 		.describe("Present only on error."),
 });
 
-export const GetObjectDataInputSchema = z.object({
+export const GetDataInputSchema = z.object({
 	object_id: z
 		.string()
 		.describe(
 			"The GUID of the object to fetch data for, typically an `object_id` returned by a prior `search_objects` call. Supports saved Answers and Liveboards.",
 		),
 	object_type: z
-		.enum(GET_OBJECT_DATA_SUPPORTED_TYPES)
+		.enum(GET_DATA_SUPPORTED_TYPES)
 		.describe(
-			"The object's type. Required. Use the `type` from the prior `search_objects` result: `ANSWER` for an Answer; `LIVEBOARD` for a Liveboard or a LIVEBOARD_VIZ.",
+			"The object's type. Required. Pass the `type` from the prior `search_objects` result verbatim — one of `ANSWER`, `LIVEBOARD`, or `LIVEBOARD_VIZ` (a viz pinned on a Liveboard; fetched via its parent Liveboard).",
 		),
 	visualization_ids: z
 		.array(z.string())
@@ -247,7 +247,7 @@ export const GetObjectDataInputSchema = z.object({
 		),
 });
 
-const GetObjectDataVizSchema = z.object({
+const GetDataVizSchema = z.object({
 	viz_id: z
 		.string()
 		.optional()
@@ -280,9 +280,9 @@ const GetObjectDataVizSchema = z.object({
 		),
 });
 
-export const GetObjectDataOutputSchema = z.object({
+export const GetDataOutputSchema = z.object({
 	data: z
-		.array(GetObjectDataVizSchema)
+		.array(GetDataVizSchema)
 		.describe(
 			"The object's data. A single entry for an Answer; one entry per visualization for a Liveboard.",
 		),
@@ -544,7 +544,7 @@ export enum ToolName {
 	// V2 (Spotter 3)
 	CheckConnectivity = "check_connectivity",
 	SearchObjects = "search_objects",
-	GetObjectData = "get_object_data",
+	GetData = "get_data",
 	CreateAnalysisSession = "create_analysis_session",
 	SendSessionMessage = "send_session_message",
 	GetSessionUpdates = "get_session_updates",
@@ -645,7 +645,7 @@ export const toolDefinitionsV2 = [
 		description: [
 			"Search for objects (Answers, Liveboards, Worksheets) in ThoughtSpot matching a given search term. Supports optional filters (types, owner, tag, modified_since, verified_only) and pagination (limit, cursor). Returns `results` (ranked), plus `next_cursor`. Each result carries: object_id, title, type (LIVEBOARD | ANSWER | LIVEBOARD_VIZ | WORKSHEET; LIVEBOARD_VIZ is a viz pinned on a Liveboard — render it as 'Liveboard viz'), author_name, description, tags, last_modified (ISO-8601), verified, external_link, query (Answer/viz sage tokens; null for Liveboards) and confidence. Returns identifiers and metadata only — never the object's data or contents, and it does not run queries.",
 			"",
-			SEARCH_OBJECTS_GET_OBJECT_DATA_DIRECTIVE,
+			SEARCH_OBJECTS_GET_DATA_DIRECTIVE,
 			"",
 			"How to present the results:",
 			"• Render as a table with fixed columns in this order: Object (the name, linked to `external_link`) · Type · Owner · Verified (✓ or —) · Last Modified.",
@@ -668,14 +668,14 @@ export const toolDefinitionsV2 = [
 		},
 	},
 	{
-		name: ToolName.GetObjectData,
+		name: ToolName.GetData,
 		description: [
 			"Fetch the full data (columns and rows) of a saved Answer or Liveboard, identified by its GUID — typically an object found via `search_objects`. Use this to explain, describe, summarize, analyze, or interpret what a ThoughtSpot object, Liveboard, Answer, or visualization actually shows.",
 			"When the user wants to explain, describe, summarize, analyze, or interpret what a specific object contains or shows, an accurate answer comes from this tool's data, so you should fetch it first with the object's `id` and answer from the returned rows.",
 			"Runs the object's saved question (its existing filters and columns, unchanged) against the current data and returns the result, so the rows reflect the latest data and may differ from when the object was first saved. The result is shaped to the object's type: an Answer returns a single tabular result, a Liveboard returns one tabular result per visualization (each with its visualization id and name). To pull a single visualization pinned on a Liveboard, pass the Liveboard GUID as `object_id` and the visualization GUID in `visualization_ids`. Each result includes the column names and data rows. Use the optional `max_rows` to bound the rows returned per visualization (defaults to 25).",
 		].join("\n"),
-		inputSchema: z.toJSONSchema(GetObjectDataInputSchema),
-		outputSchema: z.toJSONSchema(GetObjectDataOutputSchema),
+		inputSchema: z.toJSONSchema(GetDataInputSchema),
+		outputSchema: z.toJSONSchema(GetDataOutputSchema),
 		annotations: {
 			title: "Get Object Data",
 			readOnlyHint: true,

@@ -1,21 +1,23 @@
 import { buildHeaders, generateRequestId, postJson } from "../rest-utils";
-import { GET_OBJECT_DATA_SUPPORTED_TYPES } from "./get-object-data-constants";
+import { GET_DATA_SUPPORTED_TYPES } from "./get-data-constants";
 import type {
-	GetObjectDataParams,
-	GetObjectDataResult,
-	GetObjectDataViz,
-} from "./get-object-data-types";
+	GetDataParams,
+	GetDataResult,
+	GetDataViz,
+} from "./get-data-types";
 
 // Default row cap per visualization; unbounded results overwhelm LLM context.
 // Keep in sync with the `max_rows` description in tool-definitions.ts.
-export const GET_OBJECT_DATA_DEFAULT_MAX_ROWS = 25;
+export const GET_DATA_DEFAULT_MAX_ROWS = 25;
 
 // "Unbounded" record_size for Liveboards (they 500 if it can't hold the whole
 // viz). Max 32-bit signed int — the endpoint reads it as a GraphQL Int.
 export const LIVEBOARD_RECORD_SIZE = 2_147_483_647;
 
-// Only Answers and Liveboards expose fetchable data.
-const [ANSWER_TYPE, LIVEBOARD_TYPE] = GET_OBJECT_DATA_SUPPORTED_TYPES;
+// Answers and Liveboards expose fetchable data; a LIVEBOARD_VIZ fetches via its
+// parent Liveboard's endpoint.
+const [ANSWER_TYPE, LIVEBOARD_TYPE, LIVEBOARD_VIZ_TYPE] =
+	GET_DATA_SUPPORTED_TYPES;
 
 // FULL rows are self-describing ({ col: value }), robust when `column_names`
 // is absent; `mapContents` normalizes either shape to columns + positional rows.
@@ -68,11 +70,11 @@ function normalizeRows(content: RawDataContent): {
 function mapContents(
 	contents: RawDataContent[],
 	maxRows: number,
-): GetObjectDataViz[] {
+): GetDataViz[] {
 	return contents.map((content) => {
 		const { columns, rows } = normalizeRows(content);
 		// Cap client-side: the Liveboard endpoint can't truncate upstream (see
-		// getObjectData), so it may return the full viz; keep `total_row_count` at the
+		// getData), so it may return the full viz; keep `total_row_count` at the
 		// upstream total so the caller still sees how many rows exist.
 		const capped = rows.slice(0, maxRows);
 		return {
@@ -91,17 +93,13 @@ function mapContents(
 
 // Custom handler: the rest-api-sdk has no single call that resolves a GUID's
 // type and fetches its data from the matching endpoint.
-export function addGetObjectData(
-	client: any,
-	instanceUrl: string,
-	token: string,
-) {
-	client.getObjectData = async ({
+export function addGetData(client: any, instanceUrl: string, token: string) {
+	client.getData = async ({
 		objectId,
 		objectType,
 		vizIds,
-		maxRows = GET_OBJECT_DATA_DEFAULT_MAX_ROWS,
-	}: GetObjectDataParams): Promise<GetObjectDataResult> => {
+		maxRows = GET_DATA_DEFAULT_MAX_ROWS,
+	}: GetDataParams): Promise<GetDataResult> => {
 		// x-request-id ties the upstream call to tracing.
 		const requestId = generateRequestId();
 		const headers = buildHeaders(token, undefined, undefined, { requestId });
@@ -115,7 +113,10 @@ export function addGetObjectData(
 		let endpoint: string;
 		if (objectType === ANSWER_TYPE) {
 			endpoint = "/api/rest/2.0/metadata/answer/data";
-		} else if (objectType === LIVEBOARD_TYPE) {
+		} else if (
+			objectType === LIVEBOARD_TYPE ||
+			objectType === LIVEBOARD_VIZ_TYPE
+		) {
 			endpoint = "/api/rest/2.0/metadata/liveboard/data";
 			// Omitting visualization_identifiers fetches every viz on the board.
 			if (vizIds?.length) {
@@ -123,19 +124,19 @@ export function addGetObjectData(
 			}
 		} else {
 			throw new Error(
-				`getObjectData does not support object type "${objectType}" (id ${objectId}); only Answers and Liveboards expose fetchable data.`,
+				`getData does not support object type "${objectType}" (id ${objectId}); only Answers and Liveboards expose fetchable data.`,
 			);
 		}
 
 		// Answers cap rows via record_size; Liveboards need the whole viz, capped
 		// client-side in mapContents.
 		const recordSize =
-			objectType === LIVEBOARD_TYPE ? LIVEBOARD_RECORD_SIZE : maxRows;
+			objectType === ANSWER_TYPE ? maxRows : LIVEBOARD_RECORD_SIZE;
 		const data = await postJson(
 			`${instanceUrl}${endpoint}`,
 			headers,
 			{ ...body, record_size: recordSize },
-			"getObjectData failed",
+			"getData failed",
 		);
 		const contents: RawDataContent[] = data?.contents ?? [];
 

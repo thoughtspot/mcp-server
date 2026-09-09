@@ -30,11 +30,11 @@ import {
 	CreateDashboardInputSchema,
 	CreateLiveboardSchema,
 	GetAnswerSchema,
+	GetDataInputSchema,
 	GetDataSourceSuggestionsSchema,
-	GetObjectDataInputSchema,
 	GetRelevantQuestionsSchema,
 	GetSessionUpdatesInputSchema,
-	SEARCH_OBJECTS_GET_OBJECT_DATA_DIRECTIVE,
+	SEARCH_OBJECTS_GET_DATA_DIRECTIVE,
 	SearchObjectsInputSchema,
 	SendSessionMessageInputSchema,
 	SwitchOrgInputSchema,
@@ -173,6 +173,12 @@ export class MCPServer extends BaseMCPServer {
 		}
 		try {
 			await this.ensureActiveOrg();
+			// sessionInfo was fetched under the global token before the active-org
+			// mint; refetch under the org token so gates reflect the active org.
+			if (this.getActiveOrgId()) {
+				this.sessionInfo = undefined;
+				await this.ensureSessionInfo();
+			}
 		} catch (error) {
 			// A failed bootstrap must not leave the session with an active org but
 			// no token; fall back to the global token until the next connect or the
@@ -419,19 +425,22 @@ export class MCPServer extends BaseMCPServer {
 			);
 		}
 
-		// Hide get_object_data if the user lacks the data-download privilege, and
+		// Hide get_data if the user lacks the data-download privilege, and
 		// drop search_objects' directive to call it (else it points at a hidden tool).
 		if (!this.canDownloadData()) {
 			tools = tools
-				.filter((tool) => tool.name !== ToolName.GetObjectData)
+				.filter((tool) => tool.name !== ToolName.GetData)
 				.map((tool) =>
 					tool.name === ToolName.SearchObjects
 						? {
 								...tool,
-								description: tool.description.replace(
-									`\n\n${SEARCH_OBJECTS_GET_OBJECT_DATA_DIRECTIVE}`,
-									"",
-								),
+								// Drop the directive line (its own paragraph), then collapse the
+								// blank-line gap. Line-match, not substring, so it's position-safe.
+								description: tool.description
+									.split("\n")
+									.filter((line) => line !== SEARCH_OBJECTS_GET_DATA_DIRECTIVE)
+									.join("\n")
+									.replace(/\n{3,}/g, "\n\n"),
 							}
 						: tool,
 				);
@@ -583,8 +592,8 @@ export class MCPServer extends BaseMCPServer {
 				return this.callSearchObjects(request, recorder);
 			}
 
-			case ToolName.GetObjectData: {
-				return this.callGetObjectData(request, recorder);
+			case ToolName.GetData: {
+				return this.callGetData(request, recorder);
 			}
 
 			case ToolName.CheckConnectivity: {
@@ -1148,6 +1157,9 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 
 		await this.setActiveOrg(orgId, orgToken);
 		this._sources = null;
+		// Privileges/flags are per-org; drop cached session info so the next gated
+		// read (e.g. canDownloadData) refetches under the new org token.
+		this.sessionInfo = undefined;
 		span?.setAttribute("active_org_id", orgId);
 
 		try {
@@ -1165,8 +1177,8 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		);
 	}
 
-	@WithSpan("call-get-object-data")
-	async callGetObjectData(
+	@WithSpan("call-get-data")
+	async callGetData(
 		request: z.infer<typeof CallToolRequestSchema>,
 		recorder: MetricsRecorder,
 	) {
@@ -1177,15 +1189,15 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		if (!this.canDownloadData()) {
 			return this.createErrorResponse(
 				"You do not have permission to download data (requires the data-download privilege).",
-				"get_object_data forbidden",
+				"get_data forbidden",
 			);
 		}
 
 		const { object_id, object_type, visualization_ids, max_rows } =
-			GetObjectDataInputSchema.parse(request.params.arguments);
+			GetDataInputSchema.parse(request.params.arguments);
 
 		try {
-			const result = await this.getThoughtSpotService(recorder).getObjectData({
+			const result = await this.getThoughtSpotService(recorder).getData({
 				objectId: object_id,
 				objectType: object_type,
 				vizIds: visualization_ids,
@@ -1206,7 +1218,7 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			// actionable rather than a generic "check the object id".
 			return this.createErrorResponse(
 				`Failed to fetch object data: ${error instanceof Error ? error.message : String(error)}`,
-				"get_object_data failed",
+				"get_data failed",
 			);
 		}
 	}

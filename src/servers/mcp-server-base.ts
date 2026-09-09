@@ -71,6 +71,8 @@ export interface Context {
 export abstract class BaseMCPServer extends Server {
 	protected trackers: Trackers = new Trackers();
 	protected sessionInfo: SessionInfo | undefined;
+	// True once the per-session Mixpanel tracker is attached; keeps refetches idempotent.
+	private mixpanelAttached = false;
 	// In-flight ensureSessionInfo() refetch, so concurrent callers share one fetch.
 	private sessionInfoPromise?: Promise<void>;
 
@@ -153,12 +155,12 @@ export abstract class BaseMCPServer extends Server {
 	}
 
 	/**
-	 * Whether the user can download data (gates the get_object_data tool)
+	 * Whether the user can download data (gates the get_data tool)
 	 */
 	protected canDownloadData(): boolean {
 		// Permission gate: fail CLOSED. If session info (hence privileges) is
 		// unavailable — e.g. an unauthorized token where getSessionInfo failed —
-		// we cannot confirm the privilege, so hide get_object_data rather than expose it.
+		// we cannot confirm the privilege, so hide get_data rather than expose it.
 		if (!this.sessionInfo) {
 			return false;
 		}
@@ -473,11 +475,14 @@ export abstract class BaseMCPServer extends Server {
 	protected async initializeService(): Promise<void> {
 		try {
 			this.sessionInfo = await this.getThoughtSpotService().getSessionInfo();
-			const mixpanel = new MixpanelTracker(
-				this.sessionInfo,
-				this.ctx.props.clientName,
-			);
-			this.addTracker(mixpanel);
+			// Attach once — a later sessionInfo refetch (org switch / repair) must not
+			// add a second tracker (Trackers is a Set of instances → duplicate events).
+			if (!this.mixpanelAttached) {
+				this.addTracker(
+					new MixpanelTracker(this.sessionInfo, this.ctx.props.clientName),
+				);
+				this.mixpanelAttached = true;
+			}
 		} catch (error) {
 			console.error("Error initializing session info:", error);
 		}

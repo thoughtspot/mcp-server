@@ -1,13 +1,13 @@
 /**
- * Integration tests for the `search_objects` and `get_object_data` tools.
+ * Integration tests for the `search_objects` and `get_data` tools.
  *
  * Unlike the unit tests in mcp-server.spec.ts — which mock the whole
- * ThoughtSpot client and stub `searchObjects`/`getObjectData` outright — these wire
+ * ThoughtSpot client and stub `searchObjects`/`getData` outright — these wire
  * the real components together and mock ONLY the external network boundary
  * (`fetch`). Every call flows through:
  *
- *   server.callSearchObjects / callGetObjectData → real ThoughtSpotService →
- *   real handler (addSearchObjects / addGetObjectData) → rest-utils.postJson →
+ *   server.callSearchObjects / callGetData → real ThoughtSpotService →
+ *   real handler (addSearchObjects / addGetData) → rest-utils.postJson →
  *   fetch (mocked).
  *
  * This exercises the request building (endpoints, headers, x-request-id,
@@ -19,7 +19,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MCPServer } from "../../src/servers/mcp-server";
-import { LIVEBOARD_RECORD_SIZE } from "../../src/thoughtspot/get-object-data/get-object-data";
+import { LIVEBOARD_RECORD_SIZE } from "../../src/thoughtspot/get-data/get-data";
 import { ThoughtSpotService } from "../../src/thoughtspot/thoughtspot-service";
 import { makeRequest } from "./helpers";
 
@@ -134,7 +134,7 @@ function callTool(
 	const request = makeRequest(name, args) as any;
 	return name === "search_objects"
 		? server.callSearchObjects(request, undefined as any)
-		: server.callGetObjectData(request, undefined as any);
+		: server.callGetData(request, undefined as any);
 }
 
 beforeEach(() => {
@@ -399,10 +399,10 @@ describe("search_objects tool — real handler + mocked network", () => {
 });
 
 // ---------------------------------------------------------------------------
-// get_object_data
+// get_data
 // ---------------------------------------------------------------------------
 
-describe("get_object_data tool — real handler + mocked network", () => {
+describe("get_data tool — real handler + mocked network", () => {
 	it("hits the answer endpoint (no type lookup) and returns full-precision cells", async () => {
 		// COMPACT positional rows with fractional cells; returned verbatim.
 		handlers.answerData = () =>
@@ -423,7 +423,7 @@ describe("get_object_data tool — real handler + mocked network", () => {
 
 		const server = await newServer();
 
-		const result = await callTool(server, "get_object_data", {
+		const result = await callTool(server, "get_data", {
 			object_id: "answer-1",
 			object_type: "ANSWER",
 		});
@@ -470,7 +470,7 @@ describe("get_object_data tool — real handler + mocked network", () => {
 
 		const server = await newServer();
 
-		const result = await callTool(server, "get_object_data", {
+		const result = await callTool(server, "get_data", {
 			object_id: "liveboard-1",
 			object_type: "LIVEBOARD",
 			visualization_ids: ["viz-1"],
@@ -492,6 +492,38 @@ describe("get_object_data tool — real handler + mocked network", () => {
 		// Liveboard endpoint used; the viz filter rides the body. record_size is
 		// unbounded (the endpoint 500s if it's smaller than the viz); max_rows caps
 		// client-side.
+		const [, init] = callTo("/metadata/liveboard/data") ?? [];
+		const body = JSON.parse(init.body);
+		expect(body.visualization_identifiers).toEqual(["viz-1"]);
+		expect(body.record_size).toBe(LIVEBOARD_RECORD_SIZE);
+		expect(callTo("/metadata/answer/data")).toBeUndefined();
+	});
+
+	it("accepts object_type LIVEBOARD_VIZ (search_objects value) and hits the liveboard endpoint", async () => {
+		handlers.liveboardData = () =>
+			jsonResponse({
+				contents: [
+					{
+						visualization_id: "viz-1",
+						visualization_name: "By Product",
+						data_rows: [{ Product: "Widget", Units: 10 }],
+						available_data_row_count: 1,
+						returned_data_row_count: 1,
+					},
+				],
+			});
+
+		const server = await newServer();
+
+		// LIVEBOARD_VIZ is a valid search_objects `type`; the schema must not reject
+		// it, and it fetches via the parent Liveboard endpoint.
+		const result = await callTool(server, "get_data", {
+			object_id: "liveboard-1",
+			object_type: "LIVEBOARD_VIZ",
+			visualization_ids: ["viz-1"],
+		});
+
+		expect(result.isError).toBeUndefined();
 		const [, init] = callTo("/metadata/liveboard/data") ?? [];
 		const body = JSON.parse(init.body);
 		expect(body.visualization_identifiers).toEqual(["viz-1"]);
@@ -533,7 +565,7 @@ describe("get_object_data tool — real handler + mocked network", () => {
 
 		const server = await newServer();
 
-		const result = await callTool(server, "get_object_data", {
+		const result = await callTool(server, "get_data", {
 			object_id: "liveboard-1",
 			object_type: "LIVEBOARD",
 			visualization_ids: ["viz-1"],
@@ -564,7 +596,7 @@ describe("get_object_data tool — real handler + mocked network", () => {
 
 		// object_type is a required input; the schema parse rejects without it.
 		await expect(
-			callTool(server, "get_object_data", { object_id: "answer-1" }),
+			callTool(server, "get_data", { object_id: "answer-1" }),
 		).rejects.toThrow();
 	});
 
@@ -573,7 +605,7 @@ describe("get_object_data tool — real handler + mocked network", () => {
 
 		const server = await newServer();
 
-		const result = await callTool(server, "get_object_data", {
+		const result = await callTool(server, "get_data", {
 			object_id: "answer-1",
 			object_type: "ANSWER",
 		});
