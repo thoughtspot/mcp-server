@@ -677,7 +677,7 @@ export const toolDefinitionsV2 = [
 		inputSchema: z.toJSONSchema(GetDataInputSchema),
 		outputSchema: z.toJSONSchema(GetDataOutputSchema),
 		annotations: {
-			title: "Get Object Data",
+			title: "Get Data",
 			readOnlyHint: true,
 			destructiveHint: false,
 			openWorldHint: false,
