@@ -1689,6 +1689,111 @@ describe("ThoughtSpot Client", () => {
 			});
 		});
 
+		// A null-valued cell can be serialized as an absent key. Columns must come
+		// from column_names, not the first row's keys, so the column isn't dropped.
+		it("keeps a column the first row omits (columns from column_names)", async () => {
+			(fetch as any).mockResolvedValueOnce({
+				ok: true,
+				json: vi.fn().mockResolvedValue({
+					contents: [
+						{
+							column_names: ["city", "Total sales"],
+							data_rows: [
+								{ city: "Boulder" }, // "Total sales" key absent (null)
+								{ city: "Atlanta", "Total sales": 21161832.4 },
+							],
+							available_data_row_count: 2,
+						},
+					],
+				}),
+			});
+
+			const result = await client.getData({
+				objectId: "obj-1",
+				objectType: "ANSWER",
+			});
+
+			expect(result.data[0].columns).toEqual(["city", "Total sales"]);
+			expect(result.data[0].data_rows).toEqual([
+				["Boulder", null],
+				["Atlanta", 21161832.4],
+			]);
+		});
+
+		// column_names can be incomplete; a key present in rows but missing from it
+		// must not be dropped (union of column_names + row keys).
+		it("keeps a row key that column_names omits", async () => {
+			(fetch as any).mockResolvedValueOnce({
+				ok: true,
+				json: vi.fn().mockResolvedValue({
+					contents: [
+						{
+							column_names: ["a"], // omits "b"
+							data_rows: [{ a: 1, b: 2 }],
+							available_data_row_count: 1,
+						},
+					],
+				}),
+			});
+
+			const result = await client.getData({
+				objectId: "obj-1",
+				objectType: "ANSWER",
+			});
+
+			expect(result.data[0].columns).toEqual(["a", "b"]);
+			expect(result.data[0].data_rows).toEqual([[1, 2]]);
+		});
+
+		// A non-scalar cell is JSON-stringified so it can't violate the outputSchema.
+		it("coerces a non-scalar cell to a string", async () => {
+			(fetch as any).mockResolvedValueOnce({
+				ok: true,
+				json: vi.fn().mockResolvedValue({
+					contents: [
+						{
+							column_names: ["city", "meta"],
+							data_rows: [{ city: "Boulder", meta: { tier: "gold" } }],
+							available_data_row_count: 1,
+						},
+					],
+				}),
+			});
+
+			const result = await client.getData({
+				objectId: "obj-1",
+				objectType: "ANSWER",
+			});
+
+			expect(result.data[0].data_rows).toEqual([
+				["Boulder", '{"tier":"gold"}'],
+			]);
+		});
+
+		// A returned/capped count is not the total; without available_data_row_count
+		// total_row_count is unknown (undefined), not a fabricated capped number.
+		it("leaves total_row_count undefined when upstream omits the available count", async () => {
+			(fetch as any).mockResolvedValueOnce({
+				ok: true,
+				json: vi.fn().mockResolvedValue({
+					contents: [
+						{
+							column_names: ["city"],
+							data_rows: [{ city: "Boulder" }, { city: "Atlanta" }],
+							returned_data_row_count: 2, // no available_data_row_count
+						},
+					],
+				}),
+			});
+
+			const result = await client.getData({
+				objectId: "obj-1",
+				objectType: "ANSWER",
+			});
+
+			expect(result.data[0].total_row_count).toBeUndefined();
+		});
+
 		// Mirrors the real /metadata/liveboard/data FULL response: one content
 		// entry per visualization, each with visualization_id/name.
 		it("fetches a Liveboard with one entry per visualization", async () => {

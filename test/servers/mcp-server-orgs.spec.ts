@@ -1,5 +1,6 @@
 import { connect } from "mcp-testing-kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { MixpanelTracker } from "../../src/metrics/mixpanel/mixpanel";
 import { MCPServer } from "../../src/servers/mcp-server";
 import * as thoughtspotClient from "../../src/thoughtspot/thoughtspot-client";
 import { ThoughtSpotApiError } from "../../src/thoughtspot/types";
@@ -490,6 +491,36 @@ describe("MCP Server org tools", () => {
 			expect((server as any).sessionInfo).toBeTruthy();
 			// The in-flight guard coalesces both callers into a single refetch.
 			expect(warmSessionInfoCalls.count).toBe(callsBefore + 1);
+		});
+
+		it("replaces (not duplicates) the Mixpanel tracker when session info refetches", async () => {
+			const { server, tokenStore } =
+				makeServerWithTokenAwareSession(goodSession);
+			await seedWarmToken(tokenStore);
+			await server.init();
+			const trackers = () => (server as any).trackers as Set<unknown>;
+			const initInstances = vi
+				.mocked(MixpanelTracker)
+				.mock.results.map((r) => r.value);
+			const callsBefore = vi.mocked(MixpanelTracker).mock.calls.length;
+
+			// A refetch (e.g. org switch clears sessionInfo) rebuilds the tracker.
+			(server as any).sessionInfo = undefined;
+			await (server as any).ensureSessionInfo();
+
+			// Rebuilt exactly once more...
+			expect(vi.mocked(MixpanelTracker).mock.calls.length).toBe(
+				callsBefore + 1,
+			);
+			// ...every init-time tracker is removed from the set...
+			for (const t of initInstances) {
+				expect(trackers().has(t)).toBe(false);
+			}
+			// ...and exactly one mixpanel tracker (the newest) is attached.
+			const allInstances = vi
+				.mocked(MixpanelTracker)
+				.mock.results.map((r) => r.value);
+			expect(allInstances.filter((t) => trackers().has(t))).toHaveLength(1);
 		});
 	});
 

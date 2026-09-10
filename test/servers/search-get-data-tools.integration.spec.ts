@@ -531,6 +531,21 @@ describe("get_data tool — real handler + mocked network", () => {
 		expect(callTo("/metadata/answer/data")).toBeUndefined();
 	});
 
+	it("rejects LIVEBOARD_VIZ without visualization_ids (would fetch the whole board)", async () => {
+		const server = await newServer();
+
+		const result = await callTool(server, "get_data", {
+			object_id: "liveboard-1",
+			object_type: "LIVEBOARD_VIZ",
+		});
+
+		// Guided error, and no data call is made.
+		expect(result.isError).toBe(true);
+		expect(result.content[0].text).toMatch(/visualization_ids/);
+		expect(callTo("/metadata/liveboard/data")).toBeUndefined();
+		expect(callTo("/metadata/answer/data")).toBeUndefined();
+	});
+
 	it("requests the full viz in one call and caps to max_rows client-side", async () => {
 		const allRows = [
 			{ Product: "A", Units: 1 },

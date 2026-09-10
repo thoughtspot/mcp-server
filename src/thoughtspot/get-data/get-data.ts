@@ -10,8 +10,9 @@ import type {
 // Keep in sync with the `max_rows` description in tool-definitions.ts.
 export const GET_DATA_DEFAULT_MAX_ROWS = 25;
 
-// "Unbounded" record_size for Liveboards (they 500 if it can't hold the whole
-// viz). Max 32-bit signed int — the endpoint reads it as a GraphQL Int.
+// "Unbounded" record_size for Liveboards (int32 max; they 500 if it can't hold
+// the whole viz). Pulls the full viz into memory then caps client-side — don't
+// lower to bound memory without verifying the endpoint honors a smaller value.
 export const LIVEBOARD_RECORD_SIZE = 2_147_483_647;
 
 // Answers and Liveboards expose fetchable data; a LIVEBOARD_VIZ fetches via its
@@ -40,6 +41,19 @@ function isObjectRow(row: unknown): row is Record<string, unknown> {
 	return typeof row === "object" && row !== null && !Array.isArray(row);
 }
 
+// Coerce a cell to the scalar the outputSchema declares; non-scalars (object/
+// array) are JSON-stringified so a structured cell can't violate the schema.
+function toCell(v: unknown): string | number | boolean | null {
+	if (v === null || v === undefined) {
+		return null;
+	}
+	const t = typeof v;
+	if (t === "string" || t === "number" || t === "boolean") {
+		return v as string | number | boolean;
+	}
+	return JSON.stringify(v);
+}
+
 // Normalize FULL or COMPACT rows into `columns` + positional `data_rows`.
 // Cell values pass through as-is — no rounding, so callers get full precision.
 function normalizeRows(content: RawDataContent): {
@@ -57,10 +71,23 @@ function normalizeRows(content: RawDataContent): {
 		};
 	}
 
-	// FULL rows are self-describing; take columns from the row keys (not
-	// column_names) so the projection can't emit all-null cells on a mismatch.
-	const columns = Object.keys(firstRow);
-	// Null/malformed entries are dropped.
+	// Columns = column_names (authoritative order) unioned with every key seen in
+	// the rows, minus named entries no row has — so neither an incomplete
+	// column_names nor a first row missing a null key can drop a column.
+	const named = content.column_names ?? [];
+	const rowKeys = new Set<string>();
+	for (const row of rawRows) {
+		if (isObjectRow(row)) {
+			for (const k of Object.keys(row)) {
+				rowKeys.add(k);
+			}
+		}
+	}
+	const columns = [
+		...named.filter((c) => rowKeys.has(c)),
+		...[...rowKeys].filter((k) => !named.includes(k)),
+	];
+	// Null/malformed entries are dropped; a key a row lacks becomes null.
 	const rows = rawRows.flatMap((row) =>
 		isObjectRow(row) ? [columns.map((col) => row[col])] : [],
 	);
@@ -73,19 +100,17 @@ function mapContents(
 ): GetDataViz[] {
 	return contents.map((content) => {
 		const { columns, rows } = normalizeRows(content);
-		// Cap client-side: the Liveboard endpoint can't truncate upstream (see
-		// getData), so it may return the full viz; keep `total_row_count` at the
-		// upstream total so the caller still sees how many rows exist.
-		const capped = rows.slice(0, maxRows);
+		// Cap client-side (the Liveboard endpoint can't truncate upstream); cells
+		// coerced to scalars to match the outputSchema.
+		const capped = rows.slice(0, maxRows).map((r) => r.map(toCell));
 		return {
 			viz_id: content.visualization_id,
 			viz_name: content.visualization_name,
 			columns,
 			data_rows: capped,
-			total_row_count:
-				content.available_data_row_count ??
-				content.returned_data_row_count ??
-				rows.length,
+			// Total available upstream; undefined when upstream omits it, since a
+			// returned/capped count is NOT the total.
+			total_row_count: content.available_data_row_count,
 			sampling_ratio: content.sampling_ratio,
 		};
 	});

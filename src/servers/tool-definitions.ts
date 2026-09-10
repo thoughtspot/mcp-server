@@ -229,7 +229,7 @@ export const GetDataInputSchema = z.object({
 	object_type: z
 		.enum(GET_DATA_SUPPORTED_TYPES)
 		.describe(
-			"The object's type. Required. Pass the `type` from the prior `search_objects` result verbatim — one of `ANSWER`, `LIVEBOARD`, or `LIVEBOARD_VIZ` (a viz pinned on a Liveboard; fetched via its parent Liveboard).",
+			"The object's type. Required. Pass the `type` from the prior `search_objects` result verbatim — one of `ANSWER`, `LIVEBOARD`, or `LIVEBOARD_VIZ`. For `LIVEBOARD_VIZ` also pass that result's `visualization_id` in `visualization_ids` (else the request is rejected); it fetches via the parent Liveboard.",
 		),
 	visualization_ids: z
 		.array(z.string())

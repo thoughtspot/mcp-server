@@ -174,8 +174,13 @@ export class MCPServer extends BaseMCPServer {
 		try {
 			await this.ensureActiveOrg();
 			// sessionInfo was fetched under the global token before the active-org
-			// mint; refetch under the org token so gates reflect the active org.
-			if (this.getActiveOrgId()) {
+			// mint. Refetch under the org token only when the active org differs from
+			// the one init already fetched — otherwise the init-time fetch stands.
+			const activeOrgId = this.getActiveOrgId();
+			if (
+				activeOrgId &&
+				String(this.sessionInfo?.currentOrgId ?? "") !== activeOrgId
+			) {
 				this.sessionInfo = undefined;
 				await this.ensureSessionInfo();
 			}
@@ -438,7 +443,10 @@ export class MCPServer extends BaseMCPServer {
 								// blank-line gap. Line-match, not substring, so it's position-safe.
 								description: tool.description
 									.split("\n")
-									.filter((line) => line !== SEARCH_OBJECTS_GET_DATA_DIRECTIVE)
+									.filter(
+										(line: string) =>
+											line !== SEARCH_OBJECTS_GET_DATA_DIRECTIVE,
+									)
 									.join("\n")
 									.replace(/\n{3,}/g, "\n\n"),
 							}
@@ -1195,6 +1203,15 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 
 		const { object_id, object_type, visualization_ids, max_rows } =
 			GetDataInputSchema.parse(request.params.arguments);
+
+		// LIVEBOARD_VIZ scopes to one viz only via visualization_ids; without it the
+		// fetch would silently return the whole board. Guide the caller instead.
+		if (object_type === "LIVEBOARD_VIZ" && !visualization_ids?.length) {
+			return this.createErrorResponse(
+				"For object_type LIVEBOARD_VIZ, pass the result's `visualization_id` in `visualization_ids` to scope to that viz; use object_type LIVEBOARD to fetch the whole board.",
+				"get_data: LIVEBOARD_VIZ requires visualization_ids",
+			);
+		}
 
 		try {
 			const result = await this.getThoughtSpotService(recorder).getData({
