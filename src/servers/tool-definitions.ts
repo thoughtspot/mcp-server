@@ -1,12 +1,6 @@
 import { z } from "zod";
 import { GET_DATA_SUPPORTED_TYPES } from "../thoughtspot/get-data/get-data-constants";
 
-// search_objects' directive to ground explanations in get_data. Exported
-// so listTools can strip it when get_data is gated out (no download
-// privilege) — otherwise search_objects would point at a hidden tool.
-export const SEARCH_OBJECTS_GET_DATA_DIRECTIVE =
-	"Explaining an object is best grounded in its DATA, not this metadata: the fields here (title, description, `query` tokens, tags) describe an object, not its contents. When the user asks to explain, describe, summarize, analyze, interpret, or say what a returned object contains, shows, or means, you should call `get_data` for that object and base your answer on the rows it returns, rather than characterizing it from this response alone. `get_data`'s own schema documents how to pass the object. (Worksheets have no saved result to fetch.) Note that `description` and `query` tokens are authoring metadata — they can be stale and are often copied verbatim across sibling vizzes, so two objects can share a byte-identical description while their data differs, which makes them unreliable for telling objects apart or explaining them.";
-
 export const PingSchema = z.object({});
 
 export const GetRelevantQuestionsSchema = z.object({
@@ -645,7 +639,7 @@ export const toolDefinitionsV2 = [
 		description: [
 			"Search for objects (Answers, Liveboards, Worksheets) in ThoughtSpot matching a given search term. Supports optional filters (types, owner, tag, modified_since, verified_only) and pagination (limit, cursor). Returns `results` (ranked), plus `next_cursor`. Each result carries: object_id, title, type (LIVEBOARD | ANSWER | LIVEBOARD_VIZ | WORKSHEET; LIVEBOARD_VIZ is a viz pinned on a Liveboard — render it as 'Liveboard viz'), author_name, description, tags, last_modified (ISO-8601), verified, external_link, query (Answer/viz sage tokens; null for Liveboards) and confidence. Returns identifiers and metadata only — never the object's data or contents, and it does not run queries.",
 			"",
-			SEARCH_OBJECTS_GET_DATA_DIRECTIVE,
+			"Explaining an object is best grounded in its actual DATA, not this metadata: the fields here (title, description, `query` tokens, tags) describe an object, not its contents. `description` and `query` tokens are authoring metadata — they can be stale and are often copied verbatim across sibling vizzes, so two objects can share a byte-identical description while their data differs, which makes them unreliable for telling objects apart or explaining them.",
 			"",
 			"How to present the results:",
 			"• Render as a table with fixed columns in this order: Object (the name, linked to `external_link`) · Type · Owner · Verified (✓ or —) · Last Modified.",

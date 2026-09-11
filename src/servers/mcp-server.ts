@@ -34,7 +34,6 @@ import {
 	GetDataSourceSuggestionsSchema,
 	GetRelevantQuestionsSchema,
 	GetSessionUpdatesInputSchema,
-	SEARCH_OBJECTS_GET_DATA_DIRECTIVE,
 	SearchObjectsInputSchema,
 	SendSessionMessageInputSchema,
 	SwitchOrgInputSchema,
@@ -181,8 +180,7 @@ export class MCPServer extends BaseMCPServer {
 				activeOrgId &&
 				String(this.sessionInfo?.currentOrgId ?? "") !== activeOrgId
 			) {
-				this.sessionInfo = undefined;
-				await this.ensureSessionInfo();
+				await this.refreshSessionInfo();
 			}
 		} catch (error) {
 			// A failed bootstrap must not leave the session with an active org but
@@ -430,28 +428,9 @@ export class MCPServer extends BaseMCPServer {
 			);
 		}
 
-		// Hide get_data if the user lacks the data-download privilege, and
-		// drop search_objects' directive to call it (else it points at a hidden tool).
+		// Hide get_data if the user lacks the data-download privilege.
 		if (!this.canDownloadData()) {
-			tools = tools
-				.filter((tool) => tool.name !== ToolName.GetData)
-				.map((tool) =>
-					tool.name === ToolName.SearchObjects
-						? {
-								...tool,
-								// Drop the directive line (its own paragraph), then collapse the
-								// blank-line gap. Line-match, not substring, so it's position-safe.
-								description: tool.description
-									.split("\n")
-									.filter(
-										(line: string) =>
-											line !== SEARCH_OBJECTS_GET_DATA_DIRECTIVE,
-									)
-									.join("\n")
-									.replace(/\n{3,}/g, "\n\n"),
-							}
-						: tool,
-				);
+			tools = tools.filter((tool) => tool.name !== ToolName.GetData);
 		}
 
 		// Filter out orgs tools if feature is disabled
@@ -1165,9 +1144,9 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 
 		await this.setActiveOrg(orgId, orgToken);
 		this._sources = null;
-		// Privileges/flags are per-org; drop cached session info so the next gated
-		// read (e.g. canDownloadData) refetches under the new org token.
-		this.sessionInfo = undefined;
+		// Privileges/flags are per-org; refetch session info under the new org token
+		// so gates (e.g. canDownloadData) re-derive for this org.
+		await this.refreshSessionInfo();
 		span?.setAttribute("active_org_id", orgId);
 
 		try {

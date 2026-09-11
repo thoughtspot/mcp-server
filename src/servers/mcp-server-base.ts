@@ -71,8 +71,6 @@ export interface Context {
 export abstract class BaseMCPServer extends Server {
 	protected trackers: Trackers = new Trackers();
 	protected sessionInfo: SessionInfo | undefined;
-	// The current Mixpanel tracker, replaced (not duplicated) when session info is refetched.
-	private mixpanelTracker: MixpanelTracker | undefined;
 	// In-flight ensureSessionInfo() refetch, so concurrent callers share one fetch.
 	private sessionInfoPromise?: Promise<void>;
 
@@ -475,18 +473,24 @@ export abstract class BaseMCPServer extends Server {
 	protected async initializeService(): Promise<void> {
 		try {
 			this.sessionInfo = await this.getThoughtSpotService().getSessionInfo();
-			// Rebuild the tracker from the latest session info (org may have changed
-			// on refetch), removing the prior one so refetches never leave duplicates.
-			if (this.mixpanelTracker) {
-				this.trackers.delete(this.mixpanelTracker);
-			}
-			this.mixpanelTracker = new MixpanelTracker(
+			const mixpanel = new MixpanelTracker(
 				this.sessionInfo,
 				this.ctx.props.clientName,
 			);
-			this.addTracker(this.mixpanelTracker);
+			this.addTracker(mixpanel);
 		} catch (error) {
 			console.error("Error initializing session info:", error);
+		}
+	}
+
+	// Refetch session info in place (e.g. after an org switch) so privilege-gated
+	// state re-derives under the current token, without re-running full init. On
+	// failure keep the existing value.
+	protected async refreshSessionInfo(): Promise<void> {
+		try {
+			this.sessionInfo = await this.getThoughtSpotService().getSessionInfo();
+		} catch (error) {
+			console.error("Error refreshing session info:", error);
 		}
 	}
 

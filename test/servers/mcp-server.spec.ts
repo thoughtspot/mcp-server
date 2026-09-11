@@ -298,15 +298,10 @@ describe("MCP Server", () => {
 			(server as any).sessionInfo.privileges = [];
 			const { listTools } = connect(server);
 
-			const tools = (await listTools()).tools ?? [];
-			const names = tools.map((t) => t.name);
+			const names = (await listTools()).tools?.map((t) => t.name) ?? [];
 			expect(names).not.toContain("get_data");
 			// Other tools are unaffected.
 			expect(names).toContain("search_objects");
-			// search_objects must not point at the now-hidden get_data tool.
-			const searchDesc =
-				tools.find((t) => t.name === "search_objects")?.description ?? "";
-			expect(searchDesc).not.toContain("get_data");
 		});
 
 		it("hides get_data (fails closed) when session info is unavailable", async () => {

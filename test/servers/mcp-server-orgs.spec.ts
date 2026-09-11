@@ -493,34 +493,19 @@ describe("MCP Server org tools", () => {
 			expect(warmSessionInfoCalls.count).toBe(callsBefore + 1);
 		});
 
-		it("replaces (not duplicates) the Mixpanel tracker when session info refetches", async () => {
+		it("refreshSessionInfo refetches without attaching a tracker", async () => {
 			const { server, tokenStore } =
 				makeServerWithTokenAwareSession(goodSession);
 			await seedWarmToken(tokenStore);
 			await server.init();
-			const trackers = () => (server as any).trackers as Set<unknown>;
-			const initInstances = vi
-				.mocked(MixpanelTracker)
-				.mock.results.map((r) => r.value);
-			const callsBefore = vi.mocked(MixpanelTracker).mock.calls.length;
+			const trackerCalls = vi.mocked(MixpanelTracker).mock.calls.length;
 
-			// A refetch (e.g. org switch clears sessionInfo) rebuilds the tracker.
-			(server as any).sessionInfo = undefined;
-			await (server as any).ensureSessionInfo();
+			// A refresh (e.g. after an org switch) updates sessionInfo but, unlike
+			// init, attaches no tracker.
+			await (server as any).refreshSessionInfo();
 
-			// Rebuilt exactly once more...
-			expect(vi.mocked(MixpanelTracker).mock.calls.length).toBe(
-				callsBefore + 1,
-			);
-			// ...every init-time tracker is removed from the set...
-			for (const t of initInstances) {
-				expect(trackers().has(t)).toBe(false);
-			}
-			// ...and exactly one mixpanel tracker (the newest) is attached.
-			const allInstances = vi
-				.mocked(MixpanelTracker)
-				.mock.results.map((r) => r.value);
-			expect(allInstances.filter((t) => trackers().has(t))).toHaveLength(1);
+			expect((server as any).sessionInfo).toBeTruthy();
+			expect(vi.mocked(MixpanelTracker).mock.calls.length).toBe(trackerCalls);
 		});
 	});
 
@@ -670,19 +655,21 @@ describe("MCP Server org tools", () => {
 			expect(rec.orgToken).toBe("org-scoped-token");
 		});
 
-		it("clears cached session info on switch so gates re-derive under the new org", async () => {
+		it("refetches session info on switch so gates re-derive, without adding a tracker", async () => {
 			const { server } = makeServer({
 				authMode: "oauth",
 				session: { orgsEnabled: true, currentOrgId: "0" },
 			});
 			await server.init();
 			expect((server as any).sessionInfo).toBeTruthy();
+			const trackerCalls = vi.mocked(MixpanelTracker).mock.calls.length;
 
 			await connect(server).callTool("switch_org", { org_id: 101 });
 
-			// Privileges are per-org; sessionInfo must be dropped so the next gated
-			// read (canDownloadData) refetches under the org token.
-			expect((server as any).sessionInfo).toBeUndefined();
+			// Session info is refetched under the new org token (gate re-derives)...
+			expect((server as any).sessionInfo).toBeTruthy();
+			// ...and no extra Mixpanel tracker is attached on the refresh.
+			expect(vi.mocked(MixpanelTracker).mock.calls.length).toBe(trackerCalls);
 		});
 
 		it("notifies the client to re-list resources on a successful switch (org-specific datasources)", async () => {
