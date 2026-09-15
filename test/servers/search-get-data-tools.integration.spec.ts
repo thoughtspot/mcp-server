@@ -630,4 +630,37 @@ describe("get_data tool — real handler + mocked network", () => {
 			/Failed to fetch object data: .*status 500/,
 		);
 	});
+
+	it("condenses a verbose upstream 500 to the external message, dropping the debug blob", async () => {
+		handlers.answerData = () =>
+			jsonResponse(
+				{
+					error: {
+						message: {
+							debug: {
+								incident_id_guid: "cc0ae7e1-42a1",
+								debug: "[com.thoughtspot...huge stacktrace...]",
+							},
+							errorMessageExternal:
+								"Error Code: FALCON_QUERY_EXECUTION_ERROR\nError Message: query failed",
+						},
+					},
+				},
+				500,
+			);
+
+		const server = await newServer();
+		const result = await callTool(server, "get_data", {
+			object_id: "answer-1",
+			object_type: "ANSWER",
+		});
+
+		expect(result.isError).toBe(true);
+		const text = (result.content as any[])[0].text;
+		// External message surfaced (one line), internal debug blob dropped.
+		expect(text).toContain("FALCON_QUERY_EXECUTION_ERROR");
+		expect(text).toContain("query failed");
+		expect(text).not.toContain("stacktrace");
+		expect(text).not.toContain('"debug"');
+	});
 });

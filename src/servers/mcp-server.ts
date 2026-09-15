@@ -45,6 +45,31 @@ import {
 	resolveApiVersionMetrics,
 } from "./version-registry";
 
+// Condense a verbose upstream error into one user-facing line: ThoughtSpot's
+// external message when present, else a generic status line — dropping the
+// internal debug/stacktrace blob that a raw 500 body carries.
+function summarizeUpstreamError(error: unknown): string {
+	const raw = error instanceof Error ? error.message : String(error);
+	const status = raw.match(/status (\d{3})/)?.[1];
+	const generic = status
+		? `ThoughtSpot returned an error (status ${status})`
+		: raw;
+	const jsonAt = raw.indexOf("{");
+	if (jsonAt === -1) {
+		return generic;
+	}
+	try {
+		const msg = JSON.parse(raw.slice(jsonAt))?.error?.message;
+		const external =
+			msg && typeof msg === "object" ? msg.errorMessageExternal : msg;
+		return typeof external === "string" && external.trim()
+			? external.trim().replace(/\s+/g, " ")
+			: generic;
+	} catch {
+		return generic;
+	}
+}
+
 export class MCPServer extends BaseMCPServer {
 	private activeOrgId: string | undefined;
 	private activeOrgToken: string | undefined;
@@ -1210,10 +1235,10 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			if (this.apiErrorStatus(error) === 401) {
 				throw error;
 			}
-			// Surface other upstream messages (e.g. status 500) so the failure is
-			// actionable rather than a generic "check the object id".
+			// Surface a condensed upstream message (external text + status), not the
+			// raw debug/stacktrace blob a 500 body carries.
 			return this.createErrorResponse(
-				`Failed to fetch object data: ${error instanceof Error ? error.message : String(error)}`,
+				`Failed to fetch object data: ${summarizeUpstreamError(error)}`,
 				"get_data failed",
 			);
 		}
