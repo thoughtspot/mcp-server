@@ -1745,6 +1745,58 @@ describe("ThoughtSpot Client", () => {
 			expect(result.data[0].data_rows).toEqual([[1, 2]]);
 		});
 
+		// A declared column that NO row carries (all-null column) must be kept, not
+		// dropped — the schema stays intact and its cells read as null.
+		it("keeps a declared column no row carries", async () => {
+			(fetch as any).mockResolvedValueOnce({
+				ok: true,
+				json: vi.fn().mockResolvedValue({
+					contents: [
+						{
+							column_names: ["city", "Total sales"],
+							data_rows: [{ city: "Boulder" }, { city: "Atlanta" }],
+							available_data_row_count: 2,
+						},
+					],
+				}),
+			});
+
+			const result = await client.getData({
+				objectId: "obj-1",
+				objectType: "ANSWER",
+			});
+
+			expect(result.data[0].columns).toEqual(["city", "Total sales"]);
+			expect(result.data[0].data_rows).toEqual([
+				["Boulder", null],
+				["Atlanta", null],
+			]);
+		});
+
+		// Zero rows still returns the declared column headers (empty data set).
+		it("keeps declared columns when there are no rows", async () => {
+			(fetch as any).mockResolvedValueOnce({
+				ok: true,
+				json: vi.fn().mockResolvedValue({
+					contents: [
+						{
+							column_names: ["city", "Total sales"],
+							data_rows: [],
+							available_data_row_count: 0,
+						},
+					],
+				}),
+			});
+
+			const result = await client.getData({
+				objectId: "obj-1",
+				objectType: "ANSWER",
+			});
+
+			expect(result.data[0].columns).toEqual(["city", "Total sales"]);
+			expect(result.data[0].data_rows).toEqual([]);
+		});
+
 		// A non-scalar cell is JSON-stringified so it can't violate the outputSchema.
 		it("coerces a non-scalar cell to a string", async () => {
 			(fetch as any).mockResolvedValueOnce({

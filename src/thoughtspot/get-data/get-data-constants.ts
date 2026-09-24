@@ -6,3 +6,6 @@ export const GET_DATA_SUPPORTED_TYPES = [
 	"LIVEBOARD",
 	"LIVEBOARD_VIZ",
 ] as const;
+
+// One of the supported input types (not a bare string).
+export type GetDataObjectType = (typeof GET_DATA_SUPPORTED_TYPES)[number];

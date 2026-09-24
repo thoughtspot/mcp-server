@@ -71,9 +71,9 @@ function normalizeRows(content: RawDataContent): {
 		};
 	}
 
-	// Columns = column_names (authoritative order) unioned with every key seen in
-	// the rows, minus named entries no row has — so neither an incomplete
-	// column_names nor a first row missing a null key can drop a column.
+	// Columns = column_names (authoritative order) plus any extra key seen in the
+	// rows. Keep every declared column even if no row carries it (all-null column,
+	// or zero rows) so the schema stays intact; a missing key just reads as null.
 	const named = content.column_names ?? [];
 	const rowKeys = new Set<string>();
 	for (const row of rawRows) {
@@ -83,10 +83,7 @@ function normalizeRows(content: RawDataContent): {
 			}
 		}
 	}
-	const columns = [
-		...named.filter((c) => rowKeys.has(c)),
-		...[...rowKeys].filter((k) => !named.includes(k)),
-	];
+	const columns = [...named, ...[...rowKeys].filter((k) => !named.includes(k))];
 	// Null/malformed entries are dropped; a key a row lacks becomes null.
 	const rows = rawRows.flatMap((row) =>
 		isObjectRow(row) ? [columns.map((col) => row[col])] : [],

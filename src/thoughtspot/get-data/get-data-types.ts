@@ -1,10 +1,12 @@
 // Interfaces for the `get_data` tool: full data of an Answer/Liveboard GUID.
 
+import type { GetDataObjectType } from "./get-data-constants";
+
 export interface GetDataParams {
 	// GUID of an Answer or Liveboard, typically from `search_objects`.
 	objectId: string;
-	// Required type ("ANSWER"/"LIVEBOARD") from search_objects; picks the endpoint.
-	objectType: string;
+	// Required type from search_objects; picks the endpoint.
+	objectType: GetDataObjectType;
 	// Liveboards only: restrict to these viz GUIDs; omit for all vizzes.
 	vizIds?: string[];
 	// Row cap per viz (upstream `record_size`); defaults protect LLM context.
