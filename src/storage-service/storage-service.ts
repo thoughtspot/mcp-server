@@ -12,6 +12,8 @@ import type {
  *   POST  /storage/<storageId>/initialize —> initializeConversation
  *   POST  /storage/<storageId>/append     —> appendMessagesAndRestartTtl
  *   GET   /storage/<storageId>/messages   —> getNewMessagesAndUpdateBookmark
+ *   POST  /storage/<storageId>/state      —> putSessionState
+ *   GET   /storage/<storageId>/state      —> getSessionState
  *
  * The storageId is derived by taking a hash of the user's access token and combining it with the
  * conversationId, to ensure no users can access each other's conversations.
@@ -103,5 +105,41 @@ export class StorageServiceClient {
 		}
 
 		return response.json() as Promise<StreamingMessagesState>;
+	}
+
+	/**
+	 * Persist a conversation's scalar state as a single blob (overwrites). Used by flows that must
+	 * carry state between tool calls — e.g. a Spotter Model session's transaction id and generation
+	 * working set. The message stream is stored separately and is unaffected.
+	 */
+	async putSessionState<T>(conversationId: string, state: T): Promise<void> {
+		const response = await this.stubFor(conversationId).fetch(
+			this.url(conversationId, "state"),
+			{ method: "POST", headers: this.headers(), body: JSON.stringify(state) },
+		);
+
+		if (!response.ok) {
+			const text = await response.text();
+			throw new Error(
+				`Failed to put session state (${response.status}): ${text}`,
+			);
+		}
+	}
+
+	// Retrieve a conversation's scalar state, or null if it does not exist / has expired.
+	async getSessionState<T>(conversationId: string): Promise<T | null> {
+		const response = await this.stubFor(conversationId).fetch(
+			this.url(conversationId, "state"),
+			{ method: "GET", headers: this.headers() },
+		);
+
+		if (!response.ok) {
+			const text = await response.text();
+			throw new Error(
+				`Failed to get session state (${response.status}): ${text}`,
+			);
+		}
+
+		return response.json() as Promise<T | null>;
 	}
 }

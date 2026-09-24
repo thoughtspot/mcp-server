@@ -475,7 +475,210 @@ export enum ToolName {
 	CreateDashboard = "create_dashboard",
 	ListOrgs = "list_orgs",
 	SwitchOrg = "switch_org",
+	// V3 (Spotter Model — agentic model creation)
+	CreateModelSession = "create_model_session",
+	SendModelMessage = "send_model_message",
+	GetModelUpdates = "get_model_updates",
+	FinalizeModel = "finalize_model",
 }
+
+/**
+ * The Spotter Model tools. They all create or edit data models, so they are offered and accepted
+ * as a group, gated on the user's data-modeling privileges.
+ */
+export const MODEL_TOOL_NAMES: string[] = [
+	ToolName.CreateModelSession,
+	ToolName.SendModelMessage,
+	ToolName.GetModelUpdates,
+	ToolName.FinalizeModel,
+];
+
+// ── Spotter Model (V3) schemas ─────────────────────────────────────────────
+export const CreateModelSessionInputSchema = z.object({
+	connection_identifier: z
+		.string()
+		.optional()
+		.describe(
+			"GUID of the data-warehouse connection to build a NEW model on (e.g. " +
+				"'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx'). You should ask the user which connection to " +
+				"build on and quote the exact GUID back to them for confirmation before calling this " +
+				"tool. It should not be guessed, reused from a previous model, or assumed from a " +
+				"default — even if you used a connection earlier in the conversation, ask again for " +
+				"each new model. Omit this when editing an existing model.",
+		),
+	model_identifier: z
+		.string()
+		.optional()
+		.describe(
+			"GUID of an EXISTING model to open and edit, instead of building a new one. The model " +
+				"already knows which connection it is built on, so omit connection_identifier. You should " +
+				"confirm the exact model with the user first; a GUID should not be guessed. finalize_model then " +
+				"saves back to the same model without renaming it unless you pass a name.",
+		),
+});
+
+export const CreateModelSessionOutputSchema = z.object({
+	model_session_id: z
+		.string()
+		.describe(
+			"Identifier for the model session. Pass it to send_model_message, get_model_updates and " +
+				"finalize_model for the rest of this model's work.",
+		),
+});
+
+export const SendModelMessageInputSchema = z.object({
+	model_session_id: z
+		.string()
+		.describe("Identifier of the model session to send the instruction to."),
+	message: z
+		.string()
+		.optional()
+		.describe(
+			"A natural-language instruction for the model builder (e.g. 'create a model for sales from " +
+				"the ORDERS and CUSTOMERS tables' or 'add a revenue formula'). Omit only when answering a " +
+				"clarification with selected_option_ids.",
+		),
+	selected_option_ids: z
+		.array(z.string())
+		.optional()
+		.describe(
+			'When answering a clarification (a type=choice update), the `id` values (e.g. "1", "2") ' +
+				"of the options the user selected. Pass the option `id`s, not the table_guid. Omit when " +
+				"sending a plain instruction.",
+		),
+});
+
+export const SendModelMessageOutputSchema = z.object({
+	success: z
+		.boolean()
+		.describe(
+			"Whether the instruction was accepted. Call get_model_updates to read the builder's " +
+				"response. If unsuccessful, the previous instruction may still be running — keep " +
+				"calling get_model_updates until is_done is true, then try again.",
+		),
+});
+export const ModelUpdateSchema = z.object({
+	type: z
+		.enum([
+			"text",
+			"notification",
+			"choice",
+			"model_state",
+			"todo",
+			"action",
+			"message_end",
+			"mrd",
+		])
+		.describe(
+			"Kind of update from the model builder. `mrd` means the builder produced a plan (Model " +
+				"Requirements Document) and stopped for the user's approval — the model is NOT built yet; " +
+				"present the plan and let the user approve or request changes before building.",
+		),
+	text: z
+		.string()
+		.optional()
+		.describe(
+			"Message text for text/notification updates, and the full plan markdown for an mrd update.",
+		),
+	choice: z
+		.any()
+		.optional()
+		.describe(
+			"A clarification the builder needs the user to answer (type=choice).",
+		),
+	generation_no: z
+		.number()
+		.optional()
+		.describe(
+			"Present on model_state updates: the model draft advanced to this generation.",
+		),
+	tasks: z
+		.array(z.any())
+		.optional()
+		.describe(
+			"Present on todo updates: the builder's task list with per-task status " +
+				"(e.g. Tables/Joins/Columns, PENDING/IN_PROGRESS/COMPLETED) and result descriptions.",
+		),
+	actions: z
+		.array(z.any())
+		.optional()
+		.describe(
+			"Present on action updates: suggested next actions the user can take (not required).",
+		),
+	status: z
+		.string()
+		.optional()
+		.describe(
+			"Present on message_end updates: the turn's terminal status (e.g. 'completed').",
+		),
+});
+export const GetModelUpdatesInputSchema = z.object({
+	model_session_id: z
+		.string()
+		.describe("Identifier of the model session to get updates from."),
+});
+
+export const GetModelUpdatesOutputSchema = z.object({
+	updates: z
+		.array(ModelUpdateSchema)
+		.describe(
+			"Incremental new updates from the model builder. Updates returned in a previous response " +
+				"will not be sent again. This may be an empty list while the builder is still working — " +
+				"use `is_done` to know whether its response is complete.",
+		),
+	is_done: z
+		.boolean()
+		.describe(
+			"Whether the builder finished responding to the current instruction. If false, call " +
+				"get_model_updates again with the same model_session_id for the next set of updates.",
+		),
+});
+
+export const FinalizeModelInputSchema = z.object({
+	model_session_id: z
+		.string()
+		.describe("Identifier of the model session to finalize."),
+	name: z
+		.string()
+		.optional()
+		.describe(
+			"Name for the saved model. Required when building a NEW model. When editing an existing " +
+				"model, omit it to keep the model's current name — pass it only if the user asked to " +
+				"rename the model.",
+		),
+	description: z
+		.string()
+		.optional()
+		.describe(
+			"Optional description for the saved model. When editing an existing model, omit it to " +
+				"keep the current description.",
+		),
+	confirm: z
+		.boolean()
+		.optional()
+		.describe(
+			"Set true to actually save, only after the user has reviewed the summary and explicitly " +
+				"chose to save (rather than make more changes). If omitted/false, the tool only returns " +
+				"the model summary for review and does not save.",
+		),
+});
+export const FinalizeModelOutputSchema = z.object({
+	summary: z
+		.string()
+		.optional()
+		.describe("Human-readable summary of the model, returned for review."),
+	saved: z
+		.boolean()
+		.describe("Whether the model was saved (true only when confirm was set)."),
+	model_identifier: z
+		.string()
+		.optional()
+		.describe("GUID of the saved model (when saved)."),
+	url: z
+		.string()
+		.optional()
+		.describe("Link to open the saved model (when saved)."),
+});
 
 export const toolDefinitionsV1 = [
 	{
@@ -661,6 +864,103 @@ export const toolDefinitionsV2 = [
 		annotations: {
 			title: "Switch Org",
 			readOnlyHint: true,
+			destructiveHint: false,
+			openWorldHint: false,
+		},
+	},
+];
+
+// V3 — Spotter Model (agentic model creation). Includes all V2 tools plus the model tools.
+export const toolDefinitionsV3 = [
+	...toolDefinitionsV2,
+	{
+		name: ToolName.CreateModelSession,
+		description:
+			"Start a session with the ThoughtSpot model builder, to build a NEW data model or to EDIT " +
+			"an existing one. Returns a model_session_id used by send_model_message, get_model_updates " +
+			"and finalize_model.\n" +
+			"- NEW model: pass `connection_identifier`, the warehouse connection to build on. Ask the " +
+			"user which connection to use and confirm the exact GUID with them before calling this; " +
+			"it should not be guessed, reused from a previous model, or assumed from a default.\n" +
+			"- EDIT an existing model: pass `model_identifier` instead (confirm which model with the " +
+			"user first).\n" +
+			"Creating a session does not build anything — send the first instruction with " +
+			"send_model_message.",
+		inputSchema: z.toJSONSchema(CreateModelSessionInputSchema),
+		outputSchema: z.toJSONSchema(CreateModelSessionOutputSchema),
+		annotations: {
+			title: "Start Model Session",
+			readOnlyHint: false,
+			destructiveHint: false,
+			openWorldHint: false,
+		},
+	},
+	{
+		name: ToolName.SendModelMessage,
+		description:
+			"Send an instruction to the model builder — a description of the model to build (e.g. " +
+			"'create a model for sales from the ORDERS and CUSTOMERS tables'), a follow-up correction, " +
+			"or `selected_option_ids` to answer a clarification it asked. Returns as soon as the " +
+			"instruction is accepted; call get_model_updates to read the builder's response.\n" +
+			"The builder drives the conversation — don't invent your own questions.\n" +
+			"BEFORE ADDING FORMULAS: first tell the user the specific formulas you intend to add and " +
+			"get their confirmation — never have formulas added without the user signing off on them.\n" +
+			"Only one instruction runs at a time per session: keep calling get_model_updates until " +
+			"is_done is true before sending the next one.",
+		inputSchema: z.toJSONSchema(SendModelMessageInputSchema),
+		outputSchema: z.toJSONSchema(SendModelMessageOutputSchema),
+		annotations: {
+			title: "Build Model",
+			readOnlyHint: false,
+			destructiveHint: false,
+			openWorldHint: false,
+		},
+	},
+	{
+		name: ToolName.GetModelUpdates,
+		description:
+			"Get the model builder's new updates for the instruction in progress. Call it repeatedly " +
+			"until is_done is true. A full build takes 1–2 minutes, so an empty batch with " +
+			"is_done=false means it is still working, not stalled.\n" +
+			"React to the update types:\n" +
+			"- `mrd` — a proposed plan (Model Requirements Document). This is a HARD STOP: show the plan " +
+			"to the user and WAIT for their explicit approval (or edits). NEVER auto-approve it or send " +
+			"a 'build it'/'yes' message yourself. (If a build starts without any `mrd` — a backend " +
+			"config that skips the plan step — tell the user the plan step was skipped rather than " +
+			"treating it as approved.)\n" +
+			"- `choice` — a clarifying question: present the options to the user and answer with " +
+			"send_model_message using selected_option_ids.\n" +
+			"- `todo` — the build's task tracker (e.g. Tables → Joins → Columns, each PENDING/" +
+			"IN_PROGRESS/COMPLETED). SHOW it as a live progress checklist and update it as new `todo` " +
+			"updates arrive, so the user can watch the build proceed.\n" +
+			"- `notification` — a short progress line (e.g. 'Adding joins to model'): surface each one " +
+			"as it arrives.\n" +
+			"- `text` / `model_state` — results/progress: relay the meaningful parts.\n" +
+			"Relay the builder's output in plain, non-technical terms and keep mechanics (is_done, " +
+			"generation numbers, IDs, polling) internal. Once the model is built and the user is happy, " +
+			"call finalize_model to save.",
+		inputSchema: z.toJSONSchema(GetModelUpdatesInputSchema),
+		outputSchema: z.toJSONSchema(GetModelUpdatesOutputSchema),
+		annotations: {
+			title: "Building Model…",
+			readOnlyHint: true,
+			destructiveHint: false,
+			openWorldHint: false,
+		},
+	},
+	{
+		name: ToolName.FinalizeModel,
+		description:
+			"Save the model. Call first WITHOUT confirm to get a summary for review, then let the user " +
+			"decide: to make more changes, go back to send_model_message; to save, call again with " +
+			"confirm=true to persist and get the URL. confirm=true is the only step that saves. Don't " +
+			"finalize until the model is actually built — if the builder has only returned a plan (an " +
+			"mrd update) and nothing has been built, there is nothing to save.",
+		inputSchema: z.toJSONSchema(FinalizeModelInputSchema),
+		outputSchema: z.toJSONSchema(FinalizeModelOutputSchema),
+		annotations: {
+			title: "Save Model",
+			readOnlyHint: false,
 			destructiveHint: false,
 			openWorldHint: false,
 		},

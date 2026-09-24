@@ -86,6 +86,8 @@ export interface StreamingMessagesState {
 	isDone: boolean;
 }
 
+// Spotter Model (Lumos) types live with their handlers in ./spotter-model/spotter-model-types.
+
 export interface Answer {
 	title: string;
 	session_identifier: string;

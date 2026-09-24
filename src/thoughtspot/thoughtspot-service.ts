@@ -22,6 +22,13 @@ import {
 import { WithSpan, getActiveSpan } from "../metrics/tracing/tracing-utils";
 import { processSendAgentConversationMessageStreamingResponse } from "../streaming-utils";
 import type {
+	CreateModelSessionResult,
+	FetchWorksheetModelParams,
+	SaveModelParams,
+	SaveModelResult,
+	SendModelMessageParams,
+} from "./spotter-model/spotter-model-types";
+import type {
 	SearchObjectsParams,
 	SearchObjectsResponse,
 } from "./thoughtspot-client";
@@ -795,6 +802,39 @@ export class ThoughtSpotService {
 			// The decorator will automatically record the exception
 			return false;
 		}
+	}
+
+	// ── Spotter Model (Lumos) — thin wrappers over the client's /lumos handlers ──
+	// Types and request/response shapes live in ./spotter-model/spotter-model-types.
+
+	// Pass modelIdentifier to open an EXISTING model for editing; connectionIdentifier to build a
+	// new one. Exactly one is expected.
+	async createModelSession(
+		connectionIdentifier?: string,
+		modelIdentifier?: string,
+	): Promise<CreateModelSessionResult> {
+		return (this.client as any).createModelSession({
+			connectionIdentifier,
+			modelIdentifier,
+		});
+	}
+
+	async mintSessionCookie(): Promise<string | null> {
+		return (this.client as any).mintSessionCookie();
+	}
+
+	async sendModelMessageStreaming(
+		params: SendModelMessageParams,
+	): Promise<Response> {
+		return (this.client as any).sendModelMessageStreaming(params);
+	}
+
+	async saveModel(params: SaveModelParams): Promise<SaveModelResult> {
+		return (this.client as any).saveModel(params);
+	}
+
+	async fetchWorksheetModel(params: FetchWorksheetModelParams): Promise<any> {
+		return (this.client as any).fetchWorksheetModel(params);
 	}
 }
 

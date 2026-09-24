@@ -13,6 +13,11 @@ const IS_DONE_KEY = "is-done";
 const WRITE_BOOKMARK_KEY = "write-bookmark";
 const READ_BOOKMARK_KEY = "read-bookmark";
 
+// Opaque per-conversation scalar state, stored as a single blob alongside the message stream. Used
+// by flows that must carry state between calls (the Spotter Model session's transaction id and
+// generation working set); the message stream itself is unaffected.
+const SESSION_STATE_KEY = "session-state";
+
 /**
  * A Durable Object that stores streaming conversation messages and exposes them over HTTP.
  *
@@ -24,6 +29,8 @@ const READ_BOOKMARK_KEY = "read-bookmark";
  *   POST  /storage/<conversation-id>/initialize —> initializeConversation
  *   POST  /storage/<conversation-id>/append     —> appendMessagesAndRestartTtl
  *   GET   /storage/<conversation-id>/messages   —> getNewMessagesAndUpdateBookmark
+ *   POST  /storage/<conversation-id>/state      —> putSessionState
+ *   GET   /storage/<conversation-id>/state      —> getSessionState
  */
 export class ConversationStorageServerSQLite {
 	private conversationId = "";
@@ -57,6 +64,17 @@ export class ConversationStorageServerSQLite {
 
 				case "GET /messages": {
 					const state = await this.getNewMessagesAndUpdateBookmark();
+					return Response.json(state);
+				}
+
+				case "POST /state": {
+					const body = await request.json();
+					await this.putSessionState(body);
+					return Response.json({ ok: true });
+				}
+
+				case "GET /state": {
+					const state = await this.getSessionState();
 					return Response.json(state);
 				}
 
@@ -142,31 +160,48 @@ export class ConversationStorageServerSQLite {
 			throw new Error(`Conversation ${this.conversationId} not found`);
 		}
 
-		const keys = [];
-		for (let i = readBookmark; i < writeBookmark; i++) {
-			keys.push(MESSAGE_KEY_PREFIX + i);
-		}
-
 		const newMessages: (Message | RawMessage)[] = [];
-		const messagesMap = await this.getInBatches<Message | RawMessage>(keys);
-		for (let i = readBookmark; i < writeBookmark; i++) {
-			const message = messagesMap.get(MESSAGE_KEY_PREFIX + i);
-			if (!message) {
-				console.warn(
-					`Expected message at index ${i} for conversation ${this.conversationId} not found`,
-					{ readBookmark, writeBookmark },
-				);
-				continue;
+		// Idle poll (nothing new written): skip the fetch and the bookmark write entirely, so each
+		// long-poll iteration costs a single read and adds no DO write contention.
+		if (writeBookmark > readBookmark) {
+			const keys = [];
+			for (let i = readBookmark; i < writeBookmark; i++) {
+				keys.push(MESSAGE_KEY_PREFIX + i);
 			}
-			newMessages.push(message);
-		}
 
-		await this.state.storage.put<number>(READ_BOOKMARK_KEY, writeBookmark);
+			const messagesMap = await this.getInBatches<Message | RawMessage>(keys);
+			for (let i = readBookmark; i < writeBookmark; i++) {
+				const message = messagesMap.get(MESSAGE_KEY_PREFIX + i);
+				if (!message) {
+					console.warn(
+						`Expected message at index ${i} for conversation ${this.conversationId} not found`,
+						{ readBookmark, writeBookmark },
+					);
+					continue;
+				}
+				newMessages.push(message);
+			}
+
+			await this.state.storage.put<number>(READ_BOOKMARK_KEY, writeBookmark);
+		}
 
 		return {
 			messages: newMessages,
 			isDone,
 		};
+	}
+
+	// Store this conversation's scalar state as a single opaque blob and restart the TTL. The DO does
+	// not interpret the payload; the caller owns its shape.
+	private async putSessionState(state: unknown): Promise<void> {
+		await this.state.storage.put<unknown>(SESSION_STATE_KEY, state);
+		await this.restartTtl();
+	}
+
+	// Retrieve the conversation's scalar state, or null if never stored / expired.
+	private async getSessionState(): Promise<unknown | null> {
+		const state = await this.state.storage.get<unknown>(SESSION_STATE_KEY);
+		return state ?? null;
 	}
 
 	/*

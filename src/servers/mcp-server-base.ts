@@ -53,6 +53,17 @@ export type ErrorResponse = {
 
 export type ToolResponse = SuccessResponse | ErrorResponse;
 
+/**
+ * Privileges that let a user create or edit data models (Worksheets/Models). `DATAMANAGEMENT` is
+ * the classic "Can manage data" privilege and `CAN_MANAGE_WORKSHEET_VIEWS_TABLES` its granular RBAC
+ * equivalent ("Can manage data models"); `ADMINISTRATION` covers everything.
+ */
+const DATA_MODELING_PRIVILEGES = [
+	"DATAMANAGEMENT",
+	"CAN_MANAGE_WORKSHEET_VIEWS_TABLES",
+	"ADMINISTRATION",
+];
+
 export interface Context {
 	props: Props;
 	env: Env;
@@ -122,6 +133,26 @@ export abstract class BaseMCPServer extends Server {
 			return true;
 		}
 		return this.sessionInfo.isSpotterChatHistoryEnabled === true;
+	}
+
+	/**
+	 * Whether the user can create or edit data models, which gates the Spotter Model tools.
+	 *
+	 * Unlike the feature-flag helpers above, this fails CLOSED: without session info we cannot prove
+	 * the privilege, and offering a tool the user will only get a permission error from is worse than
+	 * hiding one they could have used. Call ensureSessionInfo() first if repair is worth attempting.
+	 */
+	protected canManageDataModels(): boolean {
+		const privileges = this.sessionInfo?.privileges;
+		if (!Array.isArray(privileges)) {
+			console.warn(
+				"Session info not available when checking data modeling privileges",
+			);
+			return false;
+		}
+		return privileges.some((privilege) =>
+			DATA_MODELING_PRIVILEGES.includes(String(privilege)),
+		);
 	}
 
 	/**
@@ -378,7 +409,7 @@ export abstract class BaseMCPServer extends Server {
 		};
 	}
 
-	private getMetricsWaitUntil() {
+	protected getMetricsWaitUntil() {
 		return this.ctx.ctx?.waitUntil?.bind(this.ctx.ctx);
 	}
 
