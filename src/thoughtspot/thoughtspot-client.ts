@@ -10,6 +10,7 @@ import type {
 import { customAlphabet } from "nanoid";
 import { of } from "rxjs";
 import YAML from "yaml";
+import { addGetData } from "./get-data/get-data";
 import { ORG_HEADER, buildHeaders } from "./rest-utils";
 import { addSearchObjects } from "./search-objects/search-objects";
 import { ORG_TOKEN_VALIDITY_SEC, fetchOrgToken } from "./token-endpoints";
@@ -26,6 +27,11 @@ export type {
 	SearchObjectsResponse,
 	SearchObjectsResult,
 } from "./search-objects/search-objects-types";
+export type {
+	GetDataParams,
+	GetDataResult,
+	GetDataViz,
+} from "./get-data/get-data-types";
 
 /*
  * Inject custom handlers into the ThoughtSpot client
@@ -76,6 +82,7 @@ export const getThoughtSpotClient = (
 		orgId,
 	);
 	addSearchObjects(client, instanceUrl, bearerToken);
+	addGetData(client, instanceUrl, bearerToken);
 	addFetchOrgBearerToken(client, instanceUrl);
 	addListOrgs(client, instanceUrl, bearerToken);
 	return client;

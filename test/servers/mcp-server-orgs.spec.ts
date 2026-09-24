@@ -1,5 +1,6 @@
 import { connect } from "mcp-testing-kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { MixpanelTracker } from "../../src/metrics/mixpanel/mixpanel";
 import { MCPServer } from "../../src/servers/mcp-server";
 import * as thoughtspotClient from "../../src/thoughtspot/thoughtspot-client";
 import { ThoughtSpotApiError } from "../../src/thoughtspot/types";
@@ -491,6 +492,21 @@ describe("MCP Server org tools", () => {
 			// The in-flight guard coalesces both callers into a single refetch.
 			expect(warmSessionInfoCalls.count).toBe(callsBefore + 1);
 		});
+
+		it("refreshSessionInfo refetches without attaching a tracker", async () => {
+			const { server, tokenStore } =
+				makeServerWithTokenAwareSession(goodSession);
+			await seedWarmToken(tokenStore);
+			await server.init();
+			const trackerCalls = vi.mocked(MixpanelTracker).mock.calls.length;
+
+			// A refresh (e.g. after an org switch) updates sessionInfo but, unlike
+			// init, attaches no tracker.
+			await (server as any).refreshSessionInfo();
+
+			expect((server as any).sessionInfo).toBeTruthy();
+			expect(vi.mocked(MixpanelTracker).mock.calls.length).toBe(trackerCalls);
+		});
 	});
 
 	describe("non-org cluster (orgs disabled): no org overlay on connect", () => {
@@ -637,6 +653,23 @@ describe("MCP Server org tools", () => {
 			const rec = [...store.values()][0];
 			expect(rec.activeOrgId).toBe("101");
 			expect(rec.orgToken).toBe("org-scoped-token");
+		});
+
+		it("refetches session info on switch so gates re-derive, without adding a tracker", async () => {
+			const { server } = makeServer({
+				authMode: "oauth",
+				session: { orgsEnabled: true, currentOrgId: "0" },
+			});
+			await server.init();
+			expect((server as any).sessionInfo).toBeTruthy();
+			const trackerCalls = vi.mocked(MixpanelTracker).mock.calls.length;
+
+			await connect(server).callTool("switch_org", { org_id: 101 });
+
+			// Session info is refetched under the new org token (gate re-derives)...
+			expect((server as any).sessionInfo).toBeTruthy();
+			// ...and no extra Mixpanel tracker is attached on the refresh.
+			expect(vi.mocked(MixpanelTracker).mock.calls.length).toBe(trackerCalls);
 		});
 
 		it("notifies the client to re-list resources on a successful switch (org-specific datasources)", async () => {

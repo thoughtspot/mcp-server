@@ -30,6 +30,7 @@ import {
 	CreateDashboardInputSchema,
 	CreateLiveboardSchema,
 	GetAnswerSchema,
+	GetDataInputSchema,
 	GetDataSourceSuggestionsSchema,
 	GetRelevantQuestionsSchema,
 	GetSessionUpdatesInputSchema,
@@ -43,6 +44,31 @@ import {
 	resolveApiVersion,
 	resolveApiVersionMetrics,
 } from "./version-registry";
+
+// Condense a verbose upstream error into one user-facing line: ThoughtSpot's
+// external message when present, else a generic status line — dropping the
+// internal debug/stacktrace blob that a raw 500 body carries.
+function summarizeUpstreamError(error: unknown): string {
+	const raw = error instanceof Error ? error.message : String(error);
+	const status = raw.match(/status (\d{3})/)?.[1];
+	const generic = status
+		? `ThoughtSpot returned an error (status ${status})`
+		: raw;
+	const jsonAt = raw.indexOf("{");
+	if (jsonAt === -1) {
+		return generic;
+	}
+	try {
+		const msg = JSON.parse(raw.slice(jsonAt))?.error?.message;
+		const external =
+			msg && typeof msg === "object" ? msg.errorMessageExternal : msg;
+		return typeof external === "string" && external.trim()
+			? external.trim().replace(/\s+/g, " ")
+			: generic;
+	} catch {
+		return generic;
+	}
+}
 
 export class MCPServer extends BaseMCPServer {
 	private activeOrgId: string | undefined;
@@ -171,6 +197,16 @@ export class MCPServer extends BaseMCPServer {
 		}
 		try {
 			await this.ensureActiveOrg();
+			// sessionInfo was fetched under the global token before the active-org
+			// mint. Refetch under the org token only when the active org differs from
+			// the one init already fetched — otherwise the init-time fetch stands.
+			const activeOrgId = this.getActiveOrgId();
+			if (
+				activeOrgId &&
+				String(this.sessionInfo?.currentOrgId ?? "") !== activeOrgId
+			) {
+				await this.refreshSessionInfo();
+			}
 		} catch (error) {
 			// A failed bootstrap must not leave the session with an active org but
 			// no token; fall back to the global token until the next connect or the
@@ -417,6 +453,11 @@ export class MCPServer extends BaseMCPServer {
 			);
 		}
 
+		// Hide get_data if the user lacks the data-download privilege.
+		if (!this.canDownloadData()) {
+			tools = tools.filter((tool) => tool.name !== ToolName.GetData);
+		}
+
 		// Filter out orgs tools if feature is disabled
 		if (!this.areOrgToolsAvailable()) {
 			tools = tools.filter(
@@ -561,6 +602,10 @@ export class MCPServer extends BaseMCPServer {
 
 			case ToolName.SearchObjects: {
 				return this.callSearchObjects(request, recorder);
+			}
+
+			case ToolName.GetData: {
+				return this.callGetData(request, recorder);
 			}
 
 			case ToolName.CheckConnectivity: {
@@ -1124,6 +1169,9 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 
 		await this.setActiveOrg(orgId, orgToken);
 		this._sources = null;
+		// Privileges/flags are per-org; refetch session info under the new org token
+		// so gates (e.g. canDownloadData) re-derive for this org.
+		await this.refreshSessionInfo();
 		span?.setAttribute("active_org_id", orgId);
 
 		try {
@@ -1139,6 +1187,61 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			{ success: true, active_org_id: org_id },
 			`Switched to org ${orgId}`,
 		);
+	}
+
+	@WithSpan("call-get-data")
+	async callGetData(
+		request: z.infer<typeof CallToolRequestSchema>,
+		recorder: MetricsRecorder,
+	) {
+		// Repair session info (see ensureSessionInfo) so the gate below is real,
+		// matching listTools.
+		await this.ensureSessionInfo();
+		// Enforce the gate even if a client calls the hidden tool directly.
+		if (!this.canDownloadData()) {
+			return this.createErrorResponse(
+				"You do not have permission to download data (requires the data-download privilege).",
+				"get_data forbidden",
+			);
+		}
+
+		const { object_id, object_type, visualization_ids, max_rows } =
+			GetDataInputSchema.parse(request.params.arguments);
+
+		// LIVEBOARD_VIZ scopes to one viz only via visualization_ids; without it the
+		// fetch would silently return the whole board. Guide the caller instead.
+		if (object_type === "LIVEBOARD_VIZ" && !visualization_ids?.length) {
+			return this.createErrorResponse(
+				"For object_type LIVEBOARD_VIZ, pass the result's `visualization_id` in `visualization_ids` to scope to that viz; use object_type LIVEBOARD to fetch the whole board.",
+				"get_data: LIVEBOARD_VIZ requires visualization_ids",
+			);
+		}
+
+		try {
+			const result = await this.getThoughtSpotService(recorder).getData({
+				objectId: object_id,
+				objectType: object_type,
+				vizIds: visualization_ids,
+				maxRows: max_rows,
+			});
+
+			return this.createStructuredContentSuccessResponse(
+				result,
+				`Fetched data for ${object_id} (${result.data.length} result(s))`,
+			);
+		} catch (error) {
+			// Let a 401 propagate to the central reauth handler in callTool, which
+			// returns an explicit "reauthenticate" message.
+			if (this.apiErrorStatus(error) === 401) {
+				throw error;
+			}
+			// Surface a condensed upstream message (external text + status), not the
+			// raw debug/stacktrace blob a 500 body carries.
+			return this.createErrorResponse(
+				`Failed to fetch object data: ${summarizeUpstreamError(error)}`,
+				"get_data failed",
+			);
+		}
 	}
 
 	private _sources: {

@@ -45,7 +45,7 @@ describe("MCP Server", () => {
 				},
 				userName: "test-user",
 				currentOrgId: "test-org",
-				privileges: [],
+				privileges: ["DATADOWNLOADING"],
 			}),
 			searchMetadata: vi.fn().mockResolvedValue([
 				{
@@ -143,6 +143,16 @@ describe("MCP Server", () => {
 				],
 				next_cursor: null,
 			}),
+			getData: vi.fn().mockResolvedValue({
+				data: [
+					{
+						viz_id: undefined,
+						columns: ["Region", "Revenue"],
+						data_rows: [["East", "1200000"]],
+						total_row_count: 1,
+					},
+				],
+			}),
 			instanceUrl: "https://test.thoughtspot.cloud",
 		} as any);
 
@@ -179,7 +189,7 @@ describe("MCP Server", () => {
 					mixpanelToken: "test-dev-token",
 					userName: "test-user",
 					currentOrgId: "test-org",
-					privileges: [],
+					privileges: ["DATADOWNLOADING"],
 					isSpotterDataSourceDiscoveryEnabled: true,
 				},
 				{
@@ -198,11 +208,12 @@ describe("MCP Server", () => {
 
 			const result = await listTools();
 
-			// V2 tools (latest version): 6 tools
-			expect(result.tools).toHaveLength(6);
+			// V2 tools (latest version): 7 tools
+			expect(result.tools).toHaveLength(7);
 			expect(result.tools?.map((t) => t.name)).toEqual([
 				"check_connectivity",
 				"search_objects",
+				"get_data",
 				"create_analysis_session",
 				"send_session_message",
 				"get_session_updates",
@@ -236,7 +247,7 @@ describe("MCP Server", () => {
 			);
 		});
 
-		it("should return 6 tools regardless of enableSpotterDataSourceDiscovery when using latest (V2)", async () => {
+		it("should return 7 tools regardless of enableSpotterDataSourceDiscovery when using latest (V2)", async () => {
 			// Mock getThoughtSpotClient with enableSpotterDataSourceDiscovery set to false
 			vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
 				getSessionInfo: vi.fn().mockResolvedValue({
@@ -256,7 +267,7 @@ describe("MCP Server", () => {
 					},
 					userName: "test-user",
 					currentOrgId: "test-org",
-					privileges: [],
+					privileges: ["DATADOWNLOADING"],
 				}),
 				searchMetadata: vi.fn().mockResolvedValue([]),
 				instanceUrl: "https://test.thoughtspot.cloud",
@@ -270,15 +281,44 @@ describe("MCP Server", () => {
 			const result = await listTools();
 
 			// V2 tools don't have a datasource discovery tool, so filtering has no effect
-			expect(result.tools).toHaveLength(6);
+			expect(result.tools).toHaveLength(7);
 			expect(result.tools?.map((t) => t.name)).toEqual([
 				"check_connectivity",
 				"search_objects",
+				"get_data",
 				"create_analysis_session",
 				"send_session_message",
 				"get_session_updates",
 				"create_dashboard",
 			]);
+		});
+
+		it("hides get_data when the user lacks the data-download privilege", async () => {
+			await server.init();
+			(server as any).sessionInfo.privileges = [];
+			const { listTools } = connect(server);
+
+			const names = (await listTools()).tools?.map((t) => t.name) ?? [];
+			expect(names).not.toContain("get_data");
+			// Other tools are unaffected.
+			expect(names).toContain("search_objects");
+		});
+
+		it("hides get_data (fails closed) when session info is unavailable", async () => {
+			// getSessionInfo fails at init AND the listTools ensureSessionInfo
+			// refetch, so sessionInfo never loads and the gate stays closed.
+			vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
+				getSessionInfo: vi.fn().mockRejectedValue(new Error("unauthorized")),
+				instanceUrl: "https://test.thoughtspot.cloud",
+			} as any);
+
+			const testServer = new MCPServer({ props: mockProps, env: {} as any });
+			await testServer.init();
+			expect((testServer as any).sessionInfo).toBeUndefined();
+			const { listTools } = connect(testServer);
+
+			const names = (await listTools()).tools?.map((t) => t.name) ?? [];
+			expect(names).not.toContain("get_data");
 		});
 	});
 
@@ -505,6 +545,82 @@ describe("MCP Server", () => {
 		});
 	});
 
+	describe("Fetch Data Tool", () => {
+		it("should return the object's data shaped to its type", async () => {
+			await server.init();
+			const { callTool } = connect(server);
+
+			const result = await callTool("get_data", {
+				object_id: "answer-123",
+				object_type: "ANSWER",
+			});
+
+			expect(result.isError).toBeUndefined();
+			const structured = result.structuredContent as any;
+			expect(structured.data).toHaveLength(1);
+			expect(structured.data[0].columns).toEqual(["Region", "Revenue"]);
+		});
+
+		it("should pass object_id and max_rows through to the client", async () => {
+			await server.init();
+			const { callTool } = connect(server);
+
+			const client = thoughtspotClient.getThoughtSpotClient(
+				"https://test.thoughtspot.cloud",
+				"test-access-token",
+			);
+
+			await callTool("get_data", {
+				object_id: "answer-123",
+				object_type: "ANSWER",
+				max_rows: 50,
+			});
+
+			expect((client as any).getData).toHaveBeenCalledWith(
+				expect.objectContaining({
+					objectId: "answer-123",
+					objectType: "ANSWER",
+					maxRows: 50,
+				}),
+			);
+		});
+
+		it("should return an error response when the fetch fails", async () => {
+			vi.spyOn(ThoughtSpotService.prototype, "getData").mockRejectedValueOnce(
+				new Error("upstream boom"),
+			);
+
+			await server.init();
+			const { callTool } = connect(server);
+
+			const result = await callTool("get_data", {
+				object_id: "answer-123",
+				object_type: "ANSWER",
+			});
+
+			expect(result.isError).toBe(true);
+			// Surfaces the upstream error message so the failure is actionable.
+			expect((result.content as any[])[0].text).toMatch(
+				/Failed to fetch object data: upstream boom/,
+			);
+		});
+
+		it("returns a forbidden error when the user lacks the data-download privilege", async () => {
+			await server.init();
+			(server as any).sessionInfo.privileges = [];
+			const { callTool } = connect(server);
+
+			const result = await callTool("get_data", {
+				object_id: "answer-123",
+			});
+
+			expect(result.isError).toBe(true);
+			expect((result.content as any[])[0].text).toMatch(
+				/do not have permission to download data/i,
+			);
+		});
+	});
+
 	describe("Get Relevant Questions Tool", () => {
 		// Using real service with mocked client, no service method mocks needed
 
@@ -546,7 +662,7 @@ describe("MCP Server", () => {
 					},
 					userName: "test-user",
 					currentOrgId: "test-org",
-					privileges: [],
+					privileges: ["DATADOWNLOADING"],
 					enableSpotterDataSourceDiscovery: true,
 				}),
 				queryGetDecomposedQuery: vi
@@ -590,7 +706,7 @@ describe("MCP Server", () => {
 					},
 					userName: "test-user",
 					currentOrgId: "test-org",
-					privileges: [],
+					privileges: ["DATADOWNLOADING"],
 					enableSpotterDataSourceDiscovery: true,
 				}),
 				queryGetDecomposedQuery: vi
@@ -638,7 +754,7 @@ describe("MCP Server", () => {
 					},
 					userName: "test-user",
 					currentOrgId: "test-org",
-					privileges: [],
+					privileges: ["DATADOWNLOADING"],
 					enableSpotterDataSourceDiscovery: true,
 				}),
 				queryGetDecomposedQuery: vi
@@ -682,7 +798,7 @@ describe("MCP Server", () => {
 					},
 					userName: "test-user",
 					currentOrgId: "test-org",
-					privileges: [],
+					privileges: ["DATADOWNLOADING"],
 					enableSpotterDataSourceDiscovery: true,
 				}),
 				queryGetDecomposedQuery: vi.fn().mockResolvedValue({
@@ -776,7 +892,7 @@ describe("MCP Server", () => {
 					},
 					userName: "test-user",
 					currentOrgId: "test-org",
-					privileges: [],
+					privileges: ["DATADOWNLOADING"],
 					enableSpotterDataSourceDiscovery: true,
 				}),
 				singleAnswer: vi
@@ -855,7 +971,7 @@ describe("MCP Server", () => {
 					},
 					userName: "test-user",
 					currentOrgId: "test-org",
-					privileges: [],
+					privileges: ["DATADOWNLOADING"],
 					enableSpotterDataSourceDiscovery: true,
 				}),
 				exportUnsavedAnswerTML: vi.fn().mockResolvedValue({
@@ -1113,7 +1229,7 @@ describe("MCP Server", () => {
 					},
 					userName: "test-user",
 					currentOrgId: "test-org",
-					privileges: [],
+					privileges: ["DATADOWNLOADING"],
 					enableSpotterDataSourceDiscovery: true,
 				}),
 				getDataSourceSuggestions: vi.fn().mockResolvedValue({
@@ -1193,7 +1309,7 @@ describe("MCP Server", () => {
 					},
 					userName: "test-user",
 					currentOrgId: "test-org",
-					privileges: [],
+					privileges: ["DATADOWNLOADING"],
 					enableSpotterDataSourceDiscovery: true,
 				}),
 				getDataSourceSuggestions: vi.fn().mockResolvedValue({
@@ -1234,7 +1350,7 @@ describe("MCP Server", () => {
 					},
 					userName: "test-user",
 					currentOrgId: "test-org",
-					privileges: [],
+					privileges: ["DATADOWNLOADING"],
 					enableSpotterDataSourceDiscovery: true,
 				}),
 				getDataSourceSuggestions: vi.fn().mockResolvedValue({
@@ -1289,7 +1405,7 @@ describe("MCP Server", () => {
 					},
 					userName: "test-user",
 					currentOrgId: "test-org",
-					privileges: [],
+					privileges: ["DATADOWNLOADING"],
 				}),
 				createAgentConversationWithAutoMode: vi.fn().mockResolvedValue({
 					conversation_id: "conv-abc-123",
@@ -1333,7 +1449,7 @@ describe("MCP Server", () => {
 					},
 					userName: "test-user",
 					currentOrgId: "test-org",
-					privileges: [],
+					privileges: ["DATADOWNLOADING"],
 				}),
 				createAgentConversationWithAutoMode:
 					mockCreateAgentConversationWithAutoMode,
@@ -1377,7 +1493,7 @@ describe("MCP Server", () => {
 					},
 					userName: "test-user",
 					currentOrgId: "test-org",
-					privileges: [],
+					privileges: ["DATADOWNLOADING"],
 				}),
 				createAgentConversationWithAutoMode: vi
 					.fn()
@@ -1414,7 +1530,7 @@ describe("MCP Server", () => {
 					},
 					userName: "test-user",
 					currentOrgId: "test-org",
-					privileges: [],
+					privileges: ["DATADOWNLOADING"],
 				}),
 				createAgentConversationWithAutoMode: vi
 					.fn()
