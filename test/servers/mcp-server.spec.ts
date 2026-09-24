@@ -403,7 +403,7 @@ describe("MCP Server", () => {
 
 			expect(result.isError).toBe(true);
 			expect((result.content as any[])[0].text).toContain(
-				"MUST ask the user which",
+				"should ask the user which",
 			);
 		});
 	});

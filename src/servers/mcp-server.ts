@@ -1242,7 +1242,7 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		// case where none was given at all; the schema carries the "ask the user first" instruction.
 		if (!connection_identifier && !model_identifier) {
 			return this.createErrorResponse(
-				"No connection or model specified. To build a NEW model you MUST ask the user which " +
+				"No connection or model specified. To build a NEW model you should ask the user which " +
 					"data-warehouse connection to build on and confirm the exact connection GUID with " +
 					"them — do not guess, reuse a previous model's connection, or assume a default. To " +
 					"EDIT an existing model, confirm which model with the user and pass its " +
@@ -1516,6 +1516,7 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		}
 		return { updates, isDone };
 	}
+
 	@WithSpan("call-finalize-model")
 	async callFinalizeModel(
 		request: z.infer<typeof CallToolRequestSchema>,

@@ -500,9 +500,9 @@ export const CreateModelSessionInputSchema = z.object({
 		.optional()
 		.describe(
 			"GUID of the data-warehouse connection to build a NEW model on (e.g. " +
-				"'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx'). You MUST ask the user which connection to " +
-				"build on and quote the exact GUID back to them for confirmation BEFORE calling this " +
-				"tool. Never guess it, never reuse a previous model's connection, and never assume a " +
+				"'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx'). You should ask the user which connection to " +
+				"build on and quote the exact GUID back to them for confirmation before calling this " +
+				"tool. It should not be guessed, reused from a previous model, or assumed from a " +
 				"default — even if you used a connection earlier in the conversation, ask again for " +
 				"each new model. Omit this when editing an existing model.",
 		),
@@ -511,8 +511,8 @@ export const CreateModelSessionInputSchema = z.object({
 		.optional()
 		.describe(
 			"GUID of an EXISTING model to open and edit, instead of building a new one. The model " +
-				"already knows which connection it is built on, so omit connection_identifier. You MUST " +
-				"confirm the exact model with the user first; never guess a GUID. finalize_model then " +
+				"already knows which connection it is built on, so omit connection_identifier. You should " +
+				"confirm the exact model with the user first; a GUID should not be guessed. finalize_model then " +
 				"saves back to the same model without renaming it unless you pass a name.",
 		),
 });
@@ -880,8 +880,8 @@ export const toolDefinitionsV3 = [
 			"an existing one. Returns a model_session_id used by send_model_message, get_model_updates " +
 			"and finalize_model.\n" +
 			"- NEW model: pass `connection_identifier`, the warehouse connection to build on. Ask the " +
-			"user which connection to use and confirm the exact GUID with them BEFORE calling this; " +
-			"never guess it, reuse a previous model's connection, or assume a default.\n" +
+			"user which connection to use and confirm the exact GUID with them before calling this; " +
+			"it should not be guessed, reused from a previous model, or assumed from a default.\n" +
 			"- EDIT an existing model: pass `model_identifier` instead (confirm which model with the " +
 			"user first).\n" +
 			"Creating a session does not build anything — send the first instruction with " +
