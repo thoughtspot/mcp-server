@@ -64,7 +64,7 @@ export const VERSION_REGISTRY: VersionConfig[] = [
 		description: "Spotter3 agent conversation tools released",
 	},
 	{
-		version: ["latest", "2026-09-25"],
+		version: ["latest", "2026-10-01"],
 		tools: [...toolDefinitionsV3],
 		description:
 			"Spotter Model agentic model-creation tools added (create/send/get-updates/finalize)",

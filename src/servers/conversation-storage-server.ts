@@ -160,30 +160,26 @@ export class ConversationStorageServerSQLite {
 			throw new Error(`Conversation ${this.conversationId} not found`);
 		}
 
-		const newMessages: (Message | RawMessage)[] = [];
-		// Idle poll (nothing new written): skip the fetch and the bookmark write entirely, so each
-		// long-poll iteration costs a single read and adds no DO write contention.
-		if (writeBookmark > readBookmark) {
-			const keys = [];
-			for (let i = readBookmark; i < writeBookmark; i++) {
-				keys.push(MESSAGE_KEY_PREFIX + i);
-			}
-
-			const messagesMap = await this.getInBatches<Message | RawMessage>(keys);
-			for (let i = readBookmark; i < writeBookmark; i++) {
-				const message = messagesMap.get(MESSAGE_KEY_PREFIX + i);
-				if (!message) {
-					console.warn(
-						`Expected message at index ${i} for conversation ${this.conversationId} not found`,
-						{ readBookmark, writeBookmark },
-					);
-					continue;
-				}
-				newMessages.push(message);
-			}
-
-			await this.state.storage.put<number>(READ_BOOKMARK_KEY, writeBookmark);
+		const keys = [];
+		for (let i = readBookmark; i < writeBookmark; i++) {
+			keys.push(MESSAGE_KEY_PREFIX + i);
 		}
+
+		const newMessages: (Message | RawMessage)[] = [];
+		const messagesMap = await this.getInBatches<Message | RawMessage>(keys);
+		for (let i = readBookmark; i < writeBookmark; i++) {
+			const message = messagesMap.get(MESSAGE_KEY_PREFIX + i);
+			if (!message) {
+				console.warn(
+					`Expected message at index ${i} for conversation ${this.conversationId} not found`,
+					{ readBookmark, writeBookmark },
+				);
+				continue;
+			}
+			newMessages.push(message);
+		}
+
+		await this.state.storage.put<number>(READ_BOOKMARK_KEY, writeBookmark);
 
 		return {
 			messages: newMessages,

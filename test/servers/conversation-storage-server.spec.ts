@@ -607,11 +607,11 @@ describe("ConversationStorageServerSQLite", () => {
 	});
 
 	// -------------------------------------------------------------------------
-	// Idle-poll optimization
+	// Idle polls
 	// -------------------------------------------------------------------------
 
 	describe("GET /messages with nothing new", () => {
-		it("does not write the read bookmark on an idle poll", async () => {
+		it("returns no messages once the stream is drained", async () => {
 			await server.fetch(makeRequest("POST", "initialize"));
 			await server.fetch(
 				makeRequest("POST", "append", { messages: [textMessage] }),
@@ -619,11 +619,8 @@ describe("ConversationStorageServerSQLite", () => {
 			// First read drains the message and advances the bookmark.
 			await server.fetch(makeRequest("GET", "messages"));
 
-			const writesBefore = mock.storage.put.mock.calls.length;
 			const res = await server.fetch(makeRequest("GET", "messages"));
 
-			// A long poll runs this many times per call, so an idle read must cost no writes.
-			expect(mock.storage.put.mock.calls.length).toBe(writesBefore);
 			const body = (await res.json()) as StreamingMessagesState;
 			expect(body.messages).toEqual([]);
 		});
