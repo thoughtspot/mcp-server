@@ -1,3 +1,10 @@
+import {
+	SpanKind,
+	SpanStatusCode,
+	context,
+	propagation,
+	trace,
+} from "@opentelemetry/api";
 import type {
 	Message,
 	RawMessage,
@@ -43,16 +50,61 @@ export class StorageServiceClient {
 		return `https://internal/storage/${encodeURIComponent(conversationId)}/${operation}`;
 	}
 
+	// Call the DO inside a client span, propagating the trace context so the DO's own spans join
+	// the caller's trace
+	private async fetchStorage(
+		conversationId: string,
+		operation: string,
+		init: RequestInit,
+	): Promise<Response> {
+		const method = init.method ?? "GET";
+		const tracer = trace.getTracer("thoughtspot-mcp-server");
+		return tracer.startActiveSpan(
+			`conversation-storage-${method.toLowerCase()}-${operation}`,
+			{
+				kind: SpanKind.CLIENT,
+				attributes: {
+					conversation_id: conversationId,
+					"http.method": method,
+					storage_operation: operation,
+				},
+			},
+			async (span) => {
+				const headers = new Headers(init.headers);
+				propagation.inject(context.active(), headers, {
+					set: (carrier, key, value) => carrier.set(key, value),
+				});
+				try {
+					const response = await this.stubFor(conversationId).fetch(
+						this.url(conversationId, operation),
+						{ ...init, headers },
+					);
+					span.setAttribute("http.status_code", response.status);
+					if (!response.ok) {
+						span.setStatus({ code: SpanStatusCode.ERROR });
+					}
+					return response;
+				} catch (err) {
+					span.recordException(err as Error);
+					span.setStatus({ code: SpanStatusCode.ERROR });
+					throw err;
+				} finally {
+					span.end();
+				}
+			},
+		);
+	}
+
 	/**
 	 * Initialize a conversation. Must be called before appending messages.
 	 * Can also be called on an existing conversation that is already marked done,
 	 * to prime it for a follow-up message.
 	 */
 	async initializeConversation(conversationId: string): Promise<void> {
-		const response = await this.stubFor(conversationId).fetch(
-			this.url(conversationId, "initialize"),
-			{ method: "POST", headers: this.headers() },
-		);
+		const response = await this.fetchStorage(conversationId, "initialize", {
+			method: "POST",
+			headers: this.headers(),
+		});
 
 		if (!response.ok) {
 			const body = await response.text();
@@ -73,10 +125,11 @@ export class StorageServiceClient {
 	): Promise<void> {
 		const body: StreamingMessagesState = { messages, isDone };
 
-		const response = await this.stubFor(conversationId).fetch(
-			this.url(conversationId, "append"),
-			{ method: "POST", headers: this.headers(), body: JSON.stringify(body) },
-		);
+		const response = await this.fetchStorage(conversationId, "append", {
+			method: "POST",
+			headers: this.headers(),
+			body: JSON.stringify(body),
+		});
 
 		if (!response.ok) {
 			const text = await response.text();
@@ -94,10 +147,10 @@ export class StorageServiceClient {
 	async getNewMessages(
 		conversationId: string,
 	): Promise<StreamingMessagesState> {
-		const response = await this.stubFor(conversationId).fetch(
-			this.url(conversationId, "messages"),
-			{ method: "GET", headers: this.headers() },
-		);
+		const response = await this.fetchStorage(conversationId, "messages", {
+			method: "GET",
+			headers: this.headers(),
+		});
 
 		if (!response.ok) {
 			const text = await response.text();
@@ -113,10 +166,11 @@ export class StorageServiceClient {
 	 * working set. The message stream is stored separately and is unaffected.
 	 */
 	async putSessionState<T>(conversationId: string, state: T): Promise<void> {
-		const response = await this.stubFor(conversationId).fetch(
-			this.url(conversationId, "state"),
-			{ method: "POST", headers: this.headers(), body: JSON.stringify(state) },
-		);
+		const response = await this.fetchStorage(conversationId, "state", {
+			method: "POST",
+			headers: this.headers(),
+			body: JSON.stringify(state),
+		});
 
 		if (!response.ok) {
 			const text = await response.text();
@@ -128,10 +182,10 @@ export class StorageServiceClient {
 
 	// Retrieve a conversation's scalar state, or null if it does not exist / has expired.
 	async getSessionState<T>(conversationId: string): Promise<T | null> {
-		const response = await this.stubFor(conversationId).fetch(
-			this.url(conversationId, "state"),
-			{ method: "GET", headers: this.headers() },
-		);
+		const response = await this.fetchStorage(conversationId, "state", {
+			method: "GET",
+			headers: this.headers(),
+		});
 
 		if (!response.ok) {
 			const text = await response.text();

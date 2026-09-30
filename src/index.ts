@@ -2,6 +2,7 @@ import {
 	type ResolveConfigFn,
 	type TraceConfig,
 	instrument,
+	instrumentDO,
 } from "@microlabs/otel-cf-workers";
 import { trace } from "@opentelemetry/api";
 import { type AuthHooks, createOAuthHandler } from "@thoughtspot/mcp-auth";
@@ -24,12 +25,12 @@ import {
 	resolveRequestedApiVersionMode,
 	withRequestMetrics,
 } from "./metrics/runtime/request-metrics";
-import { ConversationStorageServerSQLite } from "./servers/conversation-storage-server";
+import { ConversationStorageServerSQLite as BaseConversationStorageServer } from "./servers/conversation-storage-server";
 import { MCPServer } from "./servers/mcp-server";
 import { UserTokenStoreSQLite } from "./servers/user-token-store-server";
 import { type Props, normalizeClientName } from "./utils";
 
-export { ConversationStorageServerSQLite, UserTokenStoreSQLite };
+export { UserTokenStoreSQLite };
 
 // OTEL configuration function
 const config: ResolveConfigFn = (env: Env, _trigger) => {
@@ -44,6 +45,14 @@ const config: ResolveConfigFn = (env: Env, _trigger) => {
 
 // Create the instrumented ThoughtSpotMCP for the main export
 export const ThoughtSpotMCP = instrumentedMCPServer(MCPServer, config);
+
+// Instrumented so its fetch and storage operations are traced, joining the caller's trace via the
+// traceparent header propagated by StorageServiceClient. The export name must match the
+// class_name in wrangler.jsonc
+export const ConversationStorageServerSQLite = instrumentDO(
+	BaseConversationStorageServer,
+	config,
+);
 
 const METRIC_NAME_MAP = {
 	oauth_authorize_requests_total: METRIC_NAMES.oauthAuthorizeRequestsTotal,
