@@ -208,12 +208,11 @@ describe("MCP Server", () => {
 
 			const result = await listTools();
 
-			// Latest version: 11 tools (6 non-OAuth base + get_data + 4 model tools)
+			// Latest version: 11 tools (6 non-OAuth base + 4 model tools + get_data)
 			expect(result.tools).toHaveLength(11);
 			expect(result.tools?.map((t) => t.name)).toEqual([
 				"check_connectivity",
 				"search_objects",
-				"get_data",
 				"create_analysis_session",
 				"send_session_message",
 				"get_session_updates",
@@ -222,6 +221,7 @@ describe("MCP Server", () => {
 				"send_model_message",
 				"get_model_updates",
 				"finalize_model",
+				"get_data",
 			]);
 		});
 
@@ -289,7 +289,6 @@ describe("MCP Server", () => {
 			expect(result.tools?.map((t) => t.name)).toEqual([
 				"check_connectivity",
 				"search_objects",
-				"get_data",
 				"create_analysis_session",
 				"send_session_message",
 				"get_session_updates",
@@ -298,6 +297,7 @@ describe("MCP Server", () => {
 				"send_model_message",
 				"get_model_updates",
 				"finalize_model",
+				"get_data",
 			]);
 		});
 
@@ -340,16 +340,8 @@ describe("MCP Server", () => {
 			"create_dashboard",
 		];
 		// Base tools plus get_data, i.e. what a user with the data-download privilege
-		// (but no data-modeling privilege) sees. get_data sits right after search_objects.
-		const BASE_TOOLS_WITH_DOWNLOAD = [
-			"check_connectivity",
-			"search_objects",
-			"get_data",
-			"create_analysis_session",
-			"send_session_message",
-			"get_session_updates",
-			"create_dashboard",
-		];
+		// (but no data-modeling privilege) sees. get_data is appended after the base set.
+		const BASE_TOOLS_WITH_DOWNLOAD = [...V2_TOOLS, "get_data"];
 		const MODEL_TOOLS = [
 			"create_model_session",
 			"send_model_message",
@@ -413,8 +405,9 @@ describe("MCP Server", () => {
 			const result = await listTools();
 
 			expect(result.tools?.map((t) => t.name)).toEqual([
-				...BASE_TOOLS_WITH_DOWNLOAD,
+				...V2_TOOLS,
 				...MODEL_TOOLS,
+				"get_data",
 			]);
 		});
 

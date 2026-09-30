@@ -865,22 +865,6 @@ export const toolDefinitionsV2 = [
 		},
 	},
 	{
-		name: ToolName.GetData,
-		description: [
-			"Fetch the full data (columns and rows) of a saved Answer or Liveboard, identified by its GUID — typically an object found via `search_objects`. Use this to explain, describe, summarize, analyze, or interpret what a ThoughtSpot object, Liveboard, Answer, or visualization actually shows.",
-			"When the user wants to explain, describe, summarize, analyze, or interpret what a specific object contains or shows, an accurate answer comes from this tool's data, so you should fetch it first with the object's `id` and answer from the returned rows.",
-			"Runs the object's saved question (its existing filters and columns, unchanged) against the current data and returns the result, so the rows reflect the latest data and may differ from when the object was first saved. The result is shaped to the object's type: an Answer returns a single tabular result, a Liveboard returns one tabular result per visualization (each with its visualization id and name). To pull a single visualization pinned on a Liveboard, pass the Liveboard GUID as `object_id` and the visualization GUID in `visualization_ids`. Each result includes the column names and data rows. Use the optional `max_rows` to bound the rows returned per visualization (defaults to 25).",
-		].join("\n"),
-		inputSchema: z.toJSONSchema(GetDataInputSchema),
-		outputSchema: z.toJSONSchema(GetDataOutputSchema),
-		annotations: {
-			title: "Get Data",
-			readOnlyHint: true,
-			destructiveHint: false,
-			openWorldHint: false,
-		},
-	},
-	{
 		name: ToolName.CreateAnalysisSession,
 		description:
 			"Start an analytical session with the Analytics Agent. This is the first step in a three-step workflow: create a session, send a message, then poll for updates. Once created, you can use the returned `analytical_session_id` to send analytical questions via `send_session_message` and retrieve answers via `get_session_updates`. Sessions are conversational, so you can ask follow-up questions in the same session without creating a new one. Using a single analytical session is preferable, because it reuses the same data source selection.",
@@ -1054,3 +1038,25 @@ export const toolDefinitionsV3 = [
 		},
 	},
 ];
+
+// The get_data tool (fetch full data for a saved Answer/Liveboard). Gated behind
+// the data-download privilege at runtime in listTools/callGetData.
+const getDataToolDefinition = {
+	name: ToolName.GetData,
+	description: [
+		"Fetch the full data (columns and rows) of a saved Answer or Liveboard, identified by its GUID — typically an object found via `search_objects`. Use this to explain, describe, summarize, analyze, or interpret what a ThoughtSpot object, Liveboard, Answer, or visualization actually shows.",
+		"When the user wants to explain, describe, summarize, analyze, or interpret what a specific object contains or shows, an accurate answer comes from this tool's data, so you should fetch it first with the object's `id` and answer from the returned rows.",
+		"Runs the object's saved question (its existing filters and columns, unchanged) against the current data and returns the result, so the rows reflect the latest data and may differ from when the object was first saved. The result is shaped to the object's type: an Answer returns a single tabular result, a Liveboard returns one tabular result per visualization (each with its visualization id and name). To pull a single visualization pinned on a Liveboard, pass the Liveboard GUID as `object_id` and the visualization GUID in `visualization_ids`. Each result includes the column names and data rows. Use the optional `max_rows` to bound the rows returned per visualization (defaults to 25).",
+	].join("\n"),
+	inputSchema: z.toJSONSchema(GetDataInputSchema),
+	outputSchema: z.toJSONSchema(GetDataOutputSchema),
+	annotations: {
+		title: "Get Data",
+		readOnlyHint: true,
+		destructiveHint: false,
+		openWorldHint: false,
+	},
+};
+
+// V4 — get_data (object data fetch). Includes all V3 tools plus get_data.
+export const toolDefinitionsV4 = [...toolDefinitionsV3, getDataToolDefinition];
