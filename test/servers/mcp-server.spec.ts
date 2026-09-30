@@ -45,7 +45,7 @@ describe("MCP Server", () => {
 				},
 				userName: "test-user",
 				currentOrgId: "test-org",
-				privileges: ["DATADOWNLOADING"],
+				privileges: ["DATADOWNLOADING", "DATAMANAGEMENT"],
 			}),
 			searchMetadata: vi.fn().mockResolvedValue([
 				{
@@ -189,7 +189,7 @@ describe("MCP Server", () => {
 					mixpanelToken: "test-dev-token",
 					userName: "test-user",
 					currentOrgId: "test-org",
-					privileges: ["DATADOWNLOADING"],
+					privileges: ["DATADOWNLOADING", "DATAMANAGEMENT"],
 					isSpotterDataSourceDiscoveryEnabled: true,
 				},
 				{
@@ -208,8 +208,8 @@ describe("MCP Server", () => {
 
 			const result = await listTools();
 
-			// V2 tools (latest version): 7 tools
-			expect(result.tools).toHaveLength(7);
+			// Latest version: 11 tools (6 non-OAuth base + get_data + 4 model tools)
+			expect(result.tools).toHaveLength(11);
 			expect(result.tools?.map((t) => t.name)).toEqual([
 				"check_connectivity",
 				"search_objects",
@@ -218,6 +218,10 @@ describe("MCP Server", () => {
 				"send_session_message",
 				"get_session_updates",
 				"create_dashboard",
+				"create_model_session",
+				"send_model_message",
+				"get_model_updates",
+				"finalize_model",
 			]);
 		});
 
@@ -247,7 +251,7 @@ describe("MCP Server", () => {
 			);
 		});
 
-		it("should return 7 tools regardless of enableSpotterDataSourceDiscovery when using latest (V2)", async () => {
+		it("should return 11 tools regardless of enableSpotterDataSourceDiscovery when using latest", async () => {
 			// Mock getThoughtSpotClient with enableSpotterDataSourceDiscovery set to false
 			vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
 				getSessionInfo: vi.fn().mockResolvedValue({
@@ -267,7 +271,7 @@ describe("MCP Server", () => {
 					},
 					userName: "test-user",
 					currentOrgId: "test-org",
-					privileges: ["DATADOWNLOADING"],
+					privileges: ["DATADOWNLOADING", "DATAMANAGEMENT"],
 				}),
 				searchMetadata: vi.fn().mockResolvedValue([]),
 				instanceUrl: "https://test.thoughtspot.cloud",
@@ -280,8 +284,8 @@ describe("MCP Server", () => {
 
 			const result = await listTools();
 
-			// V2 tools don't have a datasource discovery tool, so filtering has no effect
-			expect(result.tools).toHaveLength(7);
+			// No tool in this set is a datasource discovery tool, so filtering has no effect
+			expect(result.tools).toHaveLength(11);
 			expect(result.tools?.map((t) => t.name)).toEqual([
 				"check_connectivity",
 				"search_objects",
@@ -290,6 +294,10 @@ describe("MCP Server", () => {
 				"send_session_message",
 				"get_session_updates",
 				"create_dashboard",
+				"create_model_session",
+				"send_model_message",
+				"get_model_updates",
+				"finalize_model",
 			]);
 		});
 
@@ -319,6 +327,137 @@ describe("MCP Server", () => {
 
 			const names = (await listTools()).tools?.map((t) => t.name) ?? [];
 			expect(names).not.toContain("get_data");
+		});
+	});
+
+	describe("Data modeling privilege gate", () => {
+		const V2_TOOLS = [
+			"check_connectivity",
+			"search_objects",
+			"create_analysis_session",
+			"send_session_message",
+			"get_session_updates",
+			"create_dashboard",
+		];
+		// Base tools plus get_data, i.e. what a user with the data-download privilege
+		// (but no data-modeling privilege) sees. get_data sits right after search_objects.
+		const BASE_TOOLS_WITH_DOWNLOAD = [
+			"check_connectivity",
+			"search_objects",
+			"get_data",
+			"create_analysis_session",
+			"send_session_message",
+			"get_session_updates",
+			"create_dashboard",
+		];
+		const MODEL_TOOLS = [
+			"create_model_session",
+			"send_model_message",
+			"get_model_updates",
+			"finalize_model",
+		];
+
+		// A server whose session info reports exactly these privileges.
+		async function serverWithPrivileges(privileges: unknown) {
+			vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
+				getSessionInfo: vi.fn().mockResolvedValue({
+					clusterId: "test-cluster-123",
+					clusterName: "test-cluster",
+					releaseVersion: "10.13.0.cl-110",
+					userGUID: "test-user-123",
+					configInfo: {
+						mixpanelConfig: {
+							devSdkKey: "test-dev-token",
+							prodSdkKey: "test-prod-token",
+							production: false,
+						},
+						selfClusterName: "test-cluster",
+						selfClusterId: "test-cluster-123",
+						enableSpotterDataSourceDiscovery: true,
+					},
+					userName: "test-user",
+					currentOrgId: "test-org",
+					privileges,
+				}),
+				searchMetadata: vi.fn().mockResolvedValue([]),
+				instanceUrl: "https://test.thoughtspot.cloud",
+			} as any);
+
+			const testServer = new MCPServer({ props: mockProps, env: {} as any });
+			await testServer.init();
+			return testServer;
+		}
+
+		it("hides the model tools from a user who cannot manage data models", async () => {
+			const testServer = await serverWithPrivileges(["DATADOWNLOADING"]);
+			const { listTools } = connect(testServer);
+
+			const result = await listTools();
+
+			expect(result.tools?.map((t) => t.name)).toEqual(
+				BASE_TOOLS_WITH_DOWNLOAD,
+			);
+		});
+
+		it.each([
+			["DATAMANAGEMENT"],
+			["CAN_MANAGE_WORKSHEET_VIEWS_TABLES"],
+			["ADMINISTRATION"],
+		])("offers the model tools to a user with %s", async (privilege) => {
+			const testServer = await serverWithPrivileges([
+				"DATADOWNLOADING",
+				privilege,
+			]);
+			const { listTools } = connect(testServer);
+
+			const result = await listTools();
+
+			expect(result.tools?.map((t) => t.name)).toEqual([
+				...BASE_TOOLS_WITH_DOWNLOAD,
+				...MODEL_TOOLS,
+			]);
+		});
+
+		it("fails closed when the privilege list is missing or unusable", async () => {
+			const testServer = await serverWithPrivileges(undefined);
+			const { listTools } = connect(testServer);
+
+			const result = await listTools();
+
+			expect(result.tools?.map((t) => t.name)).toEqual(V2_TOOLS);
+		});
+
+		it.each(MODEL_TOOLS)(
+			"rejects a %s call from a user without the privilege",
+			async (toolName) => {
+				// A client's cached tool list can still offer these after a privilege change.
+				const testServer = await serverWithPrivileges([]);
+				const { callTool } = connect(testServer);
+
+				const result = await callTool(toolName, {
+					model_session_id: "session-1",
+					message: "build a model",
+				});
+
+				expect(result.isError).toBe(true);
+				expect((result.content as any[])[0].text).toContain(
+					"do not have permission to create or edit data models",
+				);
+			},
+		);
+
+		it("lets a privileged user through the call-path gate", async () => {
+			const testServer = await serverWithPrivileges(["DATAMANAGEMENT"]);
+			const { callTool } = connect(testServer);
+
+			// No connection or model given, so this stops at the tool's own validation — proving the
+			// privilege gate let it through rather than short-circuiting on permissions.
+			const result = await callTool("create_model_session", {});
+
+			expect(result.isError).toBe(true);
+			expect((result.content as any[])[0].text).toContain(
+				"should ask the user which",
+			);
 		});
 	});
 

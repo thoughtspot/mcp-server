@@ -13,6 +13,7 @@ import YAML from "yaml";
 import { addGetData } from "./get-data/get-data";
 import { ORG_HEADER, buildHeaders } from "./rest-utils";
 import { addSearchObjects } from "./search-objects/search-objects";
+import { addSpotterModel } from "./spotter-model/spotter-model-client";
 import { ORG_TOKEN_VALIDITY_SEC, fetchOrgToken } from "./token-endpoints";
 import { type Org, type SessionInfo, ThoughtSpotApiError } from "./types";
 
@@ -85,6 +86,8 @@ export const getThoughtSpotClient = (
 	addGetData(client, instanceUrl, bearerToken);
 	addFetchOrgBearerToken(client, instanceUrl);
 	addListOrgs(client, instanceUrl, bearerToken);
+	// Spotter Model (Lumos) agentic model-creation handlers.
+	addSpotterModel(client, instanceUrl, bearerToken, orgId);
 	return client;
 };
 
