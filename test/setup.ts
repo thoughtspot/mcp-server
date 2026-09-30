@@ -32,8 +32,9 @@ vi.mock("@opentelemetry/api", () => {
 	};
 
 	const mockTracer = {
-		startActiveSpan: vi.fn((name, fn) => {
-			return fn(mockSpan);
+		// The callback is always the last arg: (name, fn), (name, options, fn) or (name, options, ctx, fn)
+		startActiveSpan: vi.fn((_name, ...args) => {
+			return args[args.length - 1](mockSpan);
 		}),
 		startSpan: vi.fn(() => mockSpan),
 	};
@@ -52,6 +53,17 @@ vi.mock("@opentelemetry/api", () => {
 			active: vi.fn(() => ({})),
 			with: vi.fn((ctx, fn) => fn()),
 			bind: vi.fn(),
+		},
+		propagation: {
+			inject: vi.fn(),
+			extract: vi.fn(),
+		},
+		SpanKind: {
+			INTERNAL: 0,
+			SERVER: 1,
+			CLIENT: 2,
+			PRODUCER: 3,
+			CONSUMER: 4,
 		},
 		SpanStatusCode: {
 			OK: 1,

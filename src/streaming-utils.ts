@@ -209,7 +209,7 @@ export const processSendAgentConversationMessageStreamingResponse = async (
 								spanHasError = true;
 								span.setStatus({
 									code: SpanStatusCode.ERROR,
-									message: `Error event in event stream, error code: ${item.error_code}`,
+									message: `Error event in event stream, error code: ${item}`,
 								});
 								newMessages.push({
 									is_thinking: false,
