@@ -13,6 +13,21 @@ import {
 } from "../metrics/runtime/metrics-recorder";
 import type { ToolMetricApiSurface } from "../metrics/runtime/tool-metrics";
 import { WithSpan } from "../metrics/tracing/tracing-utils";
+import type { StorageServiceClient } from "../storage-service/storage-service";
+import {
+	MODEL_POLL_INTERVAL_MS,
+	MODEL_POLL_ITERATIONS,
+} from "../thoughtspot/spotter-model/spotter-model-constants";
+import {
+	buildChoiceAnswer,
+	summarizeWorksheetModel,
+} from "../thoughtspot/spotter-model/spotter-model-mapper";
+import { consumeModelStream } from "../thoughtspot/spotter-model/spotter-model-stream";
+import type {
+	ModelSessionState,
+	ModelStreamSink,
+	ModelUpdate,
+} from "../thoughtspot/spotter-model/spotter-model-types";
 import type {
 	DataSource,
 	ThoughtSpotService,
@@ -29,11 +44,16 @@ import {
 	CreateAnalysisSessionInputSchema,
 	CreateDashboardInputSchema,
 	CreateLiveboardSchema,
+	CreateModelSessionInputSchema,
+	FinalizeModelInputSchema,
 	GetAnswerSchema,
 	GetDataSourceSuggestionsSchema,
+	GetModelUpdatesInputSchema,
 	GetRelevantQuestionsSchema,
 	GetSessionUpdatesInputSchema,
+	MODEL_TOOL_NAMES,
 	SearchObjectsInputSchema,
+	SendModelMessageInputSchema,
 	SendSessionMessageInputSchema,
 	SwitchOrgInputSchema,
 	ToolName,
@@ -425,6 +445,11 @@ export class MCPServer extends BaseMCPServer {
 			);
 		}
 
+		// Don't pollute the toolspace with model-building tools a user has no privilege to use.
+		if (!this.canManageDataModels()) {
+			tools = tools.filter((tool) => !MODEL_TOOL_NAMES.includes(tool.name));
+		}
+
 		return { tools };
 	}
 
@@ -527,6 +552,22 @@ export class MCPServer extends BaseMCPServer {
 		request: z.infer<typeof CallToolRequestSchema>,
 		recorder: MetricsRecorder,
 	) {
+		// listTools hides the model tools from users who cannot manage data models, but a client's
+		// tool list is cached, so a call can still arrive after a privilege change (or from a client
+		// that ignores the list). Gate the call path too, repairing session info first so a transient
+		// fetch failure doesn't deny a user who does have the privilege.
+		if (MODEL_TOOL_NAMES.includes(name)) {
+			await this.ensureSessionInfo();
+			if (!this.canManageDataModels()) {
+				return this.createErrorResponse(
+					"You do not have permission to create or edit data models in ThoughtSpot. This " +
+						'requires the "Can manage data" privilege — ask a ThoughtSpot administrator to ' +
+						"grant it.",
+					`${name} rejected: missing data modeling privilege`,
+				);
+			}
+		}
+
 		switch (name) {
 			case ToolName.Ping: {
 				if (this.ctx.props.accessToken && this.ctx.props.instanceUrl) {
@@ -618,6 +659,22 @@ export class MCPServer extends BaseMCPServer {
 					);
 				}
 				return this.callSwitchOrg(request, recorder);
+			}
+
+			case ToolName.CreateModelSession: {
+				return this.callCreateModelSession(request, recorder);
+			}
+
+			case ToolName.SendModelMessage: {
+				return this.callSendModelMessage(request, recorder);
+			}
+
+			case ToolName.GetModelUpdates: {
+				return this.callGetModelUpdates(request, recorder);
+			}
+
+			case ToolName.FinalizeModel: {
+				return this.callFinalizeModel(request, recorder);
 			}
 
 			default:
@@ -1161,5 +1218,383 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			map: new Map(sources.map((s) => [s.id, s])),
 		};
 		return this._sources;
+	}
+
+	// Spotter Model (V3) — agentic model creation
+	//
+	// Session state is persisted in the ConversationStorageServerSQLite Durable Object (keyed by
+	// model_session_id, same as the V2 analytical session tools) so it survives across worker
+	// instances/restarts — a single MCP session can be served by different isolates per call.
+
+	// create — open a Lumos model session (a new model on a warehouse connection, or an existing
+	// model for editing) and persist its scalar state. Nothing is built yet; the first instruction
+	// arrives via send_model_message.
+	@WithSpan("call-create-model-session")
+	async callCreateModelSession(
+		request: z.infer<typeof CallToolRequestSchema>,
+		recorder: MetricsRecorder,
+	) {
+		const span = trace.getSpan(context.active());
+		const { connection_identifier, model_identifier } =
+			CreateModelSessionInputSchema.parse(request.params.arguments);
+
+		// The server cannot tell a confirmed connection from an invented one, so it can only gate the
+		// case where none was given at all; the schema carries the "ask the user first" instruction.
+		if (!connection_identifier && !model_identifier) {
+			return this.createErrorResponse(
+				"No connection or model specified. To build a NEW model you should ask the user which " +
+					"data-warehouse connection to build on and confirm the exact connection GUID with " +
+					"them — do not guess, reuse a previous model's connection, or assume a default. To " +
+					"EDIT an existing model, confirm which model with the user and pass its " +
+					"model_identifier.",
+				"create_model_session called without connection_identifier or model_identifier",
+			);
+		}
+		span?.setAttribute("is_edit_existing_model", Boolean(model_identifier));
+
+		const storageService = await this.getStorageService();
+		const svc = this.getThoughtSpotService(recorder);
+		let sessionId: string;
+		try {
+			// Independent calls, so run together. The cookie (JSESSIONID, from the bearer token) is
+			// forwarded on later /chat calls for cookie-only backend tools (FormulaGen).
+			const [resp, sessionCookie] = await Promise.all([
+				svc.createModelSession(connection_identifier, model_identifier),
+				svc.mintSessionCookie().catch((error) => {
+					console.error(
+						`Failed to mint session cookie for model session: ${(error as Error).message}`,
+					);
+					return null;
+				}),
+			]);
+			const session: ModelSessionState = {
+				transactionId: resp.transaction_id,
+				// Upstream sends generation numbers as strings; store as a number (GraphQL Int).
+				generationNo: Number(resp.generation_no),
+				genNoWorkingSet: [],
+				sessionCookie: sessionCookie ?? undefined,
+				// Recorded so finalize_model can require a name for a new model but not for an edit.
+				isEdit: Boolean(model_identifier),
+			};
+			sessionId = resp.conversation_id;
+			await storageService.putSessionState(sessionId, session);
+		} catch (error) {
+			return this.createErrorResponse(
+				model_identifier
+					? "Could not open that model for editing. Please verify the model identifier and your permissions on it, then try again."
+					: "Could not start a model session. Please verify the connection and try again.",
+				`Error creating model session: ${(error as Error).message}`,
+			);
+		}
+
+		span?.setAttribute("model_session_id", sessionId);
+		// The conversation itself is initialized by send_model_message, which is the common entrypoint
+		// for both the first instruction and every follow-up.
+		return this.createStructuredContentSuccessResponse(
+			{ model_session_id: sessionId },
+			"Model session created successfully",
+		);
+	}
+
+	// send — hand one instruction (or a clarification answer) to the builder and return immediately;
+	// get_model_updates drains the response.
+	@WithSpan("call-send-model-message")
+	async callSendModelMessage(
+		request: z.infer<typeof CallToolRequestSchema>,
+		recorder: MetricsRecorder,
+	) {
+		const span = trace.getSpan(context.active());
+		const { model_session_id, message, selected_option_ids } =
+			SendModelMessageInputSchema.parse(request.params.arguments);
+		span?.setAttributes({
+			model_session_id,
+			is_choice_answer: Boolean(selected_option_ids),
+		});
+
+		if (!message && !selected_option_ids) {
+			return this.createErrorResponse(
+				"Nothing to send. Pass a `message` with an instruction for the model builder, or " +
+					"`selected_option_ids` to answer a clarification it asked. To read the response to " +
+					"an instruction you already sent, call get_model_updates instead.",
+				"send_model_message called without message or selected_option_ids",
+			);
+		}
+
+		const storageService = await this.getStorageService();
+		const session =
+			await storageService.getSessionState<ModelSessionState>(model_session_id);
+		if (!session) {
+			return this.createErrorResponse(
+				"Unknown model_session_id. Call create_model_session to start a model session.",
+				"Model session not found",
+			);
+		}
+
+		// Answer a pending clarification by echoing the builder's choice object back with the chosen
+		// options' is_selected flags set — the builder binds the answer by transaction_id+generation_no.
+		const choice = selected_option_ids
+			? buildChoiceAnswer(session.pendingChoice, selected_option_ids)
+			: undefined;
+
+		// Prime the conversation for this turn — the same per-turn initialize the V2 analytical-session
+		// tools do. It clears the previous turn's done flag before we return, so a get_model_updates
+		// racing in doesn't observe it, and it rejects a second instruction while one is still
+		// streaming rather than interleaving two turns' updates. Done before any state write, so a
+		// rejected send leaves the stored session (and its pending clarification) untouched.
+		try {
+			await storageService.initializeConversation(model_session_id);
+		} catch (error) {
+			return this.createErrorResponse(
+				"The model builder is still working on the previous instruction. Call " +
+					"get_model_updates until is_done is true, then send the next instruction.",
+				`Error initializing model conversation ${model_session_id}: ${error}`,
+			);
+		}
+
+		// Open the upstream stream synchronously (so connection/auth failures surface in this call),
+		// then consume it in the BACKGROUND while get_model_updates long-polls the store — the same
+		// fire-and-forget split the V2 analytical-session tools use.
+		let response: Response;
+		try {
+			response = await this.getThoughtSpotService(
+				recorder,
+			).sendModelMessageStreaming({
+				conversation_identifier: model_session_id,
+				transaction_id: session.transactionId,
+				generation_no: session.generationNo,
+				gen_no_working_set: session.genNoWorkingSet,
+				session_cookie: session.sessionCookie,
+				message: message ?? "",
+				choice,
+			});
+		} catch (error) {
+			// Mark the turn done so a poller doesn't wait forever, then report the failure. The pending
+			// clarification is deliberately left in place: the send never landed, so a retry with the
+			// same selected_option_ids must still find the choice to echo back.
+			// Guarded: if this DO write also fails, its error must not replace the upstream one.
+			try {
+				await storageService.appendMessages(model_session_id, [], true);
+			} catch (appendError) {
+				console.error(
+					`Failed to mark model turn done after a send failure for session ${model_session_id}:`,
+					(appendError as Error).message,
+				);
+			}
+			return this.createErrorResponse(
+				"Encountered an error while updating the model.",
+				`Error sending model message: ${(error as Error).message}`,
+			);
+		}
+
+		// The pending clarification is consumed only once the send has landed; the stream re-emits
+		// META_CHOICE if another is needed. Cleared after the send rather than before it, so a failed
+		// send leaves the clarification intact for a retry.
+		if (session.pendingChoice) {
+			session.pendingChoice = null;
+			await storageService.putSessionState(model_session_id, session);
+		}
+
+		// consumeModelStream is self-contained: it catches its own errors and always marks the
+		// turn done, so the floating promise never rejects and a long-poller never hangs forever.
+		const streamPromise = consumeModelStream({
+			response,
+			modelSessionId: model_session_id,
+			session,
+			sink: this.modelStreamSink(storageService, model_session_id),
+		}).catch((error) => {
+			console.error(
+				`Unhandled error in background model stream consumer for session ${model_session_id}:`,
+				(error as Error).message,
+			);
+		});
+
+		// A 1-2 min build far outlives this tool response, so the runtime has to be told to keep the
+		// invocation alive - the same reason the V2 analytical-session stream is handed to waitUntil.
+		// Without it the consumer can be killed mid-build: the turn never reaches is_done and
+		// get_model_updates long-polls its full window forever. Tests and non-Worker runtimes expose
+		// no waitUntil, so fall back to leaving the promise floating there.
+		const waitUntil = this.getMetricsWaitUntil();
+		if (waitUntil) {
+			try {
+				waitUntil(streamPromise);
+			} catch (error) {
+				console.error(
+					"Failed to schedule background model stream processing",
+					error,
+				);
+			}
+		} else {
+			void streamPromise;
+		}
+
+		return this.createStructuredContentSuccessResponse(
+			{ success: true },
+			"Model message sent successfully",
+		);
+	}
+
+	// get — drain the builder's updates for the instruction in flight.
+	@WithSpan("call-get-model-updates")
+	async callGetModelUpdates(
+		request: z.infer<typeof CallToolRequestSchema>,
+		_recorder: MetricsRecorder = NOOP_METRICS_RECORDER,
+	) {
+		const span = trace.getSpan(context.active());
+		const { model_session_id } = GetModelUpdatesInputSchema.parse(
+			request.params.arguments,
+		);
+		span?.setAttribute("model_session_id", model_session_id);
+
+		const storageService = await this.getStorageService();
+		let updates: ModelUpdate[];
+		let isDone: boolean;
+		try {
+			({ updates, isDone } = await this.pollModelUpdates(
+				storageService,
+				model_session_id,
+			));
+		} catch (error) {
+			// The update stream only exists once an instruction has been sent on this session, so a
+			// poll before any send finds no conversation to read.
+			return this.createErrorResponse(
+				"There are no updates for this model session yet. Send an instruction with " +
+					"send_model_message first, then call get_model_updates.",
+				`Error polling model updates for ${model_session_id}: ${(error as Error).message}`,
+			);
+		}
+
+		span?.setAttributes({
+			total_model_updates: updates.length,
+			is_done: isDone,
+		});
+		return this.createStructuredContentSuccessResponse(
+			{ updates, is_done: isDone },
+			isDone
+				? "Model updates retrieved"
+				: "More updates pending; call get_model_updates again with the same model_session_id",
+		);
+	}
+
+	// Bind one session's Durable Object storage to the sink the stream consumer writes through, so
+	// the consumer itself stays storage-agnostic (and unit-testable with a fake). Model updates ride
+	// the same append/read-bookmark message stream the V2 analytical sessions use — isolation comes
+	// from the conversation id the DO is routed by.
+	private modelStreamSink(
+		storageService: StorageServiceClient,
+		modelSessionId: string,
+	): ModelStreamSink {
+		return {
+			putSession: (session) =>
+				storageService.putSessionState(modelSessionId, session),
+			appendUpdates: (updates, opts) =>
+				storageService.appendMessages(modelSessionId, updates, opts.isDone),
+		};
+	}
+
+	// Long-poll the message stream until the turn is done or the window elapses, keeping the whole
+	// turn in as few calls as possible. Awaits release the DO input gate so the consumer appends
+	// concurrently. A turn longer than the window returns is_done=false; the client calls again.
+	private async pollModelUpdates(
+		storageService: StorageServiceClient,
+		modelSessionId: string,
+	): Promise<{ updates: ModelUpdate[]; isDone: boolean }> {
+		const updates: ModelUpdate[] = [];
+		let isDone = false;
+		for (let i = 0; i < MODEL_POLL_ITERATIONS; i++) {
+			const batch = await storageService.getNewMessages(modelSessionId);
+			// The stream stores normalized model updates, which are raw JSON payloads as far as the
+			// store is concerned (same passthrough the V2 raw-mode messages use).
+			updates.push(...(batch.messages as ModelUpdate[]));
+			isDone = batch.isDone;
+
+			if (isDone) {
+				break;
+			}
+			await new Promise((resolve) =>
+				setTimeout(resolve, MODEL_POLL_INTERVAL_MS),
+			);
+		}
+		return { updates, isDone };
+	}
+
+	@WithSpan("call-finalize-model")
+	async callFinalizeModel(
+		request: z.infer<typeof CallToolRequestSchema>,
+		recorder: MetricsRecorder,
+	) {
+		const { model_session_id, name, description, confirm } =
+			FinalizeModelInputSchema.parse(request.params.arguments);
+		const storageService = await this.getStorageService();
+		const session =
+			await storageService.getSessionState<ModelSessionState>(model_session_id);
+		if (!session) {
+			return this.createErrorResponse(
+				"Unknown model_session_id.",
+				"Model session not found",
+			);
+		}
+
+		// Review step (no confirm): don't save; just ask the user to confirm save vs. more changes.
+		if (!confirm) {
+			// Summary from the ACTUAL materialized model (structured counts + names), not model prose
+			// (which leaks scaffolding or comes back empty). Best-effort: fall back on fetch/parse failure.
+			let summary = "The model is ready to review before saving.";
+			try {
+				const model = await this.getThoughtSpotService(
+					recorder,
+				).fetchWorksheetModel({
+					session_identifier: session.transactionId,
+					generation_number: session.generationNo,
+					gen_no_working_set: session.genNoWorkingSet,
+				});
+				const contents = summarizeWorksheetModel(model);
+				if (contents) {
+					summary = `The model is ready to save. It contains ${contents}`;
+				}
+			} catch (error) {
+				console.error(
+					`Failed to fetch worksheet model for finalize review: ${(error as Error).message}`,
+				);
+			}
+			return this.createStructuredContentSuccessResponse(
+				{ summary, saved: false },
+				"Model summary for review",
+			);
+		}
+
+		// saveModel omits the name/description request when no name is given. That is what preserves
+		// an existing model's name on an edit-save, but it would leave a NEW model persisted unnamed.
+		// Only block when we positively know the session is new: a session stored before isEdit
+		// existed reports undefined, and refusing to save it would be worse than an unnamed model.
+		if (session.isEdit === false && !name) {
+			return this.createErrorResponse(
+				"A name is required to save a new model. Ask the user what to call it, then call " +
+					"finalize_model again with confirm=true and that name.",
+				"finalize_model called with confirm=true and no name for a new model",
+			);
+		}
+
+		try {
+			const result = await this.getThoughtSpotService(recorder).saveModel({
+				transaction_id: session.transactionId,
+				generation_no: session.generationNo,
+				gen_no_working_set: session.genNoWorkingSet,
+				name,
+				description,
+			});
+			return this.createStructuredContentSuccessResponse(
+				{
+					saved: true,
+					model_identifier: result.model_identifier,
+					url: result.url,
+				},
+				"Model saved",
+			);
+		} catch (error) {
+			return this.createErrorResponse(
+				"Encountered an error while saving the model.",
+				`Error finalizing model: ${(error as Error).message}`,
+			);
+		}
 	}
 }
