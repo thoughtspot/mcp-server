@@ -1484,6 +1484,92 @@ describe("MCP Server", () => {
 			});
 		});
 
+		describe("when data source discovery is disabled", () => {
+			// `enableSpotterDataSourceDiscovery` absent counts as disabled too.
+			function mockClient(discovery: boolean | undefined) {
+				const createConversation = vi
+					.fn()
+					.mockResolvedValue({ conversation_id: "conv-ds-789" });
+				const getSessionInfo = vi.fn().mockResolvedValue({
+					clusterId: "test-cluster-123",
+					clusterName: "test-cluster",
+					releaseVersion: "10.13.0.cl-110",
+					userGUID: "test-user-123",
+					configInfo: {
+						mixpanelConfig: {
+							devSdkKey: "test-dev-token",
+							prodSdkKey: "test-prod-token",
+							production: false,
+						},
+						selfClusterName: "test-cluster",
+						selfClusterId: "test-cluster-123",
+						enableSpotterDataSourceDiscovery: discovery,
+					},
+					userName: "test-user",
+					currentOrgId: "test-org",
+					privileges: [],
+				});
+				vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
+					getSessionInfo,
+					createAgentConversationWithAutoMode: createConversation,
+					instanceUrl: "https://test.thoughtspot.cloud",
+				} as any);
+				return { createConversation, getSessionInfo };
+			}
+
+			it.each([false, undefined])(
+				"rejects a session with no data_source_id without creating a conversation (discovery=%s)",
+				async (discovery) => {
+					const { createConversation } = mockClient(discovery);
+					await server.init();
+					const { callTool } = connect(server);
+
+					const result = await callTool("create_analysis_session", {});
+
+					expect(result.isError).toBe(true);
+					expect((result.content as any)[0].text).toContain(
+						"`data_source_id` is required",
+					);
+					expect((result.content as any)[0].text).toContain("search_objects");
+					expect(createConversation).not.toHaveBeenCalled();
+				},
+			);
+
+			it("repairs session info before the check when the connect-time fetch failed", async () => {
+				const { createConversation, getSessionInfo } = mockClient(false);
+				// The connect-time fetch fails, which would leave discovery reading as on.
+				getSessionInfo.mockRejectedValueOnce(new Error("transient"));
+				await server.init();
+				const { callTool } = connect(server);
+
+				const result = await callTool("create_analysis_session", {});
+
+				expect(getSessionInfo).toHaveBeenCalledTimes(2);
+				expect(result.isError).toBe(true);
+				expect(createConversation).not.toHaveBeenCalled();
+			});
+
+			it("creates a worksheet-context session when data_source_id is given", async () => {
+				const { createConversation } = mockClient(false);
+				await server.init();
+				const { callTool } = connect(server);
+
+				const result = await callTool("create_analysis_session", {
+					data_source_id: "ds-123",
+				});
+
+				expect(result.isError).toBeUndefined();
+				expect((result.structuredContent as any).analytical_session_id).toBe(
+					"conv-ds-789",
+				);
+				expect(createConversation).toHaveBeenCalledWith({
+					isSpotterDataSourceDiscoveryEnabled: false,
+					isSpotterChatHistoryEnabled: false,
+					dataSourceId: "ds-123",
+				});
+			});
+		});
+
 		it("should handle error from service", async () => {
 			vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
 				getSessionInfo: vi.fn().mockResolvedValue({
