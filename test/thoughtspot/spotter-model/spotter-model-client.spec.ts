@@ -221,6 +221,23 @@ describe("spotter-model client", () => {
 			});
 		});
 
+		it("org-scopes the saved model url via withOrgUrl", async () => {
+			(global.fetch as any).mockResolvedValue(jsonResponse(saved));
+			const client: any = {};
+			addSpotterModel(client, INSTANCE_URL, TOKEN, "101", (url) =>
+				url.replace("/#/", "/?orgId=101#/"),
+			);
+
+			const result = await client.saveModel({
+				transaction_id: "txn-1",
+				generation_no: 4,
+			});
+
+			expect(result.url).toBe(
+				`${INSTANCE_URL}/?orgId=101#/data/tables/model-guid`,
+			);
+		});
+
 		it("skips the rename request entirely when no name is given", async () => {
 			(global.fetch as any).mockResolvedValue(jsonResponse(saved));
 			const client = makeClient();

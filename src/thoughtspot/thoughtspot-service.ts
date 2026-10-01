@@ -73,6 +73,10 @@ export class ThoughtSpotService {
 		return recorder;
 	}
 
+	// Org-scopes a UI link; identity for clients built without org URL context.
+	private withOrgUrl = (url: string): string =>
+		(this.client as any).withOrgUrl?.(url) ?? url;
+
 	private scheduleBackgroundMetricsFlush(recorder: MetricsRecorder): void {
 		scheduleMetricsFlush(recorder, this.metrics.waitUntil);
 	}
@@ -404,6 +408,7 @@ export class ThoughtSpotService {
 					reader,
 					appendStoredMessages,
 					streamRecorder,
+					this.withOrgUrl,
 				).finally(() => {
 					this.scheduleBackgroundMetricsFlush(streamRecorder);
 				});
@@ -494,7 +499,9 @@ export class ThoughtSpotService {
 					: Promise.resolve(null),
 			]);
 
-			const frameUrl = `${(this.client as any).instanceUrl}/?tsmcp=true#/embed/conv-assist-answer?sessionId=${session.sessionId}&genNo=${session.genNo}&acSessionId=${session.acSession.sessionId}&acGenNo=${session.acSession.genNo}`;
+			const frameUrl = this.withOrgUrl(
+				`${(this.client as any).instanceUrl}/?tsmcp=true#/embed/conv-assist-answer?sessionId=${session.sessionId}&genNo=${session.genNo}&acSessionId=${session.acSession.sessionId}&acGenNo=${session.acSession.genNo}`,
+			);
 
 			return {
 				question,
@@ -638,7 +645,9 @@ export class ThoughtSpotService {
 				}),
 		);
 
-		const liveboardUrl = `${(this.client as any).instanceUrl}/#/pinboard/${resp[0].response.header.id_guid}`;
+		const liveboardUrl = this.withOrgUrl(
+			`${(this.client as any).instanceUrl}/#/pinboard/${resp[0].response.header.id_guid}`,
+		);
 		span?.setStatus({
 			code: SpanStatusCode.OK,
 			message: "Liveboard created successfully",

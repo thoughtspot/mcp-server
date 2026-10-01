@@ -5,6 +5,10 @@ import {
 import type { ResponseContext } from "@thoughtspot/rest-api-sdk";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import YAML from "yaml";
+import {
+	type OrgUrlContext,
+	addOrgToAppUrl,
+} from "../../src/thoughtspot/org-url";
 import { getThoughtSpotClient } from "../../src/thoughtspot/thoughtspot-client";
 
 // Mock the ThoughtSpot REST API SDK
@@ -141,6 +145,87 @@ describe("ThoughtSpot Client", () => {
 			);
 			expect(typeof client.sendAgentConversationMessageStreaming).toBe(
 				"function",
+			);
+		});
+	});
+
+	describe("org-aware UI links (addOrgToAppUrl)", () => {
+		const orgCtx = (orgId: string): OrgUrlContext => ({ orgId });
+
+		it.each<[string, string, OrgUrlContext | undefined, string]>([
+			[
+				"no org context",
+				"https://h/#/pinboard/lb",
+				undefined,
+				"https://h/#/pinboard/lb",
+			],
+			[
+				"empty org id",
+				"https://h/#/pinboard/lb",
+				{ orgId: "" },
+				"https://h/#/pinboard/lb",
+			],
+			[
+				"orgId goes before the hash",
+				"https://h/#/pinboard/lb",
+				orgCtx("101"),
+				"https://h/?orgId=101#/pinboard/lb",
+			],
+			[
+				"merges with an existing pre-hash query, leaves the route query alone",
+				"https://h/?tsmcp=true#/embed/conv-assist-answer?sessionId=s&genNo=1",
+				orgCtx("101"),
+				"https://h/?tsmcp=true&orgId=101#/embed/conv-assist-answer?sessionId=s&genNo=1",
+			],
+			[
+				"replaces a stale orgId",
+				"https://h/?orgId=5&x=1#/pinboard/lb",
+				orgCtx("101"),
+				"https://h/?x=1&orgId=101#/pinboard/lb",
+			],
+			[
+				"primary org 0 is still sent",
+				"https://h/#/pinboard/lb",
+				orgCtx("0"),
+				"https://h/?orgId=0#/pinboard/lb",
+			],
+		])("%s", (_name, url, org, expected) => {
+			expect(addOrgToAppUrl(url, org)).toBe(expected);
+		});
+
+		it("exposes withOrgUrl on the client and applies it to search external_link", async () => {
+			const client = getThoughtSpotClient(
+				mockInstanceUrl,
+				mockBearerToken,
+				"101",
+				orgCtx("101"),
+			) as any;
+			expect(client.withOrgUrl(`${mockInstanceUrl}/#/pinboard/lb`)).toBe(
+				`${mockInstanceUrl}/?orgId=101#/pinboard/lb`,
+			);
+
+			(fetch as any).mockResolvedValue({
+				ok: true,
+				json: vi.fn().mockResolvedValue({
+					data: {
+						queryRequest: {
+							results: [
+								{
+									objectSecurityInfo: {
+										objectType: "PINBOARD_ANSWER_BOOK",
+										objectId: "lb-1",
+									},
+									resultType: "PINBOARD_RESULT",
+								},
+							],
+						},
+					},
+				}),
+			});
+
+			const result = await client.searchObjects({ query: "sales" });
+			expect((result.results[0] as any).external_link).toBe(
+				`${mockInstanceUrl}/?orgId=101#/insights/pinboard/lb-1`,
 			);
 		});
 	});

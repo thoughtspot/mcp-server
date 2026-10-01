@@ -23,6 +23,7 @@ export function addSearchObjects(
 	client: any,
 	instanceUrl: string,
 	token: string,
+	withOrgUrl: (url: string) => string = (url) => url,
 ) {
 	(client as any).searchObjects = async (
 		params: SearchObjectsParams,
@@ -124,7 +125,9 @@ export function addSearchObjects(
 			}
 
 			let pageObjects: SearchObjectHeader[] = results
-				.map((result: any) => toHeader(result, instanceUrl, stickerNames))
+				.map((result: any) =>
+					toHeader(result, instanceUrl, stickerNames, withOrgUrl),
+				)
 				.filter(
 					(obj: SearchObjectHeader | null): obj is SearchObjectHeader =>
 						obj !== null,

@@ -96,6 +96,7 @@ export function toHeader(
 	result: any,
 	instanceUrl: string,
 	stickerNames: Record<string, string>,
+	withOrgUrl: (url: string) => string = (url) => url,
 ): SearchObjectHeader | null {
 	const resultType: string = result?.resultType ?? "";
 	const { id, visualizationId, header } = resolveResultShape(result);
@@ -123,11 +124,8 @@ export function toHeader(
 		tags,
 		last_modified: toEpochMs(header?.modifiedOn),
 		verified: header?.isVerified ?? false,
-		external_link: toExternalLink(
-			instanceUrl,
-			resultType,
-			visualizationId ?? id,
-			id,
+		external_link: withOrgUrl(
+			toExternalLink(instanceUrl, resultType, visualizationId ?? id, id),
 		),
 		query: toQuery(resultType, result?.sageQuery),
 		// TODO: raw Eureka relevance score; normalization to 0–1 pending.

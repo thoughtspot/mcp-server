@@ -1161,6 +1161,38 @@ describe("MCP Server org tools", () => {
 	});
 
 	// Fan-out consistency across separate server instances sharing one store.
+	describe("org-aware UI links", () => {
+		// The 4th getThoughtSpotClient arg is the org URL context for UI links.
+		function lastOrgUrlContext() {
+			const calls = vi.mocked(thoughtspotClient.getThoughtSpotClient).mock
+				.calls;
+			return calls[calls.length - 1][3];
+		}
+
+		it("passes the active org to the client", async () => {
+			const { server } = makeServer({
+				authMode: "oauth",
+				session: { orgsEnabled: true, currentOrgId: "0" },
+			});
+			await server.init();
+			await connect(server).callTool("switch_org", { org_id: 101 });
+
+			(server as any).getThoughtSpotService();
+			expect(lastOrgUrlContext()).toEqual({ orgId: "101" });
+		});
+
+		it("sends no org URL context when orgs are disabled", async () => {
+			const { server } = makeServer({
+				authMode: "oauth",
+				session: { orgsEnabled: false },
+			});
+			await server.init();
+
+			(server as any).getThoughtSpotService();
+			expect(lastOrgUrlContext()).toBeUndefined();
+		});
+	});
+
 	describe("fan-out consistency", () => {
 		// F1: a switch in instance A is seen by instance B's next call.
 		it("B sees A's switch on its next tool call (per-request reload)", async () => {

@@ -35,11 +35,12 @@ export function addSpotterModel(
 	instanceUrl: string,
 	token: string,
 	orgId?: string,
+	withOrgUrl: (url: string) => string = (url) => url,
 ) {
 	addMintSessionCookie(client, instanceUrl, token, orgId);
 	addCreateModelSession(client, instanceUrl, token);
 	addSendModelMessageStreaming(client, instanceUrl, token);
-	addSaveModel(client, instanceUrl, token, orgId);
+	addSaveModel(client, instanceUrl, token, orgId, withOrgUrl);
 	addFetchWorksheetModel(client, instanceUrl, token, orgId);
 }
 
@@ -217,6 +218,7 @@ function addSaveModel(
 	instanceUrl: string,
 	token: string,
 	orgId?: string,
+	withOrgUrl: (url: string) => string = (url) => url,
 ) {
 	(client as any).saveModel = async ({
 		transaction_id,
@@ -284,7 +286,7 @@ function addSaveModel(
 		}
 		return {
 			model_identifier: guid,
-			url: `${instanceUrl}/#/data/tables/${guid}`,
+			url: withOrgUrl(`${instanceUrl}/#/data/tables/${guid}`),
 		};
 	};
 }
