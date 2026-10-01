@@ -862,6 +862,18 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		);
 		span?.setAttribute("data_source_id", data_source_id ?? "(none)");
 
+		// With auto data-source selection off, a session without a data source is
+		// created with an empty context and dataset search disabled, so the agent
+		// cannot answer any data question. Refuse it and let the client pick one.
+		// Repair session info first: without it the discovery check fails open.
+		await this.ensureSessionInfo();
+		if (!data_source_id && !this.isSpotterDataSourceDiscoveryEnabled()) {
+			return this.createErrorResponse(
+				"This ThoughtSpot instance does not select a data source automatically, so `data_source_id` is required. Find the data source with `search_objects` (types: ['WORKSHEET']), confirm it with the user if more than one matches, then call `create_analysis_session` again with its `object_id` as `data_source_id`.",
+				"Create analysis session rejected: no data_source_id and data source discovery is disabled",
+			);
+		}
+
 		let response: AgentConversation;
 		try {
 			response = await this.getThoughtSpotService(

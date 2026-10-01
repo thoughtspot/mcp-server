@@ -297,7 +297,7 @@ export const CreateAnalysisSessionInputSchema = z.object({
 		.string()
 		.optional()
 		.describe(
-			'The ID of the data source to query. You can provide this when the user has specified or confirmed a data source, or when context makes a particular source obvious. Omit it to let the Analytics Agent automatically select the most relevant source based on the question. A valid ID follows the following format: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" (for example, "de1b3cfd-1725-400a-b6c7-0cd0f2b70bf1"). If you only have the data source name but not the ID, you can provide it in the `additional_context` field of the `send_session_message` tool instead.',
+			'The ID of the data source to query. You can provide this when the user has specified or confirmed a data source, or when context makes a particular source obvious. Omit it to let the Analytics Agent automatically select the most relevant source based on the question; if the instance does not support automatic selection, the tool returns an error asking for a data source, which you can find with `search_objects`. A valid ID follows the following format: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" (for example, "de1b3cfd-1725-400a-b6c7-0cd0f2b70bf1"). If you only have the data source name but not the ID, you can provide it in the `additional_context` field of the `send_session_message` tool instead.',
 		),
 });
 
