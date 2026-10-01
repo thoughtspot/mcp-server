@@ -391,6 +391,33 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		]);
 	});
 
+	it("org-scopes the answer iframe url via withOrgUrl", async () => {
+		const storage = makeMockStorage();
+		const metadata = {
+			session_id: "sess-1",
+			gen_no: 42,
+			transaction_id: "txn-1",
+			generation_number: 7,
+		};
+		const line = `data: ${JSON.stringify([{ type: "answer", metadata }])}\n`;
+
+		await processSendAgentConversationMessageStreamingResponse(
+			INSTANCE_URL,
+			SpotterResponseFormat.SIMPLIFIED,
+			CONV_ID,
+			makeReader([line]),
+			storage.appendMessages,
+			undefined,
+			(url) => url.replace("?tsmcp=true", "?tsmcp=true&orgId=101"),
+		);
+
+		expect(storage.appendMessagesAndRestartTtl).toHaveBeenCalledWith(CONV_ID, [
+			expect.objectContaining({
+				iframe_url: `${INSTANCE_URL}/?tsmcp=true&orgId=101#/embed/conv-assist-answer?sessionId=sess-1&genNo=42&acSessionId=txn-1&acGenNo=7`,
+			}),
+		]);
+	});
+
 	it("sets is_thinking=true on an answer event when metadata.type is 'thinking'", async () => {
 		const storage = makeMockStorage();
 		const metadata = {

@@ -10,6 +10,7 @@ import type {
 import { customAlphabet } from "nanoid";
 import { of } from "rxjs";
 import YAML from "yaml";
+import { type OrgUrlContext, addOrgToAppUrl } from "./org-url";
 import { ORG_HEADER, buildHeaders } from "./rest-utils";
 import { addSearchObjects } from "./search-objects/search-objects";
 import { addSpotterModel } from "./spotter-model/spotter-model-client";
@@ -38,6 +39,7 @@ export const getThoughtSpotClient = (
 	instanceUrl: string,
 	bearerToken: string,
 	orgId?: string,
+	orgUrl?: OrgUrlContext,
 ) => {
 	const config = createBearerAuthenticationConfig(instanceUrl, () =>
 		Promise.resolve(bearerToken),
@@ -61,6 +63,9 @@ export const getThoughtSpotClient = (
 	});
 	const client = new ThoughtSpotRestApi(config);
 	(client as any).instanceUrl = instanceUrl;
+	// Applied to every UI link we hand back, so it opens in the active org.
+	const withOrgUrl = (url: string) => addOrgToAppUrl(url, orgUrl);
+	(client as any).withOrgUrl = withOrgUrl;
 	addExportUnsavedAnswerTML(client, instanceUrl, bearerToken, orgId);
 	addGetSessionInfo(client, instanceUrl, bearerToken, orgId);
 	addGetAnswerSession(client, instanceUrl, bearerToken, orgId);
@@ -76,11 +81,11 @@ export const getThoughtSpotClient = (
 		bearerToken,
 		orgId,
 	);
-	addSearchObjects(client, instanceUrl, bearerToken);
+	addSearchObjects(client, instanceUrl, bearerToken, withOrgUrl);
 	addFetchOrgBearerToken(client, instanceUrl);
 	addListOrgs(client, instanceUrl, bearerToken);
 	// Spotter Model (Lumos) agentic model-creation handlers.
-	addSpotterModel(client, instanceUrl, bearerToken, orgId);
+	addSpotterModel(client, instanceUrl, bearerToken, orgId, withOrgUrl);
 	return client;
 };
 

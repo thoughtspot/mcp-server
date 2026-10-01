@@ -1109,6 +1109,26 @@ describe("thoughtspot-service", () => {
 			);
 		});
 
+		it("org-scopes the liveboard url via the client's withOrgUrl", async () => {
+			mockClient.importMetadataTML = vi
+				.fn()
+				.mockResolvedValue([
+					{ response: { header: { id_guid: "liveboard123" } } },
+				]);
+			(mockClient as any).withOrgUrl = (url: string) =>
+				url.replace("/#/", "/?orgId=101#/");
+
+			const result = await createLiveboard(
+				"Test Liveboard",
+				[{ question: "Q", tml: { answer: { name: "A" } } }],
+				mockClient,
+			);
+
+			expect(result).toBe(
+				"https://test.thoughtspot.com/?orgId=101#/pinboard/liveboard123",
+			);
+		});
+
 		it("should filter out answers without TML", async () => {
 			const answers = [
 				{

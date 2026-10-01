@@ -27,6 +27,7 @@ export const processSendAgentConversationMessageStreamingResponse = async (
 		isDone?: boolean,
 	) => Promise<void>,
 	recorder?: MetricsRecorder,
+	withOrgUrl: (url: string) => string = (url) => url,
 ) => {
 	return await withSpan(
 		"process-send-agent-conversation-message-streaming-response",
@@ -156,7 +157,9 @@ export const processSendAgentConversationMessageStreamingResponse = async (
 									"answer",
 									item.metadata?.type === "thinking",
 								);
-								const iframeUrl = `${instanceUrl}/?tsmcp=true#/embed/conv-assist-answer?sessionId=${item.metadata?.session_id}&genNo=${item.metadata?.gen_no}&acSessionId=${item.metadata?.transaction_id}&acGenNo=${item.metadata?.generation_number}`;
+								const iframeUrl = withOrgUrl(
+									`${instanceUrl}/?tsmcp=true#/embed/conv-assist-answer?sessionId=${item.metadata?.session_id}&genNo=${item.metadata?.gen_no}&acSessionId=${item.metadata?.transaction_id}&acGenNo=${item.metadata?.generation_number}`,
+								);
 								newMessages.push({
 									is_thinking: item.metadata?.type === "thinking",
 									type: "answer",

@@ -30,6 +30,7 @@ import { getActiveSpan, withSpan } from "../metrics/tracing/tracing-utils";
 import { OrgStorageServiceClient } from "../storage-service/org-storage-service";
 import { StorageServiceClient } from "../storage-service/storage-service";
 import { OrgService } from "../thoughtspot/org-service";
+import type { OrgUrlContext } from "../thoughtspot/org-url";
 import { getThoughtSpotClient } from "../thoughtspot/thoughtspot-client";
 import { ThoughtSpotService } from "../thoughtspot/thoughtspot-service";
 import type { SessionInfo } from "../thoughtspot/types";
@@ -324,6 +325,15 @@ export abstract class BaseMCPServer extends Server {
 		);
 	}
 
+	// How UI links name the active org; undefined leaves them unchanged.
+	protected getOrgUrlContext(): OrgUrlContext | undefined {
+		const orgId = this.getActiveOrgId();
+		if (!orgId || !this.sessionInfo?.orgsEnabled) {
+			return undefined;
+		}
+		return { orgId };
+	}
+
 	protected getThoughtSpotService(
 		recorder?: MetricsRecorder,
 		analyticsContextOverride?: MetricAnalyticsContext,
@@ -333,6 +343,7 @@ export abstract class BaseMCPServer extends Server {
 				this.ctx.props.instanceUrl,
 				this.getActiveToken(),
 				this.getActiveOrgId(),
+				this.getOrgUrlContext(),
 			),
 			{
 				recorder,
