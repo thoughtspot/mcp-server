@@ -203,11 +203,56 @@ export function toAnalyticsEngineDataPoint(
 	};
 }
 
+function counterSeriesKey(observation: MetricObservation): string {
+	const labelEntries = Object.entries(observation.labels)
+		.filter(([, value]) => value !== undefined)
+		.sort(([a], [b]) => a.localeCompare(b));
+	return JSON.stringify([observation.name, labelEntries]);
+}
+
+// Analytics Engine allows at most 25 writeDataPoint calls per Worker
+// invocation; per-event counters (e.g. one increment per upstream stream
+// message) can produce hundreds of observations in a single flush, so
+// counters sharing a series (name + labels) are summed into one data point.
+// Histograms and gauges keep one point per observation: summing would
+// destroy percentile/last-value semantics.
+export function aggregateCounterObservations(
+	observations: readonly MetricObservation[],
+): MetricObservation[] {
+	const aggregated: MetricObservation[] = [];
+	const counters = new Map<string, MetricObservation>();
+
+	for (const observation of observations) {
+		if (observation.kind !== "counter") {
+			aggregated.push(observation);
+			continue;
+		}
+
+		const key = counterSeriesKey(observation);
+		const existing = counters.get(key);
+		if (existing) {
+			existing.value += observation.value;
+			existing.timestampMs = Math.max(
+				existing.timestampMs,
+				observation.timestampMs,
+			);
+		} else {
+			const copy = { ...observation, labels: { ...observation.labels } };
+			counters.set(key, copy);
+			aggregated.push(copy);
+		}
+	}
+
+	return aggregated;
+}
+
 export class AnalyticsEngineMetricsSink implements MetricsSink {
 	constructor(private readonly dataset: AnalyticsEngineDatasetLike) {}
 
 	async flush(payload: MetricsFlushPayload): Promise<void> {
-		for (const observation of payload.observations) {
+		for (const observation of aggregateCounterObservations(
+			payload.observations,
+		)) {
 			try {
 				this.dataset.writeDataPoint(
 					toAnalyticsEngineDataPoint(
