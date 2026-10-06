@@ -1044,8 +1044,88 @@ describe("thoughtspot-service", () => {
 
 			expect(result).toEqual({
 				url: "https://test.thoughtspot.com/#/pinboard/liveboard123",
+				liveboardId: "liveboard123",
 				error: null,
 			});
+		});
+
+		// The layout's visualization_id comes from the array index, so tile ids must be assigned
+		// from final position. Any other scheme desyncs the two and imports a broken liveboard.
+		it("assigns tile ids from final position, with and without a note tile", async () => {
+			const answers = [
+				{ title: "A", session_identifier: "s1", generation_number: 1 },
+				{ title: "B", session_identifier: "s2", generation_number: 1 },
+			];
+
+			const run = async (noteTile?: string) => {
+				(mockClient as any).exportUnsavedAnswerTML = vi
+					.fn()
+					.mockResolvedValue({ answer: { name: "x" } });
+				mockClient.importMetadataTML = vi
+					.fn()
+					.mockResolvedValue([{ response: { header: { id_guid: "lb" } } }]);
+				await fetchTMLAndCreateLiveboard(
+					"T",
+					answers,
+					noteTile as any,
+					mockClient,
+				);
+				const tml = JSON.parse(
+					(mockClient.importMetadataTML as any).mock.calls[0][0]
+						.metadata_tmls[0],
+				);
+				return {
+					vizIds: tml.liveboard.visualizations.map((v: any) => v.id),
+					layoutIds: tml.liveboard.layout.tiles.map(
+						(t: any) => t.visualization_id,
+					),
+					noteTiles: tml.liveboard.visualizations.filter(
+						(v: any) => v.note_tile,
+					).length,
+				};
+			};
+
+			const withNote = await run("<p>hi</p>");
+			expect(withNote.noteTiles).toBe(1);
+			expect(withNote.vizIds).toEqual(["Viz_0", "Viz_1", "Viz_2"]);
+			expect(withNote.layoutIds).toEqual(withNote.vizIds);
+
+			const withoutNote = await run(undefined);
+			expect(withoutNote.noteTiles).toBe(0);
+			expect(withoutNote.vizIds).toEqual(["Viz_0", "Viz_1"]);
+			expect(withoutNote.layoutIds).toEqual(withoutNote.vizIds);
+		});
+
+		it("keeps ids and layout aligned when an answer's TML cannot be fetched", async () => {
+			// Previously ids were Viz_{idx+1} from the pre-filter index, so a dropped answer left
+			// a gap that the position-derived layout did not have.
+			(mockClient as any).exportUnsavedAnswerTML = vi
+				.fn()
+				.mockResolvedValueOnce({ answer: { name: "ok" } })
+				.mockResolvedValueOnce(null);
+			mockClient.importMetadataTML = vi
+				.fn()
+				.mockResolvedValue([{ response: { header: { id_guid: "lb" } } }]);
+
+			await fetchTMLAndCreateLiveboard(
+				"T",
+				[
+					{ title: "A", session_identifier: "s1", generation_number: 1 },
+					{ title: "B", session_identifier: "s2", generation_number: 1 },
+				],
+				undefined as any,
+				mockClient,
+			);
+
+			const tml = JSON.parse(
+				(mockClient.importMetadataTML as any).mock.calls[0][0].metadata_tmls[0],
+			);
+			expect(tml.liveboard.visualizations.map((v: any) => v.id)).toEqual([
+				"Viz_0",
+			]);
+			expect(
+				tml.liveboard.layout.tiles.map((t: any) => t.visualization_id),
+			).toEqual(["Viz_0"]);
 		});
 
 		it("should handle TML fetch errors", async () => {
@@ -1910,6 +1990,110 @@ describe("thoughtspot-service", () => {
 					description: "Sales and marketing worksheet",
 				},
 			]);
+		});
+	});
+
+	describe("createEmptyLiveboard", () => {
+		it("imports a minimal liveboard TML and returns the new liveboard id", async () => {
+			mockClient.importMetadataTML = vi
+				.fn()
+				.mockResolvedValue([{ response: { header: { id_guid: "lb-new-1" } } }]);
+
+			const service = new ThoughtSpotService(mockClient);
+			const result = await service.createEmptyLiveboard("Q3 Review");
+
+			expect(mockClient.importMetadataTML).toHaveBeenCalledTimes(1);
+			const call = mockClient.importMetadataTML.mock.calls[0][0];
+			expect(call.import_policy).toBe("ALL_OR_NONE");
+			expect(call.create_new).toBe(true);
+
+			const tml = JSON.parse(call.metadata_tmls[0]);
+			expect(tml).toEqual({
+				liveboard: {
+					name: "Q3 Review",
+					visualizations: [],
+					layout: { tiles: [] },
+				},
+			});
+
+			expect(result).toEqual({ liveboardId: "lb-new-1" });
+		});
+
+		it("throws when the import response is missing id_guid", async () => {
+			mockClient.importMetadataTML = vi.fn().mockResolvedValue([{}]);
+
+			const service = new ThoughtSpotService(mockClient);
+			await expect(service.createEmptyLiveboard("LB")).rejects.toThrow(
+				/id_guid missing/,
+			);
+		});
+
+		it("propagates errors from importMetadataTML", async () => {
+			mockClient.importMetadataTML = vi
+				.fn()
+				.mockRejectedValue(new Error("import broke"));
+
+			const service = new ThoughtSpotService(mockClient);
+			await expect(service.createEmptyLiveboard("LB")).rejects.toThrow(
+				"import broke",
+			);
+		});
+	});
+
+	describe("createBachPinboardSession", () => {
+		it("delegates to the client and returns the session ids", async () => {
+			mockClient.createBachPinboardSession = vi.fn().mockResolvedValue({
+				transactionId: "txn-1",
+				generationNumber: "3",
+			});
+
+			const service = new ThoughtSpotService(mockClient);
+			const result = await service.createBachPinboardSession("lb-1");
+
+			expect(mockClient.createBachPinboardSession).toHaveBeenCalledWith({
+				liveboardId: "lb-1",
+			});
+			expect(result).toEqual({
+				transactionId: "txn-1",
+				generationNumber: "3",
+			});
+		});
+
+		it("propagates errors from the client", async () => {
+			mockClient.createBachPinboardSession = vi
+				.fn()
+				.mockRejectedValue(new Error("bach create failed"));
+
+			const service = new ThoughtSpotService(mockClient);
+			await expect(service.createBachPinboardSession("lb-1")).rejects.toThrow(
+				"bach create failed",
+			);
+		});
+	});
+
+	describe("saveBachPinboard", () => {
+		it("delegates to the client with the txn id + generation number", async () => {
+			mockClient.saveBachPinboard = vi.fn().mockResolvedValue(undefined);
+
+			const service = new ThoughtSpotService(mockClient);
+			const result = await service.saveBachPinboard("txn-1", "9");
+
+			expect(mockClient.saveBachPinboard).toHaveBeenCalledWith({
+				transactionId: "txn-1",
+				generationNumber: "9",
+			});
+			expect(result).toBeUndefined();
+		});
+
+		it("propagates errors from the client", async () => {
+			mockClient.saveBachPinboard = vi
+				.fn()
+				.mockRejectedValue(new Error("bach save failed"));
+
+			const service = new ThoughtSpotService(mockClient);
+			await expect(service.saveBachPinboard("txn-1", "9")).rejects.toThrow(
+				"bach save failed",
+			);
 		});
 	});
 });

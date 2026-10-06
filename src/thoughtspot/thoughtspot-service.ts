@@ -534,8 +534,8 @@ export class ThoughtSpotService {
 	async fetchTMLAndCreateLiveboard(
 		title: string,
 		answers: Answer[],
-		noteTileParsedHtml: string,
-	): Promise<{ url?: string; error: Error | null }> {
+		noteTileParsedHtml?: string,
+	): Promise<{ url?: string; liveboardId?: string; error: Error | null }> {
 		const span = getActiveSpan();
 
 		try {
@@ -555,13 +555,10 @@ export class ThoughtSpotService {
 				),
 			);
 
-			// Add note tile first
-			const noteTitle = {
-				id: "Viz_0",
-				note_tile: {
-					html_parsed_string: noteTileParsedHtml,
-				},
-			};
+			// A note tile is only added when the caller supplied content for one.
+			const noteTiles = noteTileParsedHtml
+				? [{ note_tile: { html_parsed_string: noteTileParsedHtml } }]
+				: [];
 
 			// Update answers with TML data to match TML visualization format
 			const visualizationAnswers = answers
@@ -569,7 +566,6 @@ export class ThoughtSpotService {
 					const tml = tmls[idx];
 					if (!tml) return null;
 					return {
-						id: `Viz_${idx + 1}`,
 						answer: {
 							...tml.answer,
 							name: answer.title,
@@ -578,14 +574,23 @@ export class ThoughtSpotService {
 				})
 				.filter((viz) => viz !== null);
 
-			// Combine note tile first, then visualization answers
-			const tiles = [noteTitle, ...visualizationAnswers];
+			// Ids are assigned from final position, because createLiveboard builds the layout's
+			// visualization_id from the array index. Deriving them any other way desyncs the two:
+			// previously the note tile was hardcoded to Viz_0 and answers to Viz_{idx+1}, which
+			// only lined up while a note tile was always present and no answer was ever dropped.
+			const tiles = [...noteTiles, ...visualizationAnswers].map(
+				(tile, idx) => ({
+					id: `Viz_${idx}`,
+					...tile,
+				}),
+			);
 
 			span?.addEvent("create-liveboard");
 
-			const liveboardUrl = await this.createLiveboard(title, tiles);
+			const created = await this.createLiveboardWithId(title, tiles);
 			return {
-				url: liveboardUrl,
+				url: created.url,
+				liveboardId: created.liveboardId,
 				error: null,
 			};
 		} catch (error) {
@@ -601,10 +606,83 @@ export class ThoughtSpotService {
 	}
 
 	/**
-	 * Create liveboard from answers
+	 * Create an empty liveboard with just a name. Returns the new liveboard's GUID.
+	 */
+	@WithSpan("create-empty-liveboard")
+	async createEmptyLiveboard(name: string): Promise<{ liveboardId: string }> {
+		const tml = {
+			liveboard: { name, visualizations: [], layout: { tiles: [] } },
+		};
+
+		const resp = await this.observeUpstreamCall(
+			UPSTREAM_OPERATION_NAMES.importMetadataTml,
+			() =>
+				this.client.importMetadataTML({
+					metadata_tmls: [JSON.stringify(tml)],
+					import_policy: "ALL_OR_NONE",
+					create_new: true,
+				}),
+		);
+
+		const liveboardId = (resp as any)?.[0]?.response?.header?.id_guid;
+		if (!liveboardId) {
+			throw new Error(
+				`createEmptyLiveboard: id_guid missing in response: ${JSON.stringify(resp)}`,
+			);
+		}
+		return { liveboardId };
+	}
+
+	/**
+	 * Initiate a new BACH pinboard session for a liveboard.
+	 */
+	@WithSpan("create-bach-pinboard-session")
+	async createBachPinboardSession(
+		liveboardId: string,
+	): Promise<{ transactionId: string; generationNumber: string }> {
+		return this.observeUpstreamCall(
+			UPSTREAM_OPERATION_NAMES.createBachPinboardSession,
+			() => (this.client as any).createBachPinboardSession({ liveboardId }),
+		);
+	}
+
+	/**
+	 * Commit the current generation of a BACH pinboard session back to the saved liveboard. The
+	 * BACH session is unaffected by the save and can continue to receive further mutations.
+	 */
+	@WithSpan("save-bach-pinboard")
+	async saveBachPinboard(
+		transactionId: string,
+		generationNumber: string,
+	): Promise<void> {
+		await this.observeUpstreamCall(
+			UPSTREAM_OPERATION_NAMES.saveBachPinboard,
+			() =>
+				(this.client as any).saveBachPinboard({
+					transactionId,
+					generationNumber,
+				}),
+		);
+	}
+
+	/**
+	 * Create liveboard from answers. Returns the URL only; prefer
+	 * `createLiveboardWithId` when the caller also needs the liveboard GUID (e.g. to hand the
+	 * liveboard to a follow-up agent turn).
+	 */
+	async createLiveboard(name: string, answers: any[]): Promise<string> {
+		const { url } = await this.createLiveboardWithId(name, answers);
+		return url;
+	}
+
+	/**
+	 * Create liveboard from answers, returning both the URL and the new liveboard's GUID.
 	 */
 	@WithSpan("create-liveboard")
-	async createLiveboard(name: string, answers: any[]): Promise<string> {
+	async createLiveboardWithId(
+		name: string,
+		answers: any[],
+	): Promise<{ url: string; liveboardId: string }> {
 		const span = getActiveSpan();
 		span?.setAttributes({
 			total_answers: answers.length,
@@ -640,12 +718,14 @@ export class ThoughtSpotService {
 				}),
 		);
 
-		const liveboardUrl = `${(this.client as any).instanceUrl}/#/pinboard/${resp[0].response.header.id_guid}`;
+		const liveboardId = resp[0].response.header.id_guid;
+		const liveboardUrl = `${(this.client as any).instanceUrl}/#/pinboard/${liveboardId}`;
+		span?.setAttribute("liveboard_id", liveboardId);
 		span?.setStatus({
 			code: SpanStatusCode.OK,
 			message: "Liveboard created successfully",
 		});
-		return liveboardUrl;
+		return { url: liveboardUrl, liveboardId };
 	}
 
 	/**

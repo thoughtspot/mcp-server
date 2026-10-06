@@ -25,6 +25,9 @@ import type {
  * The storageId is derived by taking a hash of the user's access token and combining it with the
  * conversationId, to ensure no users can access each other's conversations.
  */
+// Open-ended per-session state; each flow owns its own keys.
+export type ConversationMetadata = Record<string, unknown>;
+
 export class StorageServiceClient {
 	constructor(
 		private readonly namespace: DurableObjectNamespace,
@@ -195,5 +198,76 @@ export class StorageServiceClient {
 		}
 
 		return response.json() as Promise<T | null>;
+	}
+
+	/*
+	 * SpotterViz session state, stored in the same per-conversation `/state` slot that Spotter Model
+	 * uses rather than a separate metadata route.
+	 *
+	 * Callers patch individual keys (the SSE drain patches `generationNumber` while the dashboard
+	 * orchestrator writes turn progress), so these give merge semantics on top of the whole-blob
+	 * put. Note this is read-modify-write across two DO calls, not atomic: two concurrent patches to
+	 * the same session can lose one write. The previous dedicated PATCH route merged inside the DO.
+	 */
+
+	// Throws when nothing is stored, matching what callers expect from a missing session.
+	async getMetadata<T extends ConversationMetadata = ConversationMetadata>(
+		conversationId: string,
+	): Promise<T> {
+		const state = await this.getSessionState<T>(conversationId);
+		if (state === null) {
+			throw new Error(`No session state stored for ${conversationId}`);
+		}
+		return state;
+	}
+
+	// Shallow-merge a patch into the stored state and return the result.
+	async updateMetadata<T extends ConversationMetadata = ConversationMetadata>(
+		conversationId: string,
+		patch: Partial<T>,
+	): Promise<T> {
+		const existing =
+			(await this.getSessionState<T>(conversationId)) ?? ({} as T);
+		const merged = { ...existing, ...patch } as T;
+		await this.putSessionState<T>(conversationId, merged);
+		return merged;
+	}
+
+	/*
+	 * Type-generic twins of appendMessages / getNewMessages, for streams whose items are not Spotter
+	 * messages (SpotterViz SSE events). They share the DO's message log and bookmark machinery.
+	 */
+	async appendEvents<T>(
+		conversationId: string,
+		events: T[],
+		isDone = false,
+	): Promise<void> {
+		// Wire field stays "messages" so the DO route is shared between the two callers.
+		const response = await this.fetchStorage(conversationId, "append", {
+			method: "POST",
+			headers: this.headers(),
+			body: JSON.stringify({ messages: events, isDone }),
+		});
+
+		if (!response.ok) {
+			const text = await response.text();
+			throw new Error(`Failed to append events (${response.status}): ${text}`);
+		}
+	}
+
+	async getNewEvents<T>(
+		conversationId: string,
+	): Promise<{ messages: T[]; isDone: boolean }> {
+		const response = await this.fetchStorage(conversationId, "messages", {
+			method: "GET",
+			headers: this.headers(),
+		});
+
+		if (!response.ok) {
+			const text = await response.text();
+			throw new Error(`Failed to get events (${response.status}): ${text}`);
+		}
+
+		return response.json() as Promise<{ messages: T[]; isDone: boolean }>;
 	}
 }

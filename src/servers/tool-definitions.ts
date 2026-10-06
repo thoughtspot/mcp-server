@@ -471,25 +471,271 @@ export const AnswerSchema = z.object({
 		),
 });
 
-export const CreateDashboardInputSchema = z.object({
-	title: z.string().describe("Title of the dashboard to be created."),
-	note_tile: z
-		.string()
+/**
+ * Guidance reused across the dashboard tools. Kept in one place so `create_dashboard` and
+ * `modify_dashboard` describe the same capability the same way.
+ */
+const DESIGN_CONTEXT_GUIDANCE = `Free-form description of how the dashboard should look and be organised. There is no length limit, so pass as much detail as you have: if you are migrating a dashboard from another tool (for example a Tableau workbook), describe its charts, groupings, tabs, ordering and colours here in your own words.
+
+What is worth including, because the dashboard designer acts on it:
+- The data source to use, by name or id. This is the single most important item. Without it the tool will come back asking which data source to use instead of building anything.
+- Grouping and tabs: which charts belong together, and whether they should be split across tabs.
+- Narrative order: what matters most. Key figures and headline metrics are placed top-left first.
+- Chart types per metric, stated literally (for example "revenue by region as a column chart"). Use the user's exact wording for measures and dimensions; it is interpreted literally.
+- Brand colours as hex codes.
+- Any short explanatory text you want on the dashboard. Keep it brief and do not put live figures such as amounts, counts or percentages in it.
+
+What it cannot do, so do not ask for it: changing the chart type of an existing chart (it has to be recreated instead), editing an existing chart's columns or query, and colouring individual data values (for example red for "Churn").`;
+
+/** One line for tools that are not entry points, so the full contract is not sent three times. */
+const RESULT_CONTRACT_BRIEF =
+	"Check `status`: `completed` (give the user `dashboard_url`), `in_progress` (call this again), `needs_input` (`question` says what is needed; answer it via `modify_dashboard` with the same `dashboard_id` and `task_id`), `failed` (see `error`).";
+
+const RESULT_CONTRACT_GUIDANCE = `Check \`status\` on the result and act on it:
+- \`completed\`: the dashboard is saved. Give the user \`dashboard_url\`.
+- \`needs_input\`: the designer needs more detail before it can proceed, and nothing has changed yet. \`question\` holds exactly what it asked, and \`choices\` any options it offered. **It is your decision how to resolve this.** If you can answer it yourself, for example you already know which data source to use or can resolve it from what the user told you earlier, just answer it. Only ask the user when you genuinely cannot. Either way, continue by calling \`modify_dashboard\` with the same \`dashboard_id\` and \`task_id\`, putting the answer in \`instructions\`. Do not abandon the request and do not report it to the user as finished.
+- \`in_progress\`: still working. Call \`get_dashboard_status\` with \`task_id\` to continue, and keep calling it until you get another status.
+- \`failed\`: nothing usable was produced. \`error\` explains why.`;
+
+/**
+ * Shared result shape for the dashboard tools.
+ *
+ * Field prose is deliberately sparse. This schema ships on all three tools, so every sentence here
+ * is sent three times on every request. Anything the status contract in the tool description
+ * already explains (how to use `task_id`, what to do per status) is not repeated here, and fields
+ * whose names say what they are carry no description at all.
+ */
+export const DashboardResultSchema = z.object({
+	status: z
+		.enum(["completed", "in_progress", "needs_input", "failed"])
 		.describe(
-			'Intended to be a summary of the contents of the dashboard. You can fill this with information about the questions asked by the user and the analyses performed to answer those questions. You can include any action items or next steps the user should consider taking. The format for the `note_tile` field is raw unescaped HTML, and can include custom styles, text formatting, and colors. You can include emojis for visual appeal. At the end, you can add a line indicating the date the content was generated. The entire content of the `note_tile` should be in a single line with no line breaks. You can use <br> or CSS styling to add spacing inside the HTML content where needed, but avoid unnecessary whitespace inside the content. Use unescaped raw HTML such as <p> and not &lt;p&gt;. Example content: "<h2>Title of Note Tile</h2><p>Comprehensive summary of questions and answers used to generate the dashboard. Use HTML formatting:<br>- Text styling to highlight <strong>important phrases</strong><br>- 🚀 Emojis for visual appeal<br><br><em style="color: #636e72;">Generated on April 15, 2026</em></p>".',
+			"Outcome of the request. See the tool description for what to do for each value.",
 		),
-	answers: z
-		.array(AnswerSchema)
+	dashboard_id: z.string().optional(),
+	dashboard_url: z.string().optional(),
+	task_id: z.string().optional(),
+	changes_applied: z
+		.boolean()
+		.optional()
 		.describe(
-			"List of answers to add to the dashboard. The order of tiles on the dashboard will match the order of answers in this list (top to bottom, left to right).",
+			"Whether the dashboard actually changed. False with `completed` means the request was understood but changed nothing.",
+		),
+	summary: z.string().optional().describe("What the designer reported."),
+	steps: z.array(z.string()).optional(),
+	events_seen: z
+		.number()
+		.optional()
+		.describe(
+			"Progress so far while `in_progress`. Rising between calls means it is working; stuck at 0 may mean it is not.",
+		),
+	question: z
+		.string()
+		.optional()
+		.describe(
+			"What the designer needs from you when `status` is `needs_input`.",
+		),
+	choices: z
+		.array(z.string())
+		.optional()
+		.describe("Options the designer offered alongside `question`."),
+	error: z.string().optional().describe("Why it failed."),
+});
+
+export const CreateDashboardInputSchema = z
+	.object({
+		title: z.string().describe("Title of the dashboard to be created."),
+		design_context: z.string().optional().describe(DESIGN_CONTEXT_GUIDANCE),
+		data_source_id: z
+			.string()
+			.optional()
+			.describe(
+				'Id of the data source to build new charts from, in the format "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx". Required when you do not pass `answers`, because the charts have to be created from somewhere. If you only know the data source name, use `get_data_source_suggestions` to resolve it, or name it inside `design_context`.',
+			),
+		answers: z
+			.array(AnswerSchema)
+			.optional()
+			.describe(
+				"List of answers to add to the dashboard, from a prior analysis. Omit this when you have no answers yet and want the charts built from `design_context` instead, in which case you must pass `data_source_id`.",
+			),
+		skip_layout: z
+			.boolean()
+			.optional()
+			.describe(
+				"Set true to skip organising and styling, returning as soon as the answers are assembled. The result is a plain uniform grid in the order of `answers`, so only use this when the user explicitly wants the raw dashboard quickly and does not care how it looks.",
+			),
+	})
+	.refine((d) => (d.answers && d.answers.length > 0) || d.design_context, {
+		message:
+			"Provide `answers` from a prior analysis, or `design_context` describing the dashboard to build, or both.",
+	})
+	.refine((d) => (d.answers && d.answers.length > 0) || d.data_source_id, {
+		message:
+			"`data_source_id` is required when `answers` is not provided, because the charts have to be created from a data source.",
+	});
+
+export const CreateDashboardOutputSchema = DashboardResultSchema.extend({
+	link: z
+		.string()
+		.optional()
+		.describe(
+			"A URL link to the created dashboard. Retained for backwards compatibility; prefer `dashboard_url`.",
 		),
 });
 
-export const CreateDashboardOutputSchema = z.object({
-	link: z
+export const ModifyDashboardInputSchema = z.object({
+	dashboard_id: z
+		.string()
+		.min(1)
+		.describe(
+			'Id of the dashboard to change, in the format "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx". Always required, including when continuing earlier work with `task_id`, so that every call states which dashboard it is changing. If you do not have the id, ask the user for it or for the dashboard link, which ends in `/pinboard/<id>`. Do not guess it and do not pass a dashboard name here.',
+		),
+	task_id: z
+		.string()
+		.optional()
+		.describe(
+			"Handle returned by a previous `create_dashboard` or `modify_dashboard` call. Pass it alongside `dashboard_id` to answer a question the designer asked, or to send a follow-up instruction, which keeps the earlier context. Omit it to start a fresh change. It must belong to the same `dashboard_id`.",
+		),
+	instructions: z
+		.string()
+		.min(1)
+		.describe(
+			"What to change, in plain language. This can be a layout or styling change, a request to add new charts, or an answer to a question the designer asked you. Include the same kind of detail described for `design_context` on `create_dashboard`, and name the data source when the change needs new charts.",
+		),
+	data_source_id: z
+		.string()
+		.optional()
+		.describe(
+			"Id of the data source to use if the change requires new charts. Without it, a request that needs new charts will come back asking which data source to use.",
+		),
+});
+
+export const ModifyDashboardOutputSchema = DashboardResultSchema;
+
+export const GetDashboardStatusInputSchema = z.object({
+	task_id: z
 		.string()
 		.describe(
-			"A URL link to the created dashboard. You can provide this link to the user to view the dashboard.",
+			"The `task_id` returned by `create_dashboard` or `modify_dashboard` when `status` was `in_progress`.",
+		),
+});
+
+export const GetDashboardStatusOutputSchema = DashboardResultSchema;
+
+export const SpotterVizCreateSessionInputSchema = z
+	.object({
+		new_liveboard_name: z
+			.string()
+			.optional()
+			.describe(
+				"Name for a new, empty liveboard to be created. Provide this when the user wants to start a SpotterViz session from scratch.",
+			),
+		existing_liveboard_id: z
+			.uuid()
+			.optional()
+			.describe(
+				"GUID of an existing liveboard to open in SpotterViz (the format is xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx). Provide this when the user wants to continue with an existing liveboard instead of creating a new one.",
+			),
+	})
+	.refine(
+		(d) =>
+			(d.new_liveboard_name === undefined) !==
+			(d.existing_liveboard_id === undefined),
+		{
+			message:
+				"Exactly one of `new_liveboard_name` or `existing_liveboard_id` must be provided.",
+		},
+	);
+
+export const SpotterVizCreateSessionOutputSchema = z.object({
+	spotterviz_session_id: z
+		.string()
+		.describe(
+			"Identifier for the SpotterViz session. Use this with future spotterviz_send_message / spotterviz_get_updates calls.",
+		),
+	liveboard_id: z
+		.string()
+		.describe("GUID of the liveboard the session is bound to."),
+	liveboard_name: z
+		.string()
+		.optional()
+		.describe("Display name of the liveboard, if known."),
+});
+
+export const SpotterVizSubmitQueryInputSchema = z.object({
+	spotterviz_session_id: z
+		.string()
+		.describe(
+			"Identifier of the SpotterViz session to send the message to. Use the value returned from `spotterviz_create_session`.",
+		),
+	message: z
+		.string()
+		.min(1)
+		.max(2000)
+		.describe(
+			"Natural-language instruction or question to send to the SpotterViz agent. Maximum 2000 characters.",
+		),
+});
+
+export const SpotterVizSubmitQueryOutputSchema = z.object({
+	success: z
+		.boolean()
+		.describe(
+			"Whether the message was accepted and streaming started. After this returns, poll `spotterviz_get_updates` for the agent's response.",
+		),
+});
+
+export const SpotterVizGetUpdatesInputSchema = z.object({
+	spotterviz_session_id: z
+		.string()
+		.describe(
+			"Identifier of the SpotterViz session to fetch updates from. Use the value returned from `spotterviz_create_session`.",
+		),
+});
+
+export const SpotterVizUpdateSchema = z.object({
+	event_type: z
+		.string()
+		.describe(
+			"The Aurora SSE event type (e.g. `message.delta`, `control.action`, `meta.error`).",
+		),
+	data: z
+		.record(z.string(), z.unknown())
+		.describe("Raw event payload as emitted by Aurora."),
+	message_id: z.string().nullish(),
+	idx: z.number().nullish(),
+	timestamp: z.string().nullish(),
+	tool_id: z.string().nullish(),
+	group_id: z.string().nullish(),
+	heading: z.string().nullish(),
+});
+
+export const SpotterVizGetUpdatesOutputSchema = z.object({
+	updates: z
+		.array(SpotterVizUpdateSchema)
+		.describe(
+			"Incremental SSE events emitted by the SpotterViz agent since the last call. Empty when the agent is still thinking and no new events have arrived within the wait window.",
+		),
+	is_done: z
+		.boolean()
+		.describe(
+			"Whether the SpotterViz agent has finished responding for this turn. If false, call this tool again to continue polling.",
+		),
+});
+
+export const SpotterVizSaveLiveboardInputSchema = z.object({
+	spotterviz_session_id: z
+		.string()
+		.describe(
+			"Identifier of the SpotterViz session whose current liveboard state should be saved. Use the value returned from `spotterviz_create_session`.",
+		),
+});
+
+export const SpotterVizSaveLiveboardOutputSchema = z.object({
+	liveboard_id: z.string().describe("GUID of the saved liveboard."),
+	liveboard_url: z
+		.string()
+		.describe(
+			"URL where the user can view the saved liveboard in ThoughtSpot. Provide this link to the user when reporting that the liveboard was saved.",
 		),
 });
 
@@ -543,6 +789,8 @@ export enum ToolName {
 	SendSessionMessage = "send_session_message",
 	GetSessionUpdates = "get_session_updates",
 	CreateDashboard = "create_dashboard",
+	ModifyDashboard = "modify_dashboard",
+	GetDashboardStatus = "get_dashboard_status",
 	ListOrgs = "list_orgs",
 	SwitchOrg = "switch_org",
 	// V3 (Spotter Model — agentic model creation)
@@ -550,6 +798,11 @@ export enum ToolName {
 	SendModelMessage = "send_model_message",
 	GetModelUpdates = "get_model_updates",
 	FinalizeModel = "finalize_model",
+	// SpotterViz (Aurora)
+	SpotterVizCreateSession = "spotterviz_create_session",
+	SpotterVizSubmitQuery = "spotterviz_submit_query",
+	SpotterVizGetUpdates = "spotterviz_get_updates",
+	SpotterVizSaveLiveboard = "spotterviz_save_liveboard",
 }
 
 /**
@@ -867,7 +1120,7 @@ export const toolDefinitionsV2 = [
 	{
 		name: ToolName.CreateAnalysisSession,
 		description:
-			"Start an analytical session with the Analytics Agent. This is the first step in a three-step workflow: create a session, send a message, then poll for updates. Once created, you can use the returned `analytical_session_id` to send analytical questions via `send_session_message` and retrieve answers via `get_session_updates`. Sessions are conversational, so you can ask follow-up questions in the same session without creating a new one. Using a single analytical session is preferable, because it reuses the same data source selection.",
+			"Start an analytical session with the Analytics Agent. This is the first step in a three-step workflow: create a session, send a message, then poll for updates. Once created, you can use the returned `analytical_session_id` to send analytical questions via `send_session_message` and retrieve answers via `get_session_updates`. Sessions are conversational, so you can ask follow-up questions in the same session without creating a new one. Using a single analytical session is preferable, because it reuses the same data source selection. When the user's intent is to create a dashboard, use the first message in this session to plan: ask the Analytics Agent what data and metrics are available for the topic, what trends or breakdowns would be most meaningful, and what chart types best fit the data. Use the Agent's response to form a dashboard plan before requesting any specific charts.",
 		inputSchema: z.toJSONSchema(CreateAnalysisSessionInputSchema),
 		outputSchema: z.toJSONSchema(CreateAnalysisSessionOutputSchema),
 		annotations: {
@@ -880,7 +1133,7 @@ export const toolDefinitionsV2 = [
 	{
 		name: ToolName.SendSessionMessage,
 		description:
-			"Send a message to a session with the Analytics Agent. The Agent may take some time to think and generate a response, so the response will not be returned immediately. Instead, you can use the `get_session_updates` tool to query for the latest updates on the session. After the Agent finishes responding (when `get_session_updates` returns `is_done: true`), you can send another message to the same session to ask follow-up questions without creating a new session. Do not send a new message until the Agent has finished responding to the previous message (when `get_session_updates` returns `is_done: true`). If the user wants to create a dashboard, do not send a message with that request; instead use the `create_dashboard` tool.",
+			"Send a message to a session with the Analytics Agent. The Agent may take some time to think and generate a response, so the response will not be returned immediately. Instead, you can use the `get_session_updates` tool to query for the latest updates on the session. After the Agent finishes responding (when `get_session_updates` returns `is_done: true`), you can send another message to the same session to ask follow-up questions without creating a new session. Do not send a new message until the Agent has finished responding to the previous message (when `get_session_updates` returns `is_done: true`). When the user's intent is to create a dashboard, the first message must be a planning query — ask what data and metrics are available, what key breakdowns or trends exist, and what charts would be most insightful. Only after receiving and synthesising the Agent's planning response should you send follow-up messages to request specific charts. If the user wants to create a dashboard from the charts collected, use the `create_dashboard` tool — do not send that request as a message to the Agent.",
 		inputSchema: z.toJSONSchema(SendSessionMessageInputSchema),
 		outputSchema: z.toJSONSchema(SendSessionMessageOutputSchema),
 		annotations: {
@@ -903,13 +1156,95 @@ export const toolDefinitionsV2 = [
 	},
 	{
 		name: ToolName.CreateDashboard,
-		description:
-			"Create a dashboard from a list of answers, allowing the user to revisit the results later. You can use this if the user asks for a dashboard or liveboard, or asks to save the results from the analysis. This can be a useful way to save the results to revisit later, or present them to other users.",
+		description: `Create a dashboard, organise it, and save it, so the user can revisit the results later or share them with others. Use this whenever the user asks for a dashboard or a liveboard, asks to save the results of an analysis, or asks to recreate a dashboard they have elsewhere.
+
+There are two ways to call it, and you can combine them:
+1. From analysis you already did: pass \`answers\` from \`get_session_updates\`. The charts you already have are assembled into a dashboard.
+2. From a description: pass \`design_context\` describing the dashboard you want, plus \`data_source_id\`. The charts are created for you. Use this when the user has a template, a spec, or a dashboard from another tool (for example a Tableau workbook) that they want recreated.
+
+**The dashboard is always organised and styled before it is saved**, so what you get back is presentable rather than a plain grid. Add \`design_context\` when the user has preferences about how it should look; leave it out and sensible choices are made for you. Because this includes a design pass, it can take a few minutes and may return before it is finished.
+
+${RESULT_CONTRACT_GUIDANCE}`,
 		inputSchema: z.toJSONSchema(CreateDashboardInputSchema),
 		outputSchema: z.toJSONSchema(CreateDashboardOutputSchema),
 		annotations: {
 			title: "Create Dashboard",
 			readOnlyHint: false,
+			destructiveHint: false,
+			openWorldHint: false,
+		},
+	},
+	{
+		name: ToolName.ModifyDashboard,
+		description: `Change an existing dashboard. It can rearrange and restyle what is already there, add new charts, add short explanatory text, and organise charts into groups or tabs.
+
+\`dashboard_id\` is always required, so that every call says which dashboard it is changing. Add \`task_id\` as well to continue something you already started, which is how you answer a question the designer asked you or send a follow-up instruction about the same dashboard.
+
+Describe the change in \`instructions\` in plain language, and be specific: vague requests come back as questions rather than changes. If the change needs new charts, name the data source or pass \`data_source_id\`.
+
+Changes are saved to the user's real dashboard automatically as they are made, so only call this when the user has asked for the dashboard to change. Changing a dashboard can take a few minutes, so this may return before it is finished.
+
+${RESULT_CONTRACT_GUIDANCE}`,
+		inputSchema: z.toJSONSchema(ModifyDashboardInputSchema),
+		outputSchema: z.toJSONSchema(ModifyDashboardOutputSchema),
+		annotations: {
+			title: "Modify Dashboard",
+			readOnlyHint: false,
+			destructiveHint: false,
+			openWorldHint: false,
+		},
+	},
+	{
+		name: ToolName.GetDashboardStatus,
+		description: `Continue waiting for a dashboard that is still being built or changed. Call this when \`create_dashboard\` or \`modify_dashboard\` returned \`status: "in_progress"\`, passing the \`task_id\` they gave you.
+
+Each call waits a short while before returning, so calling it repeatedly is the correct way to wait. Keep calling until \`status\` is \`completed\`, \`needs_input\` or \`failed\`. Do not abandon a task after one \`in_progress\` result, and do not start a new \`create_dashboard\` or \`modify_dashboard\` call for the same work, or you will create duplicate dashboards.
+
+${RESULT_CONTRACT_BRIEF}`,
+		inputSchema: z.toJSONSchema(GetDashboardStatusInputSchema),
+		outputSchema: z.toJSONSchema(GetDashboardStatusOutputSchema),
+		annotations: {
+			title: "Get Dashboard Status",
+			readOnlyHint: true,
+			destructiveHint: false,
+			openWorldHint: false,
+		},
+	},
+	{
+		name: ToolName.SpotterVizCreateSession,
+		description:
+			"DEPRECATED and no longer listed: use `create_dashboard` and `modify_dashboard` instead, which do this in a single call. Low-level session primitive kept only for existing callers. Opens a SpotterViz session against a new or existing liveboard; exactly one of `new_liveboard_name` or `existing_liveboard_id` must be provided. The returned `spotterviz_session_id` is the identifier for the other `spotterviz_*` tools.",
+		inputSchema: z.toJSONSchema(SpotterVizCreateSessionInputSchema),
+		outputSchema: z.toJSONSchema(SpotterVizCreateSessionOutputSchema),
+		annotations: {
+			title: "Create SpotterViz Session",
+			readOnlyHint: false,
+			destructiveHint: false,
+			openWorldHint: false,
+		},
+	},
+	{
+		name: ToolName.SpotterVizSubmitQuery,
+		description:
+			"DEPRECATED and no longer listed: use `create_dashboard` and `modify_dashboard` instead, which do this in a single call. Low-level session primitive kept only for existing callers. Submits a prompt to an existing SpotterViz session; it can restyle and rearrange a liveboard and can also create new answers on it. The response streams asynchronously, so this returns as soon as streaming starts; poll `spotterviz_get_updates` for the response. Do not call it again on the same `spotterviz_session_id` until the previous turn is done, or it will be rejected.",
+		inputSchema: z.toJSONSchema(SpotterVizSubmitQueryInputSchema),
+		outputSchema: z.toJSONSchema(SpotterVizSubmitQueryOutputSchema),
+		annotations: {
+			title: "Submit SpotterViz Query",
+			readOnlyHint: false,
+			destructiveHint: false,
+			openWorldHint: false,
+		},
+	},
+	{
+		name: ToolName.SpotterVizGetUpdates,
+		description:
+			"Get the latest streaming events from a SpotterViz session. Call this after `spotterviz_submit_query` and continue polling until `is_done` is true. When `is_done` is true, immediately call `spotterviz_save_liveboard` — do not skip this step. The tool waits adaptively for new events (with internal exponential backoff up to 16 s) and returns early as soon as any events arrive or the turn finishes, so back-to-back calls cost no more than a quick poll when activity is high. An empty `updates` list with `is_done: false` simply means the agent is still thinking — call again to keep polling.",
+		inputSchema: z.toJSONSchema(SpotterVizGetUpdatesInputSchema),
+		outputSchema: z.toJSONSchema(SpotterVizGetUpdatesOutputSchema),
+		annotations: {
+			title: "Get SpotterViz Session Updates",
+			readOnlyHint: true,
 			destructiveHint: false,
 			openWorldHint: false,
 		},
@@ -923,6 +1258,19 @@ export const toolDefinitionsV2 = [
 		annotations: {
 			title: "List Orgs",
 			readOnlyHint: true,
+			destructiveHint: false,
+			openWorldHint: false,
+		},
+	},
+	{
+		name: ToolName.SpotterVizSaveLiveboard,
+		description:
+			"Persist the current state of the SpotterViz session's liveboard back to ThoughtSpot. Always call this after `spotterviz_get_updates` returns `is_done: true` — do not end the SpotterViz flow without saving. The session stays active after saving, so further `spotterviz_submit_query` calls on the same session id continue to work. Returns a `liveboard_url` you must surface to the user as a direct link to the saved liveboard.",
+		inputSchema: z.toJSONSchema(SpotterVizSaveLiveboardInputSchema),
+		outputSchema: z.toJSONSchema(SpotterVizSaveLiveboardOutputSchema),
+		annotations: {
+			title: "Save SpotterViz Liveboard",
+			readOnlyHint: false,
 			destructiveHint: false,
 			openWorldHint: false,
 		},
