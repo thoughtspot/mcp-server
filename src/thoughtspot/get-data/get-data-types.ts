@@ -11,6 +11,9 @@ export interface GetDataParams {
 	vizIds?: string[];
 	// Row cap per viz (upstream `record_size`); defaults protect LLM context.
 	maxRows?: number;
+	// Whole-Liveboard fetches only: cap on vizzes fetched (first N) to avoid the
+	// upstream timeout on big boards. Ignored when vizIds is given.
+	maxVisualizations?: number;
 }
 
 // One tabular result: one for an Answer, one per Liveboard visualization.

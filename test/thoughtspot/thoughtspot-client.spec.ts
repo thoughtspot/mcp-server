@@ -1848,7 +1848,21 @@ describe("ThoughtSpot Client", () => {
 
 		// Mirrors the real /metadata/liveboard/data FULL response: one content
 		// entry per visualization, each with visualization_id/name.
-		it("fetches a Liveboard with one entry per visualization", async () => {
+		it("fetches a whole Liveboard: enumerates vizzes, then scopes the data call", async () => {
+			// Call 1: metadata/search enumerates the board's viz GUIDs.
+			(fetch as any).mockResolvedValueOnce({
+				ok: true,
+				json: vi.fn().mockResolvedValue([
+					{
+						metadata_id: "obj-1",
+						visualization_headers: [
+							{ id: "de1240fc-2d4d-4c67-9317-02e9c6e3bf1c" },
+							{ id: "cf049bb9-f3b7-466b-9000-41d814d3967a" },
+						],
+					},
+				]),
+			});
+			// Call 2: liveboard/data returns one content per requested viz.
 			(fetch as any).mockResolvedValueOnce({
 				ok: true,
 				json: vi.fn().mockResolvedValue({
@@ -1885,15 +1899,26 @@ describe("ThoughtSpot Client", () => {
 				maxRows: 50,
 			});
 
-			const dataUrl = (fetch as any).mock.calls[0][0];
-			const dataBody = JSON.parse((fetch as any).mock.calls[0][1].body);
+			// Call 1 is the viz enumeration.
+			const metaUrl = (fetch as any).mock.calls[0][0];
+			const metaBody = JSON.parse((fetch as any).mock.calls[0][1].body);
+			expect(metaUrl).toBe(`${mockInstanceUrl}/api/rest/2.0/metadata/search`);
+			expect(metaBody.include_visualization_headers).toBe(true);
+			expect(metaBody.metadata).toEqual([
+				{ identifier: "obj-1", type: "LIVEBOARD" },
+			]);
+
+			// Call 2 is the data fetch, scoped to the enumerated vizzes.
+			const dataUrl = (fetch as any).mock.calls[1][0];
+			const dataBody = JSON.parse((fetch as any).mock.calls[1][1].body);
 			expect(dataUrl).toBe(
 				`${mockInstanceUrl}/api/rest/2.0/metadata/liveboard/data`,
 			);
-			// Liveboards request the full viz (unbounded record_size); max_rows caps client-side.
 			expect(dataBody.record_size).toBe(LIVEBOARD_RECORD_SIZE);
-			// No viz filter when fetching the whole Liveboard.
-			expect(dataBody.visualization_identifiers).toBeUndefined();
+			expect(dataBody.visualization_identifiers).toEqual([
+				"de1240fc-2d4d-4c67-9317-02e9c6e3bf1c",
+				"cf049bb9-f3b7-466b-9000-41d814d3967a",
+			]);
 
 			expect(result.data).toEqual([
 				{
@@ -1913,6 +1938,60 @@ describe("ThoughtSpot Client", () => {
 					sampling_ratio: 1,
 				},
 			]);
+		});
+
+		// A big board: enumeration returns more vizzes than the cap, so only the
+		// first N GUIDs are fetched.
+		it("caps a whole Liveboard to the first N visualizations", async () => {
+			const vizIds = Array.from(
+				{ length: 40 },
+				(_, i) => `viz-${String(i).padStart(2, "0")}`,
+			);
+			(fetch as any).mockResolvedValueOnce({
+				ok: true,
+				json: vi
+					.fn()
+					.mockResolvedValue([
+						{ visualization_headers: vizIds.map((id) => ({ id })) },
+					]),
+			});
+			(fetch as any).mockResolvedValueOnce({
+				ok: true,
+				json: vi.fn().mockResolvedValue({ contents: [] }),
+			});
+
+			const result = await client.getData({
+				objectId: "board-big",
+				objectType: "LIVEBOARD",
+				maxVisualizations: 25,
+			});
+
+			const dataBody = JSON.parse((fetch as any).mock.calls[1][1].body);
+			expect(dataBody.visualization_identifiers).toHaveLength(25);
+			expect(dataBody.visualization_identifiers).toEqual(vizIds.slice(0, 25));
+			expect(result.data).toEqual([]);
+		});
+
+		// If enumeration yields no viz headers, fall back to the unbounded fetch
+		// (no visualization_identifiers) rather than failing.
+		it("falls back to an unbounded fetch when enumeration is empty", async () => {
+			(fetch as any).mockResolvedValueOnce({
+				ok: true,
+				json: vi.fn().mockResolvedValue([{ visualization_headers: [] }]),
+			});
+			(fetch as any).mockResolvedValueOnce({
+				ok: true,
+				json: vi.fn().mockResolvedValue({ contents: [] }),
+			});
+
+			const result = await client.getData({
+				objectId: "board-empty",
+				objectType: "LIVEBOARD",
+			});
+
+			const dataBody = JSON.parse((fetch as any).mock.calls[1][1].body);
+			expect(dataBody.visualization_identifiers).toBeUndefined();
+			expect(result.data).toEqual([]);
 		});
 
 		// An answer pinned inside a Liveboard: pass the Liveboard GUID plus the

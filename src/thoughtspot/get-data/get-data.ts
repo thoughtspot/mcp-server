@@ -10,6 +10,13 @@ import type {
 // Keep in sync with the `max_rows` description in tool-definitions.ts.
 export const GET_DATA_DEFAULT_MAX_ROWS = 25;
 
+// Max visualizations fetched for a whole-Liveboard request. A board can have
+// hundreds of (small) vizzes; fetching all of them makes the upstream /data call
+// exceed Cloudflare's ~100s limit (524). We enumerate the board's vizzes with one
+// metadata call and fetch only the first N. Viz-scoped calls (explicit
+// visualization_ids) bypass this.
+export const GET_DATA_DEFAULT_MAX_VISUALIZATIONS = 25;
+
 // "Unbounded" record_size for Liveboards (int32 max; they 500 if it can't hold
 // the whole viz). Pulls the full viz into memory then caps client-side — don't
 // lower to bound memory without verifying the endpoint honors a smaller value.
@@ -113,6 +120,29 @@ function mapContents(
 	});
 }
 
+// List a Liveboard's visualization GUIDs (in board order) via one metadata call,
+// so a whole-board fetch can be bounded to the first N instead of pulling every
+// viz. Returns [] if the board exposes no viz headers.
+async function listLiveboardVizIds(
+	instanceUrl: string,
+	headers: Record<string, string>,
+	objectId: string,
+): Promise<string[]> {
+	const result = await postJson(
+		`${instanceUrl}/api/rest/2.0/metadata/search`,
+		headers,
+		{
+			metadata: [{ identifier: objectId, type: LIVEBOARD_TYPE }],
+			include_visualization_headers: true,
+		},
+		"getData failed to list liveboard visualizations",
+	);
+	const vizHeaders: unknown[] = result?.[0]?.visualization_headers ?? [];
+	return vizHeaders
+		.map((vh) => (vh as { id?: unknown })?.id)
+		.filter((id): id is string => typeof id === "string" && id.length > 0);
+}
+
 // Custom handler: the rest-api-sdk has no single call that resolves a GUID's
 // type and fetches its data from the matching endpoint.
 export function addGetData(client: any, instanceUrl: string, token: string) {
@@ -121,6 +151,7 @@ export function addGetData(client: any, instanceUrl: string, token: string) {
 		objectType,
 		vizIds,
 		maxRows = GET_DATA_DEFAULT_MAX_ROWS,
+		maxVisualizations = GET_DATA_DEFAULT_MAX_VISUALIZATIONS,
 	}: GetDataParams): Promise<GetDataResult> => {
 		// x-request-id ties the upstream call to tracing.
 		const requestId = generateRequestId();
@@ -140,9 +171,24 @@ export function addGetData(client: any, instanceUrl: string, token: string) {
 			objectType === LIVEBOARD_VIZ_TYPE
 		) {
 			endpoint = "/api/rest/2.0/metadata/liveboard/data";
-			// Omitting visualization_identifiers fetches every viz on the board.
 			if (vizIds?.length) {
+				// Caller scoped the fetch to specific vizzes.
 				body.visualization_identifiers = vizIds;
+			} else {
+				// Whole-board request: enumerate the vizzes and fetch only the first N,
+				// else the upstream pulls every viz and times out (524). Fall back to an
+				// unbounded fetch only if enumeration returns nothing.
+				const allVizIds = await listLiveboardVizIds(
+					instanceUrl,
+					headers,
+					objectId,
+				);
+				if (allVizIds.length) {
+					body.visualization_identifiers = allVizIds.slice(
+						0,
+						maxVisualizations,
+					);
+				}
 			}
 		} else {
 			throw new Error(
