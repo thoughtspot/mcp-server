@@ -177,12 +177,13 @@ export function addGetData(client: any, instanceUrl: string, token: string) {
 			} else {
 				// Whole-board request: enumerate the vizzes and fetch only the first N,
 				// else the upstream pulls every viz and times out (524). Fall back to an
-				// unbounded fetch only if enumeration returns nothing.
-				const allVizIds = await listLiveboardVizIds(
-					instanceUrl,
-					headers,
-					objectId,
-				);
+				// unbounded fetch if enumeration returns nothing or itself fails.
+				let allVizIds: string[] = [];
+				try {
+					allVizIds = await listLiveboardVizIds(instanceUrl, headers, objectId);
+				} catch (error) {
+					console.error("getData: liveboard viz enumeration failed", error);
+				}
 				if (allVizIds.length) {
 					body.visualization_identifiers = allVizIds.slice(
 						0,

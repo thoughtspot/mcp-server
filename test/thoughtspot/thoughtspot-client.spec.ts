@@ -1994,6 +1994,30 @@ describe("ThoughtSpot Client", () => {
 			expect(result.data).toEqual([]);
 		});
 
+		// Enumeration itself failing (network/permission) must not fail the whole
+		// request — fall back to the unbounded fetch.
+		it("falls back to an unbounded fetch when enumeration fails", async () => {
+			(fetch as any).mockRejectedValueOnce(new Error("metadata search boom"));
+			(fetch as any).mockResolvedValueOnce({
+				ok: true,
+				json: vi.fn().mockResolvedValue({ contents: [] }),
+			});
+
+			const result = await client.getData({
+				objectId: "board-err",
+				objectType: "LIVEBOARD",
+			});
+
+			// Second call is the data fetch, unbounded (no viz filter).
+			const dataUrl = (fetch as any).mock.calls[1][0];
+			const dataBody = JSON.parse((fetch as any).mock.calls[1][1].body);
+			expect(dataUrl).toBe(
+				`${mockInstanceUrl}/api/rest/2.0/metadata/liveboard/data`,
+			);
+			expect(dataBody.visualization_identifiers).toBeUndefined();
+			expect(result.data).toEqual([]);
+		});
+
 		// An answer pinned inside a Liveboard: pass the Liveboard GUID plus the
 		// visualization GUID; the request carries visualization_identifiers.
 		it("fetches a specific visualization inside a Liveboard", async () => {
