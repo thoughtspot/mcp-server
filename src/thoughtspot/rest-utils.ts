@@ -42,11 +42,13 @@ export async function postJson(
 	headers: Record<string, string>,
 	body: unknown,
 	errorPrefix: string,
+	signal?: AbortSignal,
 ): Promise<any> {
 	const response = await fetch(url, {
 		method: "POST",
 		headers,
 		body: JSON.stringify(body),
+		...(signal && { signal }),
 	});
 	if (!response.ok) {
 		const errorText = await response.text();

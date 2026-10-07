@@ -10,12 +10,19 @@ import type {
 // Keep in sync with the `max_rows` description in tool-definitions.ts.
 export const GET_DATA_DEFAULT_MAX_ROWS = 25;
 
-// Max visualizations fetched for a whole-Liveboard request. A board can have
-// hundreds of (small) vizzes; fetching all of them makes the upstream /data call
-// exceed Cloudflare's ~100s limit (524). We enumerate the board's vizzes with one
-// metadata call and fetch only the first N. Viz-scoped calls (explicit
-// visualization_ids) bypass this.
+// Whole-Liveboard fetches take only the first N vizzes; fetching all of a big
+// board exceeds Cloudflare's ~100s limit (524).
 export const GET_DATA_DEFAULT_MAX_VISUALIZATIONS = 25;
+
+// Vizzes per liveboard/data request; batches run in parallel so one slow or
+// invalid viz doesn't hold up or fail the rest.
+export const GET_DATA_VIZ_BATCH_SIZE = 5;
+
+// Batches still pending after this are aborted; stays under client/edge timeouts.
+export const GET_DATA_BATCH_TIMEOUT_MS = 30_000;
+
+// Answer-backed tiles; notes/filters 400 the data call ("Invalid vizId").
+const ANSWER_VIZ_TYPES = new Set(["TABLE", "CHART"]);
 
 // "Unbounded" record_size for Liveboards (int32 max; they 500 if it can't hold
 // the whole viz). Pulls the full viz into memory then caps client-side — don't
@@ -138,9 +145,72 @@ async function listLiveboardVizIds(
 		"getData failed to list liveboard visualizations",
 	);
 	const vizHeaders: unknown[] = result?.[0]?.visualization_headers ?? [];
-	return vizHeaders
-		.map((vh) => (vh as { id?: unknown })?.id)
+	return (vizHeaders as { id?: unknown; vizType?: unknown }[])
+		.filter((vh) => ANSWER_VIZ_TYPES.has(vh?.vizType as string))
+		.map((vh) => vh.id)
 		.filter((id): id is string => typeof id === "string" && id.length > 0);
+}
+
+// Fetch Liveboard vizzes in parallel batches; returns contents (in board order)
+// from the batches that succeed, and throws only if every batch fails.
+async function fetchVizBatches(
+	url: string,
+	headers: Record<string, string>,
+	body: Record<string, unknown>,
+	vizIds: string[],
+): Promise<RawDataContent[]> {
+	const batches: string[][] = [];
+	for (let i = 0; i < vizIds.length; i += GET_DATA_VIZ_BATCH_SIZE) {
+		batches.push(vizIds.slice(i, i + GET_DATA_VIZ_BATCH_SIZE));
+	}
+	const controller = new AbortController();
+	const timer = setTimeout(() => controller.abort(), GET_DATA_BATCH_TIMEOUT_MS);
+	const startedAt = Date.now();
+
+	let results: PromiseSettledResult<RawDataContent[]>[];
+	try {
+		results = await Promise.allSettled(
+			batches.map(async (ids, i) => {
+				try {
+					const data = await postJson(
+						url,
+						headers,
+						{
+							...body,
+							visualization_identifiers: ids,
+							record_size: LIVEBOARD_RECORD_SIZE,
+						},
+						"getData failed",
+						controller.signal,
+					);
+					return (data?.contents ?? []) as RawDataContent[];
+				} catch (error) {
+					const timedOut = controller.signal.aborted;
+					console.error(
+						`getData: batch ${i + 1}/${batches.length} ${timedOut ? "timed out" : "failed"} after ${Date.now() - startedAt}ms`,
+						error instanceof Error ? error.message : String(error),
+					);
+					if (timedOut) {
+						throw new Error(
+							`getData timed out after ${GET_DATA_BATCH_TIMEOUT_MS / 1000}s waiting for ThoughtSpot`,
+						);
+					}
+					throw error;
+				}
+			}),
+		);
+	} finally {
+		clearTimeout(timer);
+	}
+
+	const succeeded = results.filter(
+		(r): r is PromiseFulfilledResult<RawDataContent[]> =>
+			r.status === "fulfilled",
+	);
+	if (!succeeded.length) {
+		throw (results[0] as PromiseRejectedResult).reason;
+	}
+	return succeeded.flatMap((r) => r.value);
 }
 
 // Custom handler: the rest-api-sdk has no single call that resolves a GUID's
@@ -197,12 +267,19 @@ export function addGetData(client: any, instanceUrl: string, token: string) {
 			);
 		}
 
+		const url = `${instanceUrl}${endpoint}`;
+		const scopedVizIds = body.visualization_identifiers as string[] | undefined;
+		if (scopedVizIds?.length) {
+			const contents = await fetchVizBatches(url, headers, body, scopedVizIds);
+			return { data: mapContents(contents, maxRows) };
+		}
+
 		// Answers cap rows via record_size; Liveboards need the whole viz, capped
 		// client-side in mapContents.
 		const recordSize =
 			objectType === ANSWER_TYPE ? maxRows : LIVEBOARD_RECORD_SIZE;
 		const data = await postJson(
-			`${instanceUrl}${endpoint}`,
+			url,
 			headers,
 			{ ...body, record_size: recordSize },
 			"getData failed",

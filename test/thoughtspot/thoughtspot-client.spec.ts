@@ -5,7 +5,10 @@ import {
 import type { ResponseContext } from "@thoughtspot/rest-api-sdk";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import YAML from "yaml";
-import { LIVEBOARD_RECORD_SIZE } from "../../src/thoughtspot/get-data/get-data";
+import {
+	GET_DATA_BATCH_TIMEOUT_MS,
+	LIVEBOARD_RECORD_SIZE,
+} from "../../src/thoughtspot/get-data/get-data";
 import { getThoughtSpotClient } from "../../src/thoughtspot/thoughtspot-client";
 
 // Mock the ThoughtSpot REST API SDK
@@ -1856,8 +1859,8 @@ describe("ThoughtSpot Client", () => {
 					{
 						metadata_id: "obj-1",
 						visualization_headers: [
-							{ id: "de1240fc-2d4d-4c67-9317-02e9c6e3bf1c" },
-							{ id: "cf049bb9-f3b7-466b-9000-41d814d3967a" },
+							{ id: "de1240fc-2d4d-4c67-9317-02e9c6e3bf1c", vizType: "CHART" },
+							{ id: "cf049bb9-f3b7-466b-9000-41d814d3967a", vizType: "TABLE" },
 						],
 					},
 				]),
@@ -1949,13 +1952,16 @@ describe("ThoughtSpot Client", () => {
 			);
 			(fetch as any).mockResolvedValueOnce({
 				ok: true,
-				json: vi
-					.fn()
-					.mockResolvedValue([
-						{ visualization_headers: vizIds.map((id) => ({ id })) },
-					]),
+				json: vi.fn().mockResolvedValue([
+					{
+						visualization_headers: vizIds.map((id) => ({
+							id,
+							vizType: "CHART",
+						})),
+					},
+				]),
 			});
-			(fetch as any).mockResolvedValueOnce({
+			(fetch as any).mockResolvedValue({
 				ok: true,
 				json: vi.fn().mockResolvedValue({ contents: [] }),
 			});
@@ -1966,10 +1972,136 @@ describe("ThoughtSpot Client", () => {
 				maxVisualizations: 25,
 			});
 
-			const dataBody = JSON.parse((fetch as any).mock.calls[1][1].body);
-			expect(dataBody.visualization_identifiers).toHaveLength(25);
-			expect(dataBody.visualization_identifiers).toEqual(vizIds.slice(0, 25));
+			// 25 vizzes -> 5 parallel batches of 5, in board order.
+			const batchIds = (fetch as any).mock.calls
+				.slice(1)
+				.map((c: any) => JSON.parse(c[1].body).visualization_identifiers);
+			expect(batchIds).toHaveLength(5);
+			for (const ids of batchIds) {
+				expect(ids).toHaveLength(5);
+			}
+			expect(batchIds.flat()).toEqual(vizIds.slice(0, 25));
 			expect(result.data).toEqual([]);
+		});
+
+		// One failing batch must not sink the others.
+		it("returns vizzes from the batches that succeed when one batch fails", async () => {
+			const vizIds = Array.from({ length: 10 }, (_, i) => `viz-${i}`);
+			(fetch as any).mockImplementation(async (url: string, init: any) => {
+				if (url.endsWith("/metadata/search")) {
+					return {
+						ok: true,
+						json: async () => [
+							{
+								visualization_headers: vizIds.map((id) => ({
+									id,
+									vizType: "TABLE",
+								})),
+							},
+						],
+					};
+				}
+				const ids: string[] = JSON.parse(init.body).visualization_identifiers;
+				if (ids.includes("viz-0")) {
+					return {
+						ok: false,
+						status: 400,
+						text: async () => '{"error":"Invalid vizId : viz-0"}',
+					};
+				}
+				return {
+					ok: true,
+					json: async () => ({
+						contents: ids.map((id) => ({
+							visualization_id: id,
+							column_names: ["a"],
+							data_rows: [[1]],
+						})),
+					}),
+				};
+			});
+
+			const result = await client.getData({
+				objectId: "board-partial",
+				objectType: "LIVEBOARD",
+			});
+
+			expect(result.data.map((v: any) => v.viz_id)).toEqual(vizIds.slice(5));
+		});
+
+		it("throws when every batch fails", async () => {
+			(fetch as any).mockResolvedValue({
+				ok: false,
+				status: 400,
+				text: async () => '{"error":"Invalid vizId"}',
+			});
+
+			await expect(
+				client.getData({
+					objectId: "board-1",
+					objectType: "LIVEBOARD",
+					vizIds: ["bad-1", "bad-2"],
+				}),
+			).rejects.toThrow("getData failed with status 400");
+		});
+
+		it("aborts batches still pending at the timeout", async () => {
+			vi.useFakeTimers();
+			try {
+				(fetch as any).mockImplementation(
+					(_url: string, init: any) =>
+						new Promise((_resolve, reject) => {
+							init.signal.addEventListener("abort", () =>
+								reject(new Error("The operation was aborted")),
+							);
+						}),
+				);
+
+				const pending = client.getData({
+					objectId: "board-1",
+					objectType: "LIVEBOARD",
+					vizIds: ["slow-1"],
+				});
+				const assertion = expect(pending).rejects.toThrow(
+					`getData timed out after ${GET_DATA_BATCH_TIMEOUT_MS / 1000}s`,
+				);
+				await vi.advanceTimersByTimeAsync(GET_DATA_BATCH_TIMEOUT_MS);
+				await assertion;
+			} finally {
+				vi.useRealTimers();
+			}
+		});
+
+		// Note/filter tiles have no data; sending them 400s the whole call.
+		it("skips non-data tiles (notes, filters) when enumerating", async () => {
+			(fetch as any).mockResolvedValueOnce({
+				ok: true,
+				json: vi.fn().mockResolvedValue([
+					{
+						visualization_headers: [
+							{ id: "table-1", vizType: "TABLE" },
+							{ id: "note-1", name: "Note-tile-note-1" },
+							{ id: "filter-1", vizType: "FILTER" },
+							{ id: "chart-1", vizType: "CHART" },
+						],
+					},
+				]),
+			});
+			(fetch as any).mockResolvedValueOnce({
+				ok: true,
+				json: vi.fn().mockResolvedValue({ contents: [] }),
+			});
+
+			await client.getData({
+				objectId: "board-mixed",
+				objectType: "LIVEBOARD",
+			});
+
+			const dataBody = JSON.parse((fetch as any).mock.calls[1][1].body);
+			expect(dataBody.visualization_identifiers).toEqual([
+				"table-1",
+				"chart-1",
+			]);
 		});
 
 		// If enumeration yields no viz headers, fall back to the unbounded fetch
