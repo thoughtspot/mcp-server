@@ -13,6 +13,16 @@ import {
 } from "../metrics/runtime/metrics-recorder";
 import type { ToolMetricApiSurface } from "../metrics/runtime/tool-metrics";
 import { WithSpan } from "../metrics/tracing/tracing-utils";
+import {
+	DashboardTurnBusyError,
+	type DashboardTurnOutcome,
+	pollDashboardTurn,
+	runDashboardTurn,
+} from "../spotterviz/dashboard-orchestrator";
+import {
+	composeCreatePrompt,
+	composeModifyPrompt,
+} from "../spotterviz/dashboard-prompt";
 import type { StorageServiceClient } from "../storage-service/storage-service";
 import {
 	MODEL_POLL_INTERVAL_MS,
@@ -47,12 +57,14 @@ import {
 	CreateModelSessionInputSchema,
 	FinalizeModelInputSchema,
 	GetAnswerSchema,
+	GetDashboardStatusInputSchema,
 	GetDataInputSchema,
 	GetDataSourceSuggestionsSchema,
 	GetModelUpdatesInputSchema,
 	GetRelevantQuestionsSchema,
 	GetSessionUpdatesInputSchema,
 	MODEL_TOOL_NAMES,
+	ModifyDashboardInputSchema,
 	SearchObjectsInputSchema,
 	SendModelMessageInputSchema,
 	SendSessionMessageInputSchema,
@@ -89,7 +101,6 @@ function summarizeUpstreamError(error: unknown): string {
 		return generic;
 	}
 }
-
 export class MCPServer extends BaseMCPServer {
 	private activeOrgId: string | undefined;
 	private activeOrgToken: string | undefined;
@@ -686,6 +697,14 @@ export class MCPServer extends BaseMCPServer {
 				return this.callCreateDashboard(request, recorder);
 			}
 
+			case ToolName.ModifyDashboard: {
+				return this.callModifyDashboard(request, recorder);
+			}
+
+			case ToolName.GetDashboardStatus: {
+				return this.callGetDashboardStatus(request, recorder);
+			}
+
 			case ToolName.ListOrgs: {
 				if (!this.areOrgToolsAvailable()) {
 					return this.createErrorResponse(
@@ -1049,47 +1068,312 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		recorder: MetricsRecorder,
 	) {
 		const span = trace.getSpan(context.active());
-		const { title, answers, note_tile } = CreateDashboardInputSchema.parse(
+		const { title, answers, design_context, data_source_id, skip_layout } =
+			CreateDashboardInputSchema.parse(request.params.arguments);
+		const hasAnswers = Boolean(answers && answers.length > 0);
+		span?.setAttributes({
+			total_answers: answers?.length ?? 0,
+			has_design_context: Boolean(design_context),
+			skip_layout: skip_layout === true,
+		});
+
+		let liveboardId: string | undefined;
+		let link: string | undefined;
+
+		if (hasAnswers) {
+			let transformedAnswers: Answer[] = [];
+			try {
+				transformedAnswers = (answers ?? []).map((answer) => {
+					const { session_id, gen_no } = JSON.parse(answer.answer_id);
+					if (session_id === undefined || gen_no === undefined) {
+						throw new Error(`Invalid answer_id format ${answer.answer_id}`);
+					}
+					return {
+						title: answer.title,
+						session_identifier: session_id,
+						generation_number: gen_no,
+					};
+				});
+			} catch (error) {
+				return this.createErrorResponse(
+					'Invalid answer_id format. Please provide the value returned from the "get_session_updates" tool.',
+					`Error creating dashboard ${error}`,
+				);
+			}
+
+			const liveboard = await this.getThoughtSpotService(
+				recorder,
+			).fetchTMLAndCreateLiveboard(title, transformedAnswers);
+
+			if (liveboard.error) {
+				return this.createErrorResponse(
+					"Encountered an error while creating the dashboard. Please check your inputs and try again.",
+					`Error creating dashboard ${liveboard.error.message}`,
+				);
+			}
+
+			liveboardId = liveboard.liveboardId;
+			link = liveboard.url;
+		}
+
+		// Only skip the design pass when the caller explicitly asked to. Assembling answers alone
+		// yields a uniform grid in array order with no grouping or styling, which is not worth
+		// sharing; the previous tool set got styled because the calling agent was told to follow
+		// every create with a styling call, and that outcome has to be preserved here.
+		if (skip_layout) {
+			return this.createStructuredContentSuccessResponse(
+				{
+					status: "completed" as const,
+					dashboard_id: liveboardId,
+					dashboard_url: link,
+					link,
+					changes_applied: true,
+				},
+				"Dashboard created successfully",
+			);
+		}
+
+		return this.runDashboardWork(
+			recorder,
+			{
+				existingLiveboardId: liveboardId,
+				newLiveboardName: liveboardId ? undefined : title,
+				buildMessage: () =>
+					composeCreatePrompt({
+						title,
+						designContext: design_context,
+						dataSourceId: data_source_id,
+						hasExistingAnswers: hasAnswers,
+					}),
+			},
+			{ link, legacyLink: true },
+		);
+	}
+
+	@WithSpan("call-modify-dashboard")
+	async callModifyDashboard(
+		request: z.infer<typeof CallToolRequestSchema>,
+		recorder: MetricsRecorder,
+	) {
+		const span = trace.getSpan(context.active());
+		const { dashboard_id, task_id, instructions, data_source_id } =
+			ModifyDashboardInputSchema.parse(request.params.arguments);
+		span?.setAttributes({
+			dashboard_id,
+			has_task_id: Boolean(task_id),
+		});
+
+		// A task is bound to the dashboard it was opened against. Continuing one while naming a
+		// different dashboard would silently change the wrong dashboard, so reject the mismatch
+		// rather than trusting either value.
+		if (task_id) {
+			const mismatch = await this.findTaskDashboardMismatch(
+				task_id,
+				dashboard_id,
+			);
+			if (mismatch) {
+				return this.createErrorResponse(mismatch.userMessage, mismatch.logNote);
+			}
+		}
+
+		return this.runDashboardWork(recorder, {
+			existingLiveboardId: dashboard_id,
+			existingTaskId: task_id,
+			buildMessage: () =>
+				composeModifyPrompt({
+					instructions,
+					dataSourceId: data_source_id,
+				}),
+		});
+	}
+
+	/**
+	 * Check that a task handle belongs to the dashboard the caller named. Returns a message to
+	 * surface when it does not, or when the task can no longer be resolved at all.
+	 */
+	private async findTaskDashboardMismatch(
+		taskId: string,
+		dashboardId: string,
+	): Promise<{ userMessage: string; logNote: string } | undefined> {
+		let taskDashboardId: string | undefined;
+		try {
+			const storage = await this.getStorageService();
+			const metadata = await storage.getMetadata<{ liveboardId?: string }>(
+				taskId,
+			);
+			taskDashboardId = metadata.liveboardId;
+		} catch (error) {
+			console.error("Error resolving dashboard task:", error);
+			return {
+				userMessage:
+					"That `task_id` could not be found. It may have expired. Call `modify_dashboard` again with just `dashboard_id` and your full instruction to start a fresh change.",
+				logNote: `Failed to resolve task ${taskId}: ${error}`,
+			};
+		}
+
+		if (!taskDashboardId) {
+			return {
+				userMessage:
+					"That `task_id` is no longer available, most likely because it expired. Call `modify_dashboard` again with just `dashboard_id` and your full instruction to start a fresh change.",
+				logNote: `Task ${taskId} has no liveboardId in metadata`,
+			};
+		}
+
+		if (taskDashboardId !== dashboardId) {
+			return {
+				userMessage: `That \`task_id\` belongs to a different dashboard (${taskDashboardId}), not ${dashboardId}. Pass the \`dashboard_id\` the task was started against, or omit \`task_id\` to start a fresh change on ${dashboardId}.`,
+				logNote: `Task ${taskId} is bound to ${taskDashboardId}, caller passed ${dashboardId}`,
+			};
+		}
+
+		return undefined;
+	}
+
+	@WithSpan("call-get-dashboard-status")
+	async callGetDashboardStatus(
+		request: z.infer<typeof CallToolRequestSchema>,
+		recorder: MetricsRecorder,
+	) {
+		const span = trace.getSpan(context.active());
+		const { task_id } = GetDashboardStatusInputSchema.parse(
 			request.params.arguments,
 		);
-		span?.setAttribute("total_answers", answers.length);
+		span?.setAttribute("dashboard_task_id", task_id);
 
-		let transformedAnswers: Answer[] = [];
 		try {
-			transformedAnswers = answers.map((answer) => {
-				const { session_id, gen_no } = JSON.parse(answer.answer_id);
-				if (session_id === undefined || gen_no === undefined) {
-					throw new Error(`Invalid answer_id format ${answer.answer_id}`);
-				}
-				return {
-					title: answer.title,
-					session_identifier: session_id,
-					generation_number: gen_no,
-				};
-			});
+			const service = await this.getSpotterVizService(recorder);
+			const storage = await this.getStorageService();
+			const outcome = await pollDashboardTurn(service, storage, task_id);
+			return this.dashboardOutcomeResponse(outcome);
 		} catch (error) {
+			console.error("Error checking dashboard status:", error);
 			return this.createErrorResponse(
-				'Invalid answer_id format. Please provide the value returned from the "get_session_updates" tool.',
-				`Error creating dashboard ${error}`,
+				`Failed to check the dashboard status: ${(error as Error).message}`,
+				"Dashboard status check failed",
+			);
+		}
+	}
+
+	/**
+	 * Shared path for create and modify: resolve or reuse a designer session, run one turn under
+	 * the hybrid wait, and map the outcome onto the tool result contract.
+	 */
+	private async runDashboardWork(
+		recorder: MetricsRecorder,
+		params: {
+			existingLiveboardId?: string;
+			newLiveboardName?: string;
+			existingTaskId?: string;
+			buildMessage: () => string;
+		},
+		extra: { link?: string; legacyLink?: boolean } = {},
+	) {
+		const { existingLiveboardId, newLiveboardName, existingTaskId } = params;
+
+		try {
+			const service = await this.getSpotterVizService(recorder);
+			const storage = await this.getStorageService();
+
+			// Continuing an existing task keeps the designer's prior context, which is what makes
+			// answering its question work.
+			const taskId =
+				existingTaskId ??
+				(
+					await service.createSession({
+						existingLiveboardId,
+						newLiveboardName,
+					})
+				).spotterVizSessionId;
+
+			const outcome = await runDashboardTurn({
+				service,
+				storage,
+				taskId,
+				message: params.buildMessage(),
+				waitUntil: this.ctx.ctx?.waitUntil?.bind(this.ctx.ctx),
+			});
+
+			return this.dashboardOutcomeResponse(outcome, extra);
+		} catch (error) {
+			if (error instanceof DashboardTurnBusyError) {
+				return this.createErrorResponse(
+					"This dashboard is still being worked on. Call `get_dashboard_status` with the `task_id` you were given until it reports a final status, then try again.",
+					`Dashboard turn already in flight: ${error.message}`,
+				);
+			}
+			console.error("Error running dashboard work:", error);
+			return this.createErrorResponse(
+				`Failed to build the dashboard: ${(error as Error).message}`,
+				"Dashboard work failed",
+			);
+		}
+	}
+
+	/**
+	 * Map an orchestrator outcome onto the tool result contract shared by the dashboard tools.
+	 *
+	 * `legacyLink` is only set for `create_dashboard`, which has carried a `link` field since
+	 * before these tools existed. The other tools' output schemas do not declare it, and Zod emits
+	 * closed schemas, so adding it there would fail client-side validation.
+	 */
+	private dashboardOutcomeResponse(
+		outcome: DashboardTurnOutcome,
+		extra: { link?: string; legacyLink?: boolean } = {},
+	) {
+		const span = trace.getSpan(context.active());
+		span?.setAttributes({
+			dashboard_status: outcome.status,
+			dashboard_task_id: outcome.taskId,
+		});
+
+		if (outcome.status === "in_progress") {
+			return this.createStructuredContentSuccessResponse(
+				{
+					status: outcome.status,
+					task_id: outcome.taskId,
+					steps: outcome.steps,
+					events_seen: outcome.eventsSeen,
+					...(outcome.text ? { summary: outcome.text } : {}),
+				},
+				"Dashboard work still in progress",
 			);
 		}
 
-		const liveboard = await this.getThoughtSpotService(
-			recorder,
-		).fetchTMLAndCreateLiveboard(title, transformedAnswers, note_tile);
+		const base = {
+			status: outcome.status,
+			task_id: outcome.taskId,
+			changes_applied: outcome.liveboardUpdated,
+			steps: outcome.steps,
+			...(outcome.text ? { summary: outcome.text } : {}),
+		};
 
-		if (liveboard.error) {
-			return this.createErrorResponse(
-				"Encountered an error while creating the dashboard. Please check your inputs and try again.",
-				`Error creating dashboard ${liveboard.error.message}`,
+		if (outcome.status === "needs_input") {
+			return this.createStructuredContentSuccessResponse(
+				{
+					...base,
+					...(outcome.question ? { question: outcome.question } : {}),
+					...(outcome.choice ? { choices: outcome.choice.choices } : {}),
+				},
+				"Dashboard work needs more input",
 			);
 		}
 
+		if (outcome.status === "failed") {
+			return this.createStructuredContentSuccessResponse(
+				{ ...base, error: outcome.error },
+				"Dashboard work failed",
+			);
+		}
+
+		const url = outcome.dashboardUrl ?? extra.link;
 		return this.createStructuredContentSuccessResponse(
 			{
-				link: liveboard.url,
+				...base,
+				...(outcome.dashboardId ? { dashboard_id: outcome.dashboardId } : {}),
+				...(url ? { dashboard_url: url } : {}),
+				...(url && extra.legacyLink ? { link: url } : {}),
 			},
-			"Dashboard created successfully",
+			"Dashboard ready",
 		);
 	}
 

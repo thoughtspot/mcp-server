@@ -208,8 +208,8 @@ describe("MCP Server", () => {
 
 			const result = await listTools();
 
-			// Latest version: 11 tools (6 non-OAuth base + 4 model tools + get_data)
-			expect(result.tools).toHaveLength(11);
+			// Latest version: 13 tools (6 non-OAuth base + 4 model tools + get_data + 2 dashboard tools)
+			expect(result.tools).toHaveLength(13);
 			expect(result.tools?.map((t) => t.name)).toEqual([
 				"check_connectivity",
 				"search_objects",
@@ -217,6 +217,8 @@ describe("MCP Server", () => {
 				"send_session_message",
 				"get_session_updates",
 				"create_dashboard",
+				"modify_dashboard",
+				"get_dashboard_status",
 				"create_model_session",
 				"send_model_message",
 				"get_model_updates",
@@ -247,11 +249,20 @@ describe("MCP Server", () => {
 				(t) => t.name === "create_dashboard",
 			);
 			expect(dashboardTool?.description).toMatch(
-				/create a dashboard from a list of answers/i,
+				/create a dashboard, organise it, and save it/i,
 			);
+			// The description must not leak the internal agent's name, or a calling agent starts
+			// trying to decide between overlapping tools.
+			expect(dashboardTool?.description).not.toMatch(/spotterviz/i);
+
+			const modifyTool = result.tools?.find(
+				(t) => t.name === "modify_dashboard",
+			);
+			expect(modifyTool?.description).toMatch(/change an existing dashboard/i);
+			expect(modifyTool?.description).not.toMatch(/spotterviz/i);
 		});
 
-		it("should return 11 tools regardless of enableSpotterDataSourceDiscovery when using latest", async () => {
+		it("should return 13 tools regardless of enableSpotterDataSourceDiscovery when using latest", async () => {
 			// Mock getThoughtSpotClient with enableSpotterDataSourceDiscovery set to false
 			vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
 				getSessionInfo: vi.fn().mockResolvedValue({
@@ -285,7 +296,7 @@ describe("MCP Server", () => {
 			const result = await listTools();
 
 			// No tool in this set is a datasource discovery tool, so filtering has no effect
-			expect(result.tools).toHaveLength(11);
+			expect(result.tools).toHaveLength(13);
 			expect(result.tools?.map((t) => t.name)).toEqual([
 				"check_connectivity",
 				"search_objects",
@@ -293,6 +304,8 @@ describe("MCP Server", () => {
 				"send_session_message",
 				"get_session_updates",
 				"create_dashboard",
+				"modify_dashboard",
+				"get_dashboard_status",
 				"create_model_session",
 				"send_model_message",
 				"get_model_updates",
@@ -338,6 +351,8 @@ describe("MCP Server", () => {
 			"send_session_message",
 			"get_session_updates",
 			"create_dashboard",
+			"modify_dashboard",
+			"get_dashboard_status",
 		];
 		// Base tools plus get_data, i.e. what a user with the data-download privilege
 		// (but no data-modeling privilege) sees. get_data is appended after the base set.
@@ -2086,6 +2101,158 @@ describe("MCP Server", () => {
 		});
 	});
 
+	describe("Modify Dashboard Tool", () => {
+		function stubDashboardWork(overrides: Record<string, any> = {}) {
+			const service = {
+				createSession: vi
+					.fn()
+					.mockResolvedValue({ spotterVizSessionId: "task-1" }),
+				submitQuery: vi
+					.fn()
+					.mockResolvedValue({ streamPromise: Promise.resolve() }),
+				getUpdates: vi.fn().mockResolvedValue({
+					updates: [
+						{
+							event_type: "control.action",
+							data: { action: "lb_refresh", metadata: {} },
+						},
+						{
+							event_type: "message.end",
+							data: { status: "completed", liveboard_updated: true },
+						},
+					],
+					isDone: true,
+				}),
+				saveLiveboard: vi.fn().mockResolvedValue({
+					liveboardId: "lb-1",
+					liveboardUrl: "https://test.thoughtspot.cloud/#/pinboard/lb-1",
+				}),
+				...overrides,
+			};
+			vi.spyOn(
+				MCPServer.prototype as any,
+				"getSpotterVizService",
+			).mockResolvedValue(service);
+			vi.spyOn(
+				MCPServer.prototype as any,
+				"getStorageService",
+			).mockResolvedValue({
+				initializeConversation: vi.fn().mockResolvedValue(undefined),
+				getMetadata: vi.fn().mockResolvedValue({ liveboardId: "lb-1" }),
+				updateMetadata: vi.fn().mockResolvedValue({}),
+			});
+			return service;
+		}
+
+		it("modifies a dashboard and reports a completed result", async () => {
+			stubDashboardWork();
+			await server.init();
+			const { callTool } = connect(server);
+
+			const result: any = await callTool("modify_dashboard", {
+				dashboard_id: "lb-1",
+				instructions: "Use a dark theme and put the KPIs on top",
+			});
+
+			expect(result.isError).toBeUndefined();
+			expect(result.structuredContent.status).toBe("completed");
+			expect(result.structuredContent.changes_applied).toBe(true);
+			expect(result.structuredContent.dashboard_url).toContain(
+				"/#/pinboard/lb-1",
+			);
+			// `link` exists only on create_dashboard for backwards compatibility. modify's output
+			// schema is closed, so emitting it here would fail client-side validation.
+			expect(result.structuredContent).not.toHaveProperty("link");
+		});
+
+		it("surfaces a clarifying question as needs_input rather than success", async () => {
+			// Aurora returns a perfectly successful turn that changed nothing when it needs more
+			// detail. Reporting that as completed would tell the agent the work was done.
+			stubDashboardWork({
+				getUpdates: vi.fn().mockResolvedValue({
+					updates: [
+						{
+							event_type: "message.delta",
+							data: { content: "Which data source should I use?" },
+						},
+						{
+							event_type: "message.end",
+							data: { status: "completed", liveboard_updated: false },
+						},
+					],
+					isDone: true,
+				}),
+			});
+			await server.init();
+			const { callTool } = connect(server);
+
+			const result: any = await callTool("modify_dashboard", {
+				dashboard_id: "lb-1",
+				instructions: "Add a chart",
+			});
+
+			expect(result.structuredContent.status).toBe("needs_input");
+			expect(result.structuredContent.question).toBe(
+				"Which data source should I use?",
+			);
+			expect(result.structuredContent.changes_applied).toBe(false);
+			expect(result.structuredContent.task_id).toBe("task-1");
+		});
+
+		it("refuses to continue a task that belongs to a different dashboard", async () => {
+			// Otherwise a mixed-up pair of ids would silently change the wrong dashboard.
+			stubDashboardWork();
+			vi.spyOn(
+				MCPServer.prototype as any,
+				"getStorageService",
+			).mockResolvedValue({
+				initializeConversation: vi.fn().mockResolvedValue(undefined),
+				getMetadata: vi.fn().mockResolvedValue({ liveboardId: "lb-OTHER" }),
+				updateMetadata: vi.fn().mockResolvedValue({}),
+			});
+			await server.init();
+			const { callTool } = connect(server);
+
+			const result: any = await callTool("modify_dashboard", {
+				dashboard_id: "lb-1",
+				task_id: "task-1",
+				instructions: "Use a dark theme",
+			});
+
+			expect(result.isError).toBe(true);
+			expect(result.content[0].text).toMatch(
+				/belongs to a different dashboard/i,
+			);
+		});
+
+		it("explains that an unresolvable task id has probably expired", async () => {
+			stubDashboardWork();
+			vi.spyOn(
+				MCPServer.prototype as any,
+				"getStorageService",
+			).mockResolvedValue({
+				initializeConversation: vi.fn().mockResolvedValue(undefined),
+				getMetadata: vi.fn().mockResolvedValue({}),
+				updateMetadata: vi.fn().mockResolvedValue({}),
+			});
+			await server.init();
+			const { callTool } = connect(server);
+
+			const result: any = await callTool("modify_dashboard", {
+				dashboard_id: "lb-1",
+				task_id: "task-gone",
+				instructions: "Use a dark theme",
+			});
+
+			expect(result.isError).toBe(true);
+			expect(result.content[0].text).toMatch(/expired/i);
+		});
+
+		// Schema-level guardrails are asserted directly against the schemas in
+		// test/servers/dashboard-schemas.spec.ts: a thrown ZodError cannot be observed through
+		// mcp-testing-kit's callTool, which hangs on a JSON-RPC error response.
+	});
+
 	describe("Create Dashboard Tool", () => {
 		it("should create dashboard successfully with valid answer_ids", async () => {
 			const mockFetchTMLAndCreateLiveboard = vi
@@ -2100,6 +2267,8 @@ describe("MCP Server", () => {
 
 			const result = await callTool("create_dashboard", {
 				title: "Revenue Dashboard",
+				// skip_layout is the only way to get the raw assembly now: styling is the default.
+				skip_layout: true,
 				note_tile: "<h2>Revenue Analysis</h2><p>Generated on May 5, 2026</p>",
 				answers: [
 					{
@@ -2131,7 +2300,6 @@ describe("MCP Server", () => {
 						generation_number: 2,
 					},
 				],
-				"<h2>Revenue Analysis</h2><p>Generated on May 5, 2026</p>",
 			);
 		});
 
@@ -2237,8 +2405,112 @@ describe("MCP Server", () => {
 						generation_number: 3,
 					},
 				],
-				"<p>One answer</p>",
 			);
+		});
+
+		it("organises and styles by default when only answers are given", async () => {
+			// Regression guard: answers with no design_context used to return the raw uniform grid,
+			// which silently dropped the styling the previous tool set got via its own follow-up
+			// call. Styling is now the default and must run without the agent asking for it.
+			vi.spyOn(
+				ThoughtSpotService.prototype,
+				"fetchTMLAndCreateLiveboard",
+			).mockResolvedValue({
+				url: "https://test.thoughtspot.cloud/#/pinboard/lb-9",
+				liveboardId: "lb-9",
+				error: null,
+			});
+			const submitQuery = vi
+				.fn()
+				.mockResolvedValue({ streamPromise: Promise.resolve() });
+			vi.spyOn(
+				MCPServer.prototype as any,
+				"getSpotterVizService",
+			).mockResolvedValue({
+				createSession: vi
+					.fn()
+					.mockResolvedValue({ spotterVizSessionId: "task-9" }),
+				submitQuery,
+				getUpdates: vi.fn().mockResolvedValue({
+					updates: [
+						{
+							event_type: "control.action",
+							data: { action: "lb_refresh", metadata: {} },
+						},
+						{
+							event_type: "message.end",
+							data: { status: "completed", liveboard_updated: true },
+						},
+					],
+					isDone: true,
+				}),
+				saveLiveboard: vi.fn().mockResolvedValue({
+					liveboardId: "lb-9",
+					liveboardUrl: "https://test.thoughtspot.cloud/#/pinboard/lb-9",
+				}),
+			});
+			vi.spyOn(
+				MCPServer.prototype as any,
+				"getStorageService",
+			).mockResolvedValue({
+				initializeConversation: vi.fn().mockResolvedValue(undefined),
+				getMetadata: vi.fn().mockResolvedValue({ liveboardId: "lb-9" }),
+				updateMetadata: vi.fn().mockResolvedValue({}),
+			});
+
+			await server.init();
+			const { callTool } = connect(server);
+
+			const result: any = await callTool("create_dashboard", {
+				title: "Sales Overview",
+				answers: [
+					{
+						answer_id: JSON.stringify({ session_id: "s1", gen_no: 1 }),
+						title: "Sales by Region",
+					},
+				],
+			});
+
+			expect(result.isError).toBeUndefined();
+			expect(result.structuredContent.status).toBe("completed");
+			expect(result.structuredContent.changes_applied).toBe(true);
+			expect(submitQuery).toHaveBeenCalledTimes(1);
+			// The default prompt must actually ask for grouping, tabs and coherent styling.
+			const prompt = submitQuery.mock.calls[0][0].message;
+			expect(prompt).toMatch(/arranging the answers in groups/i);
+			expect(prompt).toMatch(/create tabs if necessary/i);
+			expect(prompt).toMatch(/coherent/i);
+		});
+
+		it("ignores a note_tile from an older caller instead of failing", async () => {
+			// note_tile was removed from this tool. Zod strips unknown keys rather than erroring,
+			// so a client still sending it keeps working, just without a note tile.
+			const spy = vi
+				.spyOn(ThoughtSpotService.prototype, "fetchTMLAndCreateLiveboard")
+				.mockResolvedValue({
+					url: "https://test.thoughtspot.cloud/#/pinboard/dash-1",
+					liveboardId: "dash-1",
+					error: null,
+				});
+
+			await server.init();
+			const { callTool } = connect(server);
+
+			const result: any = await callTool("create_dashboard", {
+				title: "Legacy Caller",
+				note_tile: "<p>Ignored now</p>",
+				answers: [
+					{
+						answer_id: JSON.stringify({ session_id: "s", gen_no: 1 }),
+						title: "A",
+					},
+				],
+			});
+
+			expect(result.isError).toBeUndefined();
+			expect(spy).toHaveBeenCalledWith("Legacy Caller", [
+				{ title: "A", session_identifier: "s", generation_number: 1 },
+			]);
 		});
 	});
 

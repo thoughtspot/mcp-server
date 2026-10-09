@@ -15,7 +15,12 @@ import { ORG_HEADER, buildHeaders } from "./rest-utils";
 import { addSearchObjects } from "./search-objects/search-objects";
 import { addSpotterModel } from "./spotter-model/spotter-model-client";
 import { ORG_TOKEN_VALIDITY_SEC, fetchOrgToken } from "./token-endpoints";
-import { type Org, type SessionInfo, ThoughtSpotApiError } from "./types";
+import {
+	type BachSession,
+	type Org,
+	type SessionInfo,
+	ThoughtSpotApiError,
+} from "./types";
 
 // Re-exported for existing importers; definitions live with the handlers.
 export type {
@@ -84,6 +89,8 @@ export const getThoughtSpotClient = (
 	);
 	addSearchObjects(client, instanceUrl, bearerToken);
 	addGetData(client, instanceUrl, bearerToken);
+	addCreateBachPinboardSession(client, instanceUrl, bearerToken, orgId);
+	addSaveBachPinboard(client, instanceUrl, bearerToken, orgId);
 	addFetchOrgBearerToken(client, instanceUrl);
 	addListOrgs(client, instanceUrl, bearerToken);
 	// Spotter Model (Lumos) agentic model-creation handlers.
@@ -304,6 +311,159 @@ function addCreateAgentConversationWithAutoMode(
 
 		const data = (await response.json()) as AgentConversation;
 		return data;
+	};
+}
+
+/*
+ * Initiate a new BACH pinboard session for a liveboard.
+ */
+function addCreateBachPinboardSession(
+	client: any,
+	instanceUrl: string,
+	token: string,
+	orgId?: string,
+) {
+	(client as any).createBachPinboardSession = async ({
+		liveboardId,
+	}: { liveboardId: string }): Promise<BachSession> => {
+		const endpoint = "/callosum/v1/bach/pinboard/";
+		// Java callers (e.g. BachPinboardRequestBuilder) seed the session with a fresh GUID rather
+		// than leaving the field empty; mirror that to avoid validation rejections.
+		const clientTransactionId = crypto.randomUUID();
+		const fetchOptions = {
+			method: "POST",
+			headers: buildHeaders(token, orgId),
+			body: JSON.stringify({
+				pinboardSession: { transactionId: clientTransactionId },
+				pinboardRequests: [
+					{
+						type: "LOAD_PINBOARD",
+						loadPinboard: { savedPinboardId: liveboardId },
+					},
+				],
+			}),
+		};
+		const response = await fetch(`${instanceUrl}${endpoint}`, fetchOptions);
+		if (!response.ok) {
+			const errorText = await response.text();
+			throw new Error(
+				`createBachPinboardSession failed with status ${response.status}: ${errorText}`,
+			);
+		}
+
+		const data = (await response.json()) as {
+			status?: {
+				statusCode?: string;
+				errorMessage?: string;
+				errorCode?: string;
+			};
+			pinboardSession?: {
+				transactionId?: string;
+				generationNumber?: string | number;
+			};
+			pinboardResponses?: Array<{
+				loadPinboard?: {
+					status?: { statusCode?: string; errorMessage?: string };
+				};
+				status?: { statusCode?: string; errorMessage?: string };
+			}>;
+		};
+
+		const statusCode = data?.status?.statusCode;
+		if (statusCode && statusCode !== "OK") {
+			const detail =
+				data.status?.errorMessage ||
+				data.pinboardResponses?.[0]?.loadPinboard?.status?.errorMessage ||
+				data.pinboardResponses?.[0]?.status?.errorMessage ||
+				JSON.stringify(data.status);
+			throw new Error(
+				`createBachPinboardSession returned non-OK status ${statusCode}: ${detail}`,
+			);
+		}
+
+		const transactionId = data?.pinboardSession?.transactionId;
+		const generationNumber = data?.pinboardSession?.generationNumber;
+		if (!transactionId || generationNumber === undefined) {
+			throw new Error(
+				`createBachPinboardSession: missing session ids in response: ${JSON.stringify(data)}`,
+			);
+		}
+		return { transactionId, generationNumber: String(generationNumber) };
+	};
+}
+
+/*
+ * Save the current state of the pinboard.
+ */
+function addSaveBachPinboard(
+	client: any,
+	instanceUrl: string,
+	token: string,
+	orgId?: string,
+) {
+	(client as any).saveBachPinboard = async ({
+		transactionId,
+		generationNumber,
+	}: {
+		transactionId: string;
+		generationNumber: string;
+	}): Promise<void> => {
+		const endpoint = "/callosum/v1/bach/pinboard/";
+		const fetchOptions = {
+			method: "POST",
+			headers: buildHeaders(token, orgId),
+			body: JSON.stringify({
+				pinboardSession: { transactionId, generationNumber },
+				pinboardRequests: [
+					{
+						type: "SAVE_PINBOARD",
+						savePinboard: {},
+					},
+				],
+			}),
+		};
+		const response = await fetch(`${instanceUrl}${endpoint}`, fetchOptions);
+		if (!response.ok) {
+			const errorText = await response.text();
+			throw new Error(
+				`saveBachPinboard failed with status ${response.status}: ${errorText}`,
+			);
+		}
+
+		const data = (await response.json()) as {
+			status?: {
+				statusCode?: string;
+				errorMessage?: string;
+				errorCode?: string;
+			};
+			pinboardResponses?: Array<{
+				savePinboard?: {
+					status?: { statusCode?: string; errorMessage?: string };
+				} | null;
+				status?: { statusCode?: string; errorMessage?: string };
+			}>;
+		} | null;
+
+		// Without this, a null or non-object body skips the status check below and the save is
+		// reported as successful. Saving is what promotes the edit session to the saved liveboard, so
+		// a false success here means the user's changes are silently lost.
+		if (!data || typeof data !== "object") {
+			throw new Error(
+				`saveBachPinboard failed: non-object response body: ${JSON.stringify(data)}`,
+			);
+		}
+
+		const statusCode = data?.status?.statusCode;
+		if (statusCode && statusCode !== "OK") {
+			const detail =
+				data.status?.errorMessage ||
+				data.pinboardResponses?.[0]?.savePinboard?.status?.errorMessage ||
+				data.pinboardResponses?.[0]?.status?.errorMessage ||
+				JSON.stringify(data.status);
+			throw new Error(
+				`saveBachPinboard returned non-OK status ${statusCode}: ${detail}`,
+			);
+		}
 	};
 }
 

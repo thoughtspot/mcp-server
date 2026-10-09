@@ -27,6 +27,8 @@ import {
 	recordToolInvocationMetrics,
 } from "../metrics/runtime/tool-metrics";
 import { getActiveSpan, withSpan } from "../metrics/tracing/tracing-utils";
+import { SpotterVizClient } from "../spotterviz/spotterviz-client";
+import { SpotterVizService } from "../spotterviz/spotterviz-service";
 import { OrgStorageServiceClient } from "../storage-service/org-storage-service";
 import { StorageServiceClient } from "../storage-service/storage-service";
 import { OrgService } from "../thoughtspot/org-service";
@@ -369,6 +371,20 @@ export abstract class BaseMCPServer extends Server {
 				),
 				eventIdentity: this.getMetricEventIdentity(),
 			},
+		);
+	}
+
+	protected async getSpotterVizService(
+		recorder?: MetricsRecorder,
+	): Promise<SpotterVizService> {
+		return new SpotterVizService(
+			this.getThoughtSpotService(recorder),
+			await this.getStorageService(),
+			new SpotterVizClient(
+				this.ctx.props.instanceUrl,
+				this.ctx.props.accessToken,
+			),
+			recorder,
 		);
 	}
 
