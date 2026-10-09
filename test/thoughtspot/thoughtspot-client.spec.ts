@@ -6,7 +6,9 @@ import type { ResponseContext } from "@thoughtspot/rest-api-sdk";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import YAML from "yaml";
 import {
-	GET_DATA_BATCH_TIMEOUT_MS,
+	GET_DATA_TIMEOUT_MS,
+	GET_DATA_VIZ_BATCH_SIZE,
+	GET_DATA_VIZ_CONCURRENCY,
 	LIVEBOARD_RECORD_SIZE,
 } from "../../src/thoughtspot/get-data/get-data";
 import { getThoughtSpotClient } from "../../src/thoughtspot/thoughtspot-client";
@@ -1865,35 +1867,33 @@ describe("ThoughtSpot Client", () => {
 					},
 				]),
 			});
-			// Call 2: liveboard/data returns one content per requested viz.
-			(fetch as any).mockResolvedValueOnce({
-				ok: true,
-				json: vi.fn().mockResolvedValue({
-					metadata_id: "obj-1",
-					metadata_name: "Test MCP Liveboard 1",
-					contents: [
-						{
-							available_data_row_count: 1,
-							column_names: ["item type", "Total sales"],
-							data_rows: [
-								{ "item type": "Dresses", "Total sales": 7896217.73 },
-							],
-							returned_data_row_count: 1,
-							sampling_ratio: 1,
-							visualization_id: "de1240fc-2d4d-4c67-9317-02e9c6e3bf1c",
-							visualization_name: "Total sales by item type by year",
-						},
-						{
-							available_data_row_count: 1,
-							column_names: ["city", "Total sales"],
-							data_rows: [{ city: "Billings", "Total sales": 3198084.8 }],
-							returned_data_row_count: 1,
-							sampling_ratio: 1,
-							visualization_id: "cf049bb9-f3b7-466b-9000-41d814d3967a",
-							visualization_name: "Total sales by city (this year, 2026)",
-						},
-					],
-				}),
+			// Then liveboard/data, one call per batch.
+			const contentsById: Record<string, unknown> = {
+				"de1240fc-2d4d-4c67-9317-02e9c6e3bf1c": {
+					available_data_row_count: 1,
+					column_names: ["item type", "Total sales"],
+					data_rows: [{ "item type": "Dresses", "Total sales": 7896217.73 }],
+					returned_data_row_count: 1,
+					sampling_ratio: 1,
+					visualization_id: "de1240fc-2d4d-4c67-9317-02e9c6e3bf1c",
+					visualization_name: "Total sales by item type by year",
+				},
+				"cf049bb9-f3b7-466b-9000-41d814d3967a": {
+					available_data_row_count: 1,
+					column_names: ["city", "Total sales"],
+					data_rows: [{ city: "Billings", "Total sales": 3198084.8 }],
+					returned_data_row_count: 1,
+					sampling_ratio: 1,
+					visualization_id: "cf049bb9-f3b7-466b-9000-41d814d3967a",
+					visualization_name: "Total sales by city (this year, 2026)",
+				},
+			};
+			(fetch as any).mockImplementation(async (_url: string, init: any) => {
+				const ids: string[] = JSON.parse(init.body).visualization_identifiers;
+				return {
+					ok: true,
+					json: async () => ({ contents: ids.map((id) => contentsById[id]) }),
+				};
 			});
 
 			const result = await client.getData({
@@ -1911,7 +1911,8 @@ describe("ThoughtSpot Client", () => {
 				{ identifier: "obj-1", type: "LIVEBOARD" },
 			]);
 
-			// Call 2 is the data fetch, scoped to the enumerated vizzes.
+			// Call 2 is the data fetch, scoped to the enumerated vizzes (one batch).
+			expect((fetch as any).mock.calls).toHaveLength(2);
 			const dataUrl = (fetch as any).mock.calls[1][0];
 			const dataBody = JSON.parse((fetch as any).mock.calls[1][1].body);
 			expect(dataUrl).toBe(
@@ -1943,49 +1944,63 @@ describe("ThoughtSpot Client", () => {
 			]);
 		});
 
-		// A big board: enumeration returns more vizzes than the cap, so only the
-		// first N GUIDs are fetched.
-		it("caps a whole Liveboard to the first N visualizations", async () => {
-			const vizIds = Array.from(
-				{ length: 40 },
-				(_, i) => `viz-${String(i).padStart(2, "0")}`,
-			);
-			(fetch as any).mockResolvedValueOnce({
+		// Echoes one content per requested viz id.
+		const echoContents = (init: any) => {
+			const ids: string[] = JSON.parse(init.body).visualization_identifiers;
+			return {
 				ok: true,
-				json: vi.fn().mockResolvedValue([
-					{
-						visualization_headers: vizIds.map((id) => ({
-							id,
-							vizType: "CHART",
-						})),
-					},
-				]),
-			});
-			(fetch as any).mockResolvedValue({
-				ok: true,
-				json: vi.fn().mockResolvedValue({ contents: [] }),
+				json: async () => ({
+					contents: ids.map((id) => ({ visualization_id: id, data_rows: [] })),
+				}),
+			};
+		};
+
+		// No cap: every viz is fetched in batches, at most N in flight; a freed
+		// worker picks the next batch.
+		it("fetches every viz of a big board in batches through the worker pool", async () => {
+			const vizIds = Array.from({ length: 40 }, (_, i) => `viz-${i}`);
+			let inFlight = 0;
+			let peak = 0;
+			(fetch as any).mockImplementation(async (url: string, init: any) => {
+				if (url.endsWith("/metadata/search")) {
+					return {
+						ok: true,
+						json: async () => [
+							{
+								visualization_headers: vizIds.map((id) => ({
+									id,
+									vizType: "CHART",
+								})),
+							},
+						],
+					};
+				}
+				inFlight++;
+				peak = Math.max(peak, inFlight);
+				await new Promise((r) => setTimeout(r, 1));
+				inFlight--;
+				return echoContents(init);
 			});
 
 			const result = await client.getData({
 				objectId: "board-big",
 				objectType: "LIVEBOARD",
-				maxVisualizations: 25,
 			});
 
-			// 25 vizzes -> 5 parallel batches of 5, in board order.
-			const batchIds = (fetch as any).mock.calls
+			const batches = (fetch as any).mock.calls
 				.slice(1)
 				.map((c: any) => JSON.parse(c[1].body).visualization_identifiers);
-			expect(batchIds).toHaveLength(5);
-			for (const ids of batchIds) {
-				expect(ids).toHaveLength(5);
+			expect(batches).toHaveLength(40 / GET_DATA_VIZ_BATCH_SIZE);
+			for (const ids of batches) {
+				expect(ids).toHaveLength(GET_DATA_VIZ_BATCH_SIZE);
 			}
-			expect(batchIds.flat()).toEqual(vizIds.slice(0, 25));
-			expect(result.data).toEqual([]);
+			expect(peak).toBe(GET_DATA_VIZ_CONCURRENCY);
+			// All 40, in board order regardless of completion order.
+			expect(result.data.map((v: any) => v.viz_id)).toEqual(vizIds);
 		});
 
 		// One failing batch must not sink the others.
-		it("returns vizzes from the batches that succeed when one batch fails", async () => {
+		it("returns vizzes from the batches that succeed when one fails", async () => {
 			const vizIds = Array.from({ length: 10 }, (_, i) => `viz-${i}`);
 			(fetch as any).mockImplementation(async (url: string, init: any) => {
 				if (url.endsWith("/metadata/search")) {
@@ -2045,16 +2060,19 @@ describe("ThoughtSpot Client", () => {
 			).rejects.toThrow("getData failed with status 400");
 		});
 
-		it("aborts batches still pending at the timeout", async () => {
+		// Never-resolving fetch that rejects only when aborted.
+		const hangUntilAborted = (init: any) =>
+			new Promise((_resolve, reject) => {
+				init.signal.addEventListener("abort", () =>
+					reject(new Error("The operation was aborted")),
+				);
+			});
+
+		it("throws a timeout when nothing finishes before the deadline", async () => {
 			vi.useFakeTimers();
 			try {
-				(fetch as any).mockImplementation(
-					(_url: string, init: any) =>
-						new Promise((_resolve, reject) => {
-							init.signal.addEventListener("abort", () =>
-								reject(new Error("The operation was aborted")),
-							);
-						}),
+				(fetch as any).mockImplementation((_url: string, init: any) =>
+					hangUntilAborted(init),
 				);
 
 				const pending = client.getData({
@@ -2063,10 +2081,45 @@ describe("ThoughtSpot Client", () => {
 					vizIds: ["slow-1"],
 				});
 				const assertion = expect(pending).rejects.toThrow(
-					`getData timed out after ${GET_DATA_BATCH_TIMEOUT_MS / 1000}s`,
+					`getData timed out after ${GET_DATA_TIMEOUT_MS / 1000}s`,
 				);
-				await vi.advanceTimersByTimeAsync(GET_DATA_BATCH_TIMEOUT_MS);
+				await vi.advanceTimersByTimeAsync(GET_DATA_TIMEOUT_MS);
 				await assertion;
+			} finally {
+				vi.useRealTimers();
+			}
+		});
+
+		it("returns what finished by the deadline and skips the rest", async () => {
+			vi.useFakeTimers();
+			try {
+				// 7 batches (b0..b6); b1 and b3 hang.
+				const batchOf = (b: number) =>
+					Array.from(
+						{ length: GET_DATA_VIZ_BATCH_SIZE },
+						(_, j) => `b${b}-${j}`,
+					);
+				const vizIds = Array.from({ length: 7 }, (_, b) => batchOf(b)).flat();
+				(fetch as any).mockImplementation((_url: string, init: any) => {
+					const ids: string[] = JSON.parse(init.body).visualization_identifiers;
+					if (ids[0].startsWith("b1-") || ids[0].startsWith("b3-")) {
+						return hangUntilAborted(init);
+					}
+					return Promise.resolve(echoContents(init));
+				});
+
+				const pending = client.getData({
+					objectId: "board-1",
+					objectType: "LIVEBOARD",
+					vizIds,
+				});
+				await vi.advanceTimersByTimeAsync(GET_DATA_TIMEOUT_MS);
+				const result = await pending;
+
+				// Freed workers pick up b5/b6 (past the first 25); slow ones are dropped.
+				expect(result.data.map((v: any) => v.viz_id)).toEqual(
+					[0, 2, 4, 5, 6].flatMap(batchOf),
+				);
 			} finally {
 				vi.useRealTimers();
 			}

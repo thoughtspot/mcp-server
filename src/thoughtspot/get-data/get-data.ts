@@ -10,16 +10,16 @@ import type {
 // Keep in sync with the `max_rows` description in tool-definitions.ts.
 export const GET_DATA_DEFAULT_MAX_ROWS = 25;
 
-// Whole-Liveboard fetches take only the first N vizzes; fetching all of a big
-// board exceeds Cloudflare's ~100s limit (524).
-export const GET_DATA_DEFAULT_MAX_VISUALIZATIONS = 25;
+// Max liveboard/data requests in flight; under the Worker's 6 concurrent-
+// connection limit.
+export const GET_DATA_VIZ_CONCURRENCY = 5;
 
-// Vizzes per liveboard/data request; batches run in parallel so one slow or
-// invalid viz doesn't hold up or fail the rest.
+// Vizzes per liveboard/data request.
 export const GET_DATA_VIZ_BATCH_SIZE = 5;
 
-// Batches still pending after this are aborted; stays under client/edge timeouts.
-export const GET_DATA_BATCH_TIMEOUT_MS = 30_000;
+// Fetches still pending after this are aborted and whatever finished is
+// returned; a whole big board would exceed client/edge timeouts (524).
+export const GET_DATA_TIMEOUT_MS = 30_000;
 
 // Answer-backed tiles; notes/filters 400 the data call ("Invalid vizId").
 const ANSWER_VIZ_TYPES = new Set(["TABLE", "CHART"]);
@@ -151,9 +151,10 @@ async function listLiveboardVizIds(
 		.filter((id): id is string => typeof id === "string" && id.length > 0);
 }
 
-// Fetch Liveboard vizzes in parallel batches; returns contents (in board order)
-// from the batches that succeed, and throws only if every batch fails.
-async function fetchVizBatches(
+// Fetch Liveboard vizzes in batches through a pool of workers: each picks the
+// next batch as soon as its last one lands, until the deadline aborts the rest.
+// Returns what finished (board order); throws only if nothing did.
+async function fetchVizPool(
 	url: string,
 	headers: Record<string, string>,
 	body: Record<string, unknown>,
@@ -163,54 +164,63 @@ async function fetchVizBatches(
 	for (let i = 0; i < vizIds.length; i += GET_DATA_VIZ_BATCH_SIZE) {
 		batches.push(vizIds.slice(i, i + GET_DATA_VIZ_BATCH_SIZE));
 	}
+	const fetched: RawDataContent[][] = new Array(batches.length);
+	const errors: unknown[] = [];
 	const controller = new AbortController();
-	const timer = setTimeout(() => controller.abort(), GET_DATA_BATCH_TIMEOUT_MS);
+	const timer = setTimeout(() => controller.abort(), GET_DATA_TIMEOUT_MS);
 	const startedAt = Date.now();
+	let next = 0;
 
-	let results: PromiseSettledResult<RawDataContent[]>[];
+	const worker = async () => {
+		while (next < batches.length && !controller.signal.aborted) {
+			const i = next++;
+			try {
+				const data = await postJson(
+					url,
+					headers,
+					{
+						...body,
+						visualization_identifiers: batches[i],
+						record_size: LIVEBOARD_RECORD_SIZE,
+					},
+					"getData failed",
+					controller.signal,
+				);
+				fetched[i] = data?.contents ?? [];
+			} catch (error) {
+				const timedOut = controller.signal.aborted;
+				console.error(
+					`getData: batch ${i + 1}/${batches.length} ${timedOut ? "timed out" : "failed"} after ${Date.now() - startedAt}ms`,
+					error instanceof Error ? error.message : String(error),
+				);
+				errors.push(
+					timedOut
+						? new Error(
+								`getData timed out after ${GET_DATA_TIMEOUT_MS / 1000}s waiting for ThoughtSpot`,
+							)
+						: error,
+				);
+			}
+		}
+	};
+
 	try {
-		results = await Promise.allSettled(
-			batches.map(async (ids, i) => {
-				try {
-					const data = await postJson(
-						url,
-						headers,
-						{
-							...body,
-							visualization_identifiers: ids,
-							record_size: LIVEBOARD_RECORD_SIZE,
-						},
-						"getData failed",
-						controller.signal,
-					);
-					return (data?.contents ?? []) as RawDataContent[];
-				} catch (error) {
-					const timedOut = controller.signal.aborted;
-					console.error(
-						`getData: batch ${i + 1}/${batches.length} ${timedOut ? "timed out" : "failed"} after ${Date.now() - startedAt}ms`,
-						error instanceof Error ? error.message : String(error),
-					);
-					if (timedOut) {
-						throw new Error(
-							`getData timed out after ${GET_DATA_BATCH_TIMEOUT_MS / 1000}s waiting for ThoughtSpot`,
-						);
-					}
-					throw error;
-				}
-			}),
+		await Promise.all(
+			Array.from(
+				{ length: Math.min(GET_DATA_VIZ_CONCURRENCY, batches.length) },
+				worker,
+			),
 		);
 	} finally {
 		clearTimeout(timer);
 	}
 
-	const succeeded = results.filter(
-		(r): r is PromiseFulfilledResult<RawDataContent[]> =>
-			r.status === "fulfilled",
-	);
-	if (!succeeded.length) {
-		throw (results[0] as PromiseRejectedResult).reason;
+	// filter() skips the holes left by failed/unfetched batches.
+	const done = fetched.filter(Boolean);
+	if (!done.length) {
+		throw errors[0];
 	}
-	return succeeded.flatMap((r) => r.value);
+	return done.flat();
 }
 
 // Custom handler: the rest-api-sdk has no single call that resolves a GUID's
@@ -221,7 +231,6 @@ export function addGetData(client: any, instanceUrl: string, token: string) {
 		objectType,
 		vizIds,
 		maxRows = GET_DATA_DEFAULT_MAX_ROWS,
-		maxVisualizations = GET_DATA_DEFAULT_MAX_VISUALIZATIONS,
 	}: GetDataParams): Promise<GetDataResult> => {
 		// x-request-id ties the upstream call to tracing.
 		const requestId = generateRequestId();
@@ -245,9 +254,9 @@ export function addGetData(client: any, instanceUrl: string, token: string) {
 				// Caller scoped the fetch to specific vizzes.
 				body.visualization_identifiers = vizIds;
 			} else {
-				// Whole-board request: enumerate the vizzes and fetch only the first N,
-				// else the upstream pulls every viz and times out (524). Fall back to an
-				// unbounded fetch if enumeration returns nothing or itself fails.
+				// Whole-board request: enumerate the vizzes so the pool can fetch them
+				// in batches; one unscoped call on a big board times out (524). Fall back
+				// to it only if enumeration returns nothing or itself fails.
 				let allVizIds: string[] = [];
 				try {
 					allVizIds = await listLiveboardVizIds(instanceUrl, headers, objectId);
@@ -255,10 +264,7 @@ export function addGetData(client: any, instanceUrl: string, token: string) {
 					console.error("getData: liveboard viz enumeration failed", error);
 				}
 				if (allVizIds.length) {
-					body.visualization_identifiers = allVizIds.slice(
-						0,
-						maxVisualizations,
-					);
+					body.visualization_identifiers = allVizIds;
 				}
 			}
 		} else {
@@ -270,7 +276,7 @@ export function addGetData(client: any, instanceUrl: string, token: string) {
 		const url = `${instanceUrl}${endpoint}`;
 		const scopedVizIds = body.visualization_identifiers as string[] | undefined;
 		if (scopedVizIds?.length) {
-			const contents = await fetchVizBatches(url, headers, body, scopedVizIds);
+			const contents = await fetchVizPool(url, headers, body, scopedVizIds);
 			return { data: mapContents(contents, maxRows) };
 		}
 
