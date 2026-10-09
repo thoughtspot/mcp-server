@@ -75,7 +75,14 @@ export class SpotterVizClient {
 			jwt_token?: string;
 			session_id?: string;
 			liveboard_name?: string;
-		};
+		} | null;
+
+		// A non-object body would otherwise surface as an opaque TypeError on the next line.
+		if (!data || typeof data !== "object") {
+			throw new Error(
+				`createAuroraSession failed: Aurora /init returned a non-object response: ${JSON.stringify(data)}`,
+			);
+		}
 
 		if (!data.success || !data.session_id || !data.jwt_token) {
 			const errMsg =

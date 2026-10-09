@@ -227,23 +227,6 @@ describe("MCP Server", () => {
 			]);
 		});
 
-		it("should not advertise the low-level spotterviz session tools", async () => {
-			await server.init();
-			const { listTools } = connect(server);
-
-			const result = await listTools();
-			const names = result.tools?.map((t) => t.name) ?? [];
-
-			for (const hidden of [
-				"spotterviz_create_session",
-				"spotterviz_submit_query",
-				"spotterviz_get_updates",
-				"spotterviz_save_liveboard",
-			]) {
-				expect(names).not.toContain(hidden);
-			}
-		});
-
 		it("should include correct tool descriptions", async () => {
 			await server.init();
 			const { listTools } = connect(server);

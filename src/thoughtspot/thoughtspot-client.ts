@@ -439,10 +439,19 @@ function addSaveBachPinboard(
 			pinboardResponses?: Array<{
 				savePinboard?: {
 					status?: { statusCode?: string; errorMessage?: string };
-				};
+				} | null;
 				status?: { statusCode?: string; errorMessage?: string };
 			}>;
-		};
+		} | null;
+
+		// Without this, a null or non-object body skips the status check below and the save is
+		// reported as successful. Saving is what promotes the edit session to the saved liveboard, so
+		// a false success here means the user's changes are silently lost.
+		if (!data || typeof data !== "object") {
+			throw new Error(
+				`saveBachPinboard failed: non-object response body: ${JSON.stringify(data)}`,
+			);
+		}
 
 		const statusCode = data?.status?.statusCode;
 		if (statusCode && statusCode !== "OK") {

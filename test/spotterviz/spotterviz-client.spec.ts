@@ -128,6 +128,15 @@ describe("SpotterVizClient", () => {
 			);
 		});
 
+		it("throws a clear error, not a TypeError, when the body is null", async () => {
+			(fetch as any).mockResolvedValue(makeJsonResponse(null));
+
+			const client = new SpotterVizClient(INSTANCE_URL, BEARER);
+			await expect(client.createAuroraSession(bachSession)).rejects.toThrow(
+				/createAuroraSession failed: Aurora \/init returned a non-object response/,
+			);
+		});
+
 		it("throws if the payload is missing session_id or jwt_token", async () => {
 			(fetch as any).mockResolvedValue(
 				makeJsonResponse({ success: true, jwt_token: "j" }),

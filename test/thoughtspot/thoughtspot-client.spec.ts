@@ -2680,6 +2680,22 @@ mutation GetUnsavedAnswerTML($session: BachSessionIdInput!, $exportDependencies:
 			expect(result).toBeUndefined();
 		});
 
+		it("does not report success when the body is null", async () => {
+			// A null body used to skip the status check and return as a successful save, silently
+			// losing the user's changes, since saving is what commits the edit session.
+			(fetch as any).mockResolvedValue({
+				ok: true,
+				json: vi.fn().mockResolvedValue(null),
+			});
+
+			await expect(
+				client.saveBachPinboard({
+					transactionId: "t-1",
+					generationNumber: "5",
+				}),
+			).rejects.toThrow(/saveBachPinboard failed: non-object response body/);
+		});
+
 		it("throws with the body text on a non-ok HTTP response", async () => {
 			(fetch as any).mockResolvedValue({
 				ok: false,

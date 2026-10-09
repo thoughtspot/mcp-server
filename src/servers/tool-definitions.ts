@@ -621,124 +621,6 @@ export const GetDashboardStatusInputSchema = z.object({
 
 export const GetDashboardStatusOutputSchema = DashboardResultSchema;
 
-export const SpotterVizCreateSessionInputSchema = z
-	.object({
-		new_liveboard_name: z
-			.string()
-			.optional()
-			.describe(
-				"Name for a new, empty liveboard to be created. Provide this when the user wants to start a SpotterViz session from scratch.",
-			),
-		existing_liveboard_id: z
-			.uuid()
-			.optional()
-			.describe(
-				"GUID of an existing liveboard to open in SpotterViz (the format is xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx). Provide this when the user wants to continue with an existing liveboard instead of creating a new one.",
-			),
-	})
-	.refine(
-		(d) =>
-			(d.new_liveboard_name === undefined) !==
-			(d.existing_liveboard_id === undefined),
-		{
-			message:
-				"Exactly one of `new_liveboard_name` or `existing_liveboard_id` must be provided.",
-		},
-	);
-
-export const SpotterVizCreateSessionOutputSchema = z.object({
-	spotterviz_session_id: z
-		.string()
-		.describe(
-			"Identifier for the SpotterViz session. Use this with future spotterviz_send_message / spotterviz_get_updates calls.",
-		),
-	liveboard_id: z
-		.string()
-		.describe("GUID of the liveboard the session is bound to."),
-	liveboard_name: z
-		.string()
-		.optional()
-		.describe("Display name of the liveboard, if known."),
-});
-
-export const SpotterVizSubmitQueryInputSchema = z.object({
-	spotterviz_session_id: z
-		.string()
-		.describe(
-			"Identifier of the SpotterViz session to send the message to. Use the value returned from `spotterviz_create_session`.",
-		),
-	message: z
-		.string()
-		.min(1)
-		.max(2000)
-		.describe(
-			"Natural-language instruction or question to send to the SpotterViz agent. Maximum 2000 characters.",
-		),
-});
-
-export const SpotterVizSubmitQueryOutputSchema = z.object({
-	success: z
-		.boolean()
-		.describe(
-			"Whether the message was accepted and streaming started. After this returns, poll `spotterviz_get_updates` for the agent's response.",
-		),
-});
-
-export const SpotterVizGetUpdatesInputSchema = z.object({
-	spotterviz_session_id: z
-		.string()
-		.describe(
-			"Identifier of the SpotterViz session to fetch updates from. Use the value returned from `spotterviz_create_session`.",
-		),
-});
-
-export const SpotterVizUpdateSchema = z.object({
-	event_type: z
-		.string()
-		.describe(
-			"The Aurora SSE event type (e.g. `message.delta`, `control.action`, `meta.error`).",
-		),
-	data: z
-		.record(z.string(), z.unknown())
-		.describe("Raw event payload as emitted by Aurora."),
-	message_id: z.string().nullish(),
-	idx: z.number().nullish(),
-	timestamp: z.string().nullish(),
-	tool_id: z.string().nullish(),
-	group_id: z.string().nullish(),
-	heading: z.string().nullish(),
-});
-
-export const SpotterVizGetUpdatesOutputSchema = z.object({
-	updates: z
-		.array(SpotterVizUpdateSchema)
-		.describe(
-			"Incremental SSE events emitted by the SpotterViz agent since the last call. Empty when the agent is still thinking and no new events have arrived within the wait window.",
-		),
-	is_done: z
-		.boolean()
-		.describe(
-			"Whether the SpotterViz agent has finished responding for this turn. If false, call this tool again to continue polling.",
-		),
-});
-
-export const SpotterVizSaveLiveboardInputSchema = z.object({
-	spotterviz_session_id: z
-		.string()
-		.describe(
-			"Identifier of the SpotterViz session whose current liveboard state should be saved. Use the value returned from `spotterviz_create_session`.",
-		),
-});
-
-export const SpotterVizSaveLiveboardOutputSchema = z.object({
-	liveboard_id: z.string().describe("GUID of the saved liveboard."),
-	liveboard_url: z
-		.string()
-		.describe(
-			"URL where the user can view the saved liveboard in ThoughtSpot. Provide this link to the user when reporting that the liveboard was saved.",
-		),
-});
-
 export const ListOrgsInputSchema = z.object({});
 
 export const ListOrgsOutputSchema = z.object({
@@ -798,11 +680,6 @@ export enum ToolName {
 	SendModelMessage = "send_model_message",
 	GetModelUpdates = "get_model_updates",
 	FinalizeModel = "finalize_model",
-	// SpotterViz (Aurora)
-	SpotterVizCreateSession = "spotterviz_create_session",
-	SpotterVizSubmitQuery = "spotterviz_submit_query",
-	SpotterVizGetUpdates = "spotterviz_get_updates",
-	SpotterVizSaveLiveboard = "spotterviz_save_liveboard",
 }
 
 /**
@@ -1211,45 +1088,6 @@ ${RESULT_CONTRACT_BRIEF}`,
 		},
 	},
 	{
-		name: ToolName.SpotterVizCreateSession,
-		description:
-			"DEPRECATED and no longer listed: use `create_dashboard` and `modify_dashboard` instead, which do this in a single call. Low-level session primitive kept only for existing callers. Opens a SpotterViz session against a new or existing liveboard; exactly one of `new_liveboard_name` or `existing_liveboard_id` must be provided. The returned `spotterviz_session_id` is the identifier for the other `spotterviz_*` tools.",
-		inputSchema: z.toJSONSchema(SpotterVizCreateSessionInputSchema),
-		outputSchema: z.toJSONSchema(SpotterVizCreateSessionOutputSchema),
-		annotations: {
-			title: "Create SpotterViz Session",
-			readOnlyHint: false,
-			destructiveHint: false,
-			openWorldHint: false,
-		},
-	},
-	{
-		name: ToolName.SpotterVizSubmitQuery,
-		description:
-			"DEPRECATED and no longer listed: use `create_dashboard` and `modify_dashboard` instead, which do this in a single call. Low-level session primitive kept only for existing callers. Submits a prompt to an existing SpotterViz session; it can restyle and rearrange a liveboard and can also create new answers on it. The response streams asynchronously, so this returns as soon as streaming starts; poll `spotterviz_get_updates` for the response. Do not call it again on the same `spotterviz_session_id` until the previous turn is done, or it will be rejected.",
-		inputSchema: z.toJSONSchema(SpotterVizSubmitQueryInputSchema),
-		outputSchema: z.toJSONSchema(SpotterVizSubmitQueryOutputSchema),
-		annotations: {
-			title: "Submit SpotterViz Query",
-			readOnlyHint: false,
-			destructiveHint: false,
-			openWorldHint: false,
-		},
-	},
-	{
-		name: ToolName.SpotterVizGetUpdates,
-		description:
-			"Get the latest streaming events from a SpotterViz session. Call this after `spotterviz_submit_query` and continue polling until `is_done` is true. When `is_done` is true, immediately call `spotterviz_save_liveboard` — do not skip this step. The tool waits adaptively for new events (with internal exponential backoff up to 16 s) and returns early as soon as any events arrive or the turn finishes, so back-to-back calls cost no more than a quick poll when activity is high. An empty `updates` list with `is_done: false` simply means the agent is still thinking — call again to keep polling.",
-		inputSchema: z.toJSONSchema(SpotterVizGetUpdatesInputSchema),
-		outputSchema: z.toJSONSchema(SpotterVizGetUpdatesOutputSchema),
-		annotations: {
-			title: "Get SpotterViz Session Updates",
-			readOnlyHint: true,
-			destructiveHint: false,
-			openWorldHint: false,
-		},
-	},
-	{
 		name: ToolName.ListOrgs,
 		description:
 			"List the Orgs the authenticated user can access on the ThoughtSpot instance, including the ID, name, and description of each Org. The Org marked `is_active: true` is the one currently active for your account, which all tool calls operate against. Use this to tell the user which Org they are in. Only available when authenticated via OAuth. If the list is large , summarize or show only the most relevant orgs (e.g. the active one and a few others) rather than listing all of them, unless the user explicitly asks to see all orgs.",
@@ -1258,19 +1096,6 @@ ${RESULT_CONTRACT_BRIEF}`,
 		annotations: {
 			title: "List Orgs",
 			readOnlyHint: true,
-			destructiveHint: false,
-			openWorldHint: false,
-		},
-	},
-	{
-		name: ToolName.SpotterVizSaveLiveboard,
-		description:
-			"Persist the current state of the SpotterViz session's liveboard back to ThoughtSpot. Always call this after `spotterviz_get_updates` returns `is_done: true` — do not end the SpotterViz flow without saving. The session stays active after saving, so further `spotterviz_submit_query` calls on the same session id continue to work. Returns a `liveboard_url` you must surface to the user as a direct link to the saved liveboard.",
-		inputSchema: z.toJSONSchema(SpotterVizSaveLiveboardInputSchema),
-		outputSchema: z.toJSONSchema(SpotterVizSaveLiveboardOutputSchema),
-		annotations: {
-			title: "Save SpotterViz Liveboard",
-			readOnlyHint: false,
 			destructiveHint: false,
 			openWorldHint: false,
 		},
