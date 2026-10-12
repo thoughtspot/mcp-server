@@ -1,148 +1,119 @@
-import { type Span, SpanStatusCode } from "@opentelemetry/api";
-import { withSpan } from "../metrics/tracing/tracing-utils";
-import type { StorageServiceClient } from "../storage-service/storage-service";
-import type { AuroraSessionContext, SpotterVizEvent } from "./types";
+import type { SpotterVizEvent } from "./types";
+
+/** Why a stream read stopped. */
+export type StreamEnd = "message_end" | "closed" | "idle";
 
 /**
- * Drain an Aurora `/aurora/chat/stream` SSE response into the conversation storage DO.
+ * Read an Aurora `/aurora/chat/stream` SSE body and hand each batch of parsed events to
+ * `onEvents`.
  *
- * Wire format: each SSE frame is `event: <type>\ndata: <json>\n\n`. We keep the event_type alongside
- * the parsed data so the get_updates tool can project into the user-facing shape without re-parsing.
+ * Wire format: each SSE frame is `event: <type>\ndata: <json>\n\n`.
  *
- * Lifecycle: mirroring the spotter streaming pattern, the conversation is marked done only when
- * the HTTP stream itself closes — never on in-band terminal events like `message.end`. Trailing
- * frames from Aurora's SSE keepalive layer are simply appended like any other event.
- *
- * Side effect: when a `control.action` of `action: "lb_refresh"` carries a `new_gen_number`, the
- * stored AuroraSessionContext.generationNumber is patched so the next turn addresses the right
- * BACH state.
+ * The read stops at the first of:
+ * - `message.end`, Aurora's terminal event for the turn. Aurora can hold the socket open after it
+ *   (keepalive layer), so waiting for the close alone can leave a finished turn looking stuck.
+ * - the socket closing.
+ * - `idleMs` with no bytes at all (not even keepalives), which means Aurora has stalled. The caller decides what that
+ *   means for the turn; this function only cancels the read.
  */
-export const processAuroraSseStream = async (
-	conversationId: string,
+export async function readAuroraStream(
 	reader: ReadableStreamDefaultReader<Uint8Array>,
-	storage: StorageServiceClient,
-): Promise<void> => {
-	return await withSpan("process-spotterviz-sse-stream", async (span: Span) => {
-		span.setAttribute("conversation_id", conversationId);
+	onEvents: (events: SpotterVizEvent[]) => Promise<void>,
+	idleMs: number,
+	onBytes?: () => Promise<void>,
+): Promise<StreamEnd> {
+	const decoder = new TextDecoder();
+	let buffer = "";
 
-		let nEvents = 0;
-		let nGenNumberUpdates = 0;
-		let spanHasError = false;
-
-		try {
-			const decoder = new TextDecoder();
-			let buffer = "";
-
-			while (true) {
-				const { done, value } = await reader.read();
-
-				if (done) {
-					await storage.appendEvents(conversationId, [], true);
-					break;
-				}
-
-				buffer += decoder.decode(value, { stream: true });
-
-				// SSE frames are separated by a blank line. Anything after the last `\n\n` is a
-				// partial frame; keep it in the buffer for the next loop.
-				const lastBoundary = buffer.lastIndexOf("\n\n");
-				if (lastBoundary === -1) {
-					continue;
-				}
-				const completeFrames = buffer.slice(0, lastBoundary);
-				buffer = buffer.slice(lastBoundary + 2);
-
-				const newEvents: SpotterVizEvent[] = [];
-				let genNumberPatch: string | undefined;
-
-				for (const rawFrame of completeFrames.split("\n\n")) {
-					const frame = rawFrame.trim();
-					if (!frame || frame.startsWith(":")) {
-						// Blank or SSE comment (e.g. heartbeats).
-						continue;
-					}
-
-					const parsed = parseSseFrame(frame);
-					if (!parsed) {
-						continue;
-					}
-
-					newEvents.push(parsed);
-					nEvents++;
-
-					if (parsed.event_type === "meta.error") {
-						spanHasError = true;
-						const msg =
-							(parsed.data?.message as string | undefined) ?? "unknown error";
-						span.setStatus({
-							code: SpanStatusCode.ERROR,
-							message: `Aurora meta.error: ${msg}`,
-						});
-					} else if (parsed.event_type === "control.action") {
-						const action = parsed.data?.action;
-						const metadata = parsed.data?.metadata as
-							| Record<string, unknown>
-							| undefined;
-						if (action === "lb_refresh" && metadata?.new_gen_number != null) {
-							// Aurora emits new_gen_number as an int; we keep it as a string to match
-							// the rest of the BACH session shape in AuroraSessionContext.
-							genNumberPatch = String(metadata.new_gen_number);
-						}
-					}
-				}
-
-				if (genNumberPatch !== undefined) {
-					try {
-						await storage.updateMetadata<AuroraSessionContext>(conversationId, {
-							generationNumber: genNumberPatch,
-						});
-						nGenNumberUpdates++;
-					} catch (err) {
-						console.error(
-							`Failed to patch generationNumber for ${conversationId}:`,
-							err,
-						);
-					}
-				}
-
-				if (newEvents.length > 0) {
-					await storage.appendEvents(conversationId, newEvents);
-				}
-			}
-		} catch (error) {
-			console.error(
-				`Error processing Aurora SSE stream for ${conversationId}:`,
-				error,
-			);
-			spanHasError = true;
-			span.setStatus({
-				code: SpanStatusCode.ERROR,
-				message: error instanceof Error ? error.message : String(error),
+	try {
+		while (true) {
+			let timer: ReturnType<typeof setTimeout> | undefined;
+			const idle = new Promise<"idle">((resolve) => {
+				timer = setTimeout(() => resolve("idle"), idleMs);
 			});
-			// Best-effort: mark the conversation done so get_updates doesn't hang on a turn that
-			// will never produce more events.
-			try {
-				await storage.appendEvents(conversationId, [], true);
-			} catch (markErr) {
-				console.error(
-					`Failed to mark conversation ${conversationId} done after stream error:`,
-					markErr,
-				);
+			const result = await Promise.race([reader.read(), idle]);
+			clearTimeout(timer);
+
+			if (result === "idle") {
+				return "idle";
+			}
+			if (result.done) {
+				// Flush a final frame that arrived without a trailing blank line.
+				const events = parseFrames(`${buffer}\n\n`).events;
+				if (events.length > 0) {
+					await onEvents(events);
+				}
+				return "closed";
+			}
+
+			buffer += decoder.decode(result.value, { stream: true });
+			// Any bytes, keepalive comments included, prove the turn is alive. Aurora sends a
+			// keepalive every few seconds while a long tool call runs without emitting events.
+			await onBytes?.();
+
+			// SSE frames are separated by a blank line. Anything after the last `\n\n` is a partial
+			// frame; keep it in the buffer for the next read.
+			const lastBoundary = buffer.lastIndexOf("\n\n");
+			if (lastBoundary === -1) {
+				continue;
+			}
+			const { events, sawEnd } = parseFrames(buffer.slice(0, lastBoundary));
+			buffer = buffer.slice(lastBoundary + 2);
+
+			if (events.length > 0) {
+				await onEvents(events);
+			}
+			if (sawEnd) {
+				return "message_end";
 			}
 		}
+	} finally {
+		// Releases the upstream connection whichever way the read ended. Errors here only mean the
+		// stream was already closed.
+		reader.cancel().catch(() => {});
+	}
+}
 
-		span.setAttributes({
-			total_events_parsed: nEvents,
-			gen_number_updates: nGenNumberUpdates,
-		});
-		if (!spanHasError) {
-			span.setStatus({
-				code: SpanStatusCode.OK,
-				message: "Aurora SSE stream concluded",
-			});
+function parseFrames(chunk: string): {
+	events: SpotterVizEvent[];
+	sawEnd: boolean;
+} {
+	const events: SpotterVizEvent[] = [];
+	let sawEnd = false;
+	for (const rawFrame of chunk.split("\n\n")) {
+		const frame = rawFrame.trim();
+		if (!frame || frame.startsWith(":")) {
+			// Blank or SSE comment (e.g. heartbeats).
+			continue;
 		}
-	});
-};
+		const parsed = parseSseFrame(frame);
+		if (!parsed) {
+			continue;
+		}
+		events.push(parsed);
+		if (parsed.event_type === "message.end") {
+			sawEnd = true;
+		}
+	}
+	return { events, sawEnd };
+}
+
+/**
+ * The BACH generation an `lb_refresh` control event moves the liveboard to, if this event is one.
+ * Aurora emits it as an int; it is kept as a string to match the rest of the BACH session shape.
+ */
+export function generationFromEvent(
+	event: SpotterVizEvent,
+): string | undefined {
+	if (event.event_type !== "control.action") {
+		return undefined;
+	}
+	const metadata = event.data?.metadata as Record<string, unknown> | undefined;
+	if (event.data?.action === "lb_refresh" && metadata?.new_gen_number != null) {
+		return String(metadata.new_gen_number);
+	}
+	return undefined;
+}
 
 /**
  * Parse a single SSE frame ("event: <type>\ndata: <json>\n[...]") into a `SpotterVizEvent`.
@@ -175,6 +146,10 @@ function parseSseFrame(frame: string): SpotterVizEvent | null {
 			`Aurora SSE frame had unparseable data (event=${eventType ?? "unknown"}):`,
 			err,
 		);
+		return null;
+	}
+	// Aurora always sends an object; skip anything else rather than fail the whole turn.
+	if (!parsed || typeof parsed !== "object") {
 		return null;
 	}
 

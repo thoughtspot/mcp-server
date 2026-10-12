@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { STORAGE_CALL_TIMEOUT_MS } from "../../src/spotterviz/timeouts";
 import { StorageServiceClient } from "../../src/storage-service/storage-service";
 import type {
 	Message,
@@ -404,109 +405,6 @@ describe("StorageServiceClient", () => {
 	});
 
 	// -------------------------------------------------------------------------
-	// appendEvents / getNewEvents — generic SpotterViz path
-	// -------------------------------------------------------------------------
-
-	describe("appendEvents (generic)", () => {
-		interface CustomEvent {
-			kind: string;
-			payload: Record<string, unknown>;
-		}
-
-		it("sends POST to /storage/<id>/append with events under the 'messages' wire field", async () => {
-			const events: CustomEvent[] = [
-				{ kind: "open", payload: { id: 1 } },
-				{ kind: "close", payload: { reason: "ok" } },
-			];
-
-			await client.appendEvents<CustomEvent>(CONVERSATION_ID, events);
-
-			const req = lastRequest();
-			expect(req.url).toBe(
-				`https://internal/storage/${CONVERSATION_ID}/append`,
-			);
-			expect(req.method).toBe("POST");
-			const body = (await req.json()) as {
-				messages: CustomEvent[];
-				isDone: boolean;
-			};
-			expect(body.messages).toEqual(events);
-			expect(body.isDone).toBe(false);
-		});
-
-		it("sends isDone=true when specified", async () => {
-			await client.appendEvents<CustomEvent>(CONVERSATION_ID, [], true);
-
-			const body = (await lastRequest().json()) as { isDone: boolean };
-			expect(body.isDone).toBe(true);
-		});
-
-		it("supports empty event arrays (used to mark done-only)", async () => {
-			await client.appendEvents<CustomEvent>(CONVERSATION_ID, [], true);
-
-			const body = (await lastRequest().json()) as {
-				messages: CustomEvent[];
-				isDone: boolean;
-			};
-			expect(body.messages).toEqual([]);
-			expect(body.isDone).toBe(true);
-		});
-
-		it("throws when the server returns a non-ok status", async () => {
-			namespaceMock = makeNamespaceMock("Cannot append", 400);
-			client = new StorageServiceClient(namespaceMock, TOKEN_HASH);
-
-			await expect(
-				client.appendEvents<CustomEvent>(CONVERSATION_ID, [
-					{ kind: "x", payload: {} },
-				]),
-			).rejects.toThrow("Failed to append events (400)");
-		});
-	});
-
-	describe("getNewEvents (generic)", () => {
-		interface CustomEvent {
-			kind: string;
-		}
-
-		it("sends GET to /storage/<id>/messages", async () => {
-			namespaceMock = makeNamespaceMock({ messages: [], isDone: false });
-			client = new StorageServiceClient(namespaceMock, TOKEN_HASH);
-
-			await client.getNewEvents<CustomEvent>(CONVERSATION_ID);
-
-			const req = lastRequest();
-			expect(req.url).toBe(
-				`https://internal/storage/${CONVERSATION_ID}/messages`,
-			);
-			expect(req.method).toBe("GET");
-		});
-
-		it("returns the parsed { messages, isDone } payload typed to the caller's T", async () => {
-			const payload = {
-				messages: [{ kind: "a" }, { kind: "b" }] as CustomEvent[],
-				isDone: true,
-			};
-			namespaceMock = makeNamespaceMock(payload);
-			client = new StorageServiceClient(namespaceMock, TOKEN_HASH);
-
-			const result = await client.getNewEvents<CustomEvent>(CONVERSATION_ID);
-
-			expect(result).toEqual(payload);
-			expect(result.messages[0].kind).toBe("a");
-		});
-
-		it("throws when the server returns a non-ok status", async () => {
-			namespaceMock = makeNamespaceMock("Conversation not found", 404);
-			client = new StorageServiceClient(namespaceMock, TOKEN_HASH);
-
-			await expect(
-				client.getNewEvents<CustomEvent>(CONVERSATION_ID),
-			).rejects.toThrow("Failed to get events (404)");
-		});
-	});
-
-	// -------------------------------------------------------------------------
 	// DO instance keying — accessTokenHashUrlSafe isolation
 	// -------------------------------------------------------------------------
 
@@ -639,6 +537,70 @@ describe("StorageServiceClient", () => {
 			await expect(client.getSessionState(CONVERSATION_ID)).rejects.toThrow(
 				"Failed to get session state (500): nope",
 			);
+		});
+	});
+
+	describe("time limits and connection hygiene", () => {
+		function namespaceWith(stubFetch: ReturnType<typeof vi.fn>) {
+			return {
+				idFromName: vi.fn(
+					() => ({ toString: () => "stub-id" }) as DurableObjectId,
+				),
+				get: vi.fn(
+					() => ({ fetch: stubFetch }) as unknown as DurableObjectStub,
+				),
+			} as unknown as DurableObjectNamespace;
+		}
+
+		it.each([
+			[
+				"initializeConversation",
+				(c: StorageServiceClient) => c.initializeConversation(CONVERSATION_ID),
+			],
+			[
+				"appendMessages",
+				(c: StorageServiceClient) =>
+					c.appendMessages(CONVERSATION_ID, [textMessage]),
+			],
+			[
+				"putSessionState",
+				(c: StorageServiceClient) =>
+					c.putSessionState(CONVERSATION_ID, { a: 1 }),
+			],
+		])("cancels the unused response body after %s", async (_name, call) => {
+			const cancel = vi.fn().mockResolvedValue(undefined);
+			const stubFetch = vi.fn(async () => {
+				const response = new Response("{}", { status: 200 });
+				vi.spyOn(response.body as ReadableStream, "cancel").mockImplementation(
+					cancel,
+				);
+				return response;
+			});
+			const c = new StorageServiceClient(namespaceWith(stubFetch), TOKEN_HASH);
+
+			await call(c);
+
+			expect(cancel).toHaveBeenCalled();
+		});
+
+		it("rejects with a TimeoutError when the Durable Object does not answer", async () => {
+			vi.useFakeTimers();
+			try {
+				const stubFetch = vi.fn(() => new Promise<Response>(() => {}));
+				const c = new StorageServiceClient(
+					namespaceWith(stubFetch),
+					TOKEN_HASH,
+				);
+
+				const pending = c.getMetadata(CONVERSATION_ID);
+				const assertion = expect(pending).rejects.toMatchObject({
+					name: "TimeoutError",
+				});
+				await vi.advanceTimersByTimeAsync(STORAGE_CALL_TIMEOUT_MS);
+				await assertion;
+			} finally {
+				vi.useRealTimers();
+			}
 		});
 	});
 });

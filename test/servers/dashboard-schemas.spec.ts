@@ -10,6 +10,7 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import {
 	CreateDashboardInputSchema,
+	CreateDashboardLegacyOutputSchema,
 	CreateDashboardOutputSchema,
 	GetDashboardStatusOutputSchema,
 	ModifyDashboardInputSchema,
@@ -46,15 +47,12 @@ describe("CreateDashboardInputSchema", () => {
 		expect(parsed.data_source_id).toBe("ds-1");
 	});
 
-	it("requires a data source when no answers are supplied", () => {
-		// Without one the designer stalls asking which data source to use, which reads to the
-		// calling agent as a silent no-op. Failing fast with an actionable message is better.
+	it("accepts a design context with no data source, so the designer can pick one", () => {
 		const result = CreateDashboardInputSchema.safeParse({
 			title: "Migrated dashboard",
 			design_context: "KPI row on top",
 		});
-		expect(result.success).toBe(false);
-		expect(JSON.stringify(result.error?.issues)).toMatch(/data_source_id/);
+		expect(result.success).toBe(true);
 	});
 
 	it("requires either answers or a design context", () => {
@@ -114,14 +112,26 @@ describe("ModifyDashboardInputSchema", () => {
 describe("dashboard output schemas", () => {
 	// The MCP SDK client validates structuredContent against outputSchema, and Zod emits closed
 	// schemas, so an undeclared field is a runtime failure at a real client rather than in tests.
-	it("keeps `link` on create_dashboard only", () => {
+	it("shares one result shape across the new tools, with `link` only on the legacy tool", () => {
 		const create = z.toJSONSchema(CreateDashboardOutputSchema) as any;
 		const modify = z.toJSONSchema(ModifyDashboardOutputSchema) as any;
 		const status = z.toJSONSchema(GetDashboardStatusOutputSchema) as any;
+		const legacy = z.toJSONSchema(CreateDashboardLegacyOutputSchema) as any;
 
-		expect(Object.keys(create.properties)).toContain("link");
-		expect(Object.keys(modify.properties)).not.toContain("link");
-		expect(Object.keys(status.properties)).not.toContain("link");
+		expect(create.properties).toEqual(modify.properties);
+		expect(status.properties).toEqual(modify.properties);
+		expect(Object.keys(create.properties)).not.toContain("link");
+		expect(Object.keys(create.properties)).toContain("message");
+		for (const removed of [
+			"summary",
+			"question",
+			"error",
+			"steps",
+			"events_seen",
+		]) {
+			expect(Object.keys(create.properties)).not.toContain(removed);
+		}
+		expect(Object.keys(legacy.properties)).toEqual(["link"]);
 	});
 
 	it("only requires `status`, so partial outcomes are representable", () => {

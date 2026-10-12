@@ -5,6 +5,7 @@ import {
 	propagation,
 	trace,
 } from "@opentelemetry/api";
+import { STORAGE_CALL_TIMEOUT_MS, withTimeout } from "../spotterviz/timeouts";
 import type {
 	Message,
 	RawMessage,
@@ -78,9 +79,13 @@ export class StorageServiceClient {
 					set: (carrier, key, value) => carrier.set(key, value),
 				});
 				try {
-					const response = await this.stubFor(conversationId).fetch(
-						this.url(conversationId, operation),
-						{ ...init, headers },
+					const response = await withTimeout(
+						this.stubFor(conversationId).fetch(
+							this.url(conversationId, operation),
+							{ ...init, headers },
+						),
+						STORAGE_CALL_TIMEOUT_MS,
+						`Conversation storage ${operation}`,
 					);
 					span.setAttribute("http.status_code", response.status);
 					if (!response.ok) {
@@ -115,6 +120,8 @@ export class StorageServiceClient {
 				`Failed to initialize conversation (${response.status}): ${body}`,
 			);
 		}
+		// The body is unused; release the connection rather than leaving it open.
+		await response.body?.cancel();
 	}
 
 	/**
@@ -140,6 +147,8 @@ export class StorageServiceClient {
 				`Failed to append messages (${response.status}): ${text}`,
 			);
 		}
+		// The body is unused; release the connection rather than leaving it open.
+		await response.body?.cancel();
 	}
 
 	/**
@@ -181,6 +190,8 @@ export class StorageServiceClient {
 				`Failed to put session state (${response.status}): ${text}`,
 			);
 		}
+		// The body is unused; release the connection rather than leaving it open.
+		await response.body?.cancel();
 	}
 
 	// Retrieve a conversation's scalar state, or null if it does not exist / has expired.
@@ -231,43 +242,5 @@ export class StorageServiceClient {
 		const merged = { ...existing, ...patch } as T;
 		await this.putSessionState<T>(conversationId, merged);
 		return merged;
-	}
-
-	/*
-	 * Type-generic twins of appendMessages / getNewMessages, for streams whose items are not Spotter
-	 * messages (SpotterViz SSE events). They share the DO's message log and bookmark machinery.
-	 */
-	async appendEvents<T>(
-		conversationId: string,
-		events: T[],
-		isDone = false,
-	): Promise<void> {
-		// Wire field stays "messages" so the DO route is shared between the two callers.
-		const response = await this.fetchStorage(conversationId, "append", {
-			method: "POST",
-			headers: this.headers(),
-			body: JSON.stringify({ messages: events, isDone }),
-		});
-
-		if (!response.ok) {
-			const text = await response.text();
-			throw new Error(`Failed to append events (${response.status}): ${text}`);
-		}
-	}
-
-	async getNewEvents<T>(
-		conversationId: string,
-	): Promise<{ messages: T[]; isDone: boolean }> {
-		const response = await this.fetchStorage(conversationId, "messages", {
-			method: "GET",
-			headers: this.headers(),
-		});
-
-		if (!response.ok) {
-			const text = await response.text();
-			throw new Error(`Failed to get events (${response.status}): ${text}`);
-		}
-
-		return response.json() as Promise<{ messages: T[]; isDone: boolean }>;
 	}
 }

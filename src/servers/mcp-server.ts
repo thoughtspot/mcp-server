@@ -17,12 +17,13 @@ import {
 	DashboardTurnBusyError,
 	type DashboardTurnOutcome,
 	pollDashboardTurn,
-	runDashboardTurn,
+	startDashboardJob,
 } from "../spotterviz/dashboard-orchestrator";
 import {
 	composeCreatePrompt,
 	composeModifyPrompt,
 } from "../spotterviz/dashboard-prompt";
+import { UPSTREAM_CALL_TIMEOUT_MS, withTimeout } from "../spotterviz/timeouts";
 import type { StorageServiceClient } from "../storage-service/storage-service";
 import {
 	MODEL_POLL_INTERVAL_MS,
@@ -53,6 +54,7 @@ import { BaseMCPServer, type Context } from "./mcp-server-base";
 import {
 	CreateAnalysisSessionInputSchema,
 	CreateDashboardInputSchema,
+	CreateDashboardLegacyInputSchema,
 	CreateLiveboardSchema,
 	CreateModelSessionInputSchema,
 	FinalizeModelInputSchema,
@@ -694,7 +696,9 @@ export class MCPServer extends BaseMCPServer {
 			}
 
 			case ToolName.CreateDashboard: {
-				return this.callCreateDashboard(request, recorder);
+				return this.hasDashboardDesigner()
+					? this.callCreateDashboard(request, recorder)
+					: this.callCreateDashboardLegacy(request, recorder);
 			}
 
 			case ToolName.ModifyDashboard: {
@@ -1062,92 +1066,108 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		);
 	}
 
+	/**
+	 * Whether this request's API version has the dashboard designer. Versions released before it
+	 * keep the original `create_dashboard` contract.
+	 */
+	private hasDashboardDesigner(): boolean {
+		try {
+			return resolveApiVersion(this.ctx.props.apiVersion).tools.some(
+				(tool) => tool?.name === ToolName.ModifyDashboard,
+			);
+		} catch {
+			return false;
+		}
+	}
+
+	private invalidAnswerIdResponse(answers: { answer_id: string }[]) {
+		return this.createErrorResponse(
+			'Invalid answer_id format. Please provide the value returned from the "get_session_updates" tool.',
+			`Error creating dashboard: invalid answer_id in ${JSON.stringify(answers.map((a) => a.answer_id))}`,
+		);
+	}
+
+	/** The original `create_dashboard`: assemble answers into a liveboard, no design pass. */
+	@WithSpan("call-create-dashboard-legacy")
+	async callCreateDashboardLegacy(
+		request: z.infer<typeof CallToolRequestSchema>,
+		recorder: MetricsRecorder,
+	) {
+		const span = trace.getSpan(context.active());
+		const { title, answers, note_tile } =
+			CreateDashboardLegacyInputSchema.parse(request.params.arguments);
+		span?.setAttribute("total_answers", answers.length);
+
+		const transformedAnswers = parseAnswerIds(answers);
+		if (!transformedAnswers) {
+			return this.invalidAnswerIdResponse(answers);
+		}
+
+		const liveboard = await this.getThoughtSpotService(
+			recorder,
+		).fetchTMLAndCreateLiveboard(title, transformedAnswers, note_tile);
+
+		if (liveboard.error) {
+			return this.createErrorResponse(
+				"Encountered an error while creating the dashboard. Please check your inputs and try again.",
+				`Error creating dashboard ${liveboard.error.message}`,
+			);
+		}
+
+		return this.createStructuredContentSuccessResponse(
+			{
+				link: liveboard.url,
+			},
+			"Dashboard created successfully",
+		);
+	}
+
 	@WithSpan("call-create-dashboard")
 	async callCreateDashboard(
 		request: z.infer<typeof CallToolRequestSchema>,
 		recorder: MetricsRecorder,
 	) {
 		const span = trace.getSpan(context.active());
-		const { title, answers, design_context, data_source_id, skip_layout } =
+		const { title, answers, design_context, data_source_id } =
 			CreateDashboardInputSchema.parse(request.params.arguments);
 		const hasAnswers = Boolean(answers && answers.length > 0);
 		span?.setAttributes({
 			total_answers: answers?.length ?? 0,
 			has_design_context: Boolean(design_context),
-			skip_layout: skip_layout === true,
 		});
 
-		let liveboardId: string | undefined;
-		let link: string | undefined;
+		const transformedAnswers = parseAnswerIds(answers ?? []);
+		if (!transformedAnswers) {
+			return this.invalidAnswerIdResponse(answers ?? []);
+		}
 
-		if (hasAnswers) {
-			let transformedAnswers: Answer[] = [];
-			try {
-				transformedAnswers = (answers ?? []).map((answer) => {
-					const { session_id, gen_no } = JSON.parse(answer.answer_id);
-					if (session_id === undefined || gen_no === undefined) {
-						throw new Error(`Invalid answer_id format ${answer.answer_id}`);
+		return this.runDashboardWork(recorder, {
+			resolveLiveboard: hasAnswers
+				? async () => {
+						const liveboard = await withTimeout(
+							this.getThoughtSpotService(recorder).fetchTMLAndCreateLiveboard(
+								title,
+								transformedAnswers,
+							),
+							UPSTREAM_CALL_TIMEOUT_MS * 2,
+							"Building the dashboard from the answers",
+						);
+						if (liveboard.error || !liveboard.liveboardId) {
+							throw new Error(
+								`the answers could not be added to a dashboard: ${liveboard.error?.message ?? "no dashboard id returned"}`,
+							);
+						}
+						return { existingLiveboardId: liveboard.liveboardId };
 					}
-					return {
-						title: answer.title,
-						session_identifier: session_id,
-						generation_number: gen_no,
-					};
-				});
-			} catch (error) {
-				return this.createErrorResponse(
-					'Invalid answer_id format. Please provide the value returned from the "get_session_updates" tool.',
-					`Error creating dashboard ${error}`,
-				);
-			}
-
-			const liveboard = await this.getThoughtSpotService(
-				recorder,
-			).fetchTMLAndCreateLiveboard(title, transformedAnswers);
-
-			if (liveboard.error) {
-				return this.createErrorResponse(
-					"Encountered an error while creating the dashboard. Please check your inputs and try again.",
-					`Error creating dashboard ${liveboard.error.message}`,
-				);
-			}
-
-			liveboardId = liveboard.liveboardId;
-			link = liveboard.url;
-		}
-
-		// Only skip the design pass when the caller explicitly asked to. Assembling answers alone
-		// yields a uniform grid in array order with no grouping or styling, which is not worth
-		// sharing; the previous tool set got styled because the calling agent was told to follow
-		// every create with a styling call, and that outcome has to be preserved here.
-		if (skip_layout) {
-			return this.createStructuredContentSuccessResponse(
-				{
-					status: "completed" as const,
-					dashboard_id: liveboardId,
-					dashboard_url: link,
-					link,
-					changes_applied: true,
-				},
-				"Dashboard created successfully",
-			);
-		}
-
-		return this.runDashboardWork(
-			recorder,
-			{
-				existingLiveboardId: liveboardId,
-				newLiveboardName: liveboardId ? undefined : title,
-				buildMessage: () =>
-					composeCreatePrompt({
-						title,
-						designContext: design_context,
-						dataSourceId: data_source_id,
-						hasExistingAnswers: hasAnswers,
-					}),
-			},
-			{ link, legacyLink: true },
-		);
+				: async () => ({ newLiveboardName: title }),
+			buildMessage: () =>
+				composeCreatePrompt({
+					title,
+					designContext: design_context,
+					dataSourceId: data_source_id,
+					hasExistingAnswers: hasAnswers,
+				}),
+		});
 	}
 
 	@WithSpan("call-modify-dashboard")
@@ -1177,7 +1197,7 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		}
 
 		return this.runDashboardWork(recorder, {
-			existingLiveboardId: dashboard_id,
+			resolveLiveboard: async () => ({ existingLiveboardId: dashboard_id }),
 			existingTaskId: task_id,
 			buildMessage: () =>
 				composeModifyPrompt({
@@ -1241,9 +1261,8 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		span?.setAttribute("dashboard_task_id", task_id);
 
 		try {
-			const service = await this.getSpotterVizService(recorder);
 			const storage = await this.getStorageService();
-			const outcome = await pollDashboardTurn(service, storage, task_id);
+			const outcome = await pollDashboardTurn(storage, task_id);
 			return this.dashboardOutcomeResponse(outcome);
 		} catch (error) {
 			console.error("Error checking dashboard status:", error);
@@ -1261,39 +1280,42 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 	private async runDashboardWork(
 		recorder: MetricsRecorder,
 		params: {
-			existingLiveboardId?: string;
-			newLiveboardName?: string;
+			/** Where the turn's liveboard comes from. Runs inside the job, under its time limits. */
+			resolveLiveboard: () => Promise<{
+				existingLiveboardId?: string;
+				newLiveboardName?: string;
+			}>;
 			existingTaskId?: string;
 			buildMessage: () => string;
 		},
-		extra: { link?: string; legacyLink?: boolean } = {},
 	) {
-		const { existingLiveboardId, newLiveboardName, existingTaskId } = params;
+		const { existingTaskId } = params;
 
 		try {
 			const service = await this.getSpotterVizService(recorder);
 			const storage = await this.getStorageService();
 
-			// Continuing an existing task keeps the designer's prior context, which is what makes
-			// answering its question work.
-			const taskId =
-				existingTaskId ??
-				(
-					await service.createSession({
-						existingLiveboardId,
-						newLiveboardName,
-					})
-				).spotterVizSessionId;
+			// Minted here rather than taken from Aurora, so the caller gets a handle even when
+			// setup is what runs past the deadline.
+			const taskId = existingTaskId ?? crypto.randomUUID();
 
-			const outcome = await runDashboardTurn({
+			const outcome = await startDashboardJob({
 				service,
 				storage,
 				taskId,
-				message: params.buildMessage(),
+				// Continuing a task keeps the designer's prior context, which is what makes
+				// answering its question work.
+				setup: existingTaskId
+					? async () => {}
+					: async () => {
+							const target = await params.resolveLiveboard();
+							await service.createSession({ taskId, ...target });
+						},
+				buildMessage: params.buildMessage,
 				waitUntil: this.ctx.ctx?.waitUntil?.bind(this.ctx.ctx),
 			});
 
-			return this.dashboardOutcomeResponse(outcome, extra);
+			return this.dashboardOutcomeResponse(outcome);
 		} catch (error) {
 			if (error instanceof DashboardTurnBusyError) {
 				return this.createErrorResponse(
@@ -1311,15 +1333,8 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 
 	/**
 	 * Map an orchestrator outcome onto the tool result contract shared by the dashboard tools.
-	 *
-	 * `legacyLink` is only set for `create_dashboard`, which has carried a `link` field since
-	 * before these tools existed. The other tools' output schemas do not declare it, and Zod emits
-	 * closed schemas, so adding it there would fail client-side validation.
 	 */
-	private dashboardOutcomeResponse(
-		outcome: DashboardTurnOutcome,
-		extra: { link?: string; legacyLink?: boolean } = {},
-	) {
+	private dashboardOutcomeResponse(outcome: DashboardTurnOutcome) {
 		const span = trace.getSpan(context.active());
 		span?.setAttributes({
 			dashboard_status: outcome.status,
@@ -1328,13 +1343,7 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 
 		if (outcome.status === "in_progress") {
 			return this.createStructuredContentSuccessResponse(
-				{
-					status: outcome.status,
-					task_id: outcome.taskId,
-					steps: outcome.steps,
-					events_seen: outcome.eventsSeen,
-					...(outcome.text ? { summary: outcome.text } : {}),
-				},
+				{ status: outcome.status, task_id: outcome.taskId },
 				"Dashboard work still in progress",
 			);
 		}
@@ -1343,15 +1352,15 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			status: outcome.status,
 			task_id: outcome.taskId,
 			changes_applied: outcome.liveboardUpdated,
-			steps: outcome.steps,
-			...(outcome.text ? { summary: outcome.text } : {}),
+			...(outcome.dashboardId ? { dashboard_id: outcome.dashboardId } : {}),
 		};
 
 		if (outcome.status === "needs_input") {
+			const message = outcome.question ?? outcome.text;
 			return this.createStructuredContentSuccessResponse(
 				{
 					...base,
-					...(outcome.question ? { question: outcome.question } : {}),
+					...(message ? { message } : {}),
 					...(outcome.choice ? { choices: outcome.choice.choices } : {}),
 				},
 				"Dashboard work needs more input",
@@ -1360,18 +1369,18 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 
 		if (outcome.status === "failed") {
 			return this.createStructuredContentSuccessResponse(
-				{ ...base, error: outcome.error },
+				{ ...base, message: outcome.error ?? outcome.text },
 				"Dashboard work failed",
 			);
 		}
 
-		const url = outcome.dashboardUrl ?? extra.link;
 		return this.createStructuredContentSuccessResponse(
 			{
 				...base,
-				...(outcome.dashboardId ? { dashboard_id: outcome.dashboardId } : {}),
-				...(url ? { dashboard_url: url } : {}),
-				...(url && extra.legacyLink ? { link: url } : {}),
+				...(outcome.dashboardUrl
+					? { dashboard_url: outcome.dashboardUrl }
+					: {}),
+				...(outcome.text ? { message: outcome.text } : {}),
 			},
 			"Dashboard ready",
 		);
@@ -1995,5 +2004,29 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 				`Error finalizing model: ${(error as Error).message}`,
 			);
 		}
+	}
+}
+
+/**
+ * Turn the `answer_id` values returned by get_session_updates into the answers TML export needs.
+ * Returns undefined if any id is malformed.
+ */
+function parseAnswerIds(
+	answers: { answer_id: string; title: string }[],
+): Answer[] | undefined {
+	try {
+		return answers.map((answer) => {
+			const { session_id, gen_no } = JSON.parse(answer.answer_id);
+			if (session_id === undefined || gen_no === undefined) {
+				throw new Error("missing session_id or gen_no");
+			}
+			return {
+				title: answer.title,
+				session_identifier: session_id,
+				generation_number: gen_no,
+			};
+		});
+	} catch {
+		return undefined;
 	}
 }

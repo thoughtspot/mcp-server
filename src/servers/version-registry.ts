@@ -3,6 +3,7 @@ import {
 	toolDefinitionsV2,
 	toolDefinitionsV3,
 	toolDefinitionsV4,
+	toolDefinitionsV5,
 } from "./tool-definitions";
 
 export const YYYY_MM_DD_DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
@@ -65,7 +66,14 @@ export const VERSION_REGISTRY: VersionConfig[] = [
 		description: "Spotter3 agent conversation tools released",
 	},
 	{
-		version: ["latest", "2026-10-02"],
+		// Dashboard designer tools. Release date is a placeholder until the release is scheduled.
+		version: ["latest", "2026-10-15"],
+		tools: [...toolDefinitionsV5],
+		description:
+			"Dashboard designer: create_dashboard organises and styles, modify_dashboard and get_dashboard_status added",
+	},
+	{
+		version: ["2026-10-02"],
 		tools: [...toolDefinitionsV4],
 		description:
 			"get_data tool added (fetch full data for a saved Answer/Liveboard; gated behind the data-download privilege)",

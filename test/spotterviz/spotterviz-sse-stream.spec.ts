@@ -1,313 +1,237 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { processAuroraSseStream } from "../../src/spotterviz/spotterviz-sse-stream";
-import type {
-	AuroraSessionContext,
-	SpotterVizEvent,
-} from "../../src/spotterviz/types";
-import type { StorageServiceClient } from "../../src/storage-service/storage-service";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+	generationFromEvent,
+	readAuroraStream,
+} from "../../src/spotterviz/spotterviz-sse-stream";
+import type { SpotterVizEvent } from "../../src/spotterviz/types";
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-const CONVERSATION_ID = "conv-abc";
-
-type StorageMock = StorageServiceClient & {
-	appendEvents: ReturnType<typeof vi.fn>;
-	updateMetadata: ReturnType<typeof vi.fn>;
+type ReaderMock = ReadableStreamDefaultReader<Uint8Array> & {
+	read: ReturnType<typeof vi.fn>;
+	cancel: ReturnType<typeof vi.fn>;
 };
 
-function makeStorageMock(): StorageMock {
-	return {
-		appendEvents: vi.fn().mockResolvedValue(undefined),
-		updateMetadata: vi.fn().mockResolvedValue({}),
-	} as unknown as StorageMock;
-}
-
 /**
- * Build a reader that yields a fixed sequence of UTF-8 chunks, then signals done.
- * Each chunk is delivered as a separate `read()` resolution so we can exercise
- * the buffer-across-chunks logic in `processAuroraSseStream`.
+ * Build a reader that yields a fixed sequence of UTF-8 chunks. After the last chunk it either
+ * signals done (`close: true`) or never resolves again (simulating a socket held open).
  */
-function makeReader(chunks: string[]): ReadableStreamDefaultReader<Uint8Array> {
+function makeReader(chunks: string[], close = true): ReaderMock {
 	const encoder = new TextEncoder();
 	const queue = [...chunks];
 	return {
-		read: vi.fn(async () => {
+		read: vi.fn(() => {
 			if (queue.length === 0) {
-				return {
-					done: true,
-					value: undefined,
-				} as ReadableStreamReadResult<Uint8Array>;
+				return close
+					? Promise.resolve({ done: true, value: undefined })
+					: new Promise(() => {});
 			}
 			const next = queue.shift() as string;
-			return {
-				done: false,
-				value: encoder.encode(next),
-			} as ReadableStreamReadResult<Uint8Array>;
+			return Promise.resolve({ done: false, value: encoder.encode(next) });
 		}),
+		cancel: vi.fn().mockResolvedValue(undefined),
 		releaseLock: vi.fn(),
-		cancel: vi.fn(),
 		closed: Promise.resolve(undefined),
-	} as unknown as ReadableStreamDefaultReader<Uint8Array>;
+	} as unknown as ReaderMock;
 }
 
-/** Build a reader whose first `read()` throws. */
-function makeThrowingReader(
-	err: Error,
-): ReadableStreamDefaultReader<Uint8Array> {
-	return {
-		read: vi.fn().mockRejectedValue(err),
-		releaseLock: vi.fn(),
-		cancel: vi.fn(),
-		closed: Promise.resolve(undefined),
-	} as unknown as ReadableStreamDefaultReader<Uint8Array>;
+function frame(eventType: string, data: Record<string, unknown> = {}): string {
+	return `event: ${eventType}\ndata: ${JSON.stringify({ event_type: eventType, data })}\n\n`;
 }
 
-const sseFrame = (eventType: string, data: unknown): string =>
-	`event: ${eventType}\ndata: ${JSON.stringify(data)}\n\n`;
+function collect() {
+	const batches: SpotterVizEvent[][] = [];
+	const onEvents = vi.fn(async (events: SpotterVizEvent[]) => {
+		batches.push(events);
+	});
+	return { batches, onEvents };
+}
+
+const IDLE_MS = 1_000;
 
 // ---------------------------------------------------------------------------
-// Tests
+// readAuroraStream
 // ---------------------------------------------------------------------------
 
-describe("processAuroraSseStream", () => {
-	let storage: StorageMock;
-
-	beforeEach(() => {
-		storage = makeStorageMock();
+describe("readAuroraStream", () => {
+	afterEach(() => {
+		vi.useRealTimers();
+		vi.restoreAllMocks();
 	});
 
-	it("parses a single SSE frame and appends it to storage; marks done when the stream closes", async () => {
+	it("returns message_end on the terminal event without waiting for the socket to close", async () => {
+		const reader = makeReader(
+			[frame("text.delta", { text: "hi" }), frame("message.end")],
+			false,
+		);
+		const { batches, onEvents } = collect();
+
+		const end = await readAuroraStream(reader, onEvents, IDLE_MS);
+
+		expect(end).toBe("message_end");
+		expect(batches.flat().map((e) => e.event_type)).toEqual([
+			"text.delta",
+			"message.end",
+		]);
+		expect(reader.cancel).toHaveBeenCalled();
+	});
+
+	it("returns closed when the socket closes before message.end", async () => {
+		const reader = makeReader([frame("text.delta", { text: "hi" })]);
+		const { batches, onEvents } = collect();
+
+		const end = await readAuroraStream(reader, onEvents, IDLE_MS);
+
+		expect(end).toBe("closed");
+		expect(batches.flat()).toHaveLength(1);
+		expect(reader.cancel).toHaveBeenCalled();
+	});
+
+	it("flushes a trailing frame that arrives without a blank line before close", async () => {
 		const reader = makeReader([
-			sseFrame("text.delta", {
-				event_type: "text.delta",
-				data: { text: "Hello" },
-				message_id: "m-1",
-				idx: 0,
-				timestamp: "2024-01-01T00:00:00Z",
+			'event: text.delta\ndata: {"data":{"text":"last"}}',
+		]);
+		const { batches, onEvents } = collect();
+
+		const end = await readAuroraStream(reader, onEvents, IDLE_MS);
+
+		expect(end).toBe("closed");
+		expect(batches).toEqual([
+			[
+				expect.objectContaining({
+					event_type: "text.delta",
+					data: { text: "last" },
+				}),
+			],
+		]);
+	});
+
+	it("returns idle when no bytes arrive within idleMs and cancels the reader", async () => {
+		vi.useFakeTimers();
+		const reader = makeReader([frame("text.delta", { text: "hi" })], false);
+		const { batches, onEvents } = collect();
+
+		const pending = readAuroraStream(reader, onEvents, IDLE_MS);
+		await vi.advanceTimersByTimeAsync(IDLE_MS);
+
+		await expect(pending).resolves.toBe("idle");
+		expect(batches.flat()).toHaveLength(1);
+		expect(reader.cancel).toHaveBeenCalled();
+	});
+
+	it("buffers partial frames split across chunks", async () => {
+		const full = frame("text.delta", { text: "split" });
+		const reader = makeReader([full.slice(0, 10), full.slice(10)]);
+		const { batches, onEvents } = collect();
+
+		await readAuroraStream(reader, onEvents, IDLE_MS);
+
+		expect(batches).toEqual([
+			[
+				expect.objectContaining({
+					event_type: "text.delta",
+					data: { text: "split" },
+				}),
+			],
+		]);
+	});
+
+	it("skips comments, blank frames and unparseable data", async () => {
+		vi.spyOn(console, "warn").mockImplementation(() => {});
+		const reader = makeReader([
+			": heartbeat\n\n",
+			"event: text.delta\ndata: {not json\n\n",
+			frame("text.delta", { text: "ok" }),
+		]);
+		const { batches, onEvents } = collect();
+
+		await readAuroraStream(reader, onEvents, IDLE_MS);
+
+		expect(batches.flat().map((e) => e.data)).toEqual([{ text: "ok" }]);
+	});
+
+	it("skips frames whose data is not an object instead of failing the turn", async () => {
+		const reader = makeReader([
+			"event: text.delta\ndata: null\n\n",
+			"event: text.delta\ndata: 42\n\n",
+			frame("text.delta", { text: "ok" }),
+		]);
+		const { batches, onEvents } = collect();
+
+		const end = await readAuroraStream(reader, onEvents, IDLE_MS);
+
+		expect(end).toBe("closed");
+		expect(batches.flat().map((e) => e.data)).toEqual([{ text: "ok" }]);
+	});
+
+	it("reports keepalive-only chunks as activity without emitting events", async () => {
+		const reader = makeReader([": keepalive\n\n", ": keepalive\n\n"]);
+		const { onEvents } = collect();
+		const onBytes = vi.fn(async () => {});
+
+		const end = await readAuroraStream(reader, onEvents, IDLE_MS, onBytes);
+
+		expect(end).toBe("closed");
+		expect(onBytes).toHaveBeenCalledTimes(2);
+		expect(onEvents).not.toHaveBeenCalled();
+	});
+
+	it("falls back to the payload's event_type, then 'unknown'", async () => {
+		const reader = makeReader([
+			'data: {"event_type":"from.payload","data":{}}\n\n',
+			'data: {"data":{}}\n\n',
+		]);
+		const { batches, onEvents } = collect();
+
+		await readAuroraStream(reader, onEvents, IDLE_MS);
+
+		expect(batches.flat().map((e) => e.event_type)).toEqual([
+			"from.payload",
+			"unknown",
+		]);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// generationFromEvent
+// ---------------------------------------------------------------------------
+
+describe("generationFromEvent", () => {
+	it("returns the new generation from an lb_refresh control action as a string", () => {
+		expect(
+			generationFromEvent({
+				event_type: "control.action",
+				data: { action: "lb_refresh", metadata: { new_gen_number: 7 } },
 			}),
-		]);
-
-		await processAuroraSseStream(CONVERSATION_ID, reader, storage);
-
-		expect(storage.appendEvents).toHaveBeenCalledTimes(2);
-		const firstCall = storage.appendEvents.mock.calls[0];
-		expect(firstCall[0]).toBe(CONVERSATION_ID);
-		const events = firstCall[1] as SpotterVizEvent[];
-		expect(events).toHaveLength(1);
-		expect(events[0].event_type).toBe("text.delta");
-		expect(events[0].data).toEqual({ text: "Hello" });
-		expect(events[0].message_id).toBe("m-1");
-		expect(events[0].idx).toBe(0);
-		expect(events[0].timestamp).toBe("2024-01-01T00:00:00Z");
-		expect(firstCall[2]).toBeFalsy();
-
-		const closingCall = storage.appendEvents.mock.calls[1];
-		expect(closingCall[1]).toEqual([]);
-		expect(closingCall[2]).toBe(true);
+		).toBe("7");
 	});
 
-	it("parses multiple frames batched in one chunk and appends them in order", async () => {
-		const reader = makeReader([
-			sseFrame("a", { data: { i: 1 } }) +
-				sseFrame("b", { data: { i: 2 } }) +
-				sseFrame("c", { data: { i: 3 } }),
-		]);
-
-		await processAuroraSseStream(CONVERSATION_ID, reader, storage);
-
-		const events = storage.appendEvents.mock.calls[0][1] as SpotterVizEvent[];
-		expect(events.map((e) => e.event_type)).toEqual(["a", "b", "c"]);
-	});
-
-	it("buffers partial frames split across chunks until a frame boundary arrives", async () => {
-		const frame = sseFrame("text.delta", { data: { text: "Hello world" } });
-		const split = Math.floor(frame.length / 2);
-
-		const reader = makeReader([frame.slice(0, split), frame.slice(split)]);
-
-		await processAuroraSseStream(CONVERSATION_ID, reader, storage);
-
-		const events = storage.appendEvents.mock.calls[0][1] as SpotterVizEvent[];
-		expect(events).toHaveLength(1);
-		expect(events[0].event_type).toBe("text.delta");
-		expect(events[0].data).toEqual({ text: "Hello world" });
-	});
-
-	it("ignores SSE comments and blank frames (heartbeats)", async () => {
-		const reader = makeReader([
-			`: keepalive\n\n${sseFrame("a", { data: { i: 1 } })}\n\n`,
-		]);
-
-		await processAuroraSseStream(CONVERSATION_ID, reader, storage);
-
-		const events = storage.appendEvents.mock.calls[0][1] as SpotterVizEvent[];
-		expect(events).toHaveLength(1);
-		expect(events[0].event_type).toBe("a");
-	});
-
-	it("drops frames whose data payload is unparseable JSON but keeps streaming", async () => {
-		const malformedFrame = "event: bad\ndata: not-json-{}\n\n";
-		const goodFrame = sseFrame("good", { data: { ok: true } });
-
-		const reader = makeReader([malformedFrame + goodFrame]);
-
-		await processAuroraSseStream(CONVERSATION_ID, reader, storage);
-
-		// Only the good frame should have been appended.
-		expect(storage.appendEvents).toHaveBeenCalledTimes(2);
-		const events = storage.appendEvents.mock.calls[0][1] as SpotterVizEvent[];
-		expect(events).toHaveLength(1);
-		expect(events[0].event_type).toBe("good");
-	});
-
-	it("falls back to the data payload's event_type when SSE 'event:' header is missing", async () => {
-		// No `event:` line — only `data:`. event_type should fall back to data.event_type.
-		const reader = makeReader([
-			'data: {"event_type":"inferred","data":{"x":1}}\n\n',
-		]);
-
-		await processAuroraSseStream(CONVERSATION_ID, reader, storage);
-
-		const events = storage.appendEvents.mock.calls[0][1] as SpotterVizEvent[];
-		expect(events).toHaveLength(1);
-		expect(events[0].event_type).toBe("inferred");
-	});
-
-	it("falls back to 'unknown' when neither SSE header nor payload provides event_type", async () => {
-		const reader = makeReader(['data: {"data":{"x":1}}\n\n']);
-
-		await processAuroraSseStream(CONVERSATION_ID, reader, storage);
-
-		const events = storage.appendEvents.mock.calls[0][1] as SpotterVizEvent[];
-		expect(events[0].event_type).toBe("unknown");
-	});
-
-	it("patches AuroraSessionContext.generationNumber on control.action lb_refresh frames", async () => {
-		const reader = makeReader([
-			sseFrame("control.action", {
-				data: {
-					action: "lb_refresh",
-					metadata: { new_gen_number: 42 },
-				},
+	it("ignores other control actions", () => {
+		expect(
+			generationFromEvent({
+				event_type: "control.action",
+				data: { action: "other", metadata: { new_gen_number: 7 } },
 			}),
-		]);
-
-		await processAuroraSseStream(CONVERSATION_ID, reader, storage);
-
-		expect(storage.updateMetadata).toHaveBeenCalledTimes(1);
-		const [convId, patch] = storage.updateMetadata.mock.calls[0] as [
-			string,
-			Partial<AuroraSessionContext>,
-		];
-		expect(convId).toBe(CONVERSATION_ID);
-		// Numeric new_gen_number must be coerced to string to match BACH session shape.
-		expect(patch.generationNumber).toBe("42");
+		).toBeUndefined();
 	});
 
-	it("does not patch generationNumber for control.action of a different kind", async () => {
-		const reader = makeReader([
-			sseFrame("control.action", {
-				data: { action: "something_else", metadata: { new_gen_number: 9 } },
-			}),
-		]);
-
-		await processAuroraSseStream(CONVERSATION_ID, reader, storage);
-
-		expect(storage.updateMetadata).not.toHaveBeenCalled();
-	});
-
-	it("does not patch when lb_refresh metadata lacks new_gen_number", async () => {
-		const reader = makeReader([
-			sseFrame("control.action", {
+	it("ignores lb_refresh without new_gen_number", () => {
+		expect(
+			generationFromEvent({
+				event_type: "control.action",
 				data: { action: "lb_refresh", metadata: {} },
 			}),
-		]);
-
-		await processAuroraSseStream(CONVERSATION_ID, reader, storage);
-
-		expect(storage.updateMetadata).not.toHaveBeenCalled();
+		).toBeUndefined();
 	});
 
-	it("swallows errors from updateMetadata so a failing patch does not abort the stream", async () => {
-		storage.updateMetadata.mockRejectedValueOnce(new Error("patch failed"));
-		const reader = makeReader([
-			sseFrame("control.action", {
-				data: { action: "lb_refresh", metadata: { new_gen_number: 5 } },
-			}) + sseFrame("text.delta", { data: { text: "still flowing" } }),
-		]);
-
-		await expect(
-			processAuroraSseStream(CONVERSATION_ID, reader, storage),
-		).resolves.toBeUndefined();
-
-		// Events still appended despite the patch error.
-		const events = storage.appendEvents.mock.calls[0][1] as SpotterVizEvent[];
-		expect(events.map((e) => e.event_type)).toEqual([
-			"control.action",
-			"text.delta",
-		]);
-		// And the stream-close marker still fires.
-		const last = storage.appendEvents.mock.calls.at(-1);
-		expect(last?.[2]).toBe(true);
-	});
-
-	it("marks the conversation done with isDone=true on a clean stream close even when no frames were sent", async () => {
-		const reader = makeReader([]);
-
-		await processAuroraSseStream(CONVERSATION_ID, reader, storage);
-
-		// Only the closing call.
-		expect(storage.appendEvents).toHaveBeenCalledTimes(1);
-		expect(storage.appendEvents.mock.calls[0]).toEqual([
-			CONVERSATION_ID,
-			[],
-			true,
-		]);
-	});
-
-	it("on a reader read() error, marks the conversation done as a best-effort", async () => {
-		const reader = makeThrowingReader(new Error("network blew up"));
-
-		await expect(
-			processAuroraSseStream(CONVERSATION_ID, reader, storage),
-		).resolves.toBeUndefined();
-
-		expect(storage.appendEvents).toHaveBeenCalledWith(
-			CONVERSATION_ID,
-			[],
-			true,
-		);
-	});
-
-	it("swallows the secondary error if marking-done itself fails after a stream error", async () => {
-		const reader = makeThrowingReader(new Error("stream error"));
-		storage.appendEvents.mockRejectedValue(new Error("mark-done failed"));
-
-		await expect(
-			processAuroraSseStream(CONVERSATION_ID, reader, storage),
-		).resolves.toBeUndefined();
-	});
-
-	it("does not append an empty-events batch between frames (only the stream-close marker)", async () => {
-		// One frame, then a heartbeat-only chunk, then close.
-		const reader = makeReader([
-			sseFrame("a", { data: { i: 1 } }),
-			": heartbeat\n\n",
-		]);
-
-		await processAuroraSseStream(CONVERSATION_ID, reader, storage);
-
-		// First call has the real event; second is the close (no third empty-events batch).
-		expect(storage.appendEvents).toHaveBeenCalledTimes(2);
+	it("ignores non-control events", () => {
 		expect(
-			(storage.appendEvents.mock.calls[0][1] as SpotterVizEvent[]).length,
-		).toBe(1);
-		expect(storage.appendEvents.mock.calls[1]).toEqual([
-			CONVERSATION_ID,
-			[],
-			true,
-		]);
+			generationFromEvent({
+				event_type: "text.delta",
+				data: { action: "lb_refresh", metadata: { new_gen_number: 7 } },
+			}),
+		).toBeUndefined();
 	});
 });

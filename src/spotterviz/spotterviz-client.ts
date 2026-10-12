@@ -1,3 +1,4 @@
+import type { BachSession } from "../thoughtspot/types";
 /**
  * SpotterViz client.
  *
@@ -5,7 +6,7 @@
  * Aurora MT host, rewrites the path (strips `/aurora`), and injects `X-Tenant-Host: $http_host`
  * itself — so we just call `<instanceUrl>/aurora/<path>` with the user's bearer token.
  */
-import type { BachSession } from "../thoughtspot/types";
+import { TimeoutError, UPSTREAM_CALL_TIMEOUT_MS } from "./timeouts";
 import type { AuroraSessionContext, AuroraSessionInitResult } from "./types";
 
 export class SpotterVizClient {
@@ -45,21 +46,30 @@ export class SpotterVizClient {
 	async createAuroraSession(
 		bachSession: BachSession,
 	): Promise<AuroraSessionInitResult> {
-		const response = await fetch(`${this.instanceUrl}/aurora/init`, {
-			method: "POST",
-			headers: this.buildHeaders("application/json"),
-			body: JSON.stringify({
-				session_id: {
-					transaction_id: bachSession.transactionId,
-					generation_number: bachSession.generationNumber,
-				},
-				locale: this.locale,
-				starter_prompts: [],
-				tenant_flags: {
-					enable_charting_skill: true,
-				},
-			}),
-		});
+		let response: Response;
+		try {
+			response = await fetch(`${this.instanceUrl}/aurora/init`, {
+				method: "POST",
+				signal: AbortSignal.timeout(UPSTREAM_CALL_TIMEOUT_MS),
+				headers: this.buildHeaders("application/json"),
+				body: JSON.stringify({
+					session_id: {
+						transaction_id: bachSession.transactionId,
+						generation_number: bachSession.generationNumber,
+					},
+					locale: this.locale,
+					starter_prompts: [],
+					tenant_flags: {
+						enable_charting_skill: true,
+					},
+				}),
+			});
+		} catch (error) {
+			if ((error as Error).name === "TimeoutError") {
+				throw new TimeoutError("Starting SpotterViz", UPSTREAM_CALL_TIMEOUT_MS);
+			}
+			throw error;
+		}
 
 		if (!response.ok) {
 			const errorText = await response.text();
@@ -101,14 +111,17 @@ export class SpotterVizClient {
 
 	/**
 	 * Submit a user message to an existing Aurora session and obtain an SSE stream of agent events.
-	 * The returned Response carries an SSE body; the caller must drain it via `body.getReader()`
+	 * The returned Response carries an SSE body; the caller must drain it via `body.getReader()`.
+	 * `signal` aborts both the wait for headers and the body, so the caller owns all time limits.
 	 */
 	async submitAuroraQuery(
 		auroraCtx: AuroraSessionContext,
 		message: string,
+		signal?: AbortSignal,
 	): Promise<Response> {
 		const response = await fetch(`${this.instanceUrl}/aurora/chat/stream`, {
 			method: "POST",
+			signal,
 			headers: this.buildHeaders("text/event-stream", auroraCtx.auroraJwtToken),
 			body: JSON.stringify({
 				message,

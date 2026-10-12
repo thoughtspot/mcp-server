@@ -2,17 +2,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	DashboardTurnBusyError,
 	pollDashboardTurn,
-	runDashboardTurn,
+	startDashboardJob,
 } from "../../src/spotterviz/dashboard-orchestrator";
 import type { SpotterVizService } from "../../src/spotterviz/spotterviz-service";
-import type { SpotterVizEvent } from "../../src/spotterviz/types";
+import { STALE_TASK_MS } from "../../src/spotterviz/timeouts";
 import type { StorageServiceClient } from "../../src/storage-service/storage-service";
 
 const TASK_ID = "task-1";
 
 type ServiceMock = SpotterVizService & {
-	submitQuery: ReturnType<typeof vi.fn>;
-	getUpdates: ReturnType<typeof vi.fn>;
+	openStream: ReturnType<typeof vi.fn>;
 	saveLiveboard: ReturnType<typeof vi.fn>;
 };
 
@@ -20,26 +19,55 @@ type StorageMock = StorageServiceClient & {
 	initializeConversation: ReturnType<typeof vi.fn>;
 	getMetadata: ReturnType<typeof vi.fn>;
 	updateMetadata: ReturnType<typeof vi.fn>;
+	appendMessages: ReturnType<typeof vi.fn>;
+	metadata: Record<string, unknown>;
 };
 
-function event(
-	event_type: string,
-	data: Record<string, unknown>,
-): SpotterVizEvent {
-	return { event_type, data };
+function frame(eventType: string, data: Record<string, unknown>): string {
+	return `event: ${eventType}\ndata: ${JSON.stringify({ data })}\n\n`;
 }
 
-const DONE_EVENTS = [
-	event("control.action", { action: "lb_refresh", metadata: {} }),
-	event("message.end", { status: "completed", liveboard_updated: true }),
+const COMPLETED_FRAMES = [
+	frame("control.action", {
+		action: "lb_refresh",
+		metadata: { new_gen_number: 5 },
+	}),
+	frame("message.end", { status: "completed", liveboard_updated: true }),
 ];
 
-function makeService(streamPromise: Promise<void>): ServiceMock {
+/**
+ * A reader over `chunks`. When `hold` is given, the reader waits on it before yielding anything,
+ * so a test can keep the job running past the deadline. With `close: false` it never ends after
+ * the chunks (an Aurora socket that goes silent).
+ */
+function makeReader(
+	chunks: string[],
+	opts: { hold?: Promise<void>; close?: boolean } = {},
+): ReadableStreamDefaultReader<Uint8Array> {
+	const encoder = new TextEncoder();
+	const queue = [...chunks];
 	return {
-		submitQuery: vi.fn().mockResolvedValue({ streamPromise }),
-		getUpdates: vi
-			.fn()
-			.mockResolvedValue({ updates: DONE_EVENTS, isDone: true }),
+		read: vi.fn(async () => {
+			await opts.hold;
+			if (queue.length === 0) {
+				if (opts.close === false) {
+					return new Promise(() => {});
+				}
+				return { done: true, value: undefined };
+			}
+			return { done: false, value: encoder.encode(queue.shift() as string) };
+		}),
+		cancel: vi.fn().mockResolvedValue(undefined),
+	} as unknown as ReadableStreamDefaultReader<Uint8Array>;
+}
+
+function makeService(
+	reader: ReadableStreamDefaultReader<Uint8Array> = makeReader(
+		COMPLETED_FRAMES,
+	),
+): ServiceMock {
+	return {
+		openStream: vi.fn().mockResolvedValue(reader),
 		saveLiveboard: vi.fn().mockResolvedValue({
 			liveboardId: "lb-1",
 			liveboardUrl: "https://ts.example.com/#/pinboard/lb-1",
@@ -47,261 +75,347 @@ function makeService(streamPromise: Promise<void>): ServiceMock {
 	} as unknown as ServiceMock;
 }
 
-function makeStorage(): StorageMock {
-	return {
-		initializeConversation: vi.fn().mockResolvedValue(undefined),
-		getMetadata: vi.fn().mockResolvedValue({ liveboardId: "lb-1" }),
-		updateMetadata: vi.fn().mockResolvedValue({}),
-	} as unknown as StorageMock;
+/** In-memory storage: metadata is merged on update, like the Durable Object does. */
+function makeStorage(initial: Record<string, unknown> = {}): StorageMock {
+	const storage = {
+		metadata: { liveboardId: "lb-1", generationNumber: "1", ...initial },
+	} as StorageMock;
+	storage.initializeConversation = vi.fn().mockResolvedValue(undefined);
+	storage.getMetadata = vi.fn(async () => ({ ...storage.metadata }));
+	storage.updateMetadata = vi.fn(async (_id, values) => {
+		Object.assign(storage.metadata, values);
+		return { ...storage.metadata };
+	});
+	storage.appendMessages = vi.fn().mockResolvedValue(undefined);
+	return storage;
 }
 
-describe("runDashboardTurn", () => {
+function releasedLock(storage: StorageMock): boolean {
+	return storage.appendMessages.mock.calls.some(
+		([id, events, done]) =>
+			id === TASK_ID && Array.isArray(events) && events.length === 0 && done,
+	);
+}
+
+describe("startDashboardJob", () => {
 	beforeEach(() => {
 		vi.useFakeTimers();
+		vi.spyOn(console, "error").mockImplementation(() => {});
+		vi.spyOn(console, "warn").mockImplementation(() => {});
 	});
 	afterEach(() => {
 		vi.useRealTimers();
 		vi.restoreAllMocks();
 	});
 
-	it("returns the finished outcome and saves when the turn beats the budget", async () => {
-		const service = makeService(Promise.resolve());
+	it("returns the completed outcome, saving once with the streamed generation", async () => {
+		const service = makeService();
 		const storage = makeStorage();
+		const setup = vi.fn().mockResolvedValue(undefined);
 
-		const outcome = await runDashboardTurn({
+		const outcome = await startDashboardJob({
 			service,
 			storage,
 			taskId: TASK_ID,
-			message: "do the thing",
-			budgetMs: 1_000,
+			setup,
+			buildMessage: () => "do the thing",
+			deadlineMs: 1_000,
 		});
 
-		expect(outcome.status).toBe("completed");
+		expect(setup).toHaveBeenCalledTimes(1);
+		expect(service.openStream).toHaveBeenCalledWith(
+			expect.objectContaining({ taskId: TASK_ID, message: "do the thing" }),
+		);
+		expect(outcome).toMatchObject({
+			status: "completed",
+			taskId: TASK_ID,
+			dashboardId: "lb-1",
+			dashboardUrl: "https://ts.example.com/#/pinboard/lb-1",
+		});
+		expect(service.saveLiveboard).toHaveBeenCalledTimes(1);
 		expect(service.saveLiveboard).toHaveBeenCalledWith({
 			spotterVizSessionId: TASK_ID,
+			generationNumber: "5",
 		});
-		if (outcome.status === "completed") {
-			expect(outcome.dashboardUrl).toContain("/#/pinboard/lb-1");
-		}
+		expect(storage.metadata.generationNumber).toBe("5");
+		expect(storage.metadata.turnOutcome).toMatchObject({ status: "completed" });
+		expect(releasedLock(storage)).toBe(true);
 	});
 
-	it("hands back a task id without reading events when the budget expires", async () => {
-		// Reading events would advance a destructive bookmark in the storage DO and swallow the
-		// turn's narrative before the follow-up poll could see it.
-		let resolveStream: () => void = () => {};
-		const streamPromise = new Promise<void>((resolve) => {
-			resolveStream = resolve;
-		});
-		const service = makeService(streamPromise);
+	it("saves the generation from the stream even if stored metadata changes mid-turn", async () => {
 		const storage = makeStorage();
+		const service = makeService();
+		// A concurrent writer bumps the stored generation; the job must not pick it up.
+		storage.getMetadata.mockImplementation(async () => ({
+			...storage.metadata,
+			generationNumber: "99",
+		}));
 
-		const pending = runDashboardTurn({
+		await startDashboardJob({
 			service,
 			storage,
 			taskId: TASK_ID,
-			message: "do the thing",
-			budgetMs: 1_000,
+			setup: async () => {},
+			buildMessage: () => "m",
+			deadlineMs: 1_000,
 		});
-		await vi.advanceTimersByTimeAsync(1_000);
-		const outcome = await pending;
 
-		expect(outcome.status).toBe("in_progress");
-		expect(outcome.taskId).toBe(TASK_ID);
-		expect(service.getUpdates).not.toHaveBeenCalled();
-		expect(service.saveLiveboard).not.toHaveBeenCalled();
-
-		resolveStream();
-	});
-
-	it("biases the poll backoff after giving up, so the next poll does not waste a round trip", async () => {
-		const service = makeService(new Promise<void>(() => {}));
-		const storage = makeStorage();
-
-		const pending = runDashboardTurn({
-			service,
-			storage,
-			taskId: TASK_ID,
-			message: "do the thing",
-			budgetMs: 1_000,
-		});
-		await vi.advanceTimersByTimeAsync(1_000);
-		await pending;
-
-		expect(storage.updateMetadata).toHaveBeenCalledWith(TASK_ID, {
-			pollCount: 2,
+		expect(service.saveLiveboard).toHaveBeenCalledWith({
+			spotterVizSessionId: TASK_ID,
+			generationNumber: "5",
 		});
 	});
 
-	it("registers the drain with waitUntil before racing it", async () => {
-		const streamPromise = Promise.resolve();
-		const service = makeService(streamPromise);
+	it("returns in_progress at the deadline while the job keeps running and later stores the outcome", async () => {
+		let release: () => void = () => {};
+		const hold = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		const service = makeService(makeReader(COMPLETED_FRAMES, { hold }));
 		const storage = makeStorage();
 		const waitUntil = vi.fn();
 
-		await runDashboardTurn({
+		const pending = startDashboardJob({
 			service,
 			storage,
 			taskId: TASK_ID,
-			message: "do the thing",
-			budgetMs: 1_000,
+			setup: async () => {},
+			buildMessage: () => "m",
 			waitUntil,
+			deadlineMs: 1_000,
 		});
+		await vi.advanceTimersByTimeAsync(1_000);
 
-		expect(waitUntil).toHaveBeenCalledWith(streamPromise);
+		await expect(pending).resolves.toEqual({
+			status: "in_progress",
+			taskId: TASK_ID,
+		});
+		expect(waitUntil).toHaveBeenCalledTimes(1);
+		expect(service.saveLiveboard).not.toHaveBeenCalled();
+		expect(releasedLock(storage)).toBe(false);
+
+		release();
+		await waitUntil.mock.calls[0][0];
+
+		expect(service.saveLiveboard).toHaveBeenCalledTimes(1);
+		expect(storage.metadata.turnOutcome).toMatchObject({ status: "completed" });
+		expect(releasedLock(storage)).toBe(true);
 	});
 
-	it("clears the previous turn's stored answer so a follow-up actually runs", async () => {
-		const service = makeService(Promise.resolve());
+	it("fails without saving when the stream goes idle", async () => {
+		const service = makeService(
+			makeReader([frame("text.delta", { text: "working" })], { close: false }),
+		);
 		const storage = makeStorage();
 
-		await runDashboardTurn({
+		const pending = startDashboardJob({
 			service,
 			storage,
 			taskId: TASK_ID,
-			message: "follow up",
-			budgetMs: 1_000,
+			setup: async () => {},
+			buildMessage: () => "m",
+			deadlineMs: 10_000,
+			idleMs: 500,
 		});
+		await vi.advanceTimersByTimeAsync(500);
 
-		expect(storage.updateMetadata).toHaveBeenCalledWith(TASK_ID, {
-			turnProgress: null,
-			turnOutcome: null,
+		const outcome = await pending;
+		expect(outcome).toMatchObject({
+			status: "failed",
+			liveboardUpdated: false,
+			dashboardId: "lb-1",
 		});
-		expect(service.submitQuery).toHaveBeenCalled();
+		expect(outcome.status === "failed" && outcome.error).toMatch(
+			/stopped sending updates/,
+		);
+		expect(service.saveLiveboard).not.toHaveBeenCalled();
+		expect(releasedLock(storage)).toBe(true);
 	});
 
-	it("raises a busy error when a turn is already in flight", async () => {
-		const service = makeService(Promise.resolve());
+	it("returns a failed outcome (not a throw) when setup throws", async () => {
+		const service = makeService();
 		const storage = makeStorage();
-		storage.initializeConversation.mockRejectedValue(
-			new Error("already exists and is not marked done"),
+
+		const outcome = await startDashboardJob({
+			service,
+			storage,
+			taskId: TASK_ID,
+			setup: vi.fn().mockRejectedValue(new Error("no such answer")),
+			buildMessage: () => "m",
+			deadlineMs: 1_000,
+		});
+
+		expect(outcome).toMatchObject({ status: "failed", taskId: TASK_ID });
+		expect(outcome.status === "failed" && outcome.error).toContain(
+			"no such answer",
 		);
+		expect(service.openStream).not.toHaveBeenCalled();
+		expect(service.saveLiveboard).not.toHaveBeenCalled();
+		expect(releasedLock(storage)).toBe(true);
+	});
+
+	it("reports failure and releases the lock when the save fails", async () => {
+		const service = makeService();
+		service.saveLiveboard.mockRejectedValueOnce(new Error("commit refused"));
+		const storage = makeStorage();
+
+		const outcome = await startDashboardJob({
+			service,
+			storage,
+			taskId: TASK_ID,
+			setup: async () => {},
+			buildMessage: () => "m",
+			deadlineMs: 1_000,
+		});
+
+		expect(outcome).toMatchObject({ status: "failed", dashboardId: "lb-1" });
+		expect(outcome.status === "failed" && outcome.error).toContain(
+			"commit refused",
+		);
+		expect(releasedLock(storage)).toBe(true);
+	});
+
+	it("does not save when the turn asks a question", async () => {
+		const service = makeService(
+			makeReader([
+				frame("message.delta", { content: "Which data source?" }),
+				frame("message.end", { status: "completed", liveboard_updated: false }),
+			]),
+		);
+		const storage = makeStorage();
+
+		const outcome = await startDashboardJob({
+			service,
+			storage,
+			taskId: TASK_ID,
+			setup: async () => {},
+			buildMessage: () => "m",
+			deadlineMs: 1_000,
+		});
+
+		expect(outcome.status).toBe("needs_input");
+		expect(service.saveLiveboard).not.toHaveBeenCalled();
+		expect(releasedLock(storage)).toBe(true);
+	});
+
+	it("clears the previous turn's stored outcome before running", async () => {
+		const storage = makeStorage({
+			turnOutcome: { status: "completed", text: "old" },
+		});
+
+		await startDashboardJob({
+			service: makeService(),
+			storage,
+			taskId: TASK_ID,
+			setup: async () => {},
+			buildMessage: () => "m",
+			deadlineMs: 1_000,
+		});
+
+		expect(storage.updateMetadata.mock.calls[0][1]).toMatchObject({
+			turnOutcome: null,
+			turnProgress: null,
+		});
+	});
+
+	it("throws DashboardTurnBusyError when the task is locked", async () => {
+		const service = makeService();
+		const storage = makeStorage();
+		storage.initializeConversation.mockRejectedValueOnce(new Error("409"));
 
 		await expect(
-			runDashboardTurn({
+			startDashboardJob({
 				service,
 				storage,
 				taskId: TASK_ID,
-				message: "do the thing",
-				budgetMs: 1_000,
+				setup: async () => {},
+				buildMessage: () => "m",
 			}),
 		).rejects.toBeInstanceOf(DashboardTurnBusyError);
-		expect(service.submitQuery).not.toHaveBeenCalled();
-	});
-
-	// Committing is load-bearing: the designer's own publish writes to the edit session, and this
-	// save promotes it to the saved dashboard. A failed save means the work is not visible.
-	it("reports failure when the work was done but the commit failed", async () => {
-		const service = makeService(Promise.resolve());
-		const storage = makeStorage();
-		service.saveLiveboard.mockRejectedValue(new Error("bach exploded"));
-
-		const outcome = await runDashboardTurn({
-			service,
-			storage,
-			taskId: TASK_ID,
-			message: "do the thing",
-			budgetMs: 1_000,
-		});
-
-		expect(outcome.status).toBe("failed");
-		if (outcome.status === "failed") {
-			expect(outcome.error).toMatch(/not visible on the dashboard/i);
-		}
+		expect(service.openStream).not.toHaveBeenCalled();
+		expect(storage.appendMessages).not.toHaveBeenCalled();
 	});
 });
 
 describe("pollDashboardTurn", () => {
-	afterEach(() => vi.restoreAllMocks());
-
-	it("persists progress from a batch drained while the turn is still running", async () => {
-		// The DO delivers each event exactly once, so a mid-turn poll must not drop what it read.
-		const service = makeService(Promise.resolve());
-		const storage = makeStorage();
-		service.getUpdates.mockResolvedValue({
-			updates: [event("message.delta", { content: "Which data source?" })],
-			isDone: false,
-		});
-
-		const outcome = await pollDashboardTurn(service, storage, TASK_ID);
-
-		expect(outcome.status).toBe("in_progress");
-		expect(storage.updateMetadata).toHaveBeenCalledWith(
-			TASK_ID,
-			expect.objectContaining({
-				turnProgress: expect.objectContaining({
-					text: "Which data source?",
-				}),
-			}),
-		);
+	beforeEach(() => {
+		vi.useFakeTimers();
+		vi.spyOn(console, "warn").mockImplementation(() => {});
+	});
+	afterEach(() => {
+		vi.useRealTimers();
+		vi.restoreAllMocks();
 	});
 
-	it("replays the stored answer once a turn has finished, without saving again", async () => {
-		// The event log is drained exactly once, so re-deriving on a repeat poll would see an
-		// empty turn, report that nothing changed, and save the liveboard a second time.
-		const service = makeService(Promise.resolve());
-		const storage = makeStorage();
-		storage.getMetadata.mockResolvedValue({
-			liveboardId: "lb-1",
+	it("returns the stored outcome", async () => {
+		const storage = makeStorage({
 			turnOutcome: {
 				status: "completed",
 				liveboardUpdated: true,
-				text: "Done.",
-				steps: ["Publishing"],
+				text: "done",
 				dashboardId: "lb-1",
-				dashboardUrl: "https://ts.example.com/#/pinboard/lb-1",
 			},
 		});
 
-		const outcome = await pollDashboardTurn(service, storage, TASK_ID);
-
-		expect(outcome.status).toBe("completed");
-		if (outcome.status === "completed") {
-			expect(outcome.liveboardUpdated).toBe(true);
-			expect(outcome.dashboardUrl).toContain("/#/pinboard/lb-1");
-		}
-		expect(service.getUpdates).not.toHaveBeenCalled();
-		expect(service.saveLiveboard).not.toHaveBeenCalled();
-	});
-
-	it("stores the terminal outcome so later polls can replay it", async () => {
-		const service = makeService(Promise.resolve());
-		const storage = makeStorage();
-
-		await pollDashboardTurn(service, storage, TASK_ID);
-
-		expect(storage.updateMetadata).toHaveBeenCalledWith(
-			TASK_ID,
-			expect.objectContaining({
-				turnOutcome: expect.objectContaining({ status: "completed" }),
-			}),
+		await expect(pollDashboardTurn(storage, TASK_ID, 0)).resolves.toMatchObject(
+			{ status: "completed", taskId: TASK_ID, dashboardId: "lb-1" },
 		);
+		expect(storage.updateMetadata).not.toHaveBeenCalled();
 	});
 
-	it("merges progress from an earlier poll into the final outcome", async () => {
-		const service = makeService(Promise.resolve());
+	it("returns the outcome once it is stored during the wait", async () => {
+		const storage = makeStorage({ turnHeartbeatAt: Date.now() });
+
+		const pending = pollDashboardTurn(storage, TASK_ID, 10_000);
+		await vi.advanceTimersByTimeAsync(100);
+		storage.metadata.turnOutcome = {
+			status: "completed",
+			liveboardUpdated: true,
+			text: "",
+		};
+		await vi.advanceTimersByTimeAsync(5_000);
+
+		await expect(pending).resolves.toMatchObject({ status: "completed" });
+	});
+
+	it("returns in_progress with the latest text after waitMs", async () => {
+		const storage = makeStorage({
+			turnHeartbeatAt: Date.now(),
+			turnProgress: { text: "Adding charts" },
+		});
+
+		const pending = pollDashboardTurn(storage, TASK_ID, 5_000);
+		await vi.advanceTimersByTimeAsync(5_000);
+
+		await expect(pending).resolves.toEqual({
+			status: "in_progress",
+			taskId: TASK_ID,
+			text: "Adding charts",
+		});
+	});
+
+	it("fails a task whose heartbeat is older than STALE_TASK_MS and releases it", async () => {
+		const storage = makeStorage({
+			turnHeartbeatAt: Date.now() - STALE_TASK_MS - 1,
+		});
+
+		const outcome = await pollDashboardTurn(storage, TASK_ID, 0);
+
+		expect(outcome).toMatchObject({
+			status: "failed",
+			taskId: TASK_ID,
+			dashboardId: "lb-1",
+		});
+		expect(storage.metadata.turnOutcome).toMatchObject({ status: "failed" });
+		expect(releasedLock(storage)).toBe(true);
+	});
+
+	it("errors on an unknown task", async () => {
 		const storage = makeStorage();
-		storage.getMetadata.mockResolvedValue({
-			liveboardId: "lb-1",
-			turnProgress: {
-				text: "Which data source",
-				steps: [],
-				sawRefresh: false,
-			},
-		});
-		service.getUpdates.mockResolvedValue({
-			updates: [
-				event("message.delta", { content: " should I use?" }),
-				event("message.end", { status: "completed", liveboard_updated: false }),
-			],
-			isDone: true,
-		});
+		storage.metadata = {};
 
-		const outcome = await pollDashboardTurn(service, storage, TASK_ID);
-
-		expect(outcome.status).toBe("needs_input");
-		if (outcome.status === "needs_input") {
-			expect(outcome.question).toBe("Which data source should I use?");
-		}
-		expect(service.saveLiveboard).not.toHaveBeenCalled();
+		await expect(pollDashboardTurn(storage, TASK_ID, 0)).rejects.toThrow(
+			"not found",
+		);
 	});
 });

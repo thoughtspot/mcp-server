@@ -9,13 +9,13 @@
  * The preamble below narrows that behaviour rather than trying to override it wholesale. It grants
  * autonomy over the decisions we genuinely do not need a human for (layout, grouping, ordering,
  * sizing, styling) while leaving the designer free to ask about anything genuinely missing. Data
- * source selection is the one clarification worth pre-empting, because it is both the most common
- * and the easiest for the caller to supply.
+ * source selection is the one clarification worth pre-empting, because it is the most common: the
+ * designer can find data sources itself, so it is told to.
  */
 
 const AUTONOMY_PREAMBLE = `You are being driven by an automated integration. There is no person in this conversation who can answer follow-up questions, so treat this as a single-shot request.
 
-Make all layout, grouping, tab, ordering, sizing and styling decisions yourself using your own judgement, and publish them without asking for confirmation. Do not ask which data source to use: use the one given below if one is given.
+Make all layout, grouping, tab, ordering, sizing and styling decisions yourself using your own judgement, and publish them without asking for confirmation. Do not ask which data source to use. If one is given below, use it. Otherwise, when the liveboard already has charts, build new charts from the data sources those charts use; when it is empty, pick the most relevant data source yourself.
 
 If something essential is genuinely missing and you cannot proceed at all, reply with one short sentence stating exactly what you need, and make no changes.`;
 

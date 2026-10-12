@@ -14,10 +14,8 @@
  *   that as success would tell the calling agent the dashboard was built when it was not, so it
  *   is surfaced as its own `needs_input` outcome.
  *
- * Events are consumed destructively from the storage DO (each delivered exactly once), so a turn
- * observed across several polls must be accumulated as it goes. `TurnProgress` is that carry-over
- * state: derived and bounded, rather than the raw event list, which would not stay within a DO
- * value limit on a long turn.
+ * `TurnProgress` is folded as events stream in and stored with the task, so it stays derived and
+ * bounded rather than holding the raw event list, which would not fit a DO value on a long turn.
  */
 
 import type { SpotterVizEvent } from "./types";
@@ -30,16 +28,9 @@ export interface TurnChoice {
 	choices: string[];
 }
 
-/** Carry-over state for a turn observed across multiple polls. Safe to store in DO metadata. */
+/** Running state for a turn, folded from its events. Safe to store in DO metadata. */
 export interface TurnProgress extends Record<string, unknown> {
 	text: string;
-	steps: string[];
-	/**
-	 * Total events observed so far. Reported while a turn is still running as a liveness signal:
-	 * without it, a caller cannot tell a slow turn from a dead one, since early events are all
-	 * in-flight progress that produces no completed milestones.
-	 */
-	eventCount: number;
 	/** True once any `lb_refresh` has been seen, i.e. Aurora published. */
 	sawRefresh: boolean;
 	/** First error message seen, if any. */
@@ -63,8 +54,6 @@ export interface TurnSummary {
 	choice?: TurnChoice;
 	/** Present when status is "failed". */
 	error?: string;
-	/** Human-readable progress headings, in order, describing what was done. */
-	steps: string[];
 }
 
 // Aurora prefixes some deltas with a machine-readable generation-number comment; it is metadata
@@ -73,14 +62,6 @@ const GEN_NO_COMMENT = /<!--\s*gen_no:\s*[^>]*-->/g;
 
 /** Keeps accumulated prose inside a DO value limit on a long or chatty turn. */
 const MAX_TEXT_CHARS = 8_000;
-const MAX_STEPS = 100;
-
-export const EMPTY_TURN_PROGRESS: TurnProgress = {
-	text: "",
-	steps: [],
-	eventCount: 0,
-	sawRefresh: false,
-};
 
 function asRecord(value: unknown): Record<string, unknown> {
 	return value && typeof value === "object"
@@ -109,8 +90,6 @@ export function accumulateProgress(
 ): TurnProgress {
 	const next: TurnProgress = {
 		text: prior?.text ?? "",
-		steps: [...(prior?.steps ?? [])],
-		eventCount: (prior?.eventCount ?? 0) + events.length,
 		sawRefresh: prior?.sawRefresh ?? false,
 		error: prior?.error,
 		endStatus: prior?.endStatus,
@@ -129,21 +108,6 @@ export function accumulateProgress(
 					next.text = (next.text + chunk).slice(0, MAX_TEXT_CHARS);
 				}
 				next.choice = next.choice ?? extractChoice(data);
-				break;
-			}
-			case "meta.progress": {
-				// Keep completed, non-ephemeral milestones only, and drop consecutive repeats:
-				// Aurora emits the same heading for the started and completed halves of a step.
-				const heading = event.heading;
-				if (
-					typeof heading === "string" &&
-					heading.length > 0 &&
-					data.stage === "completed" &&
-					next.steps[next.steps.length - 1] !== heading &&
-					next.steps.length < MAX_STEPS
-				) {
-					next.steps.push(heading);
-				}
 				break;
 			}
 			case "control.action": {
@@ -181,7 +145,6 @@ export function accumulateProgress(
  */
 export function summarizeProgress(progress: TurnProgress): TurnSummary {
 	const text = progress.text.replace(GEN_NO_COMMENT, "").trim();
-	const steps = progress.steps;
 	const liveboardUpdated =
 		progress.sawRefresh || progress.endLiveboardUpdated === true;
 
@@ -190,7 +153,6 @@ export function summarizeProgress(progress: TurnProgress): TurnSummary {
 			status: "failed",
 			liveboardUpdated,
 			text,
-			steps,
 			error: progress.error ?? "The dashboard agent stopped with an error.",
 		};
 	}
@@ -202,7 +164,6 @@ export function summarizeProgress(progress: TurnProgress): TurnSummary {
 			status: "needs_input",
 			liveboardUpdated: false,
 			text,
-			steps,
 			question: text.length > 0 ? text : progress.choice?.text,
 			choice: progress.choice,
 		};
@@ -216,18 +177,10 @@ export function summarizeProgress(progress: TurnProgress): TurnSummary {
 			status: "failed",
 			liveboardUpdated: false,
 			text,
-			steps,
 			error:
 				"The dashboard designer finished without making any changes and without saying why. This has been seen on large requests; try again with fewer charts, or split the request into a smaller create followed by modifications.",
 		};
 	}
 
-	return { status: "completed", liveboardUpdated, text, steps };
-}
-
-/**
- * Reduce a complete Aurora event log to one outcome. Pure: safe to unit test against recorded logs.
- */
-export function summarizeTurn(events: SpotterVizEvent[]): TurnSummary {
-	return summarizeProgress(accumulateProgress(undefined, events));
+	return { status: "completed", liveboardUpdated, text };
 }

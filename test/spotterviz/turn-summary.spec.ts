@@ -2,9 +2,13 @@ import { describe, expect, it } from "vitest";
 import {
 	accumulateProgress,
 	summarizeProgress,
-	summarizeTurn,
 } from "../../src/spotterviz/turn-summary";
 import type { SpotterVizEvent } from "../../src/spotterviz/types";
+
+/** Reduce a complete event log to one outcome. */
+function summarizeTurn(events: SpotterVizEvent[]) {
+	return summarizeProgress(accumulateProgress(undefined, events));
+}
 
 function event(
 	event_type: string,
@@ -115,8 +119,6 @@ describe("summarizeTurn", () => {
 		expect(result.status).toBe("failed");
 		expect(result.liveboardUpdated).toBe(false);
 		expect(result.error).toMatch(/without making any changes/i);
-		// The steps it did get through are still worth reporting.
-		expect(result.steps).toEqual(["Working"]);
 	});
 
 	it("only reports completed when something actually changed", () => {
@@ -127,30 +129,6 @@ describe("summarizeTurn", () => {
 		]);
 
 		expect(result.status).toBe("completed");
-	});
-
-	it("collects completed progress headings in order without duplicates", () => {
-		const result = summarizeTurn([
-			event(
-				"meta.progress",
-				{ stage: "working" },
-				{ heading: "Understanding" },
-			),
-			event(
-				"meta.progress",
-				{ stage: "completed" },
-				{ heading: "Understanding" },
-			),
-			event(
-				"meta.progress",
-				{ stage: "completed" },
-				{ heading: "Understanding" },
-			),
-			event("meta.progress", { stage: "completed" }, { heading: "Publishing" }),
-			event("message.end", { status: "completed", liveboard_updated: true }),
-		]);
-
-		expect(result.steps).toEqual(["Understanding", "Publishing"]);
 	});
 
 	it("strips the gen_no metadata comment out of assistant prose", () => {

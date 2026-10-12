@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SpotterVizClient } from "../../src/spotterviz/spotterviz-client";
 import { SpotterVizService } from "../../src/spotterviz/spotterviz-service";
-import * as sseStreamModule from "../../src/spotterviz/spotterviz-sse-stream";
-import type {
-	AuroraSessionContext,
-	SpotterVizEvent,
-} from "../../src/spotterviz/types";
+import {
+	STREAM_HEADERS_TIMEOUT_MS,
+	UPSTREAM_CALL_TIMEOUT_MS,
+} from "../../src/spotterviz/timeouts";
+import type { AuroraSessionContext } from "../../src/spotterviz/types";
 import type { StorageServiceClient } from "../../src/storage-service/storage-service";
 import type { ThoughtSpotService } from "../../src/thoughtspot/thoughtspot-service";
 
@@ -13,6 +13,7 @@ import type { ThoughtSpotService } from "../../src/thoughtspot/thoughtspot-servi
 // Test fixtures
 // ---------------------------------------------------------------------------
 
+const TASK_ID = "task-1";
 const SPOTTER_VIZ_SESSION_ID = "aurora-sess-1";
 const BACH_SESSION = { transactionId: "txn-1", generationNumber: "1" };
 const AURORA_INIT = {
@@ -30,8 +31,6 @@ type TsServiceMock = ThoughtSpotService & {
 type StorageMock = StorageServiceClient & {
 	getMetadata: ReturnType<typeof vi.fn>;
 	updateMetadata: ReturnType<typeof vi.fn>;
-	appendEvents: ReturnType<typeof vi.fn>;
-	getNewEvents: ReturnType<typeof vi.fn>;
 };
 
 type ClientMock = SpotterVizClient & {
@@ -52,8 +51,6 @@ function makeStorage(): StorageMock {
 	return {
 		getMetadata: vi.fn(),
 		updateMetadata: vi.fn().mockResolvedValue({}),
-		appendEvents: vi.fn().mockResolvedValue(undefined),
-		getNewEvents: vi.fn(),
 	} as unknown as StorageMock;
 }
 
@@ -83,17 +80,21 @@ describe("SpotterVizService.createSession", () => {
 	});
 
 	it("creates a new liveboard when newLiveboardName is provided", async () => {
-		const result = await svc.createSession({ newLiveboardName: "My LB" });
+		const result = await svc.createSession({
+			taskId: TASK_ID,
+			newLiveboardName: "My LB",
+		});
 
 		expect(ts.createEmptyLiveboard).toHaveBeenCalledWith("My LB");
 		expect(ts.createBachPinboardSession).toHaveBeenCalledWith("lb-new");
 		expect(client.createAuroraSession).toHaveBeenCalledWith(BACH_SESSION);
-		expect(result.spotterVizSessionId).toBe(SPOTTER_VIZ_SESSION_ID);
+		expect(result.spotterVizSessionId).toBe(TASK_ID);
 		expect(result.liveboardId).toBe("lb-new");
 	});
 
 	it("reuses existingLiveboardId without creating a new liveboard", async () => {
 		const result = await svc.createSession({
+			taskId: TASK_ID,
 			existingLiveboardId: "lb-existing",
 		});
 
@@ -103,16 +104,16 @@ describe("SpotterVizService.createSession", () => {
 	});
 
 	it("throws when neither newLiveboardName nor existingLiveboardId is provided", async () => {
-		await expect(svc.createSession({})).rejects.toThrow(
+		await expect(svc.createSession({ taskId: TASK_ID })).rejects.toThrow(
 			"Could not resolve a liveboard id",
 		);
 	});
 
-	it("persists the Aurora session context under the aurora session id", async () => {
-		await svc.createSession({ newLiveboardName: "My LB" });
+	it("persists the Aurora session context under the task id", async () => {
+		await svc.createSession({ taskId: TASK_ID, newLiveboardName: "My LB" });
 
 		expect(storage.updateMetadata).toHaveBeenCalledWith(
-			SPOTTER_VIZ_SESSION_ID,
+			TASK_ID,
 			expect.objectContaining({
 				auroraSessionId: SPOTTER_VIZ_SESSION_ID,
 				auroraJwtToken: "jwt-1",
@@ -130,167 +131,57 @@ describe("SpotterVizService.createSession", () => {
 			jwtToken: "jwt-1",
 		});
 
-		const result = await svc.createSession({ newLiveboardName: "Caller LB" });
+		const result = await svc.createSession({
+			taskId: TASK_ID,
+			newLiveboardName: "Caller LB",
+		});
 
 		expect(result.liveboardName).toBe("Caller LB");
-		const persistedCtx = storage.updateMetadata.mock
-			.calls[0][1] as AuroraSessionContext;
+		const persistedCtx = storage.updateMetadata.mock.calls.at(
+			-1,
+		)?.[1] as AuroraSessionContext;
 		expect(persistedCtx.liveboardName).toBe("Caller LB");
 	});
 
 	it("propagates errors from createBachPinboardSession", async () => {
 		ts.createBachPinboardSession.mockRejectedValueOnce(new Error("bach down"));
 
-		await expect(svc.createSession({ newLiveboardName: "x" })).rejects.toThrow(
-			"bach down",
-		);
+		await expect(
+			svc.createSession({ taskId: TASK_ID, newLiveboardName: "x" }),
+		).rejects.toThrow("bach down");
 		expect(client.createAuroraSession).not.toHaveBeenCalled();
 	});
 
 	it("propagates errors from the Aurora client", async () => {
 		client.createAuroraSession.mockRejectedValueOnce(new Error("aurora 500"));
 
-		await expect(svc.createSession({ newLiveboardName: "x" })).rejects.toThrow(
-			"aurora 500",
-		);
-		expect(storage.updateMetadata).not.toHaveBeenCalled();
+		await expect(
+			svc.createSession({ taskId: TASK_ID, newLiveboardName: "x" }),
+		).rejects.toThrow("aurora 500");
+		// Only the early liveboardId record was written, not the session context.
+		expect(storage.updateMetadata).toHaveBeenCalledTimes(1);
+		expect(storage.updateMetadata).toHaveBeenCalledWith(TASK_ID, {
+			liveboardId: "lb-new",
+		});
+	});
+
+	it("times out a hung BACH session call", async () => {
+		vi.useFakeTimers();
+		ts.createBachPinboardSession.mockReturnValueOnce(new Promise(() => {}));
+
+		const pending = svc.createSession({
+			taskId: TASK_ID,
+			newLiveboardName: "x",
+		});
+		const assertion = expect(pending).rejects.toThrow("did not respond");
+		await vi.advanceTimersByTimeAsync(UPSTREAM_CALL_TIMEOUT_MS);
+		await assertion;
+		vi.useRealTimers();
 	});
 });
 
 // ---------------------------------------------------------------------------
 // submitQuery
-// ---------------------------------------------------------------------------
-
-describe("SpotterVizService.submitQuery", () => {
-	let ts: TsServiceMock;
-	let storage: StorageMock;
-	let client: ClientMock;
-	let svc: SpotterVizService;
-
-	const baseCtx: AuroraSessionContext = {
-		auroraSessionId: SPOTTER_VIZ_SESSION_ID,
-		auroraJwtToken: "jwt-1",
-		transactionId: "txn-1",
-		generationNumber: "1",
-		liveboardId: "lb-1",
-		pollCount: 3,
-	};
-
-	beforeEach(() => {
-		ts = makeTsService();
-		storage = makeStorage();
-		client = makeClient();
-		svc = new SpotterVizService(ts, storage, client);
-		storage.getMetadata.mockResolvedValue(baseCtx);
-		// Make the SSE drain a no-op to keep these tests deterministic.
-		vi.spyOn(sseStreamModule, "processAuroraSseStream").mockResolvedValue(
-			undefined,
-		);
-	});
-
-	afterEach(() => {
-		vi.restoreAllMocks();
-	});
-
-	function makeMockResponseWithReader(): Response {
-		return {
-			body: {
-				getReader: () =>
-					({
-						read: vi.fn().mockResolvedValue({ done: true, value: undefined }),
-					}) as unknown as ReadableStreamDefaultReader<Uint8Array>,
-			},
-		} as unknown as Response;
-	}
-
-	it("loads the stored context, resets pollCount, and submits the Aurora query", async () => {
-		client.submitAuroraQuery.mockResolvedValue(makeMockResponseWithReader());
-
-		const { streamPromise } = await svc.submitQuery({
-			spotterVizSessionId: SPOTTER_VIZ_SESSION_ID,
-			message: "Show me revenue",
-		});
-		await streamPromise;
-
-		expect(storage.getMetadata).toHaveBeenCalledWith(SPOTTER_VIZ_SESSION_ID);
-		expect(storage.updateMetadata).toHaveBeenCalledWith(
-			SPOTTER_VIZ_SESSION_ID,
-			{ pollCount: 0 },
-		);
-		expect(client.submitAuroraQuery).toHaveBeenCalledWith(
-			baseCtx,
-			"Show me revenue",
-		);
-	});
-
-	it("returns a streamPromise that wraps processAuroraSseStream", async () => {
-		client.submitAuroraQuery.mockResolvedValue(makeMockResponseWithReader());
-
-		const { streamPromise } = await svc.submitQuery({
-			spotterVizSessionId: SPOTTER_VIZ_SESSION_ID,
-			message: "x",
-		});
-		await streamPromise;
-
-		expect(sseStreamModule.processAuroraSseStream).toHaveBeenCalledTimes(1);
-		expect(
-			(sseStreamModule.processAuroraSseStream as any).mock.calls[0][0],
-		).toBe(SPOTTER_VIZ_SESSION_ID);
-	});
-
-	it("throws and best-effort marks the session done when the response has no body", async () => {
-		client.submitAuroraQuery.mockResolvedValue({ body: null } as Response);
-
-		await expect(
-			svc.submitQuery({
-				spotterVizSessionId: SPOTTER_VIZ_SESSION_ID,
-				message: "x",
-			}),
-		).rejects.toThrow("Aurora /chat/stream returned no response body");
-
-		// Best-effort mark-done: appendEvents called with empty array + true.
-		expect(storage.appendEvents).toHaveBeenCalledWith(
-			SPOTTER_VIZ_SESSION_ID,
-			[],
-			true,
-		);
-	});
-
-	it("throws and best-effort marks the session done when submitAuroraQuery fails", async () => {
-		client.submitAuroraQuery.mockRejectedValueOnce(new Error("aurora 500"));
-
-		await expect(
-			svc.submitQuery({
-				spotterVizSessionId: SPOTTER_VIZ_SESSION_ID,
-				message: "x",
-			}),
-		).rejects.toThrow("aurora 500");
-
-		expect(storage.appendEvents).toHaveBeenCalledWith(
-			SPOTTER_VIZ_SESSION_ID,
-			[],
-			true,
-		);
-	});
-
-	it("swallows secondary errors from the best-effort mark-done", async () => {
-		client.submitAuroraQuery.mockRejectedValueOnce(new Error("aurora 500"));
-		storage.appendEvents.mockRejectedValueOnce(new Error("mark-done failed"));
-
-		// The original error must still surface; mark-done failure must not mask it.
-		await expect(
-			svc.submitQuery({
-				spotterVizSessionId: SPOTTER_VIZ_SESSION_ID,
-				message: "x",
-			}),
-		).rejects.toThrow("aurora 500");
-	});
-});
-
-// ---------------------------------------------------------------------------
-// Output schema null tolerance
-// ---------------------------------------------------------------------------
-
 // ---------------------------------------------------------------------------
 // saveLiveboard
 // ---------------------------------------------------------------------------
@@ -318,7 +209,7 @@ describe("SpotterVizService.saveLiveboard", () => {
 		} as AuroraSessionContext);
 
 		const result = await svc.saveLiveboard({
-			spotterVizSessionId: SPOTTER_VIZ_SESSION_ID,
+			spotterVizSessionId: TASK_ID,
 		});
 
 		expect(ts.saveBachPinboard).toHaveBeenCalledWith("txn-9", "4");
@@ -335,7 +226,7 @@ describe("SpotterVizService.saveLiveboard", () => {
 		} as AuroraSessionContext);
 
 		await expect(
-			svc.saveLiveboard({ spotterVizSessionId: SPOTTER_VIZ_SESSION_ID }),
+			svc.saveLiveboard({ spotterVizSessionId: TASK_ID }),
 		).rejects.toThrow("missing a liveboardId");
 		expect(ts.saveBachPinboard).not.toHaveBeenCalled();
 	});
@@ -351,206 +242,162 @@ describe("SpotterVizService.saveLiveboard", () => {
 		ts.saveBachPinboard.mockRejectedValueOnce(new Error("bach save failed"));
 
 		await expect(
-			svc.saveLiveboard({ spotterVizSessionId: SPOTTER_VIZ_SESSION_ID }),
+			svc.saveLiveboard({ spotterVizSessionId: TASK_ID }),
 		).rejects.toThrow("bach save failed");
+	});
+
+	it("commits the generation passed by the caller over the stored one", async () => {
+		storage.getMetadata.mockResolvedValueOnce({
+			auroraSessionId: SPOTTER_VIZ_SESSION_ID,
+			auroraJwtToken: "jwt-1",
+			transactionId: "txn-9",
+			generationNumber: "4",
+			liveboardId: "lb-7",
+		} as AuroraSessionContext);
+
+		await svc.saveLiveboard({
+			spotterVizSessionId: TASK_ID,
+			generationNumber: "9",
+		});
+
+		expect(ts.saveBachPinboard).toHaveBeenCalledWith("txn-9", "9");
+	});
+
+	it("times out a hung save", async () => {
+		vi.useFakeTimers();
+		storage.getMetadata.mockResolvedValueOnce({
+			auroraSessionId: SPOTTER_VIZ_SESSION_ID,
+			auroraJwtToken: "jwt-1",
+			transactionId: "t",
+			generationNumber: "g",
+			liveboardId: "lb-1",
+		} as AuroraSessionContext);
+		ts.saveBachPinboard.mockReturnValueOnce(new Promise(() => {}));
+
+		const pending = svc.saveLiveboard({ spotterVizSessionId: TASK_ID });
+		const assertion = expect(pending).rejects.toThrow("Saving the dashboard");
+		await vi.advanceTimersByTimeAsync(UPSTREAM_CALL_TIMEOUT_MS);
+		await assertion;
+		vi.useRealTimers();
 	});
 });
 
 // ---------------------------------------------------------------------------
-// getUpdates
+// openStream
 // ---------------------------------------------------------------------------
 
-describe("SpotterVizService.getUpdates", () => {
+describe("SpotterVizService.openStream", () => {
+	const CONTEXT = {
+		auroraSessionId: SPOTTER_VIZ_SESSION_ID,
+		auroraJwtToken: "jwt-1",
+		transactionId: "txn-1",
+		generationNumber: "1",
+	} as AuroraSessionContext;
+
 	let ts: TsServiceMock;
 	let storage: StorageMock;
 	let client: ClientMock;
 	let svc: SpotterVizService;
 
 	beforeEach(() => {
-		vi.useFakeTimers();
 		ts = makeTsService();
 		storage = makeStorage();
 		client = makeClient();
 		svc = new SpotterVizService(ts, storage, client);
+		storage.getMetadata.mockResolvedValue(CONTEXT);
 	});
 
 	afterEach(() => {
 		vi.useRealTimers();
 	});
 
-	const ev = (event_type: string): SpotterVizEvent => ({
-		event_type,
-		data: {},
-	});
+	it("submits the message with the stored context and returns the body reader", async () => {
+		const body = new ReadableStream<Uint8Array>();
+		client.submitAuroraQuery.mockResolvedValueOnce(new Response(body));
 
-	it("fast-returns without sleeping when the initial peek shows the turn is done", async () => {
-		storage.getNewEvents.mockResolvedValueOnce({
-			messages: [ev("text.delta")],
-			isDone: true,
+		const reader = await svc.openStream({
+			taskId: TASK_ID,
+			message: "hello",
+			signal: new AbortController().signal,
 		});
 
-		const promise = svc.getUpdates({
-			spotterVizSessionId: SPOTTER_VIZ_SESSION_ID,
-		});
-		// No timer advance needed — initial peek is the only call.
-		const result = await promise;
-
-		expect(result.isDone).toBe(true);
-		expect(result.updates).toHaveLength(1);
-		expect(storage.getNewEvents).toHaveBeenCalledTimes(1);
-		// pollCount reset on done.
-		expect(storage.updateMetadata).toHaveBeenCalledWith(
-			SPOTTER_VIZ_SESSION_ID,
-			{ pollCount: 0 },
+		expect(storage.getMetadata).toHaveBeenCalledWith(TASK_ID);
+		expect(client.submitAuroraQuery).toHaveBeenCalledWith(
+			CONTEXT,
+			"hello",
+			expect.any(AbortSignal),
 		);
+		expect(typeof reader.read).toBe("function");
+		await reader.cancel();
 	});
 
-	it("sleeps the first backoff step (2s) when no prior poll has been recorded", async () => {
-		storage.getNewEvents.mockResolvedValueOnce({ messages: [], isDone: false });
-		storage.getNewEvents.mockResolvedValueOnce({
-			messages: [ev("text.delta")],
-			isDone: false,
-		});
-		storage.getMetadata.mockResolvedValueOnce({} as AuroraSessionContext);
-
-		const promise = svc.getUpdates({
-			spotterVizSessionId: SPOTTER_VIZ_SESSION_ID,
-		});
-
-		// Drive past the first backoff step.
-		await vi.advanceTimersByTimeAsync(2000);
-		const result = await promise;
-
-		expect(result.isDone).toBe(false);
-		expect(result.updates).toHaveLength(1);
-		// pollCount advanced 0 -> 1.
-		expect(storage.updateMetadata).toHaveBeenCalledWith(
-			SPOTTER_VIZ_SESSION_ID,
-			{ pollCount: 1 },
-		);
-	});
-
-	it("uses the backoff sequence step indexed by the stored pollCount", async () => {
-		storage.getNewEvents.mockResolvedValueOnce({ messages: [], isDone: false });
-		storage.getNewEvents.mockResolvedValueOnce({ messages: [], isDone: false });
-		// pollCount=2 -> wait sequence index 2 -> 8s.
-		storage.getMetadata.mockResolvedValueOnce({
-			pollCount: 2,
-		} as AuroraSessionContext);
-
-		const promise = svc.getUpdates({
-			spotterVizSessionId: SPOTTER_VIZ_SESSION_ID,
-		});
-
-		// Advance less than 8s — promise should not yet resolve.
-		await vi.advanceTimersByTimeAsync(7999);
-		// Just past the boundary.
-		await vi.advanceTimersByTimeAsync(2);
-
-		await promise;
-
-		expect(storage.updateMetadata).toHaveBeenCalledWith(
-			SPOTTER_VIZ_SESSION_ID,
-			{ pollCount: 3 },
-		);
-	});
-
-	it("clamps the wait time to the last backoff step (16s) once pollCount exceeds the sequence", async () => {
-		storage.getNewEvents.mockResolvedValueOnce({ messages: [], isDone: false });
-		storage.getNewEvents.mockResolvedValueOnce({ messages: [], isDone: false });
-		// pollCount=99 -> still uses the last index (16s).
-		storage.getMetadata.mockResolvedValueOnce({
-			pollCount: 99,
-		} as AuroraSessionContext);
-
-		const promise = svc.getUpdates({
-			spotterVizSessionId: SPOTTER_VIZ_SESSION_ID,
-		});
-		await vi.advanceTimersByTimeAsync(16_000);
-		await promise;
-
-		// pollCount keeps incrementing — important for span attributes / observability.
-		expect(storage.updateMetadata).toHaveBeenCalledWith(
-			SPOTTER_VIZ_SESSION_ID,
-			{ pollCount: 100 },
-		);
-	});
-
-	it("merges events from both peek and the followup poll", async () => {
-		storage.getNewEvents.mockResolvedValueOnce({
-			messages: [ev("a")],
-			isDone: false,
-		});
-		storage.getNewEvents.mockResolvedValueOnce({
-			messages: [ev("b"), ev("c")],
-			isDone: false,
-		});
-		storage.getMetadata.mockResolvedValueOnce({} as AuroraSessionContext);
-
-		const promise = svc.getUpdates({
-			spotterVizSessionId: SPOTTER_VIZ_SESSION_ID,
-		});
-		await vi.advanceTimersByTimeAsync(2000);
-		const result = await promise;
-
-		expect(result.updates.map((u) => u.event_type)).toEqual(["a", "b", "c"]);
-	});
-
-	it("resets pollCount when the followup poll reports the turn is done", async () => {
-		storage.getNewEvents.mockResolvedValueOnce({ messages: [], isDone: false });
-		storage.getNewEvents.mockResolvedValueOnce({
-			messages: [ev("done")],
-			isDone: true,
-		});
-		storage.getMetadata.mockResolvedValueOnce({
-			pollCount: 1,
-		} as AuroraSessionContext);
-
-		const promise = svc.getUpdates({
-			spotterVizSessionId: SPOTTER_VIZ_SESSION_ID,
-		});
-		await vi.advanceTimersByTimeAsync(4000);
-		const result = await promise;
-
-		expect(result.isDone).toBe(true);
-		const patches = storage.updateMetadata.mock.calls.map((c) => c[1]);
-		// One advance (1 -> 2), then a reset back to 0.
-		expect(patches).toEqual(
-			expect.arrayContaining([{ pollCount: 2 }, { pollCount: 0 }]),
-		);
-	});
-
-	it("treats missing pollCount in metadata as 0", async () => {
-		storage.getNewEvents.mockResolvedValueOnce({ messages: [], isDone: false });
-		storage.getNewEvents.mockResolvedValueOnce({ messages: [], isDone: false });
-		storage.getMetadata.mockResolvedValueOnce({
-			// pollCount absent
-		} as AuroraSessionContext);
-
-		const promise = svc.getUpdates({
-			spotterVizSessionId: SPOTTER_VIZ_SESSION_ID,
-		});
-		await vi.advanceTimersByTimeAsync(2000);
-		await promise;
-
-		expect(storage.updateMetadata).toHaveBeenCalledWith(
-			SPOTTER_VIZ_SESSION_ID,
-			{ pollCount: 1 },
-		);
-	});
-
-	it("swallows errors from the pollCount reset so already-drained events are not lost", async () => {
-		storage.getNewEvents.mockResolvedValueOnce({
-			messages: [ev("done")],
-			isDone: true,
-		});
-		storage.updateMetadata.mockRejectedValueOnce(new Error("reset failed"));
+	it("throws when the task has no SpotterViz session", async () => {
+		storage.getMetadata.mockResolvedValueOnce({});
 
 		await expect(
-			svc.getUpdates({ spotterVizSessionId: SPOTTER_VIZ_SESSION_ID }),
-		).resolves.toEqual({
-			updates: [{ event_type: "done", data: {} }],
-			isDone: true,
+			svc.openStream({
+				taskId: TASK_ID,
+				message: "hello",
+				signal: new AbortController().signal,
+			}),
+		).rejects.toThrow("no SpotterViz session");
+		expect(client.submitAuroraQuery).not.toHaveBeenCalled();
+	});
+
+	it("throws when the response has no body", async () => {
+		client.submitAuroraQuery.mockResolvedValueOnce(new Response(null));
+
+		await expect(
+			svc.openStream({
+				taskId: TASK_ID,
+				message: "hello",
+				signal: new AbortController().signal,
+			}),
+		).rejects.toThrow("no response body");
+	});
+
+	it("aborts with a TimeoutError when Aurora does not send headers in time", async () => {
+		vi.useFakeTimers();
+		client.submitAuroraQuery.mockImplementationOnce(
+			(_ctx: unknown, _msg: string, signal: AbortSignal) =>
+				new Promise((_, reject) => {
+					signal.addEventListener("abort", () => reject(new Error("aborted")));
+				}),
+		);
+
+		const pending = svc.openStream({
+			taskId: TASK_ID,
+			message: "hello",
+			signal: new AbortController().signal,
 		});
+		const assertion = expect(pending).rejects.toMatchObject({
+			name: "TimeoutError",
+		});
+		await vi.advanceTimersByTimeAsync(STREAM_HEADERS_TIMEOUT_MS);
+		await assertion;
+	});
+
+	it("propagates the caller's abort to the request", async () => {
+		let requestSignal: AbortSignal | undefined;
+		client.submitAuroraQuery.mockImplementationOnce(
+			(_ctx: unknown, _msg: string, signal: AbortSignal) => {
+				requestSignal = signal;
+				return new Promise((_, reject) => {
+					signal.addEventListener("abort", () => reject(new Error("aborted")));
+				});
+			},
+		);
+		const caller = new AbortController();
+
+		const pending = svc.openStream({
+			taskId: TASK_ID,
+			message: "hello",
+			signal: caller.signal,
+		});
+		await vi.waitFor(() => expect(requestSignal).toBeDefined());
+		caller.abort(new Error("caller gave up"));
+
+		await expect(pending).rejects.toThrow("caller gave up");
+		expect(requestSignal?.aborted).toBe(true);
 	});
 });

@@ -8,28 +8,25 @@ import { WithSpan, getActiveSpan } from "../metrics/tracing/tracing-utils";
 import type { StorageServiceClient } from "../storage-service/storage-service";
 import type { ThoughtSpotService } from "../thoughtspot/thoughtspot-service";
 import type { SpotterVizClient } from "./spotterviz-client";
-import { processAuroraSseStream } from "./spotterviz-sse-stream";
+import {
+	STREAM_HEADERS_TIMEOUT_MS,
+	TimeoutError,
+	UPSTREAM_CALL_TIMEOUT_MS,
+	withTimeout,
+} from "./timeouts";
 import type {
 	AuroraSessionContext,
-	AuroraSessionInitResult,
 	CreateSpotterVizSessionParams,
 	CreateSpotterVizSessionResult,
-	GetSpotterVizUpdatesParams,
-	GetSpotterVizUpdatesResult,
 	SaveSpotterVizLiveboardParams,
 	SaveSpotterVizLiveboardResult,
-	SpotterVizEvent,
-	SubmitSpotterVizQueryParams,
 } from "./types";
 
-// Adaptive poll cadence for streaming SSE updates: 2 s → 4 s → 8 s → 16 s (held).
-const GET_UPDATES_WAIT_SEQUENCE_MS = [2_000, 4_000, 8_000, 16_000];
-
 /**
- * Orchestrates a SpotterViz (Aurora) session: creation, per-turn query streaming, adaptive
- * SSE polling, and committing the liveboard. Delegates BACH/liveboard ops to ThoughtSpotService
- * and Aurora HTTP to SpotterVizClient; uses StorageServiceClient for the event log and to
- * persist the Aurora session context.
+ * Talks to SpotterViz (Aurora) for one dashboard task: open a session on a liveboard, start a
+ * turn's event stream, and commit the liveboard. Delegates BACH/liveboard ops to
+ * ThoughtSpotService and Aurora HTTP to SpotterVizClient; keeps the Aurora session context in
+ * storage under the task id. Every upstream call is time-limited.
  */
 export class SpotterVizService {
 	constructor(
@@ -39,16 +36,21 @@ export class SpotterVizService {
 		private readonly recorder?: MetricsRecorder,
 	) {}
 
+	get instanceUrl(): string {
+		return this.client.instanceUrl;
+	}
+
 	/**
-	 * Open a SpotterViz session: provision a new empty liveboard or attach to an existing one,
-	 * start a BACH pinboard session, initialize Aurora, and persist the resulting context.
+	 * Open a SpotterViz session for `taskId`: provision a new empty liveboard or attach to an
+	 * existing one, start a BACH pinboard session, initialize Aurora, and persist the context.
 	 */
 	@WithSpan("spotterviz-create-session")
 	async createSession(
 		params: CreateSpotterVizSessionParams,
 	): Promise<CreateSpotterVizSessionResult> {
 		const span = getActiveSpan();
-		const { newLiveboardName, existingLiveboardId } = params;
+		const { taskId, newLiveboardName, existingLiveboardId } = params;
+		span?.setAttribute("spotterviz_session_id", taskId);
 
 		try {
 			const liveboardId = await this.resolveLiveboardId(
@@ -56,9 +58,17 @@ export class SpotterVizService {
 				existingLiveboardId,
 			);
 			span?.setAttribute("liveboard_id", liveboardId);
+			// Recorded before the slower steps so a task that fails during setup still knows its
+			// dashboard.
+			await this.storage.updateMetadata<Partial<AuroraSessionContext>>(taskId, {
+				liveboardId,
+			});
 
-			const bachSession =
-				await this.tsService.createBachPinboardSession(liveboardId);
+			const bachSession = await withTimeout(
+				this.tsService.createBachPinboardSession(liveboardId),
+				UPSTREAM_CALL_TIMEOUT_MS,
+				"Opening the dashboard for editing",
+			);
 			span?.setAttributes({
 				bach_transaction_id: bachSession.transactionId,
 				bach_generation_number: bachSession.generationNumber,
@@ -71,22 +81,21 @@ export class SpotterVizService {
 			);
 			span?.setAttribute("aurora_session_id", aurora.auroraSessionId);
 
-			await this.persistAuroraContext(
-				aurora,
-				bachSession,
+			const liveboardName = aurora.liveboardName ?? newLiveboardName;
+			await this.storage.updateMetadata<AuroraSessionContext>(taskId, {
+				auroraSessionId: aurora.auroraSessionId,
+				auroraJwtToken: aurora.jwtToken,
+				transactionId: bachSession.transactionId,
+				generationNumber: bachSession.generationNumber,
 				liveboardId,
-				newLiveboardName,
-			);
+				liveboardName,
+			});
 
 			span?.setStatus({
 				code: SpanStatusCode.OK,
 				message: "SpotterViz session created",
 			});
-			return {
-				spotterVizSessionId: aurora.auroraSessionId,
-				liveboardId,
-				liveboardName: aurora.liveboardName ?? newLiveboardName,
-			};
+			return { spotterVizSessionId: taskId, liveboardId, liveboardName };
 		} catch (error) {
 			span?.setStatus({
 				code: SpanStatusCode.ERROR,
@@ -97,76 +106,76 @@ export class SpotterVizService {
 	}
 
 	/**
-	 * Begin a new turn: open the SSE stream and return a `streamPromise` for the caller to plumb
-	 * through `ctx.waitUntil`. The promise drains events into the DO and marks done at stream
-	 * close.
+	 * Start a turn and return a reader over its SSE body. Aborting `signal` cancels the request
+	 * and the body. Fails if Aurora does not start answering within STREAM_HEADERS_TIMEOUT_MS.
 	 */
-	@WithSpan("spotterviz-submit-query")
-	async submitQuery(
-		params: SubmitSpotterVizQueryParams,
-	): Promise<{ streamPromise: Promise<void> }> {
+	@WithSpan("spotterviz-open-stream")
+	async openStream(params: {
+		taskId: string;
+		message: string;
+		signal: AbortSignal;
+	}): Promise<ReadableStreamDefaultReader<Uint8Array>> {
 		const span = getActiveSpan();
-		const { spotterVizSessionId, message } = params;
-		span?.setAttribute("spotterviz_session_id", spotterVizSessionId);
+		const { taskId, message, signal } = params;
+		span?.setAttribute("spotterviz_session_id", taskId);
 		span?.setAttribute("message_length", message.length);
 
+		const context =
+			await this.storage.getMetadata<AuroraSessionContext>(taskId);
+		if (!context.auroraSessionId) {
+			throw new Error("The dashboard task has no SpotterViz session.");
+		}
+
+		// One controller for this request: aborted by the caller's signal or by the headers limit.
+		const controller = new AbortController();
+		const onAbort = () => controller.abort(signal.reason);
+		signal.addEventListener("abort", onAbort, { once: true });
+		const headersTimer = setTimeout(
+			() =>
+				controller.abort(
+					new TimeoutError("SpotterViz", STREAM_HEADERS_TIMEOUT_MS),
+				),
+			STREAM_HEADERS_TIMEOUT_MS,
+		);
+
 		try {
-			const context =
-				await this.storage.getMetadata<AuroraSessionContext>(
-					spotterVizSessionId,
-				);
-
-			// Defensive: the previous turn may have ended without anyone calling get_updates, which
-			// would leave pollCount stale and make the first poll of this turn wait too long.
-			await this.storage.updateMetadata<AuroraSessionContext>(
-				spotterVizSessionId,
-				{ pollCount: 0 },
-			);
-
 			const response = await observeUpstreamCall(
 				this.recorder,
 				UPSTREAM_OPERATION_NAMES.submitAuroraQuery,
-				() => this.client.submitAuroraQuery(context, message),
+				() =>
+					this.client.submitAuroraQuery(context, message, controller.signal),
 			);
-
 			const reader = response.body?.getReader();
 			if (!reader) {
 				throw new Error("Aurora /chat/stream returned no response body");
 			}
-
-			const streamPromise = processAuroraSseStream(
-				spotterVizSessionId,
-				reader,
-				this.storage,
-			);
-
-			span?.setStatus({
-				code: SpanStatusCode.OK,
-				message: "SpotterViz turn started",
-			});
-			return { streamPromise };
+			span?.setStatus({ code: SpanStatusCode.OK, message: "Turn started" });
+			return reader;
 		} catch (error) {
-			// The handler primed the conversation before calling submitQuery; if we fail anywhere
-			// after that, mark it done so get_updates doesn't poll a stream that will never arrive.
-			await this.markSessionDoneBestEffort(spotterVizSessionId);
+			const reason = controller.signal.aborted
+				? controller.signal.reason
+				: error;
 			span?.setStatus({
 				code: SpanStatusCode.ERROR,
-				message: `Error submitting SpotterViz query: ${(error as Error).message}`,
+				message: `Error starting SpotterViz turn: ${(reason as Error).message}`,
 			});
-			throw error;
+			throw reason instanceof Error ? reason : error;
+		} finally {
+			clearTimeout(headersTimer);
 		}
 	}
 
 	/**
-	 * Persist the SpotterViz session's current BACH generation to the saved liveboard. The session
-	 * remains live afterwards so the user can keep iterating; only the liveboard is committed.
+	 * Commit a BACH generation to the saved liveboard. The generation is passed in by the caller,
+	 * which tracked it from the turn's own events, so a concurrent metadata write cannot make this
+	 * commit a stale one.
 	 */
 	@WithSpan("spotterviz-save-liveboard")
 	async saveLiveboard(
 		params: SaveSpotterVizLiveboardParams,
 	): Promise<SaveSpotterVizLiveboardResult> {
 		const span = getActiveSpan();
-		const { spotterVizSessionId } = params;
+		const { spotterVizSessionId, generationNumber } = params;
 		span?.setAttribute("spotterviz_session_id", spotterVizSessionId);
 
 		try {
@@ -179,15 +188,17 @@ export class SpotterVizService {
 					"SpotterViz session metadata is missing a liveboardId; cannot save.",
 				);
 			}
+			const generation = generationNumber ?? context.generationNumber;
 			span?.setAttributes({
 				liveboard_id: context.liveboardId,
 				bach_transaction_id: context.transactionId,
-				bach_generation_number: context.generationNumber,
+				bach_generation_number: generation,
 			});
 
-			await this.tsService.saveBachPinboard(
-				context.transactionId,
-				context.generationNumber,
+			await withTimeout(
+				this.tsService.saveBachPinboard(context.transactionId, generation),
+				UPSTREAM_CALL_TIMEOUT_MS,
+				"Saving the dashboard",
 			);
 
 			const liveboardUrl = `${this.client.instanceUrl}/#/pinboard/${context.liveboardId}`;
@@ -205,142 +216,23 @@ export class SpotterVizService {
 		}
 	}
 
-	/**
-	 * Drain SSE events that have arrived since the caller's last poll. Fast-returns if the turn
-	 * is already done; otherwise waits one step of `GET_UPDATES_WAIT_SEQUENCE_MS[pollCount]`,
-	 * advances `pollCount`, and polls once more. `pollCount` resets when a turn finishes.
-	 */
-	@WithSpan("spotterviz-get-updates")
-	async getUpdates(
-		params: GetSpotterVizUpdatesParams,
-	): Promise<GetSpotterVizUpdatesResult> {
-		const span = getActiveSpan();
-		const { spotterVizSessionId } = params;
-		span?.setAttribute("spotterviz_session_id", spotterVizSessionId);
-
-		// Initial peek — if the turn is already done, fast-return without waiting.
-		const initial =
-			await this.storage.getNewEvents<SpotterVizEvent>(spotterVizSessionId);
-		const collected: SpotterVizEvent[] = [...initial.messages];
-
-		if (initial.isDone) {
-			await this.resetPollCount(spotterVizSessionId);
-			span?.setAttributes({
-				wait_time_ms: 0,
-				poll_count_used: 0,
-				total_session_updates: collected.length,
-				is_done: true,
-			});
-			span?.setStatus({
-				code: SpanStatusCode.OK,
-				message: "SpotterViz turn already done at peek",
-			});
-			return { updates: collected, isDone: true };
-		}
-
-		// Load pollCount, sleep one step, advance pollCount, then poll once more.
-		const pollCount = await this.readPollCount(spotterVizSessionId);
-		const waitMs =
-			GET_UPDATES_WAIT_SEQUENCE_MS[
-				Math.min(pollCount, GET_UPDATES_WAIT_SEQUENCE_MS.length - 1)
-			];
-		await new Promise((resolve) => setTimeout(resolve, waitMs));
-		await this.storage.updateMetadata<AuroraSessionContext>(
-			spotterVizSessionId,
-			{ pollCount: pollCount + 1 },
-		);
-
-		const followup =
-			await this.storage.getNewEvents<SpotterVizEvent>(spotterVizSessionId);
-		collected.push(...followup.messages);
-
-		if (followup.isDone) {
-			await this.resetPollCount(spotterVizSessionId);
-		}
-
-		span?.setAttributes({
-			wait_time_ms: waitMs,
-			poll_count_used: pollCount,
-			total_session_updates: collected.length,
-			is_done: followup.isDone,
-		});
-		span?.setStatus({
-			code: SpanStatusCode.OK,
-			message: "SpotterViz updates polled",
-		});
-
-		return { updates: collected, isDone: followup.isDone };
-	}
-
 	private async resolveLiveboardId(
 		newLiveboardName: string | undefined,
 		existingLiveboardId: string | undefined,
 	): Promise<string> {
-		if (newLiveboardName) {
-			const created =
-				await this.tsService.createEmptyLiveboard(newLiveboardName);
-			return created.liveboardId;
-		}
 		if (existingLiveboardId) {
 			return existingLiveboardId;
+		}
+		if (newLiveboardName) {
+			const created = await withTimeout(
+				this.tsService.createEmptyLiveboard(newLiveboardName),
+				UPSTREAM_CALL_TIMEOUT_MS,
+				"Creating the dashboard",
+			);
+			return created.liveboardId;
 		}
 		throw new Error(
 			"Could not resolve a liveboard id for the SpotterViz session.",
 		);
-	}
-
-	private async persistAuroraContext(
-		aurora: AuroraSessionInitResult,
-		bachSession: { transactionId: string; generationNumber: string },
-		liveboardId: string,
-		newLiveboardName: string | undefined,
-	): Promise<void> {
-		const auroraContext: AuroraSessionContext = {
-			auroraSessionId: aurora.auroraSessionId,
-			auroraJwtToken: aurora.jwtToken,
-			transactionId: bachSession.transactionId,
-			generationNumber: bachSession.generationNumber,
-			liveboardId,
-			liveboardName: aurora.liveboardName ?? newLiveboardName,
-		};
-		await this.storage.updateMetadata<AuroraSessionContext>(
-			aurora.auroraSessionId,
-			auroraContext,
-		);
-	}
-
-	private async markSessionDoneBestEffort(
-		spotterVizSessionId: string,
-	): Promise<void> {
-		try {
-			await this.storage.appendEvents(spotterVizSessionId, [], true);
-		} catch (err) {
-			console.error(
-				`Failed to mark SpotterViz session ${spotterVizSessionId} done:`,
-				err,
-			);
-		}
-	}
-
-	private async readPollCount(spotterVizSessionId: string): Promise<number> {
-		const metadata =
-			await this.storage.getMetadata<AuroraSessionContext>(spotterVizSessionId);
-		return typeof metadata.pollCount === "number" ? metadata.pollCount : 0;
-	}
-
-	private async resetPollCount(spotterVizSessionId: string): Promise<void> {
-		try {
-			await this.storage.updateMetadata<AuroraSessionContext>(
-				spotterVizSessionId,
-				{ pollCount: 0 },
-			);
-		} catch (err) {
-			console.warn(
-				`Failed to reset pollCount for ${spotterVizSessionId}:`,
-				err,
-			);
-			// Delibrately swallow the error as the events have already been drained.
-			// If this throws, the drained errors would be lost.
-		}
 	}
 }

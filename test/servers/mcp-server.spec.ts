@@ -217,13 +217,13 @@ describe("MCP Server", () => {
 				"send_session_message",
 				"get_session_updates",
 				"create_dashboard",
-				"modify_dashboard",
-				"get_dashboard_status",
 				"create_model_session",
 				"send_model_message",
 				"get_model_updates",
 				"finalize_model",
 				"get_data",
+				"modify_dashboard",
+				"get_dashboard_status",
 			]);
 		});
 
@@ -260,6 +260,26 @@ describe("MCP Server", () => {
 			);
 			expect(modifyTool?.description).toMatch(/change an existing dashboard/i);
 			expect(modifyTool?.description).not.toMatch(/spotterviz/i);
+		});
+
+		it("keeps dashboard tool descriptions free of imperatives and stale tool names", async () => {
+			await server.init();
+			const { listTools } = connect(server);
+
+			const tools = (await listTools()).tools ?? [];
+			const dashboardTools = tools.filter((t) =>
+				[
+					"create_dashboard",
+					"modify_dashboard",
+					"get_dashboard_status",
+				].includes(t.name),
+			);
+			expect(dashboardTools).toHaveLength(3);
+			for (const tool of dashboardTools) {
+				const text = JSON.stringify(tool);
+				expect(tool.description).not.toMatch(/\bmust\b/i);
+				expect(text).not.toContain("get_data_source_suggestions");
+			}
 		});
 
 		it("should return 13 tools regardless of enableSpotterDataSourceDiscovery when using latest", async () => {
@@ -304,13 +324,13 @@ describe("MCP Server", () => {
 				"send_session_message",
 				"get_session_updates",
 				"create_dashboard",
-				"modify_dashboard",
-				"get_dashboard_status",
 				"create_model_session",
 				"send_model_message",
 				"get_model_updates",
 				"finalize_model",
 				"get_data",
+				"modify_dashboard",
+				"get_dashboard_status",
 			]);
 		});
 
@@ -344,19 +364,27 @@ describe("MCP Server", () => {
 	});
 
 	describe("Data modeling privilege gate", () => {
-		const V2_TOOLS = [
+		const BASE_TOOLS = [
 			"check_connectivity",
 			"search_objects",
 			"create_analysis_session",
 			"send_session_message",
 			"get_session_updates",
 			"create_dashboard",
+		];
+		// The dashboard designer tools are appended after everything else in the latest version.
+		const DASHBOARD_DESIGNER_TOOLS = [
 			"modify_dashboard",
 			"get_dashboard_status",
 		];
+		const V2_TOOLS = [...BASE_TOOLS, ...DASHBOARD_DESIGNER_TOOLS];
 		// Base tools plus get_data, i.e. what a user with the data-download privilege
-		// (but no data-modeling privilege) sees. get_data is appended after the base set.
-		const BASE_TOOLS_WITH_DOWNLOAD = [...V2_TOOLS, "get_data"];
+		// (but no data-modeling privilege) sees.
+		const BASE_TOOLS_WITH_DOWNLOAD = [
+			...BASE_TOOLS,
+			"get_data",
+			...DASHBOARD_DESIGNER_TOOLS,
+		];
 		const MODEL_TOOLS = [
 			"create_model_session",
 			"send_model_message",
@@ -420,9 +448,10 @@ describe("MCP Server", () => {
 			const result = await listTools();
 
 			expect(result.tools?.map((t) => t.name)).toEqual([
-				...V2_TOOLS,
+				...BASE_TOOLS,
 				...MODEL_TOOLS,
 				"get_data",
+				...DASHBOARD_DESIGNER_TOOLS,
 			]);
 		});
 
@@ -2101,51 +2130,76 @@ describe("MCP Server", () => {
 		});
 	});
 
-	describe("Modify Dashboard Tool", () => {
-		function stubDashboardWork(overrides: Record<string, any> = {}) {
-			const service = {
-				createSession: vi
-					.fn()
-					.mockResolvedValue({ spotterVizSessionId: "task-1" }),
-				submitQuery: vi
-					.fn()
-					.mockResolvedValue({ streamPromise: Promise.resolve() }),
-				getUpdates: vi.fn().mockResolvedValue({
-					updates: [
-						{
-							event_type: "control.action",
-							data: { action: "lb_refresh", metadata: {} },
-						},
-						{
-							event_type: "message.end",
-							data: { status: "completed", liveboard_updated: true },
-						},
-					],
-					isDone: true,
-				}),
-				saveLiveboard: vi.fn().mockResolvedValue({
-					liveboardId: "lb-1",
-					liveboardUrl: "https://test.thoughtspot.cloud/#/pinboard/lb-1",
-				}),
-				...overrides,
-			};
-			vi.spyOn(
-				MCPServer.prototype as any,
-				"getSpotterVizService",
-			).mockResolvedValue(service);
-			vi.spyOn(
-				MCPServer.prototype as any,
-				"getStorageService",
-			).mockResolvedValue({
-				initializeConversation: vi.fn().mockResolvedValue(undefined),
-				getMetadata: vi.fn().mockResolvedValue({ liveboardId: "lb-1" }),
-				updateMetadata: vi.fn().mockResolvedValue({}),
-			});
-			return service;
-		}
+	/**
+	 * Stub the dashboard job's collaborators: a SpotterViz service whose stream yields `frames`,
+	 * and an in-memory storage that merges metadata like the Durable Object does.
+	 */
+	function stubDashboardWork(
+		opts: {
+			frames?: string[];
+			metadata?: Record<string, unknown>;
+			locked?: boolean;
+		} = {},
+	) {
+		const encoder = new TextEncoder();
+		const sse = (eventType: string, data: Record<string, unknown>) =>
+			`event: ${eventType}\ndata: ${JSON.stringify({ data })}\n\n`;
+		const frames = opts.frames ?? [
+			sse("control.action", {
+				action: "lb_refresh",
+				metadata: { new_gen_number: 3 },
+			}),
+			sse("message.end", { status: "completed", liveboard_updated: true }),
+		];
+		const service = {
+			createSession: vi.fn(async ({ taskId, existingLiveboardId }) => {
+				metadata.liveboardId = existingLiveboardId ?? "lb-new";
+				return { spotterVizSessionId: taskId };
+			}),
+			openStream: vi.fn(async () => {
+				const queue = [...frames];
+				return {
+					read: async () =>
+						queue.length > 0
+							? {
+									done: false,
+									value: encoder.encode(queue.shift() as string),
+								}
+							: { done: true, value: undefined },
+					cancel: async () => {},
+				};
+			}),
+			saveLiveboard: vi.fn(async () => ({
+				liveboardId: metadata.liveboardId,
+				liveboardUrl: `https://test.thoughtspot.cloud/#/pinboard/${metadata.liveboardId}`,
+			})),
+		};
+		const metadata: Record<string, unknown> = { ...opts.metadata };
+		const storage = {
+			metadata,
+			initializeConversation: opts.locked
+				? vi.fn().mockRejectedValue(new Error("409 already running"))
+				: vi.fn().mockResolvedValue(undefined),
+			getMetadata: vi.fn(async () => ({ ...metadata })),
+			updateMetadata: vi.fn(async (_id: string, values: object) => {
+				Object.assign(metadata, values);
+				return { ...metadata };
+			}),
+			appendMessages: vi.fn().mockResolvedValue(undefined),
+		};
+		vi.spyOn(
+			MCPServer.prototype as any,
+			"getSpotterVizService",
+		).mockResolvedValue(service);
+		vi.spyOn(MCPServer.prototype as any, "getStorageService").mockResolvedValue(
+			storage,
+		);
+		return { service, storage, sse };
+	}
 
+	describe("Modify Dashboard Tool", () => {
 		it("modifies a dashboard and reports a completed result", async () => {
-			stubDashboardWork();
+			const { service } = stubDashboardWork();
 			await server.init();
 			const { callTool } = connect(server);
 
@@ -2157,31 +2211,33 @@ describe("MCP Server", () => {
 			expect(result.isError).toBeUndefined();
 			expect(result.structuredContent.status).toBe("completed");
 			expect(result.structuredContent.changes_applied).toBe(true);
+			expect(result.structuredContent.dashboard_id).toBe("lb-1");
 			expect(result.structuredContent.dashboard_url).toContain(
 				"/#/pinboard/lb-1",
 			);
-			// `link` exists only on create_dashboard for backwards compatibility. modify's output
-			// schema is closed, so emitting it here would fail client-side validation.
+			expect(result.structuredContent.task_id).toMatch(/^[0-9a-f-]{36}$/);
 			expect(result.structuredContent).not.toHaveProperty("link");
+			expect(service.createSession).toHaveBeenCalledWith({
+				taskId: result.structuredContent.task_id,
+				existingLiveboardId: "lb-1",
+			});
+			expect(service.saveLiveboard).toHaveBeenCalledTimes(1);
+			expect(service.saveLiveboard).toHaveBeenCalledWith({
+				spotterVizSessionId: result.structuredContent.task_id,
+				generationNumber: "3",
+			});
 		});
 
-		it("surfaces a clarifying question as needs_input rather than success", async () => {
+		it("surfaces a clarifying question as needs_input in `message`", async () => {
 			// Aurora returns a perfectly successful turn that changed nothing when it needs more
 			// detail. Reporting that as completed would tell the agent the work was done.
-			stubDashboardWork({
-				getUpdates: vi.fn().mockResolvedValue({
-					updates: [
-						{
-							event_type: "message.delta",
-							data: { content: "Which data source should I use?" },
-						},
-						{
-							event_type: "message.end",
-							data: { status: "completed", liveboard_updated: false },
-						},
-					],
-					isDone: true,
-				}),
+			const sse = (eventType: string, data: Record<string, unknown>) =>
+				`event: ${eventType}\ndata: ${JSON.stringify({ data })}\n\n`;
+			const { service } = stubDashboardWork({
+				frames: [
+					sse("message.delta", { content: "Which data source should I use?" }),
+					sse("message.end", { status: "completed", liveboard_updated: false }),
+				],
 			});
 			await server.init();
 			const { callTool } = connect(server);
@@ -2192,23 +2248,58 @@ describe("MCP Server", () => {
 			});
 
 			expect(result.structuredContent.status).toBe("needs_input");
-			expect(result.structuredContent.question).toBe(
+			expect(result.structuredContent.message).toBe(
 				"Which data source should I use?",
 			);
+			expect(result.structuredContent).not.toHaveProperty("question");
 			expect(result.structuredContent.changes_applied).toBe(false);
+			expect(typeof result.structuredContent.task_id).toBe("string");
+			expect(service.saveLiveboard).not.toHaveBeenCalled();
+		});
+
+		it("continues an existing task without opening a new session", async () => {
+			const { service } = stubDashboardWork({
+				metadata: { liveboardId: "lb-1", auroraSessionId: "a-1" },
+			});
+			await server.init();
+			const { callTool } = connect(server);
+
+			const result: any = await callTool("modify_dashboard", {
+				dashboard_id: "lb-1",
+				task_id: "task-1",
+				instructions: "Use the sales model",
+			});
+
+			expect(result.structuredContent.status).toBe("completed");
 			expect(result.structuredContent.task_id).toBe("task-1");
+			expect(service.createSession).not.toHaveBeenCalled();
+			expect(service.openStream).toHaveBeenCalledWith(
+				expect.objectContaining({ taskId: "task-1" }),
+			);
+		});
+
+		it("reports a busy task as an error pointing at get_dashboard_status", async () => {
+			stubDashboardWork({
+				metadata: { liveboardId: "lb-1" },
+				locked: true,
+			});
+			await server.init();
+			const { callTool } = connect(server);
+
+			const result: any = await callTool("modify_dashboard", {
+				dashboard_id: "lb-1",
+				task_id: "task-1",
+				instructions: "Use a dark theme",
+			});
+
+			expect(result.isError).toBe(true);
+			expect(result.content[0].text).toMatch(/get_dashboard_status/);
 		});
 
 		it("refuses to continue a task that belongs to a different dashboard", async () => {
 			// Otherwise a mixed-up pair of ids would silently change the wrong dashboard.
-			stubDashboardWork();
-			vi.spyOn(
-				MCPServer.prototype as any,
-				"getStorageService",
-			).mockResolvedValue({
-				initializeConversation: vi.fn().mockResolvedValue(undefined),
-				getMetadata: vi.fn().mockResolvedValue({ liveboardId: "lb-OTHER" }),
-				updateMetadata: vi.fn().mockResolvedValue({}),
+			const { service } = stubDashboardWork({
+				metadata: { liveboardId: "lb-OTHER" },
 			});
 			await server.init();
 			const { callTool } = connect(server);
@@ -2223,18 +2314,11 @@ describe("MCP Server", () => {
 			expect(result.content[0].text).toMatch(
 				/belongs to a different dashboard/i,
 			);
+			expect(service.openStream).not.toHaveBeenCalled();
 		});
 
 		it("explains that an unresolvable task id has probably expired", async () => {
 			stubDashboardWork();
-			vi.spyOn(
-				MCPServer.prototype as any,
-				"getStorageService",
-			).mockResolvedValue({
-				initializeConversation: vi.fn().mockResolvedValue(undefined),
-				getMetadata: vi.fn().mockResolvedValue({}),
-				updateMetadata: vi.fn().mockResolvedValue({}),
-			});
 			await server.init();
 			const { callTool } = connect(server);
 
@@ -2253,53 +2337,159 @@ describe("MCP Server", () => {
 		// mcp-testing-kit's callTool, which hangs on a JSON-RPC error response.
 	});
 
+	describe("Get Dashboard Status Tool", () => {
+		it("returns the stored outcome of a finished task", async () => {
+			stubDashboardWork({
+				metadata: {
+					liveboardId: "lb-1",
+					turnOutcome: {
+						status: "completed",
+						liveboardUpdated: true,
+						text: "Added a KPI row.",
+						dashboardId: "lb-1",
+						dashboardUrl: "https://test.thoughtspot.cloud/#/pinboard/lb-1",
+					},
+				},
+			});
+			await server.init();
+			const { callTool } = connect(server);
+
+			const result: any = await callTool("get_dashboard_status", {
+				task_id: "task-1",
+			});
+
+			expect(result.structuredContent).toEqual({
+				status: "completed",
+				task_id: "task-1",
+				changes_applied: true,
+				dashboard_id: "lb-1",
+				dashboard_url: "https://test.thoughtspot.cloud/#/pinboard/lb-1",
+				message: "Added a KPI row.",
+			});
+		});
+
+		it("reports a failed task's reason in `message`", async () => {
+			stubDashboardWork({
+				metadata: {
+					turnOutcome: {
+						status: "failed",
+						liveboardUpdated: false,
+						text: "",
+						error: "It broke.",
+					},
+				},
+			});
+			await server.init();
+			const { callTool } = connect(server);
+
+			const result: any = await callTool("get_dashboard_status", {
+				task_id: "task-1",
+			});
+
+			expect(result.isError).toBeUndefined();
+			expect(result.structuredContent).toMatchObject({
+				status: "failed",
+				message: "It broke.",
+			});
+		});
+
+		it("returns an error for an unknown task", async () => {
+			stubDashboardWork();
+			await server.init();
+			const { callTool } = connect(server);
+
+			const result: any = await callTool("get_dashboard_status", {
+				task_id: "task-unknown",
+			});
+
+			expect(result.isError).toBe(true);
+			expect(result.content[0].text).toMatch(/not found/i);
+		});
+	});
+
 	describe("Create Dashboard Tool", () => {
-		it("should create dashboard successfully with valid answer_ids", async () => {
-			const mockFetchTMLAndCreateLiveboard = vi
+		const ANSWERS = [
+			{
+				answer_id: JSON.stringify({ session_id: "sess-123", gen_no: 1 }),
+				title: "Total Revenue",
+			},
+			{
+				answer_id: JSON.stringify({ session_id: "sess-456", gen_no: 2 }),
+				title: "Revenue by Region",
+			},
+		];
+
+		it("builds from answers, then organises, styles and saves by default", async () => {
+			const fetchTML = vi
 				.spyOn(ThoughtSpotService.prototype, "fetchTMLAndCreateLiveboard")
 				.mockResolvedValue({
-					url: "https://test.thoughtspot.cloud/#/pinboard/dashboard-456",
+					url: "https://test.thoughtspot.cloud/#/pinboard/lb-9",
+					liveboardId: "lb-9",
 					error: null,
 				});
+			const { service } = stubDashboardWork();
 
 			await server.init();
 			const { callTool } = connect(server);
 
-			const result = await callTool("create_dashboard", {
+			const result: any = await callTool("create_dashboard", {
 				title: "Revenue Dashboard",
-				// skip_layout is the only way to get the raw assembly now: styling is the default.
-				skip_layout: true,
-				note_tile: "<h2>Revenue Analysis</h2><p>Generated on May 5, 2026</p>",
-				answers: [
-					{
-						answer_id: JSON.stringify({ session_id: "sess-123", gen_no: 1 }),
-						title: "Total Revenue",
-					},
-					{
-						answer_id: JSON.stringify({ session_id: "sess-456", gen_no: 2 }),
-						title: "Revenue by Region",
-					},
-				],
+				answers: ANSWERS,
 			});
 
 			expect(result.isError).toBeUndefined();
-			expect((result.structuredContent as any).link).toBe(
-				"https://test.thoughtspot.cloud/#/pinboard/dashboard-456",
+			expect(result.structuredContent).toMatchObject({
+				status: "completed",
+				changes_applied: true,
+				dashboard_id: "lb-9",
+				dashboard_url: "https://test.thoughtspot.cloud/#/pinboard/lb-9",
+			});
+			expect(result.structuredContent).not.toHaveProperty("link");
+			expect(fetchTML).toHaveBeenCalledWith("Revenue Dashboard", [
+				{
+					title: "Total Revenue",
+					session_identifier: "sess-123",
+					generation_number: 1,
+				},
+				{
+					title: "Revenue by Region",
+					session_identifier: "sess-456",
+					generation_number: 2,
+				},
+			]);
+			expect(service.createSession).toHaveBeenCalledWith(
+				expect.objectContaining({ existingLiveboardId: "lb-9" }),
 			);
-			expect(mockFetchTMLAndCreateLiveboard).toHaveBeenCalledWith(
-				"Revenue Dashboard",
-				[
-					{
-						title: "Total Revenue",
-						session_identifier: "sess-123",
-						generation_number: 1,
-					},
-					{
-						title: "Revenue by Region",
-						session_identifier: "sess-456",
-						generation_number: 2,
-					},
-				],
+			expect(service.openStream).toHaveBeenCalledTimes(1);
+			// The default prompt must actually ask for grouping, tabs and coherent styling.
+			const prompt = service.openStream.mock.calls[0][0].message;
+			expect(prompt).toMatch(/arranging the answers in groups/i);
+			expect(prompt).toMatch(/create tabs if necessary/i);
+			expect(prompt).toMatch(/coherent/i);
+		});
+
+		it("creates an empty dashboard when only a design context is given", async () => {
+			const fetchTML = vi.spyOn(
+				ThoughtSpotService.prototype,
+				"fetchTMLAndCreateLiveboard",
+			);
+			const { service } = stubDashboardWork();
+
+			await server.init();
+			const { callTool } = connect(server);
+
+			const result: any = await callTool("create_dashboard", {
+				title: "From a spec",
+				design_context: "KPI row on top, then revenue by month as a line",
+			});
+
+			expect(result.structuredContent.status).toBe("completed");
+			expect(fetchTML).not.toHaveBeenCalled();
+			expect(service.createSession).toHaveBeenCalledWith(
+				expect.objectContaining({ newLiveboardName: "From a spec" }),
+			);
+			expect(service.openStream.mock.calls[0][0].message).toContain(
+				"KPI row on top",
 			);
 		});
 
@@ -2309,13 +2499,7 @@ describe("MCP Server", () => {
 
 			const result = await callTool("create_dashboard", {
 				title: "Revenue Dashboard",
-				note_tile: "<p>Summary</p>",
-				answers: [
-					{
-						answer_id: "not-valid-json",
-						title: "Total Revenue",
-					},
-				],
+				answers: [{ answer_id: "not-valid-json", title: "Total Revenue" }],
 			});
 
 			expect(result.isError).toBe(true);
@@ -2330,12 +2514,8 @@ describe("MCP Server", () => {
 
 			const result = await callTool("create_dashboard", {
 				title: "Revenue Dashboard",
-				note_tile: "<p>Summary</p>",
 				answers: [
-					{
-						answer_id: JSON.stringify({ foo: "bar" }),
-						title: "Total Revenue",
-					},
+					{ answer_id: JSON.stringify({ foo: "bar" }), title: "Total Revenue" },
 				],
 			});
 
@@ -2345,7 +2525,7 @@ describe("MCP Server", () => {
 			);
 		});
 
-		it("should return error when liveboard creation fails", async () => {
+		it("reports a failed status when the answers cannot be assembled", async () => {
 			vi.spyOn(
 				ThoughtSpotService.prototype,
 				"fetchTMLAndCreateLiveboard",
@@ -2353,138 +2533,33 @@ describe("MCP Server", () => {
 				url: undefined,
 				error: new Error("Failed to import TML"),
 			});
-
-			await server.init();
-			const { callTool } = connect(server);
-
-			const result = await callTool("create_dashboard", {
-				title: "Revenue Dashboard",
-				note_tile: "<p>Summary</p>",
-				answers: [
-					{
-						answer_id: JSON.stringify({ session_id: "sess-123", gen_no: 1 }),
-						title: "Total Revenue",
-					},
-				],
-			});
-
-			expect(result.isError).toBe(true);
-			expect((result.content as any[])[0].text).toContain(
-				"ERROR: Encountered an error while creating the dashboard",
-			);
-		});
-
-		it("should handle a single answer correctly", async () => {
-			const mockFetchTMLAndCreateLiveboard = vi
-				.spyOn(ThoughtSpotService.prototype, "fetchTMLAndCreateLiveboard")
-				.mockResolvedValue({
-					url: "https://test.thoughtspot.cloud/#/pinboard/dashboard-789",
-					error: null,
-				});
-
-			await server.init();
-			const { callTool } = connect(server);
-
-			await callTool("create_dashboard", {
-				title: "Single Answer Dashboard",
-				note_tile: "<p>One answer</p>",
-				answers: [
-					{
-						answer_id: JSON.stringify({ session_id: "sess-999", gen_no: 3 }),
-						title: "Key Metric",
-					},
-				],
-			});
-
-			expect(mockFetchTMLAndCreateLiveboard).toHaveBeenCalledWith(
-				"Single Answer Dashboard",
-				[
-					{
-						title: "Key Metric",
-						session_identifier: "sess-999",
-						generation_number: 3,
-					},
-				],
-			);
-		});
-
-		it("organises and styles by default when only answers are given", async () => {
-			// Regression guard: answers with no design_context used to return the raw uniform grid,
-			// which silently dropped the styling the previous tool set got via its own follow-up
-			// call. Styling is now the default and must run without the agent asking for it.
-			vi.spyOn(
-				ThoughtSpotService.prototype,
-				"fetchTMLAndCreateLiveboard",
-			).mockResolvedValue({
-				url: "https://test.thoughtspot.cloud/#/pinboard/lb-9",
-				liveboardId: "lb-9",
-				error: null,
-			});
-			const submitQuery = vi
-				.fn()
-				.mockResolvedValue({ streamPromise: Promise.resolve() });
-			vi.spyOn(
-				MCPServer.prototype as any,
-				"getSpotterVizService",
-			).mockResolvedValue({
-				createSession: vi
-					.fn()
-					.mockResolvedValue({ spotterVizSessionId: "task-9" }),
-				submitQuery,
-				getUpdates: vi.fn().mockResolvedValue({
-					updates: [
-						{
-							event_type: "control.action",
-							data: { action: "lb_refresh", metadata: {} },
-						},
-						{
-							event_type: "message.end",
-							data: { status: "completed", liveboard_updated: true },
-						},
-					],
-					isDone: true,
-				}),
-				saveLiveboard: vi.fn().mockResolvedValue({
-					liveboardId: "lb-9",
-					liveboardUrl: "https://test.thoughtspot.cloud/#/pinboard/lb-9",
-				}),
-			});
-			vi.spyOn(
-				MCPServer.prototype as any,
-				"getStorageService",
-			).mockResolvedValue({
-				initializeConversation: vi.fn().mockResolvedValue(undefined),
-				getMetadata: vi.fn().mockResolvedValue({ liveboardId: "lb-9" }),
-				updateMetadata: vi.fn().mockResolvedValue({}),
-			});
+			const { service, storage } = stubDashboardWork();
 
 			await server.init();
 			const { callTool } = connect(server);
 
 			const result: any = await callTool("create_dashboard", {
-				title: "Sales Overview",
-				answers: [
-					{
-						answer_id: JSON.stringify({ session_id: "s1", gen_no: 1 }),
-						title: "Sales by Region",
-					},
-				],
+				title: "Revenue Dashboard",
+				answers: ANSWERS.slice(0, 1),
 			});
 
 			expect(result.isError).toBeUndefined();
-			expect(result.structuredContent.status).toBe("completed");
-			expect(result.structuredContent.changes_applied).toBe(true);
-			expect(submitQuery).toHaveBeenCalledTimes(1);
-			// The default prompt must actually ask for grouping, tabs and coherent styling.
-			const prompt = submitQuery.mock.calls[0][0].message;
-			expect(prompt).toMatch(/arranging the answers in groups/i);
-			expect(prompt).toMatch(/create tabs if necessary/i);
-			expect(prompt).toMatch(/coherent/i);
+			expect(result.structuredContent.status).toBe("failed");
+			expect(result.structuredContent.message).toContain(
+				"Failed to import TML",
+			);
+			expect(service.openStream).not.toHaveBeenCalled();
+			// The task lock is released even though setup failed.
+			expect(storage.appendMessages).toHaveBeenCalledWith(
+				result.structuredContent.task_id,
+				[],
+				true,
+			);
 		});
 
 		it("ignores a note_tile from an older caller instead of failing", async () => {
-			// note_tile was removed from this tool. Zod strips unknown keys rather than erroring,
-			// so a client still sending it keeps working, just without a note tile.
+			// note_tile is not part of the latest tool. Zod strips unknown keys rather than
+			// erroring, so a client still sending it keeps working, just without a note tile.
 			const spy = vi
 				.spyOn(ThoughtSpotService.prototype, "fetchTMLAndCreateLiveboard")
 				.mockResolvedValue({
@@ -2492,6 +2567,7 @@ describe("MCP Server", () => {
 					liveboardId: "dash-1",
 					error: null,
 				});
+			stubDashboardWork();
 
 			await server.init();
 			const { callTool } = connect(server);
@@ -2511,6 +2587,87 @@ describe("MCP Server", () => {
 			expect(spy).toHaveBeenCalledWith("Legacy Caller", [
 				{ title: "A", session_identifier: "s", generation_number: 1 },
 			]);
+		});
+
+		describe("on api-version 2026-10-02 (legacy create_dashboard)", () => {
+			function legacyServer() {
+				return new MCPServer({
+					props: { ...mockProps, apiVersion: "2026-10-02" },
+					env: {} as any,
+				});
+			}
+
+			it("lists the original create_dashboard and no designer tools", async () => {
+				const legacy = legacyServer();
+				await legacy.init();
+				const { listTools } = connect(legacy);
+
+				const tools = (await listTools()).tools ?? [];
+				const names = tools.map((t) => t.name);
+				expect(names).toContain("create_dashboard");
+				expect(names).not.toContain("modify_dashboard");
+				expect(names).not.toContain("get_dashboard_status");
+				const create = tools.find((t) => t.name === "create_dashboard") as any;
+				expect(Object.keys(create.inputSchema.properties)).toContain(
+					"note_tile",
+				);
+				expect(Object.keys(create.outputSchema.properties)).toEqual(["link"]);
+			});
+
+			it("assembles the answers with the note tile and returns a link, with no design pass", async () => {
+				const fetchTML = vi
+					.spyOn(ThoughtSpotService.prototype, "fetchTMLAndCreateLiveboard")
+					.mockResolvedValue({
+						url: "https://test.thoughtspot.cloud/#/pinboard/dashboard-456",
+						error: null,
+					});
+				const { service } = stubDashboardWork();
+				const legacy = legacyServer();
+				await legacy.init();
+				const { callTool } = connect(legacy);
+
+				const result: any = await callTool("create_dashboard", {
+					title: "Revenue Dashboard",
+					note_tile: "<h2>Revenue Analysis</h2>",
+					answers: ANSWERS,
+				});
+
+				expect(result.isError).toBeUndefined();
+				expect(result.structuredContent).toEqual({
+					link: "https://test.thoughtspot.cloud/#/pinboard/dashboard-456",
+				});
+				expect(fetchTML).toHaveBeenCalledWith(
+					"Revenue Dashboard",
+					expect.any(Array),
+					"<h2>Revenue Analysis</h2>",
+				);
+				expect(service.createSession).not.toHaveBeenCalled();
+				expect(service.openStream).not.toHaveBeenCalled();
+			});
+
+			it("returns an error when liveboard creation fails", async () => {
+				vi.spyOn(
+					ThoughtSpotService.prototype,
+					"fetchTMLAndCreateLiveboard",
+				).mockResolvedValue({
+					url: undefined,
+					error: new Error("Failed to import TML"),
+				});
+				const legacy = legacyServer();
+				await legacy.init();
+				const { callTool } = connect(legacy);
+
+				const result = await callTool("create_dashboard", {
+					title: "Revenue Dashboard",
+					note_tile: "<p>Summary</p>",
+					answers: ANSWERS.slice(0, 1),
+				});
+
+				expect(result.isError).toBe(true);
+				expect((result.content as any[])[0].text).toContain(
+					"ERROR: Encountered an error while creating the dashboard",
+				);
+			});
 		});
 	});
 

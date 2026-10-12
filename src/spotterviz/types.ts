@@ -23,15 +23,11 @@ export interface AuroraSessionContext extends Record<string, unknown> {
 	generationNumber: string;
 	liveboardId?: string;
 	liveboardName?: string;
-	/**
-	 * Number of `get_updates` calls already issued for the current turn. Drives the per-call wait
-	 * backoff. Reset to 0 whenever a turn is observed to be done and whenever a new turn starts via
-	 * `submitQuery`. Absent means "not yet polled" (effectively 0).
-	 */
-	pollCount?: number;
 }
 
 export interface CreateSpotterVizSessionParams {
+	/** The dashboard task this session belongs to; also the storage key for its state. */
+	taskId: string;
 	newLiveboardName?: string;
 	existingLiveboardId?: string;
 }
@@ -56,26 +52,10 @@ export interface SpotterVizEvent extends Record<string, unknown> {
 	heading?: string | null;
 }
 
-export interface SubmitSpotterVizQueryParams {
-	spotterVizSessionId: string;
-	message: string;
-}
-
-export interface SubmitSpotterVizQueryResult {
-	success: true;
-}
-
-export interface GetSpotterVizUpdatesParams {
-	spotterVizSessionId: string;
-}
-
-export interface GetSpotterVizUpdatesResult {
-	updates: SpotterVizEvent[];
-	isDone: boolean;
-}
-
 export interface SaveSpotterVizLiveboardParams {
 	spotterVizSessionId: string;
+	/** Generation to commit. Falls back to the stored one when the turn saw no refresh. */
+	generationNumber?: string;
 }
 
 export interface SaveSpotterVizLiveboardResult {
