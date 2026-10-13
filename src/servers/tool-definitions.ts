@@ -229,7 +229,7 @@ export const GetDataInputSchema = z.object({
 		.array(z.string())
 		.optional()
 		.describe(
-			"When `object_id` corresponds to a Liveboard, restrict the fetch to these visualization GUIDs (use to pull a single visualization/answer pinned on a Liveboard). Omit to fetch every visualization on the Liveboard. Ignored for standalone Answers.",
+			"When `object_id` corresponds to a Liveboard, restrict the fetch to these visualization GUIDs (use to pull a single visualization/answer pinned on a Liveboard). Omit to fetch as many of the Liveboard's visualizations as fit within the time limit. Ignored for standalone Answers.",
 		),
 	max_rows: z
 		.number()
@@ -1047,7 +1047,7 @@ const getDataToolDefinition = {
 		"Fetch the full data (columns and rows) of a saved Answer or Liveboard, identified by its GUID — typically an object found via `search_objects`. Use this to explain, describe, summarize, analyze, or interpret what a ThoughtSpot object, Liveboard, Answer, or visualization actually shows.",
 		"When the user wants to explain, describe, summarize, analyze, or interpret what a specific object contains or shows, an accurate answer comes from this tool's data, so you should fetch it first with the object's `id` and answer from the returned rows.",
 		"Runs the object's saved question (its existing filters and columns, unchanged) against the current data and returns the result, so the rows reflect the latest data and may differ from when the object was first saved. The result is shaped to the object's type: an Answer returns a single tabular result, a Liveboard returns one tabular result per visualization (each with its visualization id and name). To pull a single visualization pinned on a Liveboard, pass the Liveboard GUID as `object_id` and the visualization GUID in `visualization_ids`. Each result includes the column names and data rows. Use the optional `max_rows` to bound the rows returned per visualization (defaults to 25).",
-		"A whole-Liveboard fetch on a large Liveboard may return only some of its visualizations (those that load within the time limit). To fetch a specific visualization not among them, pass its GUID in `visualization_ids`.",
+		"Liveboard fetches are time-bound: they return as many visualizations as can be fetched within the time limit, so not every requested visualization is guaranteed to come back, even when `visualization_ids` is given. A typical call handles about 25 visualizations. If a visualization you need is missing from the result, request it by GUID in a follow-up call. If `visualization_ids` is omitted, the call returns as many of the Liveboard's visualizations as fit within the time limit.",
 	].join("\n"),
 	inputSchema: z.toJSONSchema(GetDataInputSchema),
 	outputSchema: z.toJSONSchema(GetDataOutputSchema),
