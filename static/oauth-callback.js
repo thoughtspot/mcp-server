@@ -1,6 +1,6 @@
 // Immediately invoke the async function
 (async function() {
-    const oauthReqInfo = JSON.parse(document.getElementById('oauth-req-info').textContent);
+    const oauthFlow = JSON.parse(document.getElementById('oauth-flow').textContent);
     
     // Ensure manual section is hidden initially
     const manualSection = document.getElementById('manual-token-section');
@@ -9,12 +9,12 @@
     manualSection.style.display = 'none';
 
     try {
-        // Check if INSTANCE_URL is available and valid
-        if (!window.INSTANCE_URL) {
+        // Check the instance URL is available
+        if (!oauthFlow.instanceUrl) {
             throw new Error('Instance URL not available. Please ensure you accessed this page through the proper OAuth flow.');
         }
 
-        const base = new URL(window.INSTANCE_URL);
+        const base = new URL(oauthFlow.instanceUrl);
         if (!base.pathname.endsWith('/')) {
             base.pathname += '/';
         }
@@ -106,15 +106,13 @@
                             },
                             body: JSON.stringify({ 
                                 token: tokenData,
-                                oauthReqInfo: oauthReqInfo,
-                                instanceUrl: window.INSTANCE_URL
+                                state: oauthFlow.state
                             })
                         });
-                        const responseData = await storeResponse.json();
                         if (!storeResponse.ok) {
-                            const errorText = await storeResponse.text();
-                            throw new Error(`Failed to store token (Status: ${storeResponse.status}): ${errorText}`);
+                            throw new Error(await storeResponse.text());
                         }
+                        const responseData = await storeResponse.json();
                         window.location.href = responseData.redirectTo;
                     } catch (err) {
                         document.getElementById('status').textContent = err.message;
@@ -155,16 +153,13 @@
             },
             body: JSON.stringify({ 
                 token: data,
-                oauthReqInfo: oauthReqInfo,
-                instanceUrl: window.INSTANCE_URL
+                state: oauthFlow.state
             })
         });
-        const responseData = await storeResponse.json();
-
         if (!storeResponse.ok) {
-            const errorText = await storeResponse.text();
-            throw new Error(`Failed to store token (Status: ${storeResponse.status}): ${errorText}`);
+            throw new Error(await storeResponse.text());
         }
+        const responseData = await storeResponse.json();
 
         window.location.href = responseData.redirectTo;
         
