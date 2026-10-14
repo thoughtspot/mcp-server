@@ -10,6 +10,20 @@ import type {
 // Keep in sync with the `max_rows` description in tool-definitions.ts.
 export const GET_DATA_DEFAULT_MAX_ROWS = 25;
 
+// Max liveboard/data requests in flight; under the Worker's 6 concurrent-
+// connection limit.
+export const GET_DATA_VIZ_CONCURRENCY = 5;
+
+// Vizzes per liveboard/data request.
+export const GET_DATA_VIZ_BATCH_SIZE = 5;
+
+// Fetches still pending after this are aborted and whatever finished is
+// returned; a whole big board would exceed client/edge timeouts (524).
+export const GET_DATA_TIMEOUT_MS = 30_000;
+
+// Answer-backed tiles; notes/filters 400 the data call ("Invalid vizId").
+const ANSWER_VIZ_TYPES = new Set(["TABLE", "CHART"]);
+
 // "Unbounded" record_size for Liveboards (int32 max; they 500 if it can't hold
 // the whole viz). Pulls the full viz into memory then caps client-side — don't
 // lower to bound memory without verifying the endpoint honors a smaller value.
@@ -113,6 +127,102 @@ function mapContents(
 	});
 }
 
+// List a Liveboard's visualization GUIDs (in board order) via one metadata call,
+// so a whole-board fetch can be bounded to the first N instead of pulling every
+// viz. Returns [] if the board exposes no viz headers.
+async function listLiveboardVizIds(
+	instanceUrl: string,
+	headers: Record<string, string>,
+	objectId: string,
+): Promise<string[]> {
+	const result = await postJson(
+		`${instanceUrl}/api/rest/2.0/metadata/search`,
+		headers,
+		{
+			metadata: [{ identifier: objectId, type: LIVEBOARD_TYPE }],
+			include_visualization_headers: true,
+		},
+		"getData failed to list liveboard visualizations",
+	);
+	const vizHeaders: unknown[] = result?.[0]?.visualization_headers ?? [];
+	return (vizHeaders as { id?: unknown; vizType?: unknown }[])
+		.filter((vh) => ANSWER_VIZ_TYPES.has(vh?.vizType as string))
+		.map((vh) => vh.id)
+		.filter((id): id is string => typeof id === "string" && id.length > 0);
+}
+
+// Fetch Liveboard vizzes in batches through a pool of workers: each picks the
+// next batch as soon as its last one lands, until the deadline aborts the rest.
+// Returns what finished (board order); throws only if nothing did.
+async function fetchVizPool(
+	url: string,
+	headers: Record<string, string>,
+	body: Record<string, unknown>,
+	vizIds: string[],
+): Promise<RawDataContent[]> {
+	const batches: string[][] = [];
+	for (let i = 0; i < vizIds.length; i += GET_DATA_VIZ_BATCH_SIZE) {
+		batches.push(vizIds.slice(i, i + GET_DATA_VIZ_BATCH_SIZE));
+	}
+	const fetched: RawDataContent[][] = new Array(batches.length);
+	const errors: unknown[] = [];
+	const controller = new AbortController();
+	const timer = setTimeout(() => controller.abort(), GET_DATA_TIMEOUT_MS);
+	const startedAt = Date.now();
+	let next = 0;
+
+	const worker = async () => {
+		while (next < batches.length && !controller.signal.aborted) {
+			const i = next++;
+			try {
+				const data = await postJson(
+					url,
+					headers,
+					{
+						...body,
+						visualization_identifiers: batches[i],
+						record_size: LIVEBOARD_RECORD_SIZE,
+					},
+					"getData failed",
+					controller.signal,
+				);
+				fetched[i] = data?.contents ?? [];
+			} catch (error) {
+				const timedOut = controller.signal.aborted;
+				console.error(
+					`getData: batch ${i + 1}/${batches.length} ${timedOut ? "timed out" : "failed"} after ${Date.now() - startedAt}ms`,
+					error instanceof Error ? error.message : String(error),
+				);
+				errors.push(
+					timedOut
+						? new Error(
+								`getData timed out after ${GET_DATA_TIMEOUT_MS / 1000}s waiting for ThoughtSpot`,
+							)
+						: error,
+				);
+			}
+		}
+	};
+
+	try {
+		await Promise.all(
+			Array.from(
+				{ length: Math.min(GET_DATA_VIZ_CONCURRENCY, batches.length) },
+				worker,
+			),
+		);
+	} finally {
+		clearTimeout(timer);
+	}
+
+	// filter() skips the holes left by failed/unfetched batches.
+	const done = fetched.filter(Boolean);
+	if (!done.length) {
+		throw errors[0];
+	}
+	return done.flat();
+}
+
 // Custom handler: the rest-api-sdk has no single call that resolves a GUID's
 // type and fetches its data from the matching endpoint.
 export function addGetData(client: any, instanceUrl: string, token: string) {
@@ -140,9 +250,22 @@ export function addGetData(client: any, instanceUrl: string, token: string) {
 			objectType === LIVEBOARD_VIZ_TYPE
 		) {
 			endpoint = "/api/rest/2.0/metadata/liveboard/data";
-			// Omitting visualization_identifiers fetches every viz on the board.
 			if (vizIds?.length) {
+				// Caller scoped the fetch to specific vizzes.
 				body.visualization_identifiers = vizIds;
+			} else {
+				// Whole-board request: enumerate the vizzes so the pool can fetch them
+				// in batches; one unscoped call on a big board times out (524). Fall back
+				// to it only if enumeration returns nothing or itself fails.
+				let allVizIds: string[] = [];
+				try {
+					allVizIds = await listLiveboardVizIds(instanceUrl, headers, objectId);
+				} catch (error) {
+					console.error("getData: liveboard viz enumeration failed", error);
+				}
+				if (allVizIds.length) {
+					body.visualization_identifiers = allVizIds;
+				}
 			}
 		} else {
 			throw new Error(
@@ -150,12 +273,19 @@ export function addGetData(client: any, instanceUrl: string, token: string) {
 			);
 		}
 
+		const url = `${instanceUrl}${endpoint}`;
+		const scopedVizIds = body.visualization_identifiers as string[] | undefined;
+		if (scopedVizIds?.length) {
+			const contents = await fetchVizPool(url, headers, body, scopedVizIds);
+			return { data: mapContents(contents, maxRows) };
+		}
+
 		// Answers cap rows via record_size; Liveboards need the whole viz, capped
 		// client-side in mapContents.
 		const recordSize =
 			objectType === ANSWER_TYPE ? maxRows : LIVEBOARD_RECORD_SIZE;
 		const data = await postJson(
-			`${instanceUrl}${endpoint}`,
+			url,
 			headers,
 			{ ...body, record_size: recordSize },
 			"getData failed",
