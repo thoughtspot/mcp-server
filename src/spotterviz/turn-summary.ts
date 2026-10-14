@@ -1,0 +1,271 @@
+/**
+ * Derives a single, agent-facing outcome from an Aurora SSE event log.
+ *
+ * The wire protocol makes several distinct outcomes look alike, so this is deliberately explicit
+ * about which signal means what:
+ *
+ * - `message.end.data.status` is the authoritative turn outcome ("completed" | "error").
+ * - `message.end.data.liveboard_updated` only reports whether a `control.action`/`lb_refresh`
+ *   fired, i.e. whether Aurora actually published. On Aurora's error path it is hardcoded false,
+ *   so `false` alone cannot distinguish "nothing to do" from "failed after publishing".
+ * - Aurora is prompted to behave as a collaborative assistant and to ask rather than infer
+ *   (notably it refuses to pick a data source on its own). A clarifying question therefore
+ *   arrives as a perfectly successful turn that changed nothing, plus assistant text. Reporting
+ *   that as success would tell the calling agent the dashboard was built when it was not, so it
+ *   is surfaced as its own `needs_input` outcome.
+ *
+ * `TurnProgress` is folded as events stream in and stored with the task, so it stays derived and
+ * bounded rather than holding the raw event list, which would not fit a DO value on a long turn.
+ */
+
+import type { SpotterVizEvent } from "./types";
+
+export type TurnStatus = "completed" | "needs_input" | "failed";
+
+export interface TurnChoice {
+	text: string;
+	allowMultiple: boolean;
+	choices: string[];
+}
+
+/** Running state for a turn, folded from its events. Safe to store in DO metadata. */
+export interface TurnProgress extends Record<string, unknown> {
+	text: string;
+	/** What Aurora is doing now (the running tool, or a heading), for progress updates. */
+	currentStep?: string;
+	/** Aurora's latest explanation of what it is about to do, for progress updates. */
+	lastReasoning?: string;
+	/** True once any `lb_refresh` has been seen, i.e. Aurora published. */
+	sawRefresh: boolean;
+	/** First error message seen, if any. */
+	error?: string;
+	/** `message.end.data.status`, once the terminal event has arrived. */
+	endStatus?: string;
+	/** `message.end.data.liveboard_updated`, once the terminal event has arrived. */
+	endLiveboardUpdated?: boolean;
+	choice?: TurnChoice;
+}
+
+export interface TurnSummary {
+	status: TurnStatus;
+	/** True when Aurora published at least once during the turn. */
+	liveboardUpdated: boolean;
+	/** Assistant prose for the turn, concatenated in event order. */
+	text: string;
+	/** Present when status is "needs_input": what Aurora is asking for. */
+	question?: string;
+	/** Present when Aurora offered an explicit picker alongside its question. */
+	choice?: TurnChoice;
+	/** Present when status is "failed". */
+	error?: string;
+}
+
+// Aurora prefixes some deltas with a machine-readable generation-number comment; it is metadata
+// for the UI, not prose meant for a person.
+const GEN_NO_COMMENT = /<!--\s*gen_no:\s*[^>]*-->/g;
+
+/** Keeps accumulated prose inside a DO value limit on a long or chatty turn. */
+const MAX_TEXT_CHARS = 8_000;
+
+function asRecord(value: unknown): Record<string, unknown> {
+	return value && typeof value === "object"
+		? (value as Record<string, unknown>)
+		: {};
+}
+
+function extractChoice(data: Record<string, unknown>): TurnChoice | undefined {
+	const choices = data.choices;
+	if (!Array.isArray(choices) || choices.length === 0) return undefined;
+	return {
+		text: typeof data.text === "string" ? data.text : "",
+		allowMultiple: data.allow_multiple === true,
+		choices: choices.map((choice) =>
+			typeof choice === "string" ? choice : JSON.stringify(choice),
+		),
+	};
+}
+
+/** Longest single progress line. */
+const MAX_STEP_CHARS = 300;
+
+/** Pull up to `limit` short labels (queries, titles, names) out of a tool card's data. */
+function cardLabels(value: unknown, limit = 5, out: string[] = []): string[] {
+	if (out.length >= limit || value == null) return out;
+	if (Array.isArray(value)) {
+		for (const item of value) cardLabels(item, limit, out);
+		return out;
+	}
+	if (typeof value === "object") {
+		const record = value as Record<string, unknown>;
+		for (const key of ["query", "question", "title", "name", "display_name"]) {
+			const v = record[key];
+			if (typeof v === "string" && v.trim() && out.length < limit) {
+				out.push(v.replace(/^\s*\[[^\]]*\]\s*/, "").trim());
+				break;
+			}
+		}
+		for (const [key, v] of Object.entries(record)) {
+			if (typeof v === "object") cardLabels(v, limit, out);
+			if (out.length >= limit) break;
+			void key;
+		}
+	}
+	return out;
+}
+
+/**
+ * The most useful description of a progress event, as SpotterViz shows it in its own UI: the
+ * agent's reasoning when it explains its next step, otherwise what the running tool is working
+ * on (its card), otherwise the bare heading. Returns undefined for events with nothing to say.
+ */
+function describeProgress(
+	event: SpotterVizEvent,
+	data: Record<string, unknown>,
+): { kind: "reasoning" | "tool" | "heading"; text: string } | undefined {
+	const clip = (text: string) =>
+		text.length > MAX_STEP_CHARS ? `${text.slice(0, MAX_STEP_CHARS)}…` : text;
+	if (data.stage === "reasoning" && typeof data.message === "string") {
+		const reasoning = data.message.trim();
+		// Aurora's placeholder ("Analysing...") would replace a real sentence; skip it.
+		if (reasoning && !/^analy[sz]ing\W*$/i.test(reasoning)) {
+			return { kind: "reasoning", text: clip(reasoning) };
+		}
+	}
+	if (typeof data.card_heading === "string" && data.card_heading.trim()) {
+		const labels = cardLabels(data.card_data);
+		const status = data.tool_status === "completed" ? " (done)" : "";
+		return {
+			kind: "tool",
+			text: clip(
+				`${data.card_heading.trim()}${status}${labels.length ? `: ${labels.join(" · ")}` : ""}`,
+			),
+		};
+	}
+	if (data.stage === "tool_execution" && typeof data.message === "string") {
+		const message = data.message.trim();
+		if (message) return { kind: "tool", text: clip(message) };
+	}
+	const heading =
+		(typeof event.heading === "string" && event.heading.trim()) ||
+		(typeof data.message === "string" && data.message.trim());
+	return heading ? { kind: "heading", text: clip(heading) } : undefined;
+}
+
+/**
+ * Fold a freshly drained batch of events into the running progress for a turn.
+ */
+export function accumulateProgress(
+	prior: TurnProgress | undefined,
+	events: SpotterVizEvent[],
+): TurnProgress {
+	const next: TurnProgress = {
+		text: prior?.text ?? "",
+		currentStep: prior?.currentStep,
+		lastReasoning: prior?.lastReasoning,
+		sawRefresh: prior?.sawRefresh ?? false,
+		error: prior?.error,
+		endStatus: prior?.endStatus,
+		endLiveboardUpdated: prior?.endLiveboardUpdated,
+		choice: prior?.choice,
+	};
+
+	for (const event of events) {
+		const data = asRecord(event.data);
+
+		switch (event.event_type) {
+			case "message.delta": {
+				// Assistant prose arrives as `content` (TextDelta) or `text` (ChoiceDelta).
+				const chunk = data.content ?? data.text;
+				if (typeof chunk === "string" && chunk.length > 0) {
+					next.text = (next.text + chunk).slice(0, MAX_TEXT_CHARS);
+				}
+				next.choice = next.choice ?? extractChoice(data);
+				break;
+			}
+			case "meta.progress": {
+				const described = describeProgress(event, data);
+				if (described?.kind === "reasoning") {
+					next.lastReasoning = described.text;
+				} else if (described?.kind === "tool") {
+					next.currentStep = described.text;
+				} else if (described && !next.currentStep && !next.lastReasoning) {
+					// Bare headings ("Working...") only when there is nothing better yet: Aurora sends
+					// one after nearly every tool, and letting it overwrite would hide the real work.
+					next.currentStep = described.text;
+				}
+				break;
+			}
+			case "control.action": {
+				// Aurora can publish more than once per turn; any lb_refresh means the liveboard moved.
+				if (data.action === "lb_refresh") {
+					next.sawRefresh = true;
+				}
+				break;
+			}
+			case "meta.error": {
+				if (!next.error && typeof data.message === "string") {
+					next.error = data.message;
+				}
+				// An error event with no usable message still marks the turn as failed.
+				next.error = next.error ?? "The dashboard agent stopped with an error.";
+				break;
+			}
+			case "message.end": {
+				if (typeof data.status === "string") {
+					next.endStatus = data.status;
+				}
+				next.endLiveboardUpdated = data.liveboard_updated === true;
+				break;
+			}
+			default:
+				break;
+		}
+	}
+
+	return next;
+}
+
+/**
+ * Decide the outcome of a finished turn from its accumulated progress.
+ */
+export function summarizeProgress(progress: TurnProgress): TurnSummary {
+	const text = progress.text.replace(GEN_NO_COMMENT, "").trim();
+	const liveboardUpdated =
+		progress.sawRefresh || progress.endLiveboardUpdated === true;
+
+	if (progress.error || progress.endStatus === "error") {
+		return {
+			status: "failed",
+			liveboardUpdated,
+			text,
+			error: progress.error ?? "The dashboard agent stopped with an error.",
+		};
+	}
+
+	// The turn ran cleanly but changed nothing. If Aurora said something, it is asking us for
+	// something; treat it as a question rather than reporting a success that did not happen.
+	if (!liveboardUpdated && (text.length > 0 || progress.choice)) {
+		return {
+			status: "needs_input",
+			liveboardUpdated: false,
+			text,
+			question: text.length > 0 ? text : progress.choice?.text,
+			choice: progress.choice,
+		};
+	}
+
+	// Nothing published and nothing said. Observed on large requests: the designer works for
+	// several minutes, then closes the stream having created nothing, with no error event. There
+	// is no sense in which that succeeded, so do not let it read as success to a calling agent.
+	if (!liveboardUpdated) {
+		return {
+			status: "failed",
+			liveboardUpdated: false,
+			text,
+			error:
+				"The dashboard designer finished without making any changes and without saying why. This has been seen on large requests; try again with fewer charts, or split the request into a smaller create followed by modifications.",
+		};
+	}
+
+	return { status: "completed", liveboardUpdated, text };
+}

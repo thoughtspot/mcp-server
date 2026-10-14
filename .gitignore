@@ -146,3 +146,6 @@ key.pem
 
 # MacOS metadata
 .DS_Store
+
+# Local-only wrangler config for personal-account deploys
+wrangler.local*.jsonc

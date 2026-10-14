@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { STORAGE_CALL_TIMEOUT_MS } from "../../src/spotterviz/timeouts";
 import { StorageServiceClient } from "../../src/storage-service/storage-service";
 import type {
 	Message,
@@ -260,6 +261,150 @@ describe("StorageServiceClient", () => {
 	});
 
 	// -------------------------------------------------------------------------
+	// getMetadata
+	// -------------------------------------------------------------------------
+
+	// getMetadata / updateMetadata sit on the shared `/state` slot (putSessionState /
+	// getSessionState) rather than a dedicated route, so these assert that contract.
+
+	/**
+	 * Stateful stub: GET /state returns whatever was last POSTed (or `initial`), and every request
+	 * is recorded. The shared mock only remembers one canned body, which cannot express the
+	 * read-then-write that updateMetadata does.
+	 */
+	function makeStateStub(initial: unknown = null, failStatus?: number) {
+		let stored: unknown = initial;
+		const requests: { method: string; url: string; body: unknown }[] = [];
+		const stub = {
+			fetch: vi.fn(async (input: RequestInfo, init?: RequestInit) => {
+				const req = new Request(input, init);
+				const text = req.method === "GET" ? "" : await req.text();
+				requests.push({
+					method: req.method,
+					url: req.url,
+					body: text ? JSON.parse(text) : undefined,
+				});
+				if (failStatus) {
+					return new Response("Conversation not found", { status: failStatus });
+				}
+				if (req.method === "POST") {
+					stored = JSON.parse(text);
+					return Response.json({ ok: true });
+				}
+				return Response.json(stored);
+			}),
+		} as unknown as DurableObjectStub;
+		const ns = {
+			idFromName: vi.fn(
+				() => ({ toString: () => "stub-id" }) as DurableObjectId,
+			),
+			get: vi.fn(() => stub),
+		} as unknown as DurableObjectNamespace;
+		return {
+			client: new StorageServiceClient(ns, TOKEN_HASH),
+			requests,
+			stored: () => stored,
+		};
+	}
+
+	const STATE_URL = `https://internal/storage/${CONVERSATION_ID}/state`;
+
+	describe("getMetadata", () => {
+		it("reads the session's /state slot", async () => {
+			const { client, requests } = makeStateStub({ foo: "bar" });
+
+			await client.getMetadata(CONVERSATION_ID);
+
+			expect(requests).toHaveLength(1);
+			expect(requests[0].method).toBe("GET");
+			expect(requests[0].url).toBe(STATE_URL);
+		});
+
+		it("returns the stored state", async () => {
+			const state = { foo: "bar", count: 7, nested: { a: 1 } };
+			const { client } = makeStateStub(state);
+
+			expect(await client.getMetadata(CONVERSATION_ID)).toEqual(state);
+		});
+
+		it("throws when no state has been stored", async () => {
+			// Callers treat a missing session as an error (e.g. submitting to an expired task), so an
+			// empty slot must not come back as a silently empty object.
+			const { client } = makeStateStub(null);
+
+			await expect(client.getMetadata(CONVERSATION_ID)).rejects.toThrow(
+				`No session state stored for ${CONVERSATION_ID}`,
+			);
+		});
+
+		it("throws with status and body when the server returns a non-ok status", async () => {
+			const { client } = makeStateStub(null, 404);
+
+			await expect(client.getMetadata(CONVERSATION_ID)).rejects.toThrow(
+				/Failed to get session state \(404\).*Conversation not found/,
+			);
+		});
+	});
+
+	describe("updateMetadata", () => {
+		it("reads the current state, then writes the shallow-merged result", async () => {
+			const { client, requests } = makeStateStub({ existing: 1, count: 2 });
+
+			await client.updateMetadata(CONVERSATION_ID, {
+				count: 5,
+				status: "active",
+			});
+
+			expect(requests.map((r) => r.method)).toEqual(["GET", "POST"]);
+			expect(requests.every((r) => r.url === STATE_URL)).toBe(true);
+			expect(requests[1].body).toEqual({
+				existing: 1,
+				count: 5,
+				status: "active",
+			});
+		});
+
+		it("returns the merged state", async () => {
+			const { client } = makeStateStub({ existing: 1 });
+
+			const result = await client.updateMetadata(CONVERSATION_ID, { count: 5 });
+
+			expect(result).toEqual({ existing: 1, count: 5 });
+		});
+
+		it("starts from an empty object when nothing is stored yet", async () => {
+			const { client, stored } = makeStateStub(null);
+
+			await client.updateMetadata(CONVERSATION_ID, { first: true });
+
+			expect(stored()).toEqual({ first: true });
+		});
+
+		it("preserves keys it was not asked to change across successive patches", async () => {
+			// The SSE drain patches generationNumber while the orchestrator patches turn state on
+			// the same session; sequential patches must not clobber each other's keys.
+			const { client, stored } = makeStateStub({ liveboardId: "lb-1" });
+
+			await client.updateMetadata(CONVERSATION_ID, { generationNumber: "7" });
+			await client.updateMetadata(CONVERSATION_ID, { pollCount: 2 });
+
+			expect(stored()).toEqual({
+				liveboardId: "lb-1",
+				generationNumber: "7",
+				pollCount: 2,
+			});
+		});
+
+		it("throws when the server returns a non-ok status", async () => {
+			const { client } = makeStateStub(null, 404);
+
+			await expect(
+				client.updateMetadata(CONVERSATION_ID, { foo: "bar" }),
+			).rejects.toThrow("Failed to get session state (404)");
+		});
+	});
+
+	// -------------------------------------------------------------------------
 	// DO instance keying — accessTokenHashUrlSafe isolation
 	// -------------------------------------------------------------------------
 
@@ -392,6 +537,70 @@ describe("StorageServiceClient", () => {
 			await expect(client.getSessionState(CONVERSATION_ID)).rejects.toThrow(
 				"Failed to get session state (500): nope",
 			);
+		});
+	});
+
+	describe("time limits and connection hygiene", () => {
+		function namespaceWith(stubFetch: ReturnType<typeof vi.fn>) {
+			return {
+				idFromName: vi.fn(
+					() => ({ toString: () => "stub-id" }) as DurableObjectId,
+				),
+				get: vi.fn(
+					() => ({ fetch: stubFetch }) as unknown as DurableObjectStub,
+				),
+			} as unknown as DurableObjectNamespace;
+		}
+
+		it.each([
+			[
+				"initializeConversation",
+				(c: StorageServiceClient) => c.initializeConversation(CONVERSATION_ID),
+			],
+			[
+				"appendMessages",
+				(c: StorageServiceClient) =>
+					c.appendMessages(CONVERSATION_ID, [textMessage]),
+			],
+			[
+				"putSessionState",
+				(c: StorageServiceClient) =>
+					c.putSessionState(CONVERSATION_ID, { a: 1 }),
+			],
+		])("cancels the unused response body after %s", async (_name, call) => {
+			const cancel = vi.fn().mockResolvedValue(undefined);
+			const stubFetch = vi.fn(async () => {
+				const response = new Response("{}", { status: 200 });
+				vi.spyOn(response.body as ReadableStream, "cancel").mockImplementation(
+					cancel,
+				);
+				return response;
+			});
+			const c = new StorageServiceClient(namespaceWith(stubFetch), TOKEN_HASH);
+
+			await call(c);
+
+			expect(cancel).toHaveBeenCalled();
+		});
+
+		it("rejects with a TimeoutError when the Durable Object does not answer", async () => {
+			vi.useFakeTimers();
+			try {
+				const stubFetch = vi.fn(() => new Promise<Response>(() => {}));
+				const c = new StorageServiceClient(
+					namespaceWith(stubFetch),
+					TOKEN_HASH,
+				);
+
+				const pending = c.getMetadata(CONVERSATION_ID);
+				const assertion = expect(pending).rejects.toMatchObject({
+					name: "TimeoutError",
+				});
+				await vi.advanceTimersByTimeAsync(STORAGE_CALL_TIMEOUT_MS);
+				await assertion;
+			} finally {
+				vi.useRealTimers();
+			}
 		});
 	});
 });

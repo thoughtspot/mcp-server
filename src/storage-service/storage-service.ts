@@ -5,6 +5,7 @@ import {
 	propagation,
 	trace,
 } from "@opentelemetry/api";
+import { STORAGE_CALL_TIMEOUT_MS, withTimeout } from "../spotterviz/timeouts";
 import type {
 	Message,
 	RawMessage,
@@ -25,6 +26,9 @@ import type {
  * The storageId is derived by taking a hash of the user's access token and combining it with the
  * conversationId, to ensure no users can access each other's conversations.
  */
+// Open-ended per-session state; each flow owns its own keys.
+export type ConversationMetadata = Record<string, unknown>;
+
 export class StorageServiceClient {
 	constructor(
 		private readonly namespace: DurableObjectNamespace,
@@ -75,9 +79,13 @@ export class StorageServiceClient {
 					set: (carrier, key, value) => carrier.set(key, value),
 				});
 				try {
-					const response = await this.stubFor(conversationId).fetch(
-						this.url(conversationId, operation),
-						{ ...init, headers },
+					const response = await withTimeout(
+						this.stubFor(conversationId).fetch(
+							this.url(conversationId, operation),
+							{ ...init, headers },
+						),
+						STORAGE_CALL_TIMEOUT_MS,
+						`Conversation storage ${operation}`,
 					);
 					span.setAttribute("http.status_code", response.status);
 					if (!response.ok) {
@@ -112,6 +120,8 @@ export class StorageServiceClient {
 				`Failed to initialize conversation (${response.status}): ${body}`,
 			);
 		}
+		// The body is unused; release the connection rather than leaving it open.
+		await response.body?.cancel();
 	}
 
 	/**
@@ -137,6 +147,8 @@ export class StorageServiceClient {
 				`Failed to append messages (${response.status}): ${text}`,
 			);
 		}
+		// The body is unused; release the connection rather than leaving it open.
+		await response.body?.cancel();
 	}
 
 	/**
@@ -178,6 +190,8 @@ export class StorageServiceClient {
 				`Failed to put session state (${response.status}): ${text}`,
 			);
 		}
+		// The body is unused; release the connection rather than leaving it open.
+		await response.body?.cancel();
 	}
 
 	// Retrieve a conversation's scalar state, or null if it does not exist / has expired.
@@ -195,5 +209,38 @@ export class StorageServiceClient {
 		}
 
 		return response.json() as Promise<T | null>;
+	}
+
+	/*
+	 * SpotterViz session state, stored in the same per-conversation `/state` slot that Spotter Model
+	 * uses rather than a separate metadata route.
+	 *
+	 * Callers patch individual keys (the SSE drain patches `generationNumber` while the dashboard
+	 * orchestrator writes turn progress), so these give merge semantics on top of the whole-blob
+	 * put. Note this is read-modify-write across two DO calls, not atomic: two concurrent patches to
+	 * the same session can lose one write. The previous dedicated PATCH route merged inside the DO.
+	 */
+
+	// Throws when nothing is stored, matching what callers expect from a missing session.
+	async getMetadata<T extends ConversationMetadata = ConversationMetadata>(
+		conversationId: string,
+	): Promise<T> {
+		const state = await this.getSessionState<T>(conversationId);
+		if (state === null) {
+			throw new Error(`No session state stored for ${conversationId}`);
+		}
+		return state;
+	}
+
+	// Shallow-merge a patch into the stored state and return the result.
+	async updateMetadata<T extends ConversationMetadata = ConversationMetadata>(
+		conversationId: string,
+		patch: Partial<T>,
+	): Promise<T> {
+		const existing =
+			(await this.getSessionState<T>(conversationId)) ?? ({} as T);
+		const merged = { ...existing, ...patch } as T;
+		await this.putSessionState<T>(conversationId, merged);
+		return merged;
 	}
 }

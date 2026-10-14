@@ -13,6 +13,22 @@ import {
 } from "../metrics/runtime/metrics-recorder";
 import type { ToolMetricApiSurface } from "../metrics/runtime/tool-metrics";
 import { WithSpan } from "../metrics/tracing/tracing-utils";
+import { pollDashboardTurn } from "../spotterviz/dashboard-orchestrator";
+import {
+	composeConfirmPlanPrompt,
+	composeCreatePrompt,
+	composeModifyPrompt,
+} from "../spotterviz/dashboard-prompt";
+import {
+	type DashboardToolResult,
+	dashboardOutcomeResult,
+	findTaskDashboardMismatch,
+	invalidAnswerIdResult,
+	parseAnswerIds,
+	resolveTaskDashboard,
+	runDashboardWork,
+} from "../spotterviz/dashboard-tools";
+import { UPSTREAM_CALL_TIMEOUT_MS, withTimeout } from "../spotterviz/timeouts";
 import type { StorageServiceClient } from "../storage-service/storage-service";
 import {
 	MODEL_POLL_INTERVAL_MS,
@@ -43,16 +59,19 @@ import { BaseMCPServer, type Context } from "./mcp-server-base";
 import {
 	CreateAnalysisSessionInputSchema,
 	CreateDashboardInputSchema,
+	CreateDashboardLegacyInputSchema,
 	CreateLiveboardSchema,
 	CreateModelSessionInputSchema,
 	FinalizeModelInputSchema,
 	GetAnswerSchema,
+	GetDashboardStatusInputSchema,
 	GetDataInputSchema,
 	GetDataSourceSuggestionsSchema,
 	GetModelUpdatesInputSchema,
 	GetRelevantQuestionsSchema,
 	GetSessionUpdatesInputSchema,
 	MODEL_TOOL_NAMES,
+	ModifyDashboardInputSchema,
 	SearchObjectsInputSchema,
 	SendModelMessageInputSchema,
 	SendSessionMessageInputSchema,
@@ -89,7 +108,6 @@ function summarizeUpstreamError(error: unknown): string {
 		return generic;
 	}
 }
-
 export class MCPServer extends BaseMCPServer {
 	private activeOrgId: string | undefined;
 	private activeOrgToken: string | undefined;
@@ -683,7 +701,17 @@ export class MCPServer extends BaseMCPServer {
 			}
 
 			case ToolName.CreateDashboard: {
-				return this.callCreateDashboard(request, recorder);
+				return this.hasDashboardDesigner()
+					? this.callCreateDashboard(request, recorder)
+					: this.callCreateDashboardLegacy(request, recorder);
+			}
+
+			case ToolName.ModifyDashboard: {
+				return this.callModifyDashboard(request, recorder);
+			}
+
+			case ToolName.GetDashboardStatus: {
+				return this.callGetDashboardStatus(request, recorder);
 			}
 
 			case ToolName.ListOrgs: {
@@ -1043,35 +1071,49 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		);
 	}
 
+	/**
+	 * Whether this request's API version has the dashboard designer. Versions released before it
+	 * keep the original `create_dashboard` contract.
+	 */
+	private hasDashboardDesigner(): boolean {
+		try {
+			return resolveApiVersion(this.ctx.props.apiVersion).tools.some(
+				(tool) => tool?.name === ToolName.ModifyDashboard,
+			);
+		} catch {
+			return false;
+		}
+	}
+
+	private toolResponse(result: DashboardToolResult) {
+		if (!result.ok) {
+			return this.createErrorResponse(result.userMessage, result.logNote);
+		}
+		const span = trace.getSpan(context.active());
+		span?.setAttributes({
+			dashboard_status: String(result.content.status),
+			dashboard_task_id: String(result.content.task_id ?? ""),
+		});
+		return this.createStructuredContentSuccessResponse(
+			result.content,
+			result.summary,
+		);
+	}
+
+	/** The original `create_dashboard`: assemble answers into a liveboard, no design pass. */
 	@WithSpan("call-create-dashboard")
-	async callCreateDashboard(
+	async callCreateDashboardLegacy(
 		request: z.infer<typeof CallToolRequestSchema>,
 		recorder: MetricsRecorder,
 	) {
 		const span = trace.getSpan(context.active());
-		const { title, answers, note_tile } = CreateDashboardInputSchema.parse(
-			request.params.arguments,
-		);
+		const { title, answers, note_tile } =
+			CreateDashboardLegacyInputSchema.parse(request.params.arguments);
 		span?.setAttribute("total_answers", answers.length);
 
-		let transformedAnswers: Answer[] = [];
-		try {
-			transformedAnswers = answers.map((answer) => {
-				const { session_id, gen_no } = JSON.parse(answer.answer_id);
-				if (session_id === undefined || gen_no === undefined) {
-					throw new Error(`Invalid answer_id format ${answer.answer_id}`);
-				}
-				return {
-					title: answer.title,
-					session_identifier: session_id,
-					generation_number: gen_no,
-				};
-			});
-		} catch (error) {
-			return this.createErrorResponse(
-				'Invalid answer_id format. Please provide the value returned from the "get_session_updates" tool.',
-				`Error creating dashboard ${error}`,
-			);
+		const transformedAnswers = parseAnswerIds(answers);
+		if (!transformedAnswers) {
+			return this.toolResponse(invalidAnswerIdResult(answers));
 		}
 
 		const liveboard = await this.getThoughtSpotService(
@@ -1091,6 +1133,167 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			},
 			"Dashboard created successfully",
 		);
+	}
+
+	@WithSpan("call-create-dashboard-spotterviz")
+	async callCreateDashboard(
+		request: z.infer<typeof CallToolRequestSchema>,
+		recorder: MetricsRecorder,
+	) {
+		const span = trace.getSpan(context.active());
+		const { title, task_id, answers, instructions, data_source_id } =
+			CreateDashboardInputSchema.parse(request.params.arguments);
+		const hasAnswers = Boolean(answers && answers.length > 0);
+
+		// Confirming (or adjusting) the plan an earlier create proposed: same task, so the designer
+		// keeps its plan and the chosen data source.
+		if (task_id) {
+			span?.setAttribute("has_task_id", true);
+			const storage = await this.getStorageService();
+			const task = await resolveTaskDashboard(storage, task_id);
+			if ("ok" in task) {
+				return this.toolResponse(task);
+			}
+			return this.toolResponse(
+				await runDashboardWork({
+					service: await this.getSpotterVizService(recorder),
+					storage,
+					resolveLiveboard: async () => ({}),
+					existingTaskId: task_id,
+					liveboardId: task.liveboardId,
+					buildMessage: () => composeConfirmPlanPrompt(instructions),
+					waitUntil: this.ctx.ctx?.waitUntil?.bind(this.ctx.ctx),
+				}),
+			);
+		}
+
+		if (!title?.trim()) {
+			return this.createErrorResponse(
+				"Provide `title` for a new dashboard, or `task_id` to confirm a plan from an earlier `create_dashboard` call.",
+				"create_dashboard called with neither title nor task_id",
+			);
+		}
+		span?.setAttributes({
+			total_answers: answers?.length ?? 0,
+			has_instructions: Boolean(instructions),
+		});
+
+		// Checked here rather than in the schema: a schema refinement never reaches the client
+		// (JSON Schema drops it), so the calling agent would only see a generic validation error.
+		if (!hasAnswers && !instructions?.trim()) {
+			return this.createErrorResponse(
+				"Provide `answers` from a prior analysis, or `instructions` describing the dashboard to build, or both.",
+				"create_dashboard called with neither answers nor instructions",
+			);
+		}
+
+		const transformedAnswers = parseAnswerIds(answers ?? []);
+		if (!transformedAnswers) {
+			return this.toolResponse(invalidAnswerIdResult(answers ?? []));
+		}
+
+		return this.toolResponse(
+			await runDashboardWork({
+				service: await this.getSpotterVizService(recorder),
+				storage: await this.getStorageService(),
+				resolveLiveboard: hasAnswers
+					? async () => {
+							const liveboard = await withTimeout(
+								this.getThoughtSpotService(recorder).fetchTMLAndCreateLiveboard(
+									title,
+									transformedAnswers,
+								),
+								UPSTREAM_CALL_TIMEOUT_MS * 2,
+								"Building the dashboard from the answers",
+							);
+							if (liveboard.error || !liveboard.liveboardId) {
+								throw new Error(
+									`the answers could not be added to a dashboard: ${liveboard.error?.message ?? "no dashboard id returned"}`,
+								);
+							}
+							return { existingLiveboardId: liveboard.liveboardId };
+						}
+					: async () => ({ newLiveboardName: title }),
+				buildMessage: () =>
+					composeCreatePrompt({
+						title,
+						instructions,
+						dataSourceId: data_source_id,
+						hasExistingAnswers: hasAnswers,
+					}),
+				waitUntil: this.ctx.ctx?.waitUntil?.bind(this.ctx.ctx),
+			}),
+		);
+	}
+
+	@WithSpan("call-modify-dashboard-spotterviz")
+	async callModifyDashboard(
+		request: z.infer<typeof CallToolRequestSchema>,
+		recorder: MetricsRecorder,
+	) {
+		const span = trace.getSpan(context.active());
+		const { dashboard_id, task_id, instructions, data_source_id } =
+			ModifyDashboardInputSchema.parse(request.params.arguments);
+		span?.setAttributes({
+			dashboard_id,
+			has_task_id: Boolean(task_id),
+		});
+
+		const storage = await this.getStorageService();
+
+		// A task is bound to the dashboard it was opened against. Continuing one while naming a
+		// different dashboard would silently change the wrong dashboard, so reject the mismatch
+		// rather than trusting either value.
+		if (task_id) {
+			const mismatch = await findTaskDashboardMismatch(
+				storage,
+				task_id,
+				dashboard_id,
+			);
+			if (mismatch) {
+				return this.toolResponse(mismatch);
+			}
+		}
+
+		return this.toolResponse(
+			await runDashboardWork({
+				service: await this.getSpotterVizService(recorder),
+				storage,
+				resolveLiveboard: async () => ({ existingLiveboardId: dashboard_id }),
+				existingTaskId: task_id,
+				liveboardId: dashboard_id,
+				buildMessage: () =>
+					composeModifyPrompt({
+						instructions,
+						dataSourceId: data_source_id,
+					}),
+				waitUntil: this.ctx.ctx?.waitUntil?.bind(this.ctx.ctx),
+			}),
+		);
+	}
+
+	@WithSpan("call-get-dashboard-status-spotterviz")
+	async callGetDashboardStatus(
+		request: z.infer<typeof CallToolRequestSchema>,
+		_recorder: MetricsRecorder,
+	) {
+		const span = trace.getSpan(context.active());
+		const { task_id } = GetDashboardStatusInputSchema.parse(
+			request.params.arguments,
+		);
+		span?.setAttribute("dashboard_task_id", task_id);
+
+		try {
+			const storage = await this.getStorageService();
+			const outcome = await pollDashboardTurn(storage, task_id);
+			return this.toolResponse(dashboardOutcomeResult(outcome));
+		} catch (error) {
+			console.error("Error checking dashboard status:", error);
+			return this.createErrorResponse(
+				`Failed to check the dashboard status: ${(error as Error).message}`,
+				"Dashboard status check failed",
+			);
+		}
 	}
 
 	@WithSpan("call-get-data-source-suggestions")

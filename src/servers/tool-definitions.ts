@@ -471,7 +471,12 @@ export const AnswerSchema = z.object({
 		),
 });
 
-export const CreateDashboardInputSchema = z.object({
+/**
+ * The original `create_dashboard` contract: assemble answers into a liveboard, no design pass.
+ * Served on every API version released before the dashboard designer tools, unchanged, so
+ * existing integrations keep working.
+ */
+export const CreateDashboardLegacyInputSchema = z.object({
 	title: z.string().describe("Title of the dashboard to be created."),
 	note_tile: z
 		.string()
@@ -485,13 +490,115 @@ export const CreateDashboardInputSchema = z.object({
 		),
 });
 
-export const CreateDashboardOutputSchema = z.object({
+export const CreateDashboardLegacyOutputSchema = z.object({
 	link: z
 		.string()
 		.describe(
 			"A URL link to the created dashboard. You can provide this link to the user to view the dashboard.",
 		),
 });
+
+const DATA_SOURCE_ID_GUIDANCE =
+	'Optional id of a data source, in the format "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx". Omit it in most cases: the designer selects the most relevant data source automatically, and when changing a dashboard it uses the data sources the dashboard already has. Only provide it when the user has named or confirmed a specific data source.';
+
+/**
+ * Shared result shape for the dashboard tools.
+ *
+ * Field prose is deliberately sparse. This schema ships on all three tools, so every sentence here
+ * is sent three times on every request.
+ */
+export const DashboardResultSchema = z.object({
+	status: z
+		.enum(["completed", "in_progress", "needs_input", "failed"])
+		.describe(
+			"Outcome of the request. See the tool description for what to do for each value.",
+		),
+	dashboard_id: z.string().optional(),
+	dashboard_url: z.string().optional(),
+	task_id: z.string().optional(),
+	changes_applied: z
+		.boolean()
+		.optional()
+		.describe(
+			"Whether the dashboard actually changed. False with `completed` means the request was understood but changed nothing.",
+		),
+	message: z
+		.string()
+		.optional()
+		.describe(
+			"What the designer reported: what it is doing now (`in_progress`), its summary (`completed`), its plan or question (`needs_input`), or why it failed (`failed`).",
+		),
+	choices: z
+		.array(z.string())
+		.optional()
+		.describe("Options the designer offered with its question."),
+});
+
+export const CreateDashboardInputSchema = z
+	.object({
+		title: z
+			.string()
+			.optional()
+			.describe(
+				"Title of the dashboard to be created. Required unless you pass `task_id`.",
+			),
+		task_id: z
+			.string()
+			.optional()
+			.describe(
+				"`task_id` from an earlier `create_dashboard` call that returned a plan. Pass it to confirm the plan, with any changes in `instructions`, so the dashboard is built.",
+			),
+		instructions: z
+			.string()
+			.optional()
+			.describe(
+				`The user's request for the dashboard, in their words. Do not add charts, metrics, filters or layout the user did not ask for: the designer proposes those in a plan for the user to confirm, so a short request should stay short. Add detail only when the user gave it (for example chart types, grouping, tabs, brand colours as hex codes, a data source they named) or when recreating an existing dashboard from a spec, such as a Tableau workbook. Not supported: changing an existing chart's type or query, or colouring individual data values.`,
+			),
+		data_source_id: z.string().optional().describe(DATA_SOURCE_ID_GUIDANCE),
+		answers: z
+			.array(AnswerSchema)
+			.optional()
+			.describe(
+				"List of answers to add to the dashboard, from a prior analysis. Omit this when you have no answers yet and want the charts built from `instructions` instead.",
+			),
+	})
+	.describe("Pass `answers`, `instructions`, or both.");
+
+export const CreateDashboardOutputSchema = DashboardResultSchema;
+
+export const ModifyDashboardInputSchema = z.object({
+	dashboard_id: z
+		.string()
+		.min(1)
+		.describe(
+			"Id of the dashboard to change (a GUID). Find it with `search_objects` or from a dashboard link ending in `/pinboard/<id>`; never pass a name or a guess.",
+		),
+	task_id: z
+		.string()
+		.optional()
+		.describe(
+			"`task_id` from an earlier `modify_dashboard` call on the same dashboard. Pass it to answer the designer's question or follow up with its earlier context; omit it to start a fresh change.",
+		),
+	instructions: z
+		.string()
+		.min(1)
+		.describe(
+			"What to change, in the user's words: layout or styling, new charts, or the user's answer to the designer's question. Do not add changes the user did not ask for.",
+		),
+	data_source_id: z.string().optional().describe(DATA_SOURCE_ID_GUIDANCE),
+});
+
+export const ModifyDashboardOutputSchema = DashboardResultSchema;
+
+export const GetDashboardStatusInputSchema = z.object({
+	task_id: z
+		.string()
+		.describe(
+			"The `task_id` returned by `create_dashboard` or `modify_dashboard` when `status` was `in_progress`.",
+		),
+});
+
+export const GetDashboardStatusOutputSchema = DashboardResultSchema;
 
 export const ListOrgsInputSchema = z.object({});
 
@@ -543,6 +650,8 @@ export enum ToolName {
 	SendSessionMessage = "send_session_message",
 	GetSessionUpdates = "get_session_updates",
 	CreateDashboard = "create_dashboard",
+	ModifyDashboard = "modify_dashboard",
+	GetDashboardStatus = "get_dashboard_status",
 	ListOrgs = "list_orgs",
 	SwitchOrg = "switch_org",
 	// V3 (Spotter Model — agentic model creation)
@@ -867,7 +976,7 @@ export const toolDefinitionsV2 = [
 	{
 		name: ToolName.CreateAnalysisSession,
 		description:
-			"Start an analytical session with the Analytics Agent. This is the first step in a three-step workflow: create a session, send a message, then poll for updates. Once created, you can use the returned `analytical_session_id` to send analytical questions via `send_session_message` and retrieve answers via `get_session_updates`. Sessions are conversational, so you can ask follow-up questions in the same session without creating a new one. Using a single analytical session is preferable, because it reuses the same data source selection.",
+			"Start an analytical session with the Analytics Agent. This is the first step in a three-step workflow: create a session, send a message, then poll for updates. Once created, you can use the returned `analytical_session_id` to send analytical questions via `send_session_message` and retrieve answers via `get_session_updates`. Sessions are conversational, so you can ask follow-up questions in the same session without creating a new one. Using a single analytical session is preferable, because it reuses the same data source selection. When the user's intent is to create a dashboard, use the first message in this session to plan: ask the Analytics Agent what data and metrics are available for the topic, what trends or breakdowns would be most meaningful, and what chart types best fit the data. Use the Agent's response to form a dashboard plan before requesting any specific charts.",
 		inputSchema: z.toJSONSchema(CreateAnalysisSessionInputSchema),
 		outputSchema: z.toJSONSchema(CreateAnalysisSessionOutputSchema),
 		annotations: {
@@ -905,8 +1014,8 @@ export const toolDefinitionsV2 = [
 		name: ToolName.CreateDashboard,
 		description:
 			"Create a dashboard from a list of answers, allowing the user to revisit the results later. You can use this if the user asks for a dashboard or liveboard, or asks to save the results from the analysis. This can be a useful way to save the results to revisit later, or present them to other users.",
-		inputSchema: z.toJSONSchema(CreateDashboardInputSchema),
-		outputSchema: z.toJSONSchema(CreateDashboardOutputSchema),
+		inputSchema: z.toJSONSchema(CreateDashboardLegacyInputSchema),
+		outputSchema: z.toJSONSchema(CreateDashboardLegacyOutputSchema),
 		annotations: {
 			title: "Create Dashboard",
 			readOnlyHint: false,
@@ -1061,3 +1170,86 @@ const getDataToolDefinition = {
 
 // V4 — get_data (object data fetch). Includes all V3 tools plus get_data.
 export const toolDefinitionsV4 = [...toolDefinitionsV3, getDataToolDefinition];
+
+/** One-line result contract, for tools other than create_dashboard, which carries the full one. */
+const DASHBOARD_RESULT_CONTRACT_BRIEF =
+	"Check `status`: `completed` (give the user `dashboard_url`), `in_progress` (call `get_dashboard_status` again), `needs_input` (show `message` to the user and wait for their reply, then pass the reply in `instructions` to whichever tool started the task, with the same `task_id`: `create_dashboard`, or `modify_dashboard` plus its `dashboard_id`), `failed` (`message` says why; tell the user and ask before trying again, so you do not build a duplicate).";
+
+const createDashboardToolDefinition = {
+	name: ToolName.CreateDashboard,
+	description: `Create a dashboard, organise it, and save it, so the user can revisit the results later or share them with others. Use this whenever the user asks for a dashboard or a liveboard, asks to save the results of an analysis, or asks to recreate a dashboard they have elsewhere.
+
+There are two ways to call it:
+1. From analysis you already did: pass \`answers\` from \`get_session_updates\`, plus optional \`instructions\` on layout and style. The charts you already have are organised, styled and saved.
+2. From a description: pass \`instructions\` describing the dashboard. Use this when the user asks for a dashboard before any analysis, or wants one recreated from a spec or another tool (for example a Tableau workbook). Call this directly; do not run the analysis yourself first. The designer first replies with \`needs_input\`: the data source it chose and its plan for the dashboard. Nothing is built yet. Show the plan to the user and wait for their reply; never confirm it on their behalf, even if it looks complete. When the user confirms or asks for changes, call \`create_dashboard\` again with the same \`task_id\`, putting their changes in \`instructions\`.
+
+It can take a few minutes, so it may return \`in_progress\` before it is finished.
+
+Check \`status\` on the result and act on it:
+- \`completed\`: the dashboard is saved. Give the user \`dashboard_url\`.
+- \`needs_input\`: the designer has a plan or a question for the user, and nothing has changed yet. \`message\` holds it, and \`choices\` any options it offered. Show it to the user and wait for their reply; do not answer or confirm it on their behalf. Then call \`create_dashboard\` again with the same \`task_id\`, putting the user's reply in \`instructions\`. Do not report the request to the user as finished.
+- \`in_progress\`: still working. \`message\`, when present, says what the designer is doing now; relay it to the user as progress. Call \`get_dashboard_status\` with \`task_id\`, and keep calling it until you get another status.
+- \`failed\`: nothing usable was produced. \`message\` explains why. Tell the user and ask before trying again, so you do not build a duplicate.`,
+	inputSchema: z.toJSONSchema(CreateDashboardInputSchema),
+	outputSchema: z.toJSONSchema(CreateDashboardOutputSchema),
+	annotations: {
+		title: "Create Dashboard",
+		readOnlyHint: false,
+		destructiveHint: false,
+		openWorldHint: false,
+	},
+};
+
+const modifyDashboardToolDefinition = {
+	name: ToolName.ModifyDashboard,
+	description: `Change an existing dashboard. It can rearrange and restyle what is already there, add new charts, add short explanatory text, and organise charts into groups or tabs.
+
+\`dashboard_id\` is always required. Add \`task_id\` as well to continue something you already started, which is how you answer a question the designer asked you or send a follow-up instruction about the same dashboard.
+
+Pass the change in \`instructions\` in the user's words. If it is too vague to act on, the designer comes back with a question. New charts use the data sources the dashboard already has unless you say otherwise.
+
+Changes are saved to the user's real dashboard, so only call this when the user has asked for the dashboard to change. Changing a dashboard can take a few minutes, so this may return before it is finished.
+
+${DASHBOARD_RESULT_CONTRACT_BRIEF}`,
+	inputSchema: z.toJSONSchema(ModifyDashboardInputSchema),
+	outputSchema: z.toJSONSchema(ModifyDashboardOutputSchema),
+	annotations: {
+		title: "Modify Dashboard",
+		readOnlyHint: false,
+		destructiveHint: false,
+		openWorldHint: false,
+	},
+};
+
+const getDashboardStatusToolDefinition = {
+	name: ToolName.GetDashboardStatus,
+	description: `Continue waiting for a dashboard that is still being built or changed. Call this when \`create_dashboard\` or \`modify_dashboard\` returned \`status: "in_progress"\`, passing the \`task_id\` they gave you.
+
+Each call waits a short while before returning, so calling it repeatedly is the correct way to wait. Keep calling until \`status\` is \`completed\`, \`needs_input\` or \`failed\`. Do not start a new \`create_dashboard\` or \`modify_dashboard\` call for the same work, or you will create duplicate dashboards.
+
+${DASHBOARD_RESULT_CONTRACT_BRIEF}`,
+	inputSchema: z.toJSONSchema(GetDashboardStatusInputSchema),
+	outputSchema: z.toJSONSchema(GetDashboardStatusOutputSchema),
+	annotations: {
+		title: "Get Dashboard Status",
+		readOnlyHint: true,
+		destructiveHint: false,
+		openWorldHint: false,
+	},
+};
+
+/**
+ * Adds the dashboard designer: `create_dashboard` gains a design pass and a description-only mode,
+ * and `modify_dashboard` / `get_dashboard_status` are new. Earlier versions keep the original
+ * `create_dashboard` contract.
+ */
+export const toolDefinitionsV5 = [
+	...toolDefinitionsV4.map((tool) => {
+		if (tool.name === ToolName.CreateDashboard) {
+			return createDashboardToolDefinition;
+		}
+		return tool;
+	}),
+	modifyDashboardToolDefinition,
+	getDashboardStatusToolDefinition,
+];
