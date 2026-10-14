@@ -226,7 +226,12 @@ export const GetDataInputSchema = z.object({
 			"The object's type. Required. Pass the `type` from the prior `search_objects` result verbatim — one of `ANSWER`, `LIVEBOARD`, or `LIVEBOARD_VIZ`. For `LIVEBOARD_VIZ` also pass that result's `visualization_id` in `visualization_ids` (else the request is rejected); it fetches via the parent Liveboard.",
 		),
 	visualization_ids: z
-		.array(z.string())
+		.array(
+			z.guid({
+				error:
+					"Each `visualization_ids` entry must be a visualization GUID from a prior result (`viz_id` from get_data or `visualization_id` from search_objects), not a placeholder or name.",
+			}),
+		)
 		.optional()
 		.describe(
 			"When `object_id` corresponds to a Liveboard, restrict the fetch to these visualization GUIDs (use to pull a single visualization/answer pinned on a Liveboard). Omit to fetch as many of the Liveboard's visualizations as fit within the time limit. Ignored for standalone Answers.",
