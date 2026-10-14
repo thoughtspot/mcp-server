@@ -201,7 +201,7 @@ export class SpotterVizService {
 				"Saving the dashboard",
 			);
 
-			const liveboardUrl = `${this.client.instanceUrl}/#/pinboard/${context.liveboardId}`;
+			const liveboardUrl = `${this.client.instanceUrl}/#/insights/pinboard/${context.liveboardId}`;
 			span?.setStatus({
 				code: SpanStatusCode.OK,
 				message: "SpotterViz liveboard saved",

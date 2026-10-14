@@ -20,6 +20,15 @@ Make all layout, grouping, tab, ordering, sizing and styling decisions yourself 
 If something essential is genuinely missing and you cannot proceed at all, reply with one short sentence stating exactly what you need, and make no changes.`;
 
 /**
+ * For a dashboard built from a description: the person confirms the data source and plan before
+ * anything is built, as in SpotterViz itself. The confirmation arrives as a follow-up turn on the
+ * same task, which then runs under AUTONOMY_PREAMBLE.
+ */
+const PLAN_PREAMBLE = `You are being driven by an automated integration. A person will review your proposal through it before anything is built.
+
+Do not create, change or publish anything in this turn. Choose the data source you would use: the one given below if one is given, otherwise the most relevant one. Then reply with the data source you chose and your plan for the dashboard, and stop to wait for confirmation.`;
+
+/**
  * Used when the caller supplied answers but no styling preferences of their own.
  *
  * Assembling answers into a liveboard produces a uniform grid in array order with no grouping or
@@ -32,8 +41,8 @@ export const DEFAULT_LAYOUT_REQUEST =
 
 export interface ComposeCreatePromptParams {
 	title: string;
-	/** Caller's styling intent. Falls back to DEFAULT_LAYOUT_REQUEST when absent. */
-	designContext?: string;
+	/** Caller's description of the dashboard. Falls back to DEFAULT_LAYOUT_REQUEST when absent. */
+	instructions?: string;
 	dataSourceId?: string;
 	/** True when the liveboard already has charts assembled from a prior analysis. */
 	hasExistingAnswers: boolean;
@@ -51,22 +60,31 @@ function dataSourceLine(dataSourceId?: string): string[] {
 }
 
 export function composeCreatePrompt(params: ComposeCreatePromptParams): string {
-	const { title, designContext, dataSourceId, hasExistingAnswers } = params;
+	const { title, instructions, dataSourceId, hasExistingAnswers } = params;
 
-	const situation = hasExistingAnswers
-		? "This liveboard already contains the charts that were just created for it. Organise and style them to match the request below. Add further charts only if the request explicitly calls for something that is missing."
-		: "This liveboard is empty. Create the charts described below on it, then organise and style them.";
+	if (!hasExistingAnswers) {
+		return [
+			PLAN_PREAMBLE,
+			"",
+			"This liveboard is empty.",
+			`Liveboard title: ${title}`,
+			...dataSourceLine(dataSourceId),
+			"",
+			"What is wanted:",
+			instructions?.trim() || DEFAULT_LAYOUT_REQUEST,
+		].join("\n");
+	}
 
 	return [
 		AUTONOMY_PREAMBLE,
 		"",
-		situation,
+		"This liveboard already contains the charts that were just created for it. Organise and style them to match the request below. Add further charts only if the request explicitly calls for something that is missing.",
 		"",
 		`Liveboard title: ${title}`,
 		...dataSourceLine(dataSourceId),
 		"",
 		"What is wanted:",
-		designContext?.trim() || DEFAULT_LAYOUT_REQUEST,
+		instructions?.trim() || DEFAULT_LAYOUT_REQUEST,
 	].join("\n");
 }
 
@@ -81,5 +99,17 @@ export function composeModifyPrompt(params: ComposeModifyPromptParams): string {
 		"",
 		"What is wanted:",
 		instructions,
+	].join("\n");
+}
+
+/** The person has seen the plan from a create's planning turn and wants it built. */
+export function composeConfirmPlanPrompt(changes?: string): string {
+	return [
+		AUTONOMY_PREAMBLE,
+		"",
+		"The person reviewed the data source and plan you proposed and confirmed it. Build the dashboard now, applying any changes below, then organise and style it.",
+		"",
+		"Changes to the plan:",
+		changes?.trim() || "None. Build it as planned.",
 	].join("\n");
 }

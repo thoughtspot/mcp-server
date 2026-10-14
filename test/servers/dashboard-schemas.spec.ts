@@ -41,7 +41,7 @@ describe("CreateDashboardInputSchema", () => {
 	it("accepts a design context plus a data source with no answers", () => {
 		const parsed = CreateDashboardInputSchema.parse({
 			title: "Migrated dashboard",
-			design_context: "KPI row on top, then a trend line by month",
+			instructions: "KPI row on top, then a trend line by month",
 			data_source_id: "ds-1",
 		});
 		expect(parsed.data_source_id).toBe("ds-1");
@@ -50,22 +50,17 @@ describe("CreateDashboardInputSchema", () => {
 	it("accepts a design context with no data source, so the designer can pick one", () => {
 		const result = CreateDashboardInputSchema.safeParse({
 			title: "Migrated dashboard",
-			design_context: "KPI row on top",
+			instructions: "KPI row on top",
 		});
 		expect(result.success).toBe(true);
 	});
 
-	it("requires either answers or a design context", () => {
-		const result = CreateDashboardInputSchema.safeParse({ title: "Empty" });
-		expect(result.success).toBe(false);
-	});
-
-	it("treats an empty answers array as no answers", () => {
-		const result = CreateDashboardInputSchema.safeParse({
-			title: "Empty",
-			answers: [],
-		});
-		expect(result.success).toBe(false);
+	// Requiring answers or instructions is enforced in the handler, where the calling agent sees
+	// a readable error; a schema refinement would be dropped from the JSON Schema.
+	it("leaves the answers-or-instructions rule to the handler", () => {
+		expect(
+			CreateDashboardInputSchema.safeParse({ title: "Empty" }).success,
+		).toBe(true);
 	});
 });
 

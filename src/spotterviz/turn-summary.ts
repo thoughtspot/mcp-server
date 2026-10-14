@@ -31,6 +31,10 @@ export interface TurnChoice {
 /** Running state for a turn, folded from its events. Safe to store in DO metadata. */
 export interface TurnProgress extends Record<string, unknown> {
 	text: string;
+	/** What Aurora is doing now (the running tool, or a heading), for progress updates. */
+	currentStep?: string;
+	/** Aurora's latest explanation of what it is about to do, for progress updates. */
+	lastReasoning?: string;
 	/** True once any `lb_refresh` has been seen, i.e. Aurora published. */
 	sawRefresh: boolean;
 	/** First error message seen, if any. */
@@ -81,6 +85,72 @@ function extractChoice(data: Record<string, unknown>): TurnChoice | undefined {
 	};
 }
 
+/** Longest single progress line. */
+const MAX_STEP_CHARS = 300;
+
+/** Pull up to `limit` short labels (queries, titles, names) out of a tool card's data. */
+function cardLabels(value: unknown, limit = 5, out: string[] = []): string[] {
+	if (out.length >= limit || value == null) return out;
+	if (Array.isArray(value)) {
+		for (const item of value) cardLabels(item, limit, out);
+		return out;
+	}
+	if (typeof value === "object") {
+		const record = value as Record<string, unknown>;
+		for (const key of ["query", "question", "title", "name", "display_name"]) {
+			const v = record[key];
+			if (typeof v === "string" && v.trim() && out.length < limit) {
+				out.push(v.replace(/^\s*\[[^\]]*\]\s*/, "").trim());
+				break;
+			}
+		}
+		for (const [key, v] of Object.entries(record)) {
+			if (typeof v === "object") cardLabels(v, limit, out);
+			if (out.length >= limit) break;
+			void key;
+		}
+	}
+	return out;
+}
+
+/**
+ * The most useful description of a progress event, as SpotterViz shows it in its own UI: the
+ * agent's reasoning when it explains its next step, otherwise what the running tool is working
+ * on (its card), otherwise the bare heading. Returns undefined for events with nothing to say.
+ */
+function describeProgress(
+	event: SpotterVizEvent,
+	data: Record<string, unknown>,
+): { kind: "reasoning" | "tool" | "heading"; text: string } | undefined {
+	const clip = (text: string) =>
+		text.length > MAX_STEP_CHARS ? `${text.slice(0, MAX_STEP_CHARS)}…` : text;
+	if (data.stage === "reasoning" && typeof data.message === "string") {
+		const reasoning = data.message.trim();
+		// Aurora's placeholder ("Analysing...") would replace a real sentence; skip it.
+		if (reasoning && !/^analy[sz]ing\W*$/i.test(reasoning)) {
+			return { kind: "reasoning", text: clip(reasoning) };
+		}
+	}
+	if (typeof data.card_heading === "string" && data.card_heading.trim()) {
+		const labels = cardLabels(data.card_data);
+		const status = data.tool_status === "completed" ? " (done)" : "";
+		return {
+			kind: "tool",
+			text: clip(
+				`${data.card_heading.trim()}${status}${labels.length ? `: ${labels.join(" · ")}` : ""}`,
+			),
+		};
+	}
+	if (data.stage === "tool_execution" && typeof data.message === "string") {
+		const message = data.message.trim();
+		if (message) return { kind: "tool", text: clip(message) };
+	}
+	const heading =
+		(typeof event.heading === "string" && event.heading.trim()) ||
+		(typeof data.message === "string" && data.message.trim());
+	return heading ? { kind: "heading", text: clip(heading) } : undefined;
+}
+
 /**
  * Fold a freshly drained batch of events into the running progress for a turn.
  */
@@ -90,6 +160,8 @@ export function accumulateProgress(
 ): TurnProgress {
 	const next: TurnProgress = {
 		text: prior?.text ?? "",
+		currentStep: prior?.currentStep,
+		lastReasoning: prior?.lastReasoning,
 		sawRefresh: prior?.sawRefresh ?? false,
 		error: prior?.error,
 		endStatus: prior?.endStatus,
@@ -108,6 +180,19 @@ export function accumulateProgress(
 					next.text = (next.text + chunk).slice(0, MAX_TEXT_CHARS);
 				}
 				next.choice = next.choice ?? extractChoice(data);
+				break;
+			}
+			case "meta.progress": {
+				const described = describeProgress(event, data);
+				if (described?.kind === "reasoning") {
+					next.lastReasoning = described.text;
+				} else if (described?.kind === "tool") {
+					next.currentStep = described.text;
+				} else if (described && !next.currentStep && !next.lastReasoning) {
+					// Bare headings ("Working...") only when there is nothing better yet: Aurora sends
+					// one after nearly every tool, and letting it overwrite would hide the real work.
+					next.currentStep = described.text;
+				}
 				break;
 			}
 			case "control.action": {

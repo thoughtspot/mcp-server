@@ -1043,7 +1043,7 @@ describe("thoughtspot-service", () => {
 			});
 
 			expect(result).toEqual({
-				url: "https://test.thoughtspot.com/#/pinboard/liveboard123",
+				url: "https://test.thoughtspot.com/#/insights/pinboard/liveboard123",
 				liveboardId: "liveboard123",
 				error: null,
 			});
@@ -1185,7 +1185,7 @@ describe("thoughtspot-service", () => {
 			});
 
 			expect(result).toBe(
-				"https://test.thoughtspot.com/#/pinboard/liveboard123",
+				"https://test.thoughtspot.com/#/insights/pinboard/liveboard123",
 			);
 		});
 

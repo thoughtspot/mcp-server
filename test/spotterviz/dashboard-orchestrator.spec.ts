@@ -70,7 +70,7 @@ function makeService(
 		openStream: vi.fn().mockResolvedValue(reader),
 		saveLiveboard: vi.fn().mockResolvedValue({
 			liveboardId: "lb-1",
-			liveboardUrl: "https://ts.example.com/#/pinboard/lb-1",
+			liveboardUrl: "https://ts.example.com/#/insights/pinboard/lb-1",
 		}),
 	} as unknown as ServiceMock;
 }
@@ -130,7 +130,7 @@ describe("startDashboardJob", () => {
 			status: "completed",
 			taskId: TASK_ID,
 			dashboardId: "lb-1",
-			dashboardUrl: "https://ts.example.com/#/pinboard/lb-1",
+			dashboardUrl: "https://ts.example.com/#/insights/pinboard/lb-1",
 		});
 		expect(service.saveLiveboard).toHaveBeenCalledTimes(1);
 		expect(service.saveLiveboard).toHaveBeenCalledWith({
@@ -275,6 +275,31 @@ describe("startDashboardJob", () => {
 		expect(releasedLock(storage)).toBe(true);
 	});
 
+	it("explains a session_busy refusal instead of a generic failure", async () => {
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		const service = makeService(
+			makeReader([
+				frame("meta.error", { message: "Base Agent error: 409 session_busy" }),
+				frame("message.end", { status: "error", liveboard_updated: false }),
+			]),
+		);
+		const storage = makeStorage();
+
+		const outcome = await startDashboardJob({
+			service,
+			storage,
+			taskId: TASK_ID,
+			setup: async () => {},
+			buildMessage: () => "m",
+			deadlineMs: 1_000,
+		});
+
+		expect(outcome.status).toBe("failed");
+		expect(outcome.status === "failed" && outcome.error).toContain(
+			"still working on the previous request",
+		);
+	});
+
 	it("does not save when the turn asks a question", async () => {
 		const service = makeService(
 			makeReader([
@@ -392,6 +417,38 @@ describe("pollDashboardTurn", () => {
 			taskId: TASK_ID,
 			text: "Adding charts",
 		});
+	});
+
+	it("reports the current tool and the latest reasoning while in progress", async () => {
+		const storage = makeStorage({
+			turnHeartbeatAt: Date.now(),
+			turnProgress: {
+				text: "partial final answer",
+				currentStep: "Generate answers: total sales",
+				lastReasoning: "Building the KPI row first.",
+			},
+		});
+
+		const outcome = await pollDashboardTurn(storage, TASK_ID, 0);
+
+		expect(outcome).toMatchObject({
+			status: "in_progress",
+			text: "Generate answers: total sales\nBuilding the KPI row first.",
+		});
+	});
+
+	it("falls back to the tail of the prose when there is no step or reasoning", async () => {
+		const storage = makeStorage({
+			turnHeartbeatAt: Date.now(),
+			turnProgress: { text: `<!-- gen_no: 3 -->${"x".repeat(500)}end` },
+		});
+
+		const outcome = await pollDashboardTurn(storage, TASK_ID, 0);
+		const text = (outcome as { text: string }).text;
+
+		expect(text.startsWith("…")).toBe(true);
+		expect(text.endsWith("end")).toBe(true);
+		expect(text).not.toContain("gen_no");
 	});
 
 	it("fails a task whose heartbeat is older than STALE_TASK_MS and releases it", async () => {

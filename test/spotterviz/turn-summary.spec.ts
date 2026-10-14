@@ -131,6 +131,79 @@ describe("summarizeTurn", () => {
 		expect(result.status).toBe("completed");
 	});
 
+	it("does not let a bare heading overwrite the tool Aurora is working on", () => {
+		const progress = accumulateProgress(undefined, [
+			event(
+				"meta.progress",
+				{
+					stage: "tool_execution",
+					card_heading: "Update styles",
+					card_data: {},
+				},
+				{ heading: "Updating" },
+			),
+			event("meta.progress", { stage: "working" }, { heading: "Working..." }),
+		]);
+
+		expect(progress.currentStep).toBe("Update styles");
+	});
+
+	it("prefers the agent's reasoning over the bare heading", () => {
+		const progress = accumulateProgress(undefined, [
+			event(
+				"meta.progress",
+				{ stage: "reasoning", message: "I'll start with the KPI tiles." },
+				{ heading: "Working..." },
+			),
+		]);
+
+		expect(progress.lastReasoning).toBe("I'll start with the KPI tiles.");
+	});
+
+	it("keeps a real reasoning sentence over Aurora's 'Analysing...' placeholder", () => {
+		const progress = accumulateProgress(undefined, [
+			event("meta.progress", {
+				stage: "reasoning",
+				message: "Styling the KPIs.",
+			}),
+			event("meta.progress", { stage: "reasoning", message: "Analysing..." }),
+		]);
+
+		expect(progress.lastReasoning).toBe("Styling the KPIs.");
+	});
+
+	it("describes a tool card with the questions it is building", () => {
+		const progress = accumulateProgress(undefined, [
+			event(
+				"meta.progress",
+				{
+					stage: "tool_execution",
+					tool_status: "completed",
+					card_heading: "Generating answers",
+					card_data: {
+						answers: [
+							{ query: "total sales by region" },
+							{ query: "sales by month" },
+						],
+					},
+				},
+				{ heading: "Creating a new Answer" },
+			),
+		]);
+
+		expect(progress.currentStep).toBe(
+			"Generating answers (done): total sales by region · sales by month",
+		);
+	});
+
+	it("falls back to the heading when there is nothing richer", () => {
+		const progress = accumulateProgress(undefined, [
+			event("meta.progress", { stage: "working" }, { heading: "Working..." }),
+		]);
+
+		expect(progress.currentStep).toBe("Working...");
+	});
+
 	it("strips the gen_no metadata comment out of assistant prose", () => {
 		const result = summarizeTurn([
 			event("message.delta", { content: "<!-- gen_no: 12 -->Need a source" }),

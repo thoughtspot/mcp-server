@@ -719,7 +719,7 @@ export class ThoughtSpotService {
 		);
 
 		const liveboardId = resp[0].response.header.id_guid;
-		const liveboardUrl = `${(this.client as any).instanceUrl}/#/pinboard/${liveboardId}`;
+		const liveboardUrl = `${(this.client as any).instanceUrl}/#/insights/pinboard/${liveboardId}`;
 		span?.setAttribute("liveboard_id", liveboardId);
 		span?.setStatus({
 			code: SpanStatusCode.OK,

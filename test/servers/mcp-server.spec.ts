@@ -136,7 +136,7 @@ describe("MCP Server", () => {
 						last_modified: "2023-11-14T22:13:21.000Z",
 						verified: false,
 						external_link:
-							"https://test.thoughtspot.cloud/#/pinboard/liveboard-456",
+							"https://test.thoughtspot.cloud/#/insights/pinboard/liveboard-456",
 						query: null,
 						confidence: 0.82,
 					},
@@ -1124,7 +1124,7 @@ describe("MCP Server", () => {
 				"Liveboard created successfully",
 			);
 			expect((result.content as any[])[0].text).toContain(
-				"https://test.thoughtspot.cloud/#/pinboard/liveboard-123",
+				"https://test.thoughtspot.cloud/#/insights/pinboard/liveboard-123",
 			);
 		});
 
@@ -1197,7 +1197,7 @@ describe("MCP Server", () => {
 			const mockFetchTMLAndCreateLiveboard = vi
 				.spyOn(ThoughtSpotService.prototype, "fetchTMLAndCreateLiveboard")
 				.mockResolvedValue({
-					url: "https://test.thoughtspot.cloud/#/pinboard/liveboard-123",
+					url: "https://test.thoughtspot.cloud/#/insights/pinboard/liveboard-123",
 					error: null,
 				});
 
@@ -2139,6 +2139,7 @@ describe("MCP Server", () => {
 			frames?: string[];
 			metadata?: Record<string, unknown>;
 			locked?: boolean;
+			sessionState?: Record<string, unknown>;
 		} = {},
 	) {
 		const encoder = new TextEncoder();
@@ -2171,7 +2172,7 @@ describe("MCP Server", () => {
 			}),
 			saveLiveboard: vi.fn(async () => ({
 				liveboardId: metadata.liveboardId,
-				liveboardUrl: `https://test.thoughtspot.cloud/#/pinboard/${metadata.liveboardId}`,
+				liveboardUrl: `https://test.thoughtspot.cloud/#/insights/pinboard/${metadata.liveboardId}`,
 			})),
 		};
 		const metadata: Record<string, unknown> = { ...opts.metadata };
@@ -2186,6 +2187,14 @@ describe("MCP Server", () => {
 				return { ...metadata };
 			}),
 			appendMessages: vi.fn().mockResolvedValue(undefined),
+			// Other keys (other tasks, dashboard locks); the task under test lives in `metadata`.
+			sessionState: { ...opts.sessionState } as Record<string, unknown>,
+			getSessionState: vi.fn(async (id: string) =>
+				id in storage.sessionState ? storage.sessionState[id] : null,
+			),
+			putSessionState: vi.fn(async (id: string, value: unknown) => {
+				storage.sessionState[id] = value;
+			}),
 		};
 		vi.spyOn(
 			MCPServer.prototype as any,
@@ -2213,7 +2222,7 @@ describe("MCP Server", () => {
 			expect(result.structuredContent.changes_applied).toBe(true);
 			expect(result.structuredContent.dashboard_id).toBe("lb-1");
 			expect(result.structuredContent.dashboard_url).toContain(
-				"/#/pinboard/lb-1",
+				"/#/insights/pinboard/lb-1",
 			);
 			expect(result.structuredContent.task_id).toMatch(/^[0-9a-f-]{36}$/);
 			expect(result.structuredContent).not.toHaveProperty("link");
@@ -2276,6 +2285,50 @@ describe("MCP Server", () => {
 			expect(service.openStream).toHaveBeenCalledWith(
 				expect.objectContaining({ taskId: "task-1" }),
 			);
+		});
+
+		it("refuses a second change while another task is changing the same dashboard", async () => {
+			const { service } = stubDashboardWork({
+				sessionState: {
+					"dashboard-lock:lb-1": { taskId: "task-running" },
+					"task-running": { turnHeartbeatAt: Date.now(), turnOutcome: null },
+				},
+			});
+			await server.init();
+			const { callTool } = connect(server);
+
+			const result: any = await callTool("modify_dashboard", {
+				dashboard_id: "lb-1",
+				instructions: "Add a KPI",
+			});
+
+			expect(result.isError).toBe(true);
+			expect(result.content[0].text).toContain(
+				"already being changed by another request (task_id task-running)",
+			);
+			expect(service.openStream).not.toHaveBeenCalled();
+		});
+
+		it("allows a new change once the previous task on the dashboard has finished", async () => {
+			const { service } = stubDashboardWork({
+				sessionState: {
+					"dashboard-lock:lb-1": { taskId: "task-done" },
+					"task-done": {
+						turnHeartbeatAt: null,
+						turnOutcome: { status: "completed" },
+					},
+				},
+			});
+			await server.init();
+			const { callTool } = connect(server);
+
+			const result: any = await callTool("modify_dashboard", {
+				dashboard_id: "lb-1",
+				instructions: "Add a KPI",
+			});
+
+			expect(result.structuredContent.status).toBe("completed");
+			expect(service.openStream).toHaveBeenCalled();
 		});
 
 		it("reports a busy task as an error pointing at get_dashboard_status", async () => {
@@ -2347,7 +2400,8 @@ describe("MCP Server", () => {
 						liveboardUpdated: true,
 						text: "Added a KPI row.",
 						dashboardId: "lb-1",
-						dashboardUrl: "https://test.thoughtspot.cloud/#/pinboard/lb-1",
+						dashboardUrl:
+							"https://test.thoughtspot.cloud/#/insights/pinboard/lb-1",
 					},
 				},
 			});
@@ -2363,7 +2417,8 @@ describe("MCP Server", () => {
 				task_id: "task-1",
 				changes_applied: true,
 				dashboard_id: "lb-1",
-				dashboard_url: "https://test.thoughtspot.cloud/#/pinboard/lb-1",
+				dashboard_url:
+					"https://test.thoughtspot.cloud/#/insights/pinboard/lb-1",
 				message: "Added a KPI row.",
 			});
 		});
@@ -2423,7 +2478,7 @@ describe("MCP Server", () => {
 			const fetchTML = vi
 				.spyOn(ThoughtSpotService.prototype, "fetchTMLAndCreateLiveboard")
 				.mockResolvedValue({
-					url: "https://test.thoughtspot.cloud/#/pinboard/lb-9",
+					url: "https://test.thoughtspot.cloud/#/insights/pinboard/lb-9",
 					liveboardId: "lb-9",
 					error: null,
 				});
@@ -2442,7 +2497,8 @@ describe("MCP Server", () => {
 				status: "completed",
 				changes_applied: true,
 				dashboard_id: "lb-9",
-				dashboard_url: "https://test.thoughtspot.cloud/#/pinboard/lb-9",
+				dashboard_url:
+					"https://test.thoughtspot.cloud/#/insights/pinboard/lb-9",
 			});
 			expect(result.structuredContent).not.toHaveProperty("link");
 			expect(fetchTML).toHaveBeenCalledWith("Revenue Dashboard", [
@@ -2468,7 +2524,35 @@ describe("MCP Server", () => {
 			expect(prompt).toMatch(/coherent/i);
 		});
 
-		it("creates an empty dashboard when only a design context is given", async () => {
+		it("does not steer send_session_message to Spotter for dashboard requests", async () => {
+			await server.init();
+			const { listTools } = connect(server);
+			const { tools } = await listTools();
+			const send = tools.find((t: any) => t.name === "send_session_message");
+			const create = tools.find((t: any) => t.name === "create_dashboard");
+
+			expect(send.description).not.toContain("planning query");
+			expect(send.description).toContain("use the `create_dashboard` tool");
+			expect(create.description).toContain(
+				"do not run the analysis yourself first",
+			);
+		});
+
+		it("rejects a create with neither answers nor instructions, readably", async () => {
+			await server.init();
+			const { callTool } = connect(server);
+
+			const result: any = await callTool("create_dashboard", {
+				title: "Nothing to build",
+			});
+
+			expect(result.isError).toBe(true);
+			expect(result.content[0].text).toContain(
+				"Provide `answers` from a prior analysis, or `instructions`",
+			);
+		});
+
+		it("plans first when only instructions are given", async () => {
 			const fetchTML = vi.spyOn(
 				ThoughtSpotService.prototype,
 				"fetchTMLAndCreateLiveboard",
@@ -2480,7 +2564,7 @@ describe("MCP Server", () => {
 
 			const result: any = await callTool("create_dashboard", {
 				title: "From a spec",
-				design_context: "KPI row on top, then revenue by month as a line",
+				instructions: "KPI row on top, then revenue by month as a line",
 			});
 
 			expect(result.structuredContent.status).toBe("completed");
@@ -2488,9 +2572,57 @@ describe("MCP Server", () => {
 			expect(service.createSession).toHaveBeenCalledWith(
 				expect.objectContaining({ newLiveboardName: "From a spec" }),
 			);
-			expect(service.openStream.mock.calls[0][0].message).toContain(
-				"KPI row on top",
-			);
+			const prompt = service.openStream.mock.calls[0][0].message;
+			expect(prompt).toContain("KPI row on top");
+			expect(prompt).toContain("Do not create, change or publish anything");
+		});
+
+		it("confirms its own plan through create_dashboard with the task_id", async () => {
+			const { service } = stubDashboardWork({
+				metadata: { liveboardId: "lb-plan" },
+			});
+
+			await server.init();
+			const { callTool } = connect(server);
+
+			const result: any = await callTool("create_dashboard", {
+				task_id: "task-plan",
+				instructions: "Use a line chart for the trend",
+			});
+
+			expect(result.structuredContent.status).toBe("completed");
+			// Continues the planning task rather than opening a new session.
+			expect(service.createSession).not.toHaveBeenCalled();
+			expect(service.openStream.mock.calls[0][0].taskId).toBe("task-plan");
+			const prompt = service.openStream.mock.calls[0][0].message;
+			expect(prompt).toContain("confirmed it. Build the dashboard now");
+			expect(prompt).toContain("Use a line chart for the trend");
+		});
+
+		it("reports an unknown task_id on create readably", async () => {
+			stubDashboardWork();
+			await server.init();
+			const { callTool } = connect(server);
+
+			const result: any = await callTool("create_dashboard", {
+				task_id: "no-such-task",
+				instructions: "Build it",
+			});
+
+			expect(result.isError).toBe(true);
+			expect(result.content[0].text).toContain("That `task_id` was not found");
+		});
+
+		it("asks for a title when there is no task_id", async () => {
+			await server.init();
+			const { callTool } = connect(server);
+
+			const result: any = await callTool("create_dashboard", {
+				instructions: "Sales overview",
+			});
+
+			expect(result.isError).toBe(true);
+			expect(result.content[0].text).toContain("Provide `title`");
 		});
 
 		it("should return error when answer_id format is invalid", async () => {
@@ -2563,7 +2695,7 @@ describe("MCP Server", () => {
 			const spy = vi
 				.spyOn(ThoughtSpotService.prototype, "fetchTMLAndCreateLiveboard")
 				.mockResolvedValue({
-					url: "https://test.thoughtspot.cloud/#/pinboard/dash-1",
+					url: "https://test.thoughtspot.cloud/#/insights/pinboard/dash-1",
 					liveboardId: "dash-1",
 					error: null,
 				});
@@ -2618,7 +2750,7 @@ describe("MCP Server", () => {
 				const fetchTML = vi
 					.spyOn(ThoughtSpotService.prototype, "fetchTMLAndCreateLiveboard")
 					.mockResolvedValue({
-						url: "https://test.thoughtspot.cloud/#/pinboard/dashboard-456",
+						url: "https://test.thoughtspot.cloud/#/insights/pinboard/dashboard-456",
 						error: null,
 					});
 				const { service } = stubDashboardWork();
@@ -2634,7 +2766,7 @@ describe("MCP Server", () => {
 
 				expect(result.isError).toBeUndefined();
 				expect(result.structuredContent).toEqual({
-					link: "https://test.thoughtspot.cloud/#/pinboard/dashboard-456",
+					link: "https://test.thoughtspot.cloud/#/insights/pinboard/dashboard-456",
 				});
 				expect(fetchTML).toHaveBeenCalledWith(
 					"Revenue Dashboard",

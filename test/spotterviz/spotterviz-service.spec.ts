@@ -214,7 +214,9 @@ describe("SpotterVizService.saveLiveboard", () => {
 
 		expect(ts.saveBachPinboard).toHaveBeenCalledWith("txn-9", "4");
 		expect(result.liveboardId).toBe("lb-7");
-		expect(result.liveboardUrl).toBe("https://ts.example.com/#/pinboard/lb-7");
+		expect(result.liveboardUrl).toBe(
+			"https://ts.example.com/#/insights/pinboard/lb-7",
+		);
 	});
 
 	it("throws when the stored context has no liveboardId", async () => {

@@ -526,7 +526,7 @@ export const DashboardResultSchema = z.object({
 		.string()
 		.optional()
 		.describe(
-			"What the designer reported: its summary when `completed`, its question when `needs_input`, or why it failed when `failed`.",
+			"What the designer reported: what it is doing now (`in_progress`), its summary (`completed`), its plan or question (`needs_input`), or why it failed (`failed`).",
 		),
 	choices: z
 		.array(z.string())
@@ -536,25 +536,33 @@ export const DashboardResultSchema = z.object({
 
 export const CreateDashboardInputSchema = z
 	.object({
-		title: z.string().describe("Title of the dashboard to be created."),
-		design_context: z
+		title: z
 			.string()
 			.optional()
 			.describe(
-				`How the dashboard should look and be organised, in your own words, with as much detail as you have (for example when recreating a Tableau workbook). Useful: which charts to group or split into tabs; what matters most (placed top-left); chart types per metric, using the user's exact measure and dimension names; brand colours as hex codes; short explanatory text without live figures; the data source, only if the user named one. Not supported: changing an existing chart's type or query, or colouring individual data values.`,
+				"Title of the dashboard to be created. Required unless you pass `task_id`.",
+			),
+		task_id: z
+			.string()
+			.optional()
+			.describe(
+				"`task_id` from an earlier `create_dashboard` call that returned a plan. Pass it to confirm the plan, with any changes in `instructions`, so the dashboard is built.",
+			),
+		instructions: z
+			.string()
+			.optional()
+			.describe(
+				`The user's request for the dashboard, in their words. Do not add charts, metrics, filters or layout the user did not ask for: the designer proposes those in a plan for the user to confirm, so a short request should stay short. Add detail only when the user gave it (for example chart types, grouping, tabs, brand colours as hex codes, a data source they named) or when recreating an existing dashboard from a spec, such as a Tableau workbook. Not supported: changing an existing chart's type or query, or colouring individual data values.`,
 			),
 		data_source_id: z.string().optional().describe(DATA_SOURCE_ID_GUIDANCE),
 		answers: z
 			.array(AnswerSchema)
 			.optional()
 			.describe(
-				"List of answers to add to the dashboard, from a prior analysis. Omit this when you have no answers yet and want the charts built from `design_context` instead.",
+				"List of answers to add to the dashboard, from a prior analysis. Omit this when you have no answers yet and want the charts built from `instructions` instead.",
 			),
 	})
-	.refine((d) => (d.answers && d.answers.length > 0) || d.design_context, {
-		message:
-			"Provide `answers` from a prior analysis, or `design_context` describing the dashboard to build, or both.",
-	});
+	.describe("Pass `answers`, `instructions`, or both.");
 
 export const CreateDashboardOutputSchema = DashboardResultSchema;
 
@@ -569,13 +577,13 @@ export const ModifyDashboardInputSchema = z.object({
 		.string()
 		.optional()
 		.describe(
-			"`task_id` from an earlier call on the same dashboard. Pass it to answer the designer's question or follow up with its earlier context; omit it to start a fresh change.",
+			"`task_id` from an earlier `modify_dashboard` call on the same dashboard. Pass it to answer the designer's question or follow up with its earlier context; omit it to start a fresh change.",
 		),
 	instructions: z
 		.string()
 		.min(1)
 		.describe(
-			"What to change, in plain language: layout or styling, new charts, or your answer to the designer's question. Be specific, as for `design_context` on `create_dashboard`.",
+			"What to change, in the user's words: layout or styling, new charts, or the user's answer to the designer's question. Do not add changes the user did not ask for.",
 		),
 	data_source_id: z.string().optional().describe(DATA_SOURCE_ID_GUIDANCE),
 });
@@ -1164,29 +1172,23 @@ export const toolDefinitionsV4 = [...toolDefinitionsV3, getDataToolDefinition];
 
 /** One-line result contract, for tools other than create_dashboard, which carries the full one. */
 const DASHBOARD_RESULT_CONTRACT_BRIEF =
-	"Check `status`: `completed` (give the user `dashboard_url`), `in_progress` (call `get_dashboard_status` again), `needs_input` (`message` says what is needed; answer it via `modify_dashboard` with the same `dashboard_id` and `task_id`), `failed` (`message` says why).";
-
-const sendSessionMessageWithPlanningToolDefinition = {
-	...toolDefinitionsV2.find((t) => t.name === ToolName.SendSessionMessage)!,
-	description:
-		"Send a message to a session with the Analytics Agent. The Agent may take some time to think and generate a response, so the response will not be returned immediately. Instead, you can use the `get_session_updates` tool to query for the latest updates on the session. After the Agent finishes responding (when `get_session_updates` returns `is_done: true`), you can send another message to the same session to ask follow-up questions without creating a new session. Do not send a new message until the Agent has finished responding to the previous message (when `get_session_updates` returns `is_done: true`). When the user's intent is to create a dashboard, the first message should be a planning query: ask what data and metrics are available, what key breakdowns or trends exist, and what charts would be most insightful. Only after receiving and synthesising the Agent's planning response should you send follow-up messages to request specific charts. If the user wants to create a dashboard from the charts collected, use the `create_dashboard` tool instead of sending that request as a message to the Agent.",
-};
+	"Check `status`: `completed` (give the user `dashboard_url`), `in_progress` (call `get_dashboard_status` again), `needs_input` (show `message` to the user and wait for their reply, then pass the reply in `instructions` to whichever tool started the task, with the same `task_id`: `create_dashboard`, or `modify_dashboard` plus its `dashboard_id`), `failed` (`message` says why; tell the user and ask before trying again, so you do not build a duplicate).";
 
 const createDashboardToolDefinition = {
 	name: ToolName.CreateDashboard,
 	description: `Create a dashboard, organise it, and save it, so the user can revisit the results later or share them with others. Use this whenever the user asks for a dashboard or a liveboard, asks to save the results of an analysis, or asks to recreate a dashboard they have elsewhere.
 
-There are two ways to call it, and you can combine them:
-1. From analysis you already did: pass \`answers\` from \`get_session_updates\`. The charts you already have are assembled into a dashboard.
-2. From a description: pass \`design_context\` describing the dashboard you want. The charts are created for you, from a data source the designer selects automatically. Use this when the user has a template, a spec, or a dashboard from another tool (for example a Tableau workbook) that they want recreated.
+There are two ways to call it:
+1. From analysis you already did: pass \`answers\` from \`get_session_updates\`, plus optional \`instructions\` on layout and style. The charts you already have are organised, styled and saved.
+2. From a description: pass \`instructions\` describing the dashboard. Use this when the user asks for a dashboard before any analysis, or wants one recreated from a spec or another tool (for example a Tableau workbook). Call this directly; do not run the analysis yourself first. The designer first replies with \`needs_input\`: the data source it chose and its plan for the dashboard. Nothing is built yet. Show the plan to the user and wait for their reply; never confirm it on their behalf, even if it looks complete. When the user confirms or asks for changes, call \`create_dashboard\` again with the same \`task_id\`, putting their changes in \`instructions\`.
 
-The dashboard is always organised and styled before it is saved. Add \`design_context\` when the user has preferences about how it should look; leave it out and sensible choices are made for you. Because this includes a design pass, it can take a few minutes and may return before it is finished.
+It can take a few minutes, so it may return \`in_progress\` before it is finished.
 
 Check \`status\` on the result and act on it:
 - \`completed\`: the dashboard is saved. Give the user \`dashboard_url\`.
-- \`needs_input\`: the designer needs more detail before it can proceed, and nothing has changed yet. \`message\` holds exactly what it asked, and \`choices\` any options it offered. If you can answer it yourself, for example from what the user told you earlier, answer it; only ask the user when you cannot. Either way, continue by calling \`modify_dashboard\` with the same \`dashboard_id\` and \`task_id\`, putting the answer in \`instructions\`. Do not report the request to the user as finished.
-- \`in_progress\`: still working. Call \`get_dashboard_status\` with \`task_id\`, and keep calling it until you get another status.
-- \`failed\`: nothing usable was produced. \`message\` explains why.`,
+- \`needs_input\`: the designer has a plan or a question for the user, and nothing has changed yet. \`message\` holds it, and \`choices\` any options it offered. Show it to the user and wait for their reply; do not answer or confirm it on their behalf. Then call \`create_dashboard\` again with the same \`task_id\`, putting the user's reply in \`instructions\`. Do not report the request to the user as finished.
+- \`in_progress\`: still working. \`message\`, when present, says what the designer is doing now; relay it to the user as progress. Call \`get_dashboard_status\` with \`task_id\`, and keep calling it until you get another status.
+- \`failed\`: nothing usable was produced. \`message\` explains why. Tell the user and ask before trying again, so you do not build a duplicate.`,
 	inputSchema: z.toJSONSchema(CreateDashboardInputSchema),
 	outputSchema: z.toJSONSchema(CreateDashboardOutputSchema),
 	annotations: {
@@ -1203,7 +1205,7 @@ const modifyDashboardToolDefinition = {
 
 \`dashboard_id\` is always required. Add \`task_id\` as well to continue something you already started, which is how you answer a question the designer asked you or send a follow-up instruction about the same dashboard.
 
-Describe the change in \`instructions\` in plain language, and be specific: vague requests come back as questions rather than changes. New charts use the data sources the dashboard already has unless you say otherwise.
+Pass the change in \`instructions\` in the user's words. If it is too vague to act on, the designer comes back with a question. New charts use the data sources the dashboard already has unless you say otherwise.
 
 Changes are saved to the user's real dashboard, so only call this when the user has asked for the dashboard to change. Changing a dashboard can take a few minutes, so this may return before it is finished.
 
@@ -1244,9 +1246,6 @@ export const toolDefinitionsV5 = [
 	...toolDefinitionsV4.map((tool) => {
 		if (tool.name === ToolName.CreateDashboard) {
 			return createDashboardToolDefinition;
-		}
-		if (tool.name === ToolName.SendSessionMessage) {
-			return sendSessionMessageWithPlanningToolDefinition;
 		}
 		return tool;
 	}),

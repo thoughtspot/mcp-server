@@ -62,12 +62,12 @@ export function getReleaseDateIdentifier(
 export const VERSION_REGISTRY: VersionConfig[] = [
 	{
 		version: ["beta"],
-		tools: [...toolDefinitionsV2],
-		description: "Spotter3 agent conversation tools released",
+		tools: [...toolDefinitionsV5],
+		description: "Beta version",
 	},
 	{
 		// Dashboard designer tools. Release date is a placeholder until the release is scheduled.
-		version: ["latest", "2026-10-15"],
+		version: ["latest", "2026-10-14"],
 		tools: [...toolDefinitionsV5],
 		description:
 			"Dashboard designer: create_dashboard organises and styles, modify_dashboard and get_dashboard_status added",

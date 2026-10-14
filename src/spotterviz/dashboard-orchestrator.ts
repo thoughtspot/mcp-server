@@ -137,7 +137,15 @@ export async function startDashboardJob(
 	if (outcome) {
 		return { ...outcome, taskId };
 	}
-	return { status: "in_progress", taskId };
+	// Report what the designer is doing so far, so the first reply is not a bare "still working".
+	let text = "";
+	try {
+		const metadata = await storage.getMetadata<TurnMetadata>(taskId);
+		text = progressMessage(metadata.turnProgress);
+	} catch {
+		// Progress is a courtesy; the task id is what matters.
+	}
+	return { status: "in_progress", taskId, ...(text ? { text } : {}) };
 }
 
 /**
@@ -189,12 +197,37 @@ export async function pollDashboardTurn(
 			}
 
 			if (Date.now() + POLL_INTERVAL_MS > waitUntilTime) {
-				const text = metadata.turnProgress?.text;
+				const text = progressMessage(metadata.turnProgress);
 				return { status: "in_progress", taskId, ...(text ? { text } : {}) };
 			}
 			await sleep(POLL_INTERVAL_MS);
 		}
 	});
+}
+
+/** Longest tail of the designer's prose returned as a progress update. */
+const PROGRESS_TEXT_CHARS = 400;
+
+/**
+ * What the designer is doing now, for a turn still in progress: the step it is on, plus the end of
+ * what it has said so far. Text only, with no counts, so a quiet stretch never reads as stuck.
+ */
+function progressMessage(progress: TurnProgress | null | undefined): string {
+	if (!progress) {
+		return "";
+	}
+	const prose = progress.text.replace(/<!--[\s\S]*?-->/g, "").trim();
+	const tail =
+		prose.length > PROGRESS_TEXT_CHARS
+			? `…${prose.slice(-PROGRESS_TEXT_CHARS)}`
+			: prose;
+	// Prose is the final answer forming; while working, Aurora's reasoning and current tool say more.
+	if (progress.lastReasoning || progress.currentStep) {
+		return [progress.currentStep, progress.lastReasoning]
+			.filter(Boolean)
+			.join("\n");
+	}
+	return tail;
 }
 
 async function runJob(
@@ -291,6 +324,17 @@ async function finalize(
 	const { status, ...rest } = summarizeProgress(
 		progress ?? accumulateProgress(undefined, []),
 	);
+
+	// Aurora refuses a turn while a previous turn on the same session is still running.
+	if (status === "failed" && /session_busy/i.test(rest.error ?? "")) {
+		return {
+			...rest,
+			status: "failed",
+			error:
+				"The designer is still working on the previous request for this dashboard. Wait for that to finish (call get_dashboard_status with its task_id), then try again.",
+			...(await readDashboardId(storage, taskId)),
+		};
+	}
 
 	if (end === "idle") {
 		// Aurora's publish may already be in the edit session, but a stalled turn is not trusted
