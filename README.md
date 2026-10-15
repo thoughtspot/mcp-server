@@ -7,7 +7,8 @@
 # ThoughtSpot MCP Server <br/> ![MCP Server](https://badge.mcpx.dev?type=server 'MCP Server') ![Static Badge](https://img.shields.io/badge/cloudflare%20worker-deployed-green?link=https%3A%2F%2Fdash.cloudflare.com%2F485d90aa3d1ea138ad7ede769fe2c35e%2Fworkers%2Fservices%2Fview%2Fthoughtspot-mcp-server%2Fproduction%2Fmetrics) ![GitHub branch check runs](https://img.shields.io/github/check-runs/thoughtspot/mcp-server/main) [![Coverage Status](https://coveralls.io/repos/github/thoughtspot/mcp-server/badge.svg?branch=main)](https://coveralls.io/github/thoughtspot/mcp-server?branch=main) <a href="https://developer.thoughtspot.com/join-discord" target="_blank"> <img alt="Discord: ThoughtSpot" src="https://img.shields.io/discord/1143209406037758065?style=flat-square&label=Chat%20on%20Discord" /> </a>
 
 
-ThoughtSpot Spotter MCP Server provides a set of tools for querying and retrieving relevant data from your ThoughtSpot instance. Spotter connects to your ThoughtSpot instance, handles authentication securely, and returns live answers from your own data.
+ThoughtSpot SB
+Spotter MCP Server provides a set of tools for querying and retrieving relevant data from your ThoughtSpot instance. Spotter connects to your ThoughtSpot instance, handles authentication securely, and returns live answers from your own data.
 
 * [ThoughtSpot Spotter MCP Server documentation](https://developer-docs-git-mcp-server-updates-thoughtspot-site.vercel.app/docs/mcp-integration)
 * [Create a free ThoughtSpot account](https://www.thoughtspot.com/trial?utm_source=mcp&utm_medium=consent&tsref=MCP)
