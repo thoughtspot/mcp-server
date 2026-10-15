@@ -1,16 +1,7 @@
 // Runs static/oauth-callback.js (the browser script on the OAuth /callback page)
-// in a Node VM with a minimal fake DOM, window.location and fetch. Uses its own
-// vitest config (vitest.static.config.ts) because the Workers test runtime
-// can't evaluate script source.
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
-import { createContext, runInContext } from "node:vm";
-import { describe, expect, it, vi } from "vitest";
-
-const SCRIPT = readFileSync(
-	resolve(__dirname, "../../static/oauth-callback.js"),
-	"utf8",
-);
+// against stubbed window, document and fetch globals. The script runs when it is
+// imported, so each test re-imports it after resetting the module registry.
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 const ORIGIN = "https://mcp.example.com";
 const INSTANCE_URL = "https://acme.thoughtspot.cloud";
@@ -66,6 +57,15 @@ function json(body: unknown, status = 200) {
 	});
 }
 
+const originalFetch = globalThis.fetch;
+
+// Let the script's async work (fetch calls, response parsing) finish.
+async function settle() {
+	for (let i = 0; i < 10; i++) {
+		await new Promise((resolve) => setTimeout(resolve, 0));
+	}
+}
+
 async function runCallbackPage({
 	href = callbackUrl(INSTANCE_URL),
 	instanceUrl = INSTANCE_URL,
@@ -102,16 +102,13 @@ async function runCallbackPage({
 		createElement: () => fakeElement(),
 	};
 
-	await runInContext(
-		SCRIPT,
-		createContext({
-			window,
-			document,
-			fetch,
-			URL,
-			console: { error: vi.fn(), log: vi.fn() },
-		}),
-	);
+	vi.stubGlobal("window", window);
+	vi.stubGlobal("document", document);
+	vi.stubGlobal("fetch", fetch);
+	vi.resetModules();
+	// @ts-expect-error -- plain browser script, no type declarations
+	await import("../static/oauth-callback.js");
+	await settle();
 
 	const storeTokenCalls = fetch.mock.calls.filter(([input]) =>
 		input.endsWith("/store-token"),
@@ -120,6 +117,12 @@ async function runCallbackPage({
 }
 
 describe("OAuth callback page", () => {
+	afterEach(() => {
+		vi.stubGlobal("fetch", originalFetch);
+		vi.stubGlobal("window", undefined);
+		vi.stubGlobal("document", undefined);
+	});
+
 	it("stores the token and returns to the client when the cluster session is valid", async () => {
 		const { location, storeTokenCalls, fetch } = await runCallbackPage({
 			gettoken: () => json(TOKEN),
@@ -158,7 +161,7 @@ describe("OAuth callback page", () => {
 		expect(target.origin + target.pathname).toBe(`${ORIGIN}/callback`);
 		// oauthReqInfo must stay last: the server strips a suffix callosum appends to it.
 		expect([...target.searchParams.keys()]).toEqual([
-			"samlAttempted",
+			"loginAttempted",
 			"instanceUrl",
 			"oauthReqInfo",
 		]);
@@ -180,7 +183,7 @@ describe("OAuth callback page", () => {
 
 	it("shows the manual token screen on a 401 after SAML login, instead of looping", async () => {
 		const { location, storeTokenCalls, elements } = await runCallbackPage({
-			href: callbackUrl(INSTANCE_URL, { samlAttempted: "1" }),
+			href: callbackUrl(INSTANCE_URL, { loginAttempted: "1" }),
 			gettoken: () => new Response("", { status: 401 }),
 		});
 

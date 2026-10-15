@@ -51,9 +51,9 @@
                 // this page. The marker goes first so oauthReqInfo stays the last
                 // param (the server strips a suffix callosum appends to it).
                 const currentUrl = new URL(window.location.href);
-                if (!currentUrl.searchParams.has('samlAttempted')) {
+                if (!currentUrl.searchParams.has('loginAttempted')) {
                     const targetUrl = new URL(currentUrl.pathname, currentUrl.origin);
-                    targetUrl.searchParams.set('samlAttempted', '1');
+                    targetUrl.searchParams.set('loginAttempted', '1');
                     currentUrl.searchParams.forEach(function(value, key) {
                         targetUrl.searchParams.append(key, value);
                     });

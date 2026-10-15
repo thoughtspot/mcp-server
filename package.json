@@ -19,7 +19,6 @@
     "lint:staged": "biome lint --staged --no-errors-on-unmatched",
     "lint:fix": "biome lint --write",
     "test": "vitest run",
-    "test:static": "vitest run -c vitest.static.config.ts",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "bin": "node --import tsx ./src/stdio.ts",
