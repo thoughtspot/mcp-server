@@ -136,3 +136,74 @@ describe("Path aliases", () => {
 		);
 	});
 });
+
+describe("Instance allowlist wiring", () => {
+	const allowlistEnv = {
+		...env,
+		INSTANCE_ALLOWLIST_BY_HOST: JSON.stringify({
+			"test-champ.thoughtspot.app": [
+				"https://champagne.thoughtspotstaging.cloud",
+				"https://champagne-master-aws.thoughtspotstaging.cloud",
+			],
+		}),
+	};
+
+	function authorizePost(host: string, instanceUrl: string) {
+		return new IncomingRequest(`https://${host}/authorize`, {
+			method: "POST",
+			headers: { "Content-Type": "application/x-www-form-urlencoded" },
+			body: new URLSearchParams({ instanceUrl, state: "abc" }),
+		});
+	}
+
+	beforeEach(() => {
+		vi.resetModules();
+		mockOAuthFetch.mockClear();
+		mockOAuthFetch.mockResolvedValue(new Response(null, { status: 302 }));
+	});
+
+	it("rejects a disallowed instance on the restricted host before the auth package", async () => {
+		const worker = await loadWorker();
+		const response = await worker.fetch(
+			authorizePost(
+				"test-champ.thoughtspot.app",
+				"https://other.thoughtspot.cloud",
+			),
+			allowlistEnv,
+			createExecutionContext(),
+		);
+
+		expect(response.status).toBe(400);
+		expect(mockOAuthFetch).not.toHaveBeenCalled();
+	});
+
+	it("forwards an allowed instance on the restricted host", async () => {
+		const worker = await loadWorker();
+		const response = await worker.fetch(
+			authorizePost(
+				"test-champ.thoughtspot.app",
+				"https://champagne.thoughtspotstaging.cloud",
+			),
+			allowlistEnv,
+			createExecutionContext(),
+		);
+
+		expect(response.status).toBe(302);
+		expect(mockOAuthFetch).toHaveBeenCalledOnce();
+	});
+
+	it("leaves other hosts unrestricted", async () => {
+		const worker = await loadWorker();
+		const response = await worker.fetch(
+			authorizePost(
+				"test-sb.thoughtspot.app",
+				"https://other.thoughtspot.cloud",
+			),
+			allowlistEnv,
+			createExecutionContext(),
+		);
+
+		expect(response.status).toBe(302);
+		expect(mockOAuthFetch).toHaveBeenCalledOnce();
+	});
+});

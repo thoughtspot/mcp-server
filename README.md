@@ -31,6 +31,21 @@ For MCP hosts which do not(yet) support Dynamic client registration, or they req
 
 Manual client registration also allows to associate with a specific ThoughtSpot instance, so that your users do not have to enter the Thoughtspot instance URL when doing the authorization flow. While registering the Oauth client add `ThoughtSpot URL` to the appropriate value.
 
+### Restrict instances per domain
+
+When the Worker serves several custom domains, you can limit which ThoughtSpot instances each domain accepts with the `INSTANCE_ALLOWLIST_BY_HOST` environment variable. Its value is a JSON object that maps a hostname to its allowed instance URLs:
+
+```json
+{"mcp.example.com": ["https://instance-a.thoughtspot.cloud", "https://instance-b.thoughtspot.cloud"]}
+```
+
+On a listed hostname:
+- The authorization page shows a dropdown of the allowed instances instead of a free-text field.
+- `POST /authorize` rejects any other instance with a 400.
+- MCP requests (`/mcp`, `/sse`, `/token/*`, `/bearer/*`) for any other instance get a 403.
+
+Hostnames that aren't listed behave as before. If the value is not valid JSON, the server rejects requests with a 500 instead of lifting the restriction.
+
 
 ## Contributing
 
