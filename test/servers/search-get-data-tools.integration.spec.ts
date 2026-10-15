@@ -188,7 +188,7 @@ describe("search_objects tool — real handler + mocked network", () => {
 			pinboardHeader: { id: "liveboard-1" },
 			answer: {
 				header: {
-					id: "viz-1",
+					id: "9f8a1c2e-3b4d-4e5f-8a6b-7c8d9e0f1a2b",
 					title: "Revenue Trend",
 					authorName: "Bob",
 					description: "Trend viz",
@@ -283,12 +283,12 @@ describe("search_objects tool — real handler + mocked network", () => {
 
 		expect(structured.results[1]).toMatchObject({
 			object_id: "liveboard-1",
-			visualization_id: "viz-1",
+			visualization_id: "9f8a1c2e-3b4d-4e5f-8a6b-7c8d9e0f1a2b",
 			type: "LIVEBOARD_VIZ", // a viz pinned on a Liveboard ("Liveboard viz")
 			title: "Revenue Trend",
 			last_modified: "2023-11-14T22:13:25.000Z", // already ms → ISO-8601
 			query: "revenue weekly",
-			external_link: `${INSTANCE_URL}/#/insights/pinboard/liveboard-1/viz-1`,
+			external_link: `${INSTANCE_URL}/#/insights/pinboard/liveboard-1/9f8a1c2e-3b4d-4e5f-8a6b-7c8d9e0f1a2b`,
 		});
 
 		expect(structured.next_cursor).toBeNull(); // isFinalPage: true
@@ -456,7 +456,7 @@ describe("get_data tool — real handler + mocked network", () => {
 			jsonResponse({
 				contents: [
 					{
-						visualization_id: "viz-1",
+						visualization_id: "9f8a1c2e-3b4d-4e5f-8a6b-7c8d9e0f1a2b",
 						visualization_name: "By Product",
 						data_rows: [
 							{ Product: "Widget", Units: 10 },
@@ -473,14 +473,14 @@ describe("get_data tool — real handler + mocked network", () => {
 		const result = await callTool(server, "get_data", {
 			object_id: "liveboard-1",
 			object_type: "LIVEBOARD",
-			visualization_ids: ["viz-1"],
+			visualization_ids: ["9f8a1c2e-3b4d-4e5f-8a6b-7c8d9e0f1a2b"],
 			max_rows: 50,
 		});
 
 		expect(result.isError).toBeUndefined();
 		const structured = result.structuredContent as any;
 		expect(structured.data[0]).toMatchObject({
-			viz_id: "viz-1",
+			viz_id: "9f8a1c2e-3b4d-4e5f-8a6b-7c8d9e0f1a2b",
 			viz_name: "By Product",
 			columns: ["Product", "Units"],
 			data_rows: [
@@ -494,7 +494,9 @@ describe("get_data tool — real handler + mocked network", () => {
 		// client-side.
 		const [, init] = callTo("/metadata/liveboard/data") ?? [];
 		const body = JSON.parse(init.body);
-		expect(body.visualization_identifiers).toEqual(["viz-1"]);
+		expect(body.visualization_identifiers).toEqual([
+			"9f8a1c2e-3b4d-4e5f-8a6b-7c8d9e0f1a2b",
+		]);
 		expect(body.record_size).toBe(LIVEBOARD_RECORD_SIZE);
 		expect(callTo("/metadata/answer/data")).toBeUndefined();
 	});
@@ -504,7 +506,7 @@ describe("get_data tool — real handler + mocked network", () => {
 			jsonResponse({
 				contents: [
 					{
-						visualization_id: "viz-1",
+						visualization_id: "9f8a1c2e-3b4d-4e5f-8a6b-7c8d9e0f1a2b",
 						visualization_name: "By Product",
 						data_rows: [{ Product: "Widget", Units: 10 }],
 						available_data_row_count: 1,
@@ -520,13 +522,15 @@ describe("get_data tool — real handler + mocked network", () => {
 		const result = await callTool(server, "get_data", {
 			object_id: "liveboard-1",
 			object_type: "LIVEBOARD_VIZ",
-			visualization_ids: ["viz-1"],
+			visualization_ids: ["9f8a1c2e-3b4d-4e5f-8a6b-7c8d9e0f1a2b"],
 		});
 
 		expect(result.isError).toBeUndefined();
 		const [, init] = callTo("/metadata/liveboard/data") ?? [];
 		const body = JSON.parse(init.body);
-		expect(body.visualization_identifiers).toEqual(["viz-1"]);
+		expect(body.visualization_identifiers).toEqual([
+			"9f8a1c2e-3b4d-4e5f-8a6b-7c8d9e0f1a2b",
+		]);
 		expect(body.record_size).toBe(LIVEBOARD_RECORD_SIZE);
 		expect(callTo("/metadata/answer/data")).toBeUndefined();
 	});
@@ -568,7 +572,7 @@ describe("get_data tool — real handler + mocked network", () => {
 			return jsonResponse({
 				contents: [
 					{
-						visualization_id: "viz-1",
+						visualization_id: "9f8a1c2e-3b4d-4e5f-8a6b-7c8d9e0f1a2b",
 						visualization_name: "By Product",
 						data_rows: allRows,
 						available_data_row_count: allRows.length,
@@ -583,7 +587,7 @@ describe("get_data tool — real handler + mocked network", () => {
 		const result = await callTool(server, "get_data", {
 			object_id: "liveboard-1",
 			object_type: "LIVEBOARD",
-			visualization_ids: ["viz-1"],
+			visualization_ids: ["9f8a1c2e-3b4d-4e5f-8a6b-7c8d9e0f1a2b"],
 			max_rows: 2,
 		});
 
@@ -613,6 +617,23 @@ describe("get_data tool — real handler + mocked network", () => {
 		await expect(
 			callTool(server, "get_data", { object_id: "answer-1" }),
 		).rejects.toThrow();
+	});
+
+	// A non-GUID viz id (e.g. a model placeholder) fails fast, never hitting TS.
+	it("rejects non-GUID visualization_ids before calling ThoughtSpot", async () => {
+		const server = await newServer();
+
+		await expect(
+			callTool(server, "get_data", {
+				object_id: "liveboard-1",
+				object_type: "LIVEBOARD",
+				visualization_ids: ["placeholder"],
+			}),
+		).rejects.toThrow(/must be a visualization GUID/);
+		const lbCalls = fetchMock.mock.calls.filter(([u]) =>
+			String(u).includes("/metadata/liveboard/data"),
+		);
+		expect(lbCalls).toHaveLength(0);
 	});
 
 	it("surfaces an upstream non-2xx from the data endpoint as an error response", async () => {
