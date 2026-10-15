@@ -25,7 +25,7 @@ import {
 	resolveRequestedApiVersionMode,
 	withRequestMetrics,
 } from "./metrics/runtime/request-metrics";
-import { skipSamlRedirect } from "./oauth-redirect";
+import { fetchToken } from "./oauth-redirect";
 import { ConversationStorageServerSQLite as BaseConversationStorageServer } from "./servers/conversation-storage-server";
 import { MCPServer } from "./servers/mcp-server";
 import { UserTokenStoreSQLite } from "./servers/user-token-store-server";
@@ -210,7 +210,7 @@ const oauthHandler = {
 			});
 		}
 		const response = await oauthFetchHandler.fetch!(request as any, env, ctx);
-		return skipSamlRedirect(request, response);
+		return fetchToken(request, response);
 	},
 };
 

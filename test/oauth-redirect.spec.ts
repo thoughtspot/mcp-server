@@ -1,6 +1,6 @@
 import { buildSamlRedirectUrl } from "@thoughtspot/mcp-auth";
 import { describe, expect, it } from "vitest";
-import { skipSamlRedirect } from "../src/oauth-redirect";
+import { fetchToken } from "../src/oauth-redirect";
 
 const ORIGIN = "https://mcp.example.com";
 const INSTANCE_URL = "https://acme.thoughtspot.cloud";
@@ -20,9 +20,9 @@ function samlRedirect(callbackOrigin = ORIGIN) {
 	);
 }
 
-describe("skipSamlRedirect", () => {
+describe("fetchToken", () => {
 	it("redirects POST /authorize straight to the /callback page", () => {
-		const response = skipSamlRedirect(authorizeRequest(), samlRedirect());
+		const response = fetchToken(authorizeRequest(), samlRedirect());
 
 		expect(response.status).toBe(302);
 		const location = new URL(response.headers.get("Location") ?? "");
@@ -43,7 +43,7 @@ describe("skipSamlRedirect", () => {
 		const original = samlRedirect();
 		const headers = new Headers(original.headers);
 		headers.set("X-Test", "1");
-		const response = skipSamlRedirect(
+		const response = fetchToken(
 			authorizeRequest(),
 			new Response(null, { status: 303, headers }),
 		);
@@ -58,7 +58,7 @@ describe("skipSamlRedirect", () => {
 		["POST to another path", authorizeRequest("POST", "/store-token")],
 	])("leaves %s untouched", (_name, request) => {
 		const original = samlRedirect();
-		expect(skipSamlRedirect(request, original)).toBe(original);
+		expect(fetchToken(request, original)).toBe(original);
 	});
 
 	it.each([
@@ -83,6 +83,6 @@ describe("skipSamlRedirect", () => {
 			),
 		],
 	])("leaves %s untouched", (_name, original) => {
-		expect(skipSamlRedirect(authorizeRequest(), original)).toBe(original);
+		expect(fetchToken(authorizeRequest(), original)).toBe(original);
 	});
 });

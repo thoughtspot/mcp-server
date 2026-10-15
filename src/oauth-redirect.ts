@@ -11,10 +11,7 @@ const SAML_LOGIN_PATH = "/callosum/v1/saml/login";
  *
  * Any other response is returned unchanged.
  */
-export function skipSamlRedirect(
-	request: Request,
-	response: Response,
-): Response {
+export function fetchToken(request: Request, response: Response): Response {
 	const requestUrl = new URL(request.url);
 	if (
 		request.method !== "POST" ||
