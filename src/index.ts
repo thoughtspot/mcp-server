@@ -8,6 +8,7 @@ import { trace } from "@opentelemetry/api";
 import { type AuthHooks, createOAuthHandler } from "@thoughtspot/mcp-auth";
 
 import { instrumentedMCPServer } from "./cloudflare-utils";
+import { withInstanceAllowlist } from "./instance-allowlist";
 import {
 	getStatusClass,
 	resolveRequestMetricContext,
@@ -216,6 +217,11 @@ const oauthHandler = {
 
 const instrumentedOAuthHandler = instrument(oauthHandler, config);
 
+// Restricts the authorize page to the per-host instance allowlist (if any).
+const allowlistedOAuthFetch = withInstanceAllowlist(async (request, env, ctx) =>
+	instrumentedOAuthHandler.fetch!(request as any, env, ctx),
+);
+
 // OTEL instrumentation automatically uses or passing along some headers from upstream calls, so we
 // need to strip them from the request before OTEL sees them if we don't want that to happen
 const HEADERS_TO_STRIP = ["traceparent", "tracestate"];
@@ -271,11 +277,7 @@ export default {
 				const requestStartMs = Date.now();
 
 				try {
-					const response = await instrumentedOAuthHandler.fetch!(
-						request,
-						env,
-						ctx,
-					);
+					const response = await allowlistedOAuthFetch(request, env, ctx);
 					recordHttpRequestMetrics(
 						recorder,
 						request,
