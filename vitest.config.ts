@@ -1,8 +1,11 @@
 import { defineWorkersConfig } from "@cloudflare/vitest-pool-workers/config";
+import { configDefaults } from "vitest/config";
 
 export default defineWorkersConfig({
     test: {
         setupFiles: ["./test/setup.ts"],
+        // Browser-script tests run in Node via vitest.static.config.ts.
+        exclude: [...configDefaults.exclude, "test/static/**"],
         deps: {
             optimizer: {
                 ssr: {
