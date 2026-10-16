@@ -261,6 +261,27 @@ describe("withInstanceAllowlist", () => {
 		expect(html).toContain('name="state" value="abc"');
 	});
 
+	it("renders a single allowed instance as a read-only pre-filled field", async () => {
+		const inner = vi.fn().mockResolvedValue(htmlResponse());
+		const response = await withInstanceAllowlist(inner)(
+			new Request(`https://${RESTRICTED_HOST}/authorize?client_id=x`),
+			{
+				[INSTANCE_ALLOWLIST_ENV_VAR]: JSON.stringify({
+					[RESTRICTED_HOST]: [CHAMPAGNE],
+				}),
+			},
+			ctx,
+		);
+		const html = await response.text();
+
+		expect(html).toContain(
+			`<input type="text" id="instanceUrl" name="instanceUrl" class="instance-fixed" value="${CHAMPAGNE}" title="${CHAMPAGNE}" readonly>`,
+		);
+		expect(html).not.toContain("<select");
+		expect(html).not.toContain('value="" placeholder=');
+		expect(html).not.toContain('class="free-trial-footer"');
+	});
+
 	it("does not rewrite non-HTML or error responses", async () => {
 		const jsonResponse = new Response('{"error":"x"}', {
 			status: 400,

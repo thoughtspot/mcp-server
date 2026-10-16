@@ -45,6 +45,8 @@ const INSTANCE_SELECT_STYLE = `<style>
 .form-group select.input-blue { border-color: #2563eb; }
 .form-group select.input-red { border-color: #dc2626; }
 .form-group select option { color: #111827; background: #fff; }
+.form-group input.instance-fixed { font-weight: 500; color: #111827; background: #f8fafc; cursor: default; text-overflow: ellipsis; }
+.form-group input.instance-fixed:focus { outline: none; border-color: #d1d5db; }
 </style>`;
 
 export type InstanceAllowlist = Map<string, string[]>;
@@ -209,7 +211,20 @@ function escapeHtml(value: string): string {
 		.replace(/'/g, "&#39;");
 }
 
+/**
+ * A single permitted instance is shown as a pre-filled read-only field (a
+ * dropdown with one entry would suggest a choice that doesn't exist); readonly
+ * fields are still submitted, so no hidden input is needed.
+ */
+function renderFixedInstance(url: string): string {
+	const escaped = escapeHtml(url);
+	return `<input type="text" id="${INSTANCE_URL_FIELD}" name="${INSTANCE_URL_FIELD}" class="instance-fixed" value="${escaped}" title="${escaped}" readonly>`;
+}
+
 function renderInstanceSelect(allowed: string[]): string {
+	if (allowed.length === 1) {
+		return renderFixedInstance(allowed[0]);
+	}
 	const options = allowed
 		.map((url) => {
 			const escaped = escapeHtml(url);
