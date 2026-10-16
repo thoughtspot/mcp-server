@@ -22,7 +22,7 @@ const ALLOWLIST_JSON = JSON.stringify({
 });
 const ENV = { [INSTANCE_ALLOWLIST_ENV_VAR]: ALLOWLIST_JSON };
 
-const APPROVAL_HTML = `<!DOCTYPE html><html><body>
+const APPROVAL_HTML = `<!DOCTYPE html><html><head><style>.form-group input { width: 100%; }</style></head><body>
 <form id="approvalForm" method="post" action="/authorize">
 <label for="instanceUrl" id="instanceUrlLabel">ThoughtSpot instance URL</label>
 <input type="text" id="instanceUrl" name="instanceUrl" value="" placeholder="https://your-instance.thoughtspot.cloud">
@@ -79,6 +79,41 @@ describe("parseInstanceAllowlist", () => {
 		expect(() => parseInstanceAllowlist(raw)).toThrow(
 			InstanceAllowlistConfigError,
 		);
+	});
+});
+
+describe("parseInstanceAllowlist config shapes", () => {
+	it.each([
+		["a full URL", `https://${RESTRICTED_HOST}/`],
+		["mixed case with port", "Test-Champ.ThoughtSpot.app:443"],
+		["surrounding whitespace", `  ${RESTRICTED_HOST}  `],
+	])("normalizes a host key given as %s", (_label, key) => {
+		const allowlist = parseInstanceAllowlist(
+			JSON.stringify({ [key]: [CHAMPAGNE] }),
+		);
+		expect([...allowlist.keys()]).toEqual([RESTRICTED_HOST]);
+	});
+
+	it("accepts an already-parsed object (JSON-typed Cloudflare var)", () => {
+		const allowlist = parseInstanceAllowlist({
+			[RESTRICTED_HOST]: [CHAMPAGNE],
+		});
+		expect(allowlist.get(RESTRICTED_HOST)).toEqual([CHAMPAGNE]);
+	});
+
+	it("restricts a request when the var is a JSON-typed object", () => {
+		const request = new Request(`https://${RESTRICTED_HOST}/authorize`);
+		expect(
+			getAllowedInstances(request, {
+				[INSTANCE_ALLOWLIST_ENV_VAR]: { [RESTRICTED_HOST]: [CHAMPAGNE] },
+			}),
+		).toEqual([CHAMPAGNE]);
+	});
+
+	it("throws a config error for an unparseable host key", () => {
+		expect(() =>
+			parseInstanceAllowlist(JSON.stringify({ "https://": [CHAMPAGNE] })),
+		).toThrow(InstanceAllowlistConfigError);
 	});
 });
 
@@ -200,12 +235,28 @@ describe("withInstanceAllowlist", () => {
 		);
 		const html = await response.text();
 
-		expect(html).toContain('<select id="instanceUrl" name="instanceUrl">');
+		// Tooltip starts on the default (first) option so a truncated URL is readable.
+		expect(html).toContain(
+			`<select id="instanceUrl" name="instanceUrl" title="${CHAMPAGNE}">`,
+		);
 		expect(html.match(/<option /g)).toHaveLength(2);
-		expect(html).toContain(`<option value="${CHAMPAGNE}">`);
-		expect(html).toContain(`<option value="${CHAMPAGNE_AWS}">`);
+		expect(html).toContain(
+			`<option value="${CHAMPAGNE}" title="${CHAMPAGNE}">`,
+		);
+		expect(html).toContain(
+			`<option value="${CHAMPAGNE_AWS}" title="${CHAMPAGNE_AWS}">`,
+		);
+		// Script keeps the tooltip in sync with the selection, appended to <body>.
+		expect(html).toMatch(
+			/select\.title = select\.value;[\s\S]*<\/script>\s*<\/body>/,
+		);
 		expect(html).not.toContain('type="text" id="instanceUrl"');
-		expect(html).not.toContain("free-trial-footer");
+		expect(html).not.toContain('class="free-trial-footer"');
+		expect(html).not.toContain("instance-select-hint");
+		// The dropdown gets the same box styling as the text input it replaces.
+		expect(html).toMatch(
+			/<style>\s*\.form-group select \{ width: 100%;[^<]*<\/style>\s*<\/head>/,
+		);
 		// Hidden state input must survive the rewrite.
 		expect(html).toContain('name="state" value="abc"');
 	});

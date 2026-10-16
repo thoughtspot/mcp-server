@@ -7,8 +7,7 @@
 # ThoughtSpot MCP Server <br/> ![MCP Server](https://badge.mcpx.dev?type=server 'MCP Server') ![Static Badge](https://img.shields.io/badge/cloudflare%20worker-deployed-green?link=https%3A%2F%2Fdash.cloudflare.com%2F485d90aa3d1ea138ad7ede769fe2c35e%2Fworkers%2Fservices%2Fview%2Fthoughtspot-mcp-server%2Fproduction%2Fmetrics) ![GitHub branch check runs](https://img.shields.io/github/check-runs/thoughtspot/mcp-server/main) [![Coverage Status](https://coveralls.io/repos/github/thoughtspot/mcp-server/badge.svg?branch=main)](https://coveralls.io/github/thoughtspot/mcp-server?branch=main) <a href="https://developer.thoughtspot.com/join-discord" target="_blank"> <img alt="Discord: ThoughtSpot" src="https://img.shields.io/discord/1143209406037758065?style=flat-square&label=Chat%20on%20Discord" /> </a>
 
 
-ThoughtSpot SB
-Spotter MCP Server provides a set of tools for querying and retrieving relevant data from your ThoughtSpot instance. Spotter connects to your ThoughtSpot instance, handles authentication securely, and returns live answers from your own data.
+ThoughtSpot Spotter MCP Server provides a set of tools for querying and retrieving relevant data from your ThoughtSpot instance. Spotter connects to your ThoughtSpot instance, handles authentication securely, and returns live answers from your own data.
 
 * [ThoughtSpot Spotter MCP Server documentation](https://developer-docs-git-mcp-server-updates-thoughtspot-site.vercel.app/docs/mcp-integration)
 * [Create a free ThoughtSpot account](https://www.thoughtspot.com/trial?utm_source=mcp&utm_medium=consent&tsref=MCP)
@@ -31,6 +30,21 @@ For MCP hosts which do not(yet) support Dynamic client registration, or they req
 ### Associate with a ThoughtSpot instance
 
 Manual client registration also allows to associate with a specific ThoughtSpot instance, so that your users do not have to enter the Thoughtspot instance URL when doing the authorization flow. While registering the Oauth client add `ThoughtSpot URL` to the appropriate value.
+
+### Restrict instances per domain
+
+When the Worker serves several custom domains, you can limit which ThoughtSpot instances each domain accepts with the `INSTANCE_ALLOWLIST_BY_HOST` environment variable. Its value is a JSON object that maps a hostname to its allowed instance URLs:
+
+```json
+{"mcp.example.com": ["https://instance-a.thoughtspot.cloud", "https://instance-b.thoughtspot.cloud"]}
+```
+
+On a listed hostname:
+- The authorization page shows a dropdown of the allowed instances instead of a free-text field.
+- `POST /authorize` rejects any other instance with a 400.
+- MCP requests (`/mcp`, `/sse`, `/token/*`, `/bearer/*`) for any other instance get a 403.
+
+Hostnames that aren't listed behave as before. If the value is not valid JSON, the server rejects requests with a 500 instead of lifting the restriction.
 
 
 ## Contributing
