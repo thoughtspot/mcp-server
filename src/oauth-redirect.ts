@@ -1,6 +1,6 @@
 import { PUBLIC_ROUTES } from "@thoughtspot/mcp-auth";
 
-const SAML_LOGIN_PATH = "/callosum/v1/saml/login";
+const LOGIN_PATH = "/callosum/v1/saml/login";
 
 /**
  * The auth package's POST /authorize always redirects to the cluster's SAML
@@ -33,7 +33,7 @@ export function fetchToken(request: Request, response: Response): Response {
 		return response;
 	}
 	if (
-		!samlUrl.pathname.endsWith(SAML_LOGIN_PATH) ||
+		!samlUrl.pathname.endsWith(LOGIN_PATH) ||
 		callbackUrl.origin !== requestUrl.origin ||
 		callbackUrl.pathname !== PUBLIC_ROUTES.callback
 	) {
