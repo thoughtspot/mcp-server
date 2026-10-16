@@ -13,21 +13,14 @@ const LOGIN_PATH = "/callosum/v1/saml/login";
  */
 export function fetchToken(request: Request, response: Response): Response {
 	const requestUrl = new URL(request.url);
-	if (
-		request.method !== "POST" ||
-		requestUrl.pathname !== PUBLIC_ROUTES.authorize
-	) {
-		return response;
-	}
-	const location = response.headers.get("Location");
-	if (!location) {
+	if (requestUrl.pathname !== PUBLIC_ROUTES.authorize) {
 		return response;
 	}
 
 	let samlUrl: URL;
 	let callbackUrl: URL;
 	try {
-		samlUrl = new URL(location);
+		samlUrl = new URL(response.headers.get("Location") ?? "");
 		callbackUrl = new URL(samlUrl.searchParams.get("targetURLPath") ?? "");
 	} catch {
 		return response;
@@ -40,7 +33,5 @@ export function fetchToken(request: Request, response: Response): Response {
 		return response;
 	}
 
-	const headers = new Headers(response.headers);
-	headers.set("Location", callbackUrl.toString());
-	return new Response(null, { status: response.status, headers });
+	return Response.redirect(callbackUrl.toString(), response.status);
 }

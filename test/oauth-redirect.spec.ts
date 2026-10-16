@@ -39,26 +39,19 @@ describe("fetchToken", () => {
 		expect(oauthReqInfo).toEqual(OAUTH_REQ_INFO);
 	});
 
-	it("keeps the original status and other headers", () => {
-		const original = samlRedirect();
-		const headers = new Headers(original.headers);
-		headers.set("X-Test", "1");
-		const response = fetchToken(
-			authorizeRequest(),
-			new Response(null, { status: 303, headers }),
-		);
+	it("keeps the original redirect status", () => {
+		const location = samlRedirect().headers.get("Location") ?? "";
+		const response = fetchToken(authorizeRequest(), redirectTo(location, 303));
 
 		expect(response.status).toBe(303);
-		expect(response.headers.get("X-Test")).toBe("1");
 		expect(response.headers.get("Location")).toMatch(`${ORIGIN}/callback?`);
 	});
 
-	it.each([
-		["GET /authorize", authorizeRequest("GET")],
-		["POST to another path", authorizeRequest("POST", "/store-token")],
-	])("leaves %s untouched", (_name, request) => {
+	it("leaves other paths untouched", () => {
 		const original = samlRedirect();
-		expect(fetchToken(request, original)).toBe(original);
+		expect(fetchToken(authorizeRequest("POST", "/store-token"), original)).toBe(
+			original,
+		);
 	});
 
 	it.each([

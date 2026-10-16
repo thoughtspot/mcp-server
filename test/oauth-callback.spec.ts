@@ -159,12 +159,7 @@ describe("OAuth callback page", () => {
 			samlLoginUrl.searchParams.get("targetURLPath") ?? "",
 		);
 		expect(target.origin + target.pathname).toBe(`${ORIGIN}/callback`);
-		// oauthReqInfo must stay last: the server strips a suffix callosum appends to it.
-		expect([...target.searchParams.keys()]).toEqual([
-			"loginAttempted",
-			"instanceUrl",
-			"oauthReqInfo",
-		]);
+		expect(target.searchParams.get("loginAttempted")).toBe("1");
 		expect(target.searchParams.get("instanceUrl")).toBe(INSTANCE_URL);
 		expect(target.searchParams.get("oauthReqInfo")).toBe(ENCODED_REQ_INFO);
 	});

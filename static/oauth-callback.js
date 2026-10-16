@@ -48,18 +48,12 @@
                 }
 
                 // No usable session yet: go through SAML login once, landing back on
-                // this page. The marker goes first so oauthReqInfo stays the last
-                // param (the server strips a suffix callosum appends to it).
-                const currentUrl = new URL(window.location.href);
-                if (!currentUrl.searchParams.has('loginAttempted')) {
-                    const targetUrl = new URL(currentUrl.pathname, currentUrl.origin);
+                // this page with a marker so a second 401 doesn't loop.
+                const targetUrl = new URL(window.location.href);
+                if (!targetUrl.searchParams.has('loginAttempted')) {
                     targetUrl.searchParams.set('loginAttempted', '1');
-                    currentUrl.searchParams.forEach(function(value, key) {
-                        targetUrl.searchParams.append(key, value);
-                    });
                     const samlLoginUrl = new URL('callosum/v1/saml/login', base.toString());
                     samlLoginUrl.searchParams.append('targetURLPath', targetUrl.href);
-                    document.getElementById('status').textContent = 'Redirecting to ThoughtSpot login...';
                     window.location.replace(samlLoginUrl.toString());
                     return;
                 }
