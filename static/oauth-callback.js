@@ -47,7 +47,18 @@
                     return;
                 }
 
-                // 401 likely due to 3rd party cookies being blocked
+                // No usable session yet: go through SAML login once, landing back on
+                // this page with a marker so a second 401 doesn't loop.
+                const targetUrl = new URL(window.location.href);
+                if (!targetUrl.searchParams.has('loginAttempted')) {
+                    targetUrl.searchParams.set('loginAttempted', '1');
+                    const samlLoginUrl = new URL('callosum/v1/saml/login', base.toString());
+                    samlLoginUrl.searchParams.append('targetURLPath', targetUrl.href);
+                    window.location.replace(samlLoginUrl.toString());
+                    return;
+                }
+
+                // 401 even after SAML login: likely 3rd party cookies being blocked
                 manualSection.style.display = 'flex';
                 document.getElementById('status').textContent = '';
                 container.style.display = 'none';
