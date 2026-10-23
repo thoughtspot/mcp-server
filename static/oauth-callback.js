@@ -26,9 +26,27 @@
             method: 'GET',
             credentials: 'include'
         });
-        
-        if (!response.ok) {
-            if (response.status === 401) {
+
+        // gettoken returns the access token + refreshToken + timestamps.
+        let src;
+        if (response.ok) {
+            const raw = await response.json();
+            src = (raw && raw.data) ? raw.data : raw;
+        }
+        // An existing session can return a token that has expired or is about to
+        // (tokenExpiryDuration is an absolute epoch-ms expiry), or has no refresh
+        // token; neither yields a working grant, so treat them like a 401. The
+        // token must outlive the first 11h keep-warm refresh; keep in sync with
+        // MIN_TOKEN_VALIDITY_MS in src/store-token-guard.ts.
+        const MIN_TOKEN_VALIDITY_MS = 12 * 60 * 60 * 1000;
+        const unusableToken = response.ok && (
+            !src?.refreshToken ||
+            (typeof src.tokenExpiryDuration === 'number' &&
+                src.tokenExpiryDuration - Date.now() < MIN_TOKEN_VALIDITY_MS)
+        );
+
+        if (!response.ok || unusableToken) {
+            if (response.status === 401 || unusableToken) {
                 
 
                 // TODO: Remove this once we have a proper way to handle this
@@ -139,10 +157,7 @@
             }
         }
         
-        const raw = await response.json();
-        // gettoken returns the access token + refreshToken + timestamps. Normalize
-        // to the { data: { token, ... } } shape /store-token expects.
-        const src = (raw && raw.data) ? raw.data : raw;
+        // Normalize to the { data: { token, ... } } shape /store-token expects.
         if (!src || !src.token) {
             // Fail loudly at login rather than storing an undefined token and
             // failing opaquely on the first tool call.
