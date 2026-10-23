@@ -1,14 +1,21 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { addSpotterModel } from "../../../src/thoughtspot/spotter-model/spotter-model-client";
+import { ThoughtSpotClient } from "../../../src/thoughtspot/thoughtspot-client";
+
+// Only the SDK base class is stubbed; the spotter-model handlers run for real.
+vi.mock("@thoughtspot/rest-api-sdk", () => ({
+	createBearerAuthenticationConfig: vi.fn(() => ({ middleware: [] })),
+	ThoughtSpotRestApi: vi.fn(),
+}));
 
 const INSTANCE_URL = "https://test.thoughtspot.com";
 const TOKEN = "test-token-123";
 
-// Register the handlers on a bare object — no SDK involved.
 function makeClient(orgId?: string): any {
-	const client: any = {};
-	addSpotterModel(client, INSTANCE_URL, TOKEN, orgId);
-	return client;
+	return new ThoughtSpotClient({
+		instanceUrl: INSTANCE_URL,
+		token: TOKEN,
+		orgId,
+	});
 }
 
 // The last fetch call's url / parsed JSON body / headers.
@@ -34,15 +41,6 @@ describe("spotter-model client", () => {
 
 	afterEach(() => {
 		vi.restoreAllMocks();
-	});
-
-	it("registers every handler", () => {
-		const client = makeClient();
-		expect(typeof client.mintSessionCookie).toBe("function");
-		expect(typeof client.createModelSession).toBe("function");
-		expect(typeof client.sendModelMessageStreaming).toBe("function");
-		expect(typeof client.saveModel).toBe("function");
-		expect(typeof client.fetchWorksheetModel).toBe("function");
 	});
 
 	describe("createModelSession", () => {

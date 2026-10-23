@@ -7,7 +7,7 @@
  * (`fetch`). Every call flows through:
  *
  *   server.callSearchObjects / callGetData → real ThoughtSpotService →
- *   real handler (addSearchObjects / addGetData) → rest-utils.postJson →
+ *   real handler (searchObjects / getData) → rest-utils.postJson →
  *   fetch (mocked).
  *
  * This exercises the request building (endpoints, headers, x-request-id,
