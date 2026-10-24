@@ -7,10 +7,7 @@
  * carry a unique, well-formed ID.
  */
 
-import {
-	ThoughtSpotRestApi,
-	createBearerAuthenticationConfig,
-} from "@thoughtspot/rest-api-sdk";
+import { createBearerAuthenticationConfig } from "@thoughtspot/rest-api-sdk";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getThoughtSpotClient } from "../../src/thoughtspot/thoughtspot-client";
 
@@ -33,12 +30,10 @@ let fetchMock: ReturnType<typeof vi.fn>;
 
 function buildClient() {
 	const mockConfig = { middleware: [] };
-	const mockClient: Record<string, any> = { instanceUrl: INSTANCE_URL };
 
 	(createBearerAuthenticationConfig as any).mockReturnValue(mockConfig);
-	(ThoughtSpotRestApi as any).mockImplementation(() => mockClient);
 
-	return getThoughtSpotClient(INSTANCE_URL, BEARER_TOKEN) as any;
+	return getThoughtSpotClient(INSTANCE_URL, BEARER_TOKEN);
 }
 
 function mockOkFetch() {
@@ -49,7 +44,7 @@ function parsedBodies(): any[] {
 	return fetchMock.mock.calls.map((call: any[]) => JSON.parse(call[1].body));
 }
 
-describe("sendAgentConversationMessageStreaming — nano ID integration", () => {
+describe("streamAgentConversationMessage — nano ID integration", () => {
 	let client: any;
 
 	beforeEach(() => {
@@ -67,7 +62,7 @@ describe("sendAgentConversationMessageStreaming — nano ID integration", () => 
 	it("produces an id with exactly the configured length using the real nanoid library", async () => {
 		mockOkFetch();
 
-		await client.sendAgentConversationMessageStreaming({
+		await client.streamAgentConversationMessage({
 			conversation_identifier: "conv-1",
 			message: "hello",
 		});
@@ -80,7 +75,7 @@ describe("sendAgentConversationMessageStreaming — nano ID integration", () => 
 	it("produces an id that only contains characters from the custom alphabet", async () => {
 		mockOkFetch();
 
-		await client.sendAgentConversationMessageStreaming({
+		await client.streamAgentConversationMessage({
 			conversation_identifier: "conv-1",
 			message: "hello",
 		});
@@ -99,7 +94,7 @@ describe("sendAgentConversationMessageStreaming — nano ID integration", () => 
 
 		const callCount = 50;
 		for (let i = 0; i < callCount; i++) {
-			await client.sendAgentConversationMessageStreaming({
+			await client.streamAgentConversationMessage({
 				conversation_identifier: "conv-streaming",
 				message: `message-${i}`,
 			});
@@ -118,7 +113,7 @@ describe("sendAgentConversationMessageStreaming — nano ID integration", () => 
 		const callCount = 20;
 		await Promise.all(
 			Array.from({ length: callCount }, (_, i) =>
-				client.sendAgentConversationMessageStreaming({
+				client.streamAgentConversationMessage({
 					conversation_identifier: "conv-concurrent",
 					message: `parallel-message-${i}`,
 				}),
@@ -138,7 +133,7 @@ describe("sendAgentConversationMessageStreaming — nano ID integration", () => 
 		const callCount = 10;
 		await Promise.all(
 			Array.from({ length: callCount }, (_, i) =>
-				client.sendAgentConversationMessageStreaming({
+				client.streamAgentConversationMessage({
 					conversation_identifier: "conv-format",
 					message: `msg-${i}`,
 				}),
@@ -157,7 +152,7 @@ describe("sendAgentConversationMessageStreaming — nano ID integration", () => 
 		const conversationId = "realistic-conv-abc123";
 		const userMessage = "What is the total revenue for Q4?";
 
-		await client.sendAgentConversationMessageStreaming({
+		await client.streamAgentConversationMessage({
 			conversation_identifier: conversationId,
 			message: userMessage,
 		});

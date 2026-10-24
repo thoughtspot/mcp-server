@@ -11,7 +11,10 @@ import {
 	GET_DATA_VIZ_CONCURRENCY,
 	LIVEBOARD_RECORD_SIZE,
 } from "../../src/thoughtspot/get-data/get-data";
-import { getThoughtSpotClient } from "../../src/thoughtspot/thoughtspot-client";
+import {
+	ThoughtSpotClient,
+	getThoughtSpotClient,
+} from "../../src/thoughtspot/thoughtspot-client";
 
 // Mock the ThoughtSpot REST API SDK
 vi.mock("@thoughtspot/rest-api-sdk", () => ({
@@ -34,7 +37,6 @@ describe("ThoughtSpot Client", () => {
 	const mockBearerToken = "test-token-123";
 
 	let mockConfig: any;
-	let mockClient: any;
 
 	beforeEach(() => {
 		vi.clearAllMocks();
@@ -49,13 +51,7 @@ describe("ThoughtSpot Client", () => {
 			middleware: [],
 		};
 
-		// Setup mock client
-		mockClient = {
-			instanceUrl: mockInstanceUrl,
-		};
-
 		(createBearerAuthenticationConfig as any).mockReturnValue(mockConfig);
-		(ThoughtSpotRestApi as any).mockImplementation(() => mockClient);
 	});
 
 	afterEach(() => {
@@ -74,7 +70,7 @@ describe("ThoughtSpot Client", () => {
 				expect.any(Function),
 			);
 			expect(ThoughtSpotRestApi).toHaveBeenCalledWith(mockConfig);
-			expect(client).toBe(mockClient);
+			expect(client).toBeInstanceOf(ThoughtSpotClient);
 			expect(client.instanceUrl).toBe(mockInstanceUrl);
 		});
 
@@ -138,16 +134,14 @@ describe("ThoughtSpot Client", () => {
 			expect(client).toHaveProperty("getSessionInfo");
 			expect(client).toHaveProperty("getAnswerSession");
 			expect(client).toHaveProperty("createAgentConversationWithAutoMode");
-			expect(client).toHaveProperty("sendAgentConversationMessageStreaming");
+			expect(client).toHaveProperty("streamAgentConversationMessage");
 			expect(typeof client.exportUnsavedAnswerTML).toBe("function");
 			expect(typeof client.getSessionInfo).toBe("function");
 			expect(typeof client.getAnswerSession).toBe("function");
 			expect(typeof client.createAgentConversationWithAutoMode).toBe(
 				"function",
 			);
-			expect(typeof client.sendAgentConversationMessageStreaming).toBe(
-				"function",
-			);
+			expect(typeof client.streamAgentConversationMessage).toBe("function");
 		});
 	});
 
@@ -174,6 +168,7 @@ describe("ThoughtSpot Client", () => {
 			const mockYamlParsed = { test: "data" };
 
 			(fetch as any).mockResolvedValue({
+				ok: true,
 				json: vi.fn().mockResolvedValue(mockResponse),
 			});
 
@@ -231,6 +226,7 @@ describe("ThoughtSpot Client", () => {
 			};
 
 			(fetch as any).mockResolvedValue({
+				ok: true,
 				json: vi.fn().mockResolvedValue(mockResponse),
 			});
 
@@ -239,7 +235,41 @@ describe("ThoughtSpot Client", () => {
 					session_identifier: "session-123",
 					generation_number: 1,
 				}),
-			).rejects.toThrow();
+			).rejects.toThrow("Could not extract TML edoc from response.");
+		});
+
+		it("should throw on HTTP error responses", async () => {
+			(fetch as any).mockResolvedValue({
+				ok: false,
+				status: 500,
+				text: vi.fn().mockResolvedValue("Server error"),
+			});
+
+			await expect(
+				client.exportUnsavedAnswerTML({
+					session_identifier: "session-123",
+					generation_number: 1,
+				}),
+			).rejects.toMatchObject({
+				status: 500,
+				message: "exportUnsavedAnswerTML failed with status 500",
+			});
+		});
+
+		it("should throw on GraphQL errors in a 200 response", async () => {
+			(fetch as any).mockResolvedValue({
+				ok: true,
+				json: vi.fn().mockResolvedValue({
+					errors: [{ message: "Session expired" }],
+				}),
+			});
+
+			await expect(
+				client.exportUnsavedAnswerTML({
+					session_identifier: "session-123",
+					generation_number: 1,
+				}),
+			).rejects.toThrow("exportUnsavedAnswerTML GraphQL error");
 		});
 	});
 
@@ -264,6 +294,7 @@ describe("ThoughtSpot Client", () => {
 			};
 
 			(fetch as any).mockResolvedValue({
+				ok: true,
 				json: vi.fn().mockResolvedValue(mockResponse),
 			});
 
@@ -293,18 +324,16 @@ describe("ThoughtSpot Client", () => {
 		});
 
 		it("should handle HTTP error responses", async () => {
-			const mockResponse = {
+			(fetch as any).mockResolvedValue({
 				ok: false,
 				status: 401,
-				statusText: "Unauthorized",
-				json: vi.fn().mockResolvedValue({ error: "Invalid token" }),
-			};
+				text: vi.fn().mockResolvedValue("Invalid token"),
+			});
 
-			(fetch as any).mockResolvedValue(mockResponse);
-
-			// The actual implementation doesn't check response.ok, so it will try to parse the response
-			const result = await client.getSessionInfo();
-			expect(result).toBeUndefined(); // data.info will be undefined
+			await expect(client.getSessionInfo()).rejects.toMatchObject({
+				status: 401,
+				message: "getSessionInfo failed with status 401",
+			});
 		});
 
 		it("should handle malformed response", async () => {
@@ -314,33 +343,39 @@ describe("ThoughtSpot Client", () => {
 			};
 
 			(fetch as any).mockResolvedValue({
+				ok: true,
 				json: vi.fn().mockResolvedValue(mockResponse),
 			});
 
-			const result = await client.getSessionInfo();
-			expect(result).toBeUndefined();
+			await expect(client.getSessionInfo()).rejects.toThrow(
+				"Could not extract session info from response.",
+			);
 		});
 
 		it("should handle empty response", async () => {
 			const mockResponse = {};
 
 			(fetch as any).mockResolvedValue({
+				ok: true,
 				json: vi.fn().mockResolvedValue(mockResponse),
 			});
 
-			const result = await client.getSessionInfo();
-			expect(result).toBeUndefined();
+			await expect(client.getSessionInfo()).rejects.toThrow(
+				"Could not extract session info from response.",
+			);
 		});
 
 		it("should handle null response", async () => {
 			const mockResponse = null;
 
 			(fetch as any).mockResolvedValue({
+				ok: true,
 				json: vi.fn().mockResolvedValue(mockResponse),
 			});
 
-			// The actual implementation will throw when trying to access data.info on null
-			await expect(client.getSessionInfo()).rejects.toThrow();
+			await expect(client.getSessionInfo()).rejects.toThrow(
+				"Could not extract session info from response.",
+			);
 		});
 
 		it("should handle partial session info", async () => {
@@ -353,6 +388,7 @@ describe("ThoughtSpot Client", () => {
 			};
 
 			(fetch as any).mockResolvedValue({
+				ok: true,
 				json: vi.fn().mockResolvedValue(mockResponse),
 			});
 
@@ -373,6 +409,7 @@ describe("ThoughtSpot Client", () => {
 			};
 
 			(fetch as any).mockResolvedValue({
+				ok: true,
 				json: vi.fn().mockResolvedValue(mockResponse),
 			});
 
@@ -389,6 +426,7 @@ describe("ThoughtSpot Client", () => {
 
 		it("should handle JSON parsing errors", async () => {
 			(fetch as any).mockResolvedValue({
+				ok: true,
 				json: vi.fn().mockRejectedValue(new Error("Invalid JSON")),
 			});
 
@@ -487,6 +525,22 @@ describe("ThoughtSpot Client", () => {
 					generation_number: 2,
 				}),
 			).rejects.toThrow("Could not extract answer session from response.");
+		});
+
+		it("should throw on GraphQL errors in a 200 response", async () => {
+			(fetch as any).mockResolvedValue({
+				ok: true,
+				json: vi.fn().mockResolvedValue({
+					errors: [{ message: "Session expired" }],
+				}),
+			});
+
+			await expect(
+				client.getAnswerSession({
+					session_identifier: "session-123",
+					generation_number: 1,
+				}),
+			).rejects.toThrow("getAnswerSession GraphQL error");
 		});
 
 		it("should throw when response data is null", async () => {
@@ -688,7 +742,7 @@ describe("ThoughtSpot Client", () => {
 		});
 	});
 
-	describe("sendAgentConversationMessageStreaming", () => {
+	describe("streamAgentConversationMessage", () => {
 		let client: any;
 
 		beforeEach(() => {
@@ -707,7 +761,7 @@ describe("ThoughtSpot Client", () => {
 			mathObject.random = mockMathRandom;
 
 			try {
-				const result = await client.sendAgentConversationMessageStreaming({
+				const result = await client.streamAgentConversationMessage({
 					conversation_identifier: "foo",
 					message: "bar",
 				});
@@ -749,7 +803,7 @@ describe("ThoughtSpot Client", () => {
 			(fetch as any).mockRejectedValue(mockError);
 
 			await expect(
-				client.sendAgentConversationMessageStreaming({
+				client.streamAgentConversationMessage({
 					conversation_identifier: "foo",
 					message: "bar",
 				}),
@@ -767,7 +821,7 @@ describe("ThoughtSpot Client", () => {
 			(fetch as any).mockResolvedValue(mockResponse);
 
 			await expect(
-				client.sendAgentConversationMessageStreaming({
+				client.streamAgentConversationMessage({
 					conversation_identifier: "foo",
 					message: "bar",
 				}),
@@ -786,7 +840,7 @@ describe("ThoughtSpot Client", () => {
 			mathObject.random = vi.fn().mockReturnValue(0.123456789);
 
 			try {
-				await client.sendAgentConversationMessageStreaming({
+				await client.streamAgentConversationMessage({
 					conversation_identifier: "foo",
 					message: "bar",
 				});
@@ -806,7 +860,7 @@ describe("ThoughtSpot Client", () => {
 		it("should generate id with exactly 12 characters using custom alphabet", async () => {
 			(fetch as any).mockResolvedValue({ ok: true });
 
-			await client.sendAgentConversationMessageStreaming({
+			await client.streamAgentConversationMessage({
 				conversation_identifier: "conv-id",
 				message: "test message",
 			});
@@ -818,7 +872,7 @@ describe("ThoughtSpot Client", () => {
 		it("should generate id using only allowed custom alphabet characters", async () => {
 			(fetch as any).mockResolvedValue({ ok: true });
 
-			await client.sendAgentConversationMessageStreaming({
+			await client.streamAgentConversationMessage({
 				conversation_identifier: "conv-id",
 				message: "test message",
 			});
@@ -831,11 +885,11 @@ describe("ThoughtSpot Client", () => {
 		it("should generate unique ids across consecutive calls to avoid collisions", async () => {
 			(fetch as any).mockResolvedValue({ ok: true });
 
-			await client.sendAgentConversationMessageStreaming({
+			await client.streamAgentConversationMessage({
 				conversation_identifier: "conv-id",
 				message: "first message",
 			});
-			await client.sendAgentConversationMessageStreaming({
+			await client.streamAgentConversationMessage({
 				conversation_identifier: "conv-id",
 				message: "second message",
 			});

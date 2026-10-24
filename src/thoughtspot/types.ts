@@ -4,6 +4,13 @@ export interface DataSource {
 	description: string;
 }
 
+// Connection details shared by the custom (non-SDK) handlers
+export interface ClientContext {
+	instanceUrl: string;
+	token: string;
+	orgId?: string;
+}
+
 // Error from a ThoughtSpot HTTP call, carrying the numeric status so callers can
 // branch on it (e.g. 401/403 = no access) instead of parsing message strings.
 // The response body is kept off `message` so it can't leak into logs/responses.
