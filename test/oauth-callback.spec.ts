@@ -13,8 +13,12 @@ const TOKEN = {
 	token: "access-token",
 	refreshToken: "refresh-token",
 	tokenCreatedTime: 1000,
-	tokenExpiryDuration: 2000,
+	// Absolute epoch-ms expiry; far in the future so the token is valid.
+	tokenExpiryDuration: 4102444800000,
 };
+const EXPIRED_TOKEN = { ...TOKEN, tokenExpiryDuration: 2000 };
+const TOKEN_WITHOUT_REFRESH = { ...TOKEN, refreshToken: undefined };
+const HOUR_MS = 60 * 60 * 1000;
 
 type FakeElement = {
 	style: Record<string, string>;
@@ -162,6 +166,35 @@ describe("OAuth callback page", () => {
 		expect(target.searchParams.get("loginAttempted")).toBe("1");
 		expect(target.searchParams.get("instanceUrl")).toBe(INSTANCE_URL);
 		expect(target.searchParams.get("oauthReqInfo")).toBe(ENCODED_REQ_INFO);
+	});
+
+	it.each([
+		["an expired token", () => EXPIRED_TOKEN],
+		[
+			"a token expiring within 12h",
+			() => ({ ...TOKEN, tokenExpiryDuration: Date.now() + 11 * HOUR_MS }),
+		],
+		["a token without a refresh token", () => TOKEN_WITHOUT_REFRESH],
+	])("treats %s like a 401 and goes to SAML login", async (_, token) => {
+		const { location, storeTokenCalls } = await runCallbackPage({
+			gettoken: () => json(token()),
+		});
+
+		expect(storeTokenCalls).toHaveLength(0);
+		expect(location.replace).toHaveBeenCalledTimes(1);
+		const samlLoginUrl = new URL(location.replace.mock.calls[0][0]);
+		expect(samlLoginUrl.pathname).toBe("/callosum/v1/saml/login");
+	});
+
+	it("shows the manual token screen for an unusable token after SAML login, instead of looping", async () => {
+		const { location, storeTokenCalls, elements } = await runCallbackPage({
+			href: callbackUrl(INSTANCE_URL, { loginAttempted: "1" }),
+			gettoken: () => json(EXPIRED_TOKEN),
+		});
+
+		expect(location.replace).not.toHaveBeenCalled();
+		expect(storeTokenCalls).toHaveLength(0);
+		expect(elements["manual-token-section"].style.display).toBe("flex");
 	});
 
 	it("keeps an instance URL path prefix in the SAML login URL", async () => {
