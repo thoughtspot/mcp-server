@@ -1,17 +1,17 @@
-import type { ThoughtSpotRestApi } from "@thoughtspot/rest-api-sdk";
 import type { MetricsRecorder } from "../metrics/runtime/metrics-recorder";
 import {
 	UPSTREAM_OPERATION_NAMES,
 	observeUpstreamCall,
 } from "../metrics/runtime/tool-metrics";
 import { WithSpan, getActiveSpan } from "../metrics/tracing/tracing-utils";
+import type { ThoughtSpotClient } from "./thoughtspot-client";
 import type { Org } from "./types";
 
 // Org/token operations, separate from ThoughtSpotService (Spotter flows): listing
 // the user's orgs and minting org-scoped tokens for the multi-org (v2) tools.
 export class OrgService {
 	constructor(
-		private readonly client: ThoughtSpotRestApi,
+		private readonly client: ThoughtSpotClient,
 		private readonly recorder?: MetricsRecorder,
 	) {}
 
@@ -21,7 +21,7 @@ export class OrgService {
 		const orgs = (await observeUpstreamCall(
 			this.recorder,
 			UPSTREAM_OPERATION_NAMES.listOrgs,
-			() => (this.client as any).listOrgs(),
+			() => this.client.listOrgs(),
 		)) as Org[] | undefined;
 		const results = orgs ?? [];
 		getActiveSpan()?.setAttribute("results_count", results.length);
@@ -37,7 +37,7 @@ export class OrgService {
 		return (await observeUpstreamCall(
 			this.recorder,
 			UPSTREAM_OPERATION_NAMES.fetchOrgBearerToken,
-			() => (this.client as any).fetchOrgBearerToken({ accessToken, orgId }),
+			() => this.client.fetchOrgBearerToken({ accessToken, orgId }),
 		)) as string;
 	}
 }

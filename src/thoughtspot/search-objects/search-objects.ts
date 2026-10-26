@@ -1,5 +1,6 @@
 import { resolveObjectTypeFacets } from "../object-types";
-import { buildHeaders, generateRequestId, postJson } from "../rest-utils";
+import { generateRequestId, postJson } from "../rest-utils";
+import type { ClientContext } from "../types";
 import {
 	DEFAULT_SEARCH_LIMIT,
 	MAX_PAGES,
@@ -19,255 +20,248 @@ import type {
 
 // Custom handler: no public API for full-text object search; mirrors the UI's
 // Eureka search.
-export function addSearchObjects(
-	client: any,
-	instanceUrl: string,
-	token: string,
-) {
-	(client as any).searchObjects = async (
-		params: SearchObjectsParams,
-	): Promise<SearchObjectsResponse> => {
-		const {
-			types,
-			owner,
-			tag,
-			modifiedSince,
-			verifiedOnly,
-			limit = DEFAULT_SEARCH_LIMIT,
-		} = params;
+export async function searchObjects(
+	ctx: ClientContext,
+	params: SearchObjectsParams,
+): Promise<SearchObjectsResponse> {
+	const {
+		types,
+		owner,
+		tag,
+		modifiedSince,
+		verifiedOnly,
+		limit = DEFAULT_SEARCH_LIMIT,
+	} = params;
 
-		// Not expressible in the Eureka schema; applied per fetched page below.
-		const hasPostFilters = Boolean(owner || tag || modifiedSince);
+	// Not expressible in the Eureka schema; applied per fetched page below.
+	const hasPostFilters = Boolean(owner || tag || modifiedSince);
 
-		// Server-side facet filters. OBJECT_TYPE is the filterable facet (the
-		// facet the UI's facetSelections uses); OBJECT_TYPE_FACET is only a
-		// computed/returned facet, not a filter.
-		const facetSelections: { facetType: string; facetValue: string[] }[] = [];
-		if (types?.length) {
-			facetSelections.push({
-				facetType: "OBJECT_TYPE",
-				facetValue: resolveObjectTypeFacets(types),
-			});
-		}
-		if (verifiedOnly) {
-			facetSelections.push({ facetType: "IS_VERIFIED", facetValue: ["true"] });
-		}
+	// Server-side facet filters. OBJECT_TYPE is the filterable facet (the
+	// facet the UI's facetSelections uses); OBJECT_TYPE_FACET is only a
+	// computed/returned facet, not a filter.
+	const facetSelections: { facetType: string; facetValue: string[] }[] = [];
+	if (types?.length) {
+		facetSelections.push({
+			facetType: "OBJECT_TYPE",
+			facetValue: resolveObjectTypeFacets(types),
+		});
+	}
+	if (verifiedOnly) {
+		facetSelections.push({ facetType: "IS_VERIFIED", facetValue: ["true"] });
+	}
 
-		// Fetch and map one raw page for a term, applying the post-filters.
-		const fetchPage = async (
-			query: string,
-			requestId: string,
-			pageOffset: number,
-		): Promise<{
-			pageObjects: SearchObjectHeader[];
-			rawCount: number;
-			isFinalPage?: boolean;
-			totalResults?: number;
-		}> => {
-			const data = (await postJson(
-				`${instanceUrl}/prism/?op=GetEurekaResults`,
-				buildHeaders(token, undefined, undefined, {
-					requestId,
-					acceptLanguage: "en-US",
-				}),
-				{
-					operationName: "GetEurekaResults",
-					query: searchObjectsQuery,
-					variables: {
-						params: {
-							batchSize: limit,
-							// STICKERS facet lets tag ids resolve to names.
-							desiredFacets: [{ facetType: "STICKERS", facetValue: [] }],
-							facetSelections,
-							maxPinboardVizCount: MAX_PINBOARD_VIZ_COUNT,
-							filterSelections: [],
-							offset: pageOffset,
-							query,
-							removeDuplicates: true,
-							sortBy: [],
-							// Offset-derived; page number is advisory telemetry.
-							currentPageNumber: Math.floor(pageOffset / limit) + 1,
-							searchOption: "SEARCH_RESULTS",
-						},
+	// Fetch and map one raw page for a term, applying the post-filters.
+	const fetchPage = async (
+		query: string,
+		requestId: string,
+		pageOffset: number,
+	): Promise<{
+		pageObjects: SearchObjectHeader[];
+		rawCount: number;
+		isFinalPage?: boolean;
+		totalResults?: number;
+	}> => {
+		const data = (await postJson(
+			ctx,
+			"/prism/?op=GetEurekaResults",
+			{
+				operationName: "GetEurekaResults",
+				query: searchObjectsQuery,
+				variables: {
+					params: {
+						batchSize: limit,
+						// STICKERS facet lets tag ids resolve to names.
+						desiredFacets: [{ facetType: "STICKERS", facetValue: [] }],
+						facetSelections,
+						maxPinboardVizCount: MAX_PINBOARD_VIZ_COUNT,
+						filterSelections: [],
+						offset: pageOffset,
+						query,
+						removeDuplicates: true,
+						sortBy: [],
+						// Offset-derived; page number is advisory telemetry.
+						currentPageNumber: Math.floor(pageOffset / limit) + 1,
+						searchOption: "SEARCH_RESULTS",
 					},
 				},
-				"searchObjects failed",
-			)) as any;
+			},
+			"searchObjects failed",
+			{ requestId, acceptLanguage: "en-US", scopeToOrg: false },
+		)) as any;
 
-			// Eureka returns HTTP 200 on query-level failures; without this check
-			// they surface as a successful "0 objects found".
-			const hasGraphqlErrors = Boolean(data?.errors?.length);
-			const errorCode = data?.data?.queryRequest?.errorCode;
-			if (hasGraphqlErrors || errorCode) {
-				const graphqlError = data?.errors?.[0]?.message;
-				throw new Error(
-					`searchObjects failed: ${
-						graphqlError ??
-						(errorCode ? `errorCode ${errorCode}` : "unknown GraphQL error")
-					}`,
-				);
-			}
+		// Eureka returns HTTP 200 on query-level failures; without this check
+		// they surface as a successful "0 objects found".
+		const hasGraphqlErrors = Boolean(data?.errors?.length);
+		const errorCode = data?.data?.queryRequest?.errorCode;
+		if (hasGraphqlErrors || errorCode) {
+			const graphqlError = data?.errors?.[0]?.message;
+			throw new Error(
+				`searchObjects failed: ${
+					graphqlError ??
+					(errorCode ? `errorCode ${errorCode}` : "unknown GraphQL error")
+				}`,
+			);
+		}
 
-			const queryRequest = data?.data?.queryRequest ?? {};
-			const results = queryRequest.results ?? [];
+		const queryRequest = data?.data?.queryRequest ?? {};
+		const results = queryRequest.results ?? [];
 
-			// Build a sticker id -> name map so tagIds can be surfaced as tag names.
-			const stickerNames: Record<string, string> = {};
-			for (const facet of queryRequest.facets ?? []) {
-				if (facet?.facetType === "STICKERS") {
-					for (const value of facet.facetValues ?? []) {
-						if (value?.id) {
-							stickerNames[value.id] = value.name ?? value.id;
-						}
+		// Build a sticker id -> name map so tagIds can be surfaced as tag names.
+		const stickerNames: Record<string, string> = {};
+		for (const facet of queryRequest.facets ?? []) {
+			if (facet?.facetType === "STICKERS") {
+				for (const value of facet.facetValues ?? []) {
+					if (value?.id) {
+						stickerNames[value.id] = value.name ?? value.id;
 					}
 				}
 			}
+		}
 
-			let pageObjects: SearchObjectHeader[] = results
-				.map((result: any) => toHeader(result, instanceUrl, stickerNames))
-				.filter(
-					(obj: SearchObjectHeader | null): obj is SearchObjectHeader =>
-						obj !== null,
-				);
-
-			if (owner) {
-				const ownerLower = owner.toLowerCase();
-				pageObjects = pageObjects.filter((o) =>
-					o.owner.toLowerCase().includes(ownerLower),
-				);
-			}
-			if (tag) {
-				const tagLower = tag.toLowerCase();
-				pageObjects = pageObjects.filter((o) =>
-					o.tags.some((t) => t.toLowerCase().includes(tagLower)),
-				);
-			}
-			if (modifiedSince) {
-				pageObjects = pageObjects.filter(
-					(o) => (o.last_modified ?? 0) >= modifiedSince,
-				);
-			}
-
-			return {
-				pageObjects,
-				rawCount: results.length,
-				// Backend end-of-results signals; may be absent on older clusters.
-				isFinalPage:
-					typeof queryRequest.isFinalPage === "boolean"
-						? queryRequest.isFinalPage
-						: undefined,
-				totalResults:
-					typeof queryRequest.totalResults === "number"
-						? queryRequest.totalResults
-						: undefined,
-			};
-		};
-
-		// Full search for the term; the x-request-id is passed in so it is
-		// preserved even when the call later fails.
-		const runSearch = async (
-			query: string,
-			requestId: string,
-			cursor?: string,
-		): Promise<RawSearchResult> => {
-			// Clamp: LLM callers do fabricate negative cursors.
-			const rawOffset = Math.max(
-				0,
-				cursor ? Number.parseInt(cursor, 10) || 0 : 0,
-			);
-			// Honor the cursor's absolute offset; snapping to the current limit could
-			// move it backwards if the caller changed `limit` between pages.
-			const startOffset = rawOffset;
-
-			// Accumulate pages so post-filters can't return a short page while
-			// matches remain; a page cap AND a wall-clock budget bound the loop so
-			// a sparse filter can never fan out into an unbounded number of/too-slow
-			// upstream calls.
-			const startedAt = Date.now();
-			let objects: SearchObjectHeader[] = [];
-			let pageOffset = startOffset;
-			let hasMorePages = false;
-			let pages = 0;
-			do {
-				const page = await fetchPage(query, requestId, pageOffset);
-				objects.push(...page.pageObjects);
-				// Authoritative signals first (isFinalPage, then totalResults);
-				// rawCount === limit is only a last resort because removeDuplicates
-				// can shrink a page below limit while more results remain.
-				pageOffset += limit;
-				if (page.isFinalPage !== undefined) {
-					hasMorePages = !page.isFinalPage;
-				} else if (page.totalResults !== undefined) {
-					hasMorePages = pageOffset < page.totalResults;
-				} else {
-					hasMorePages = page.rawCount === limit;
-				}
-				pages += 1;
-			} while (
-				hasPostFilters &&
-				objects.length < limit &&
-				hasMorePages &&
-				pages < MAX_PAGES &&
-				Date.now() - startedAt < POST_FILTERING_TIME_LIMIT
+		let pageObjects: SearchObjectHeader[] = results
+			.map((result: any) => toHeader(result, ctx.instanceUrl, stickerNames))
+			.filter(
+				(obj: SearchObjectHeader | null): obj is SearchObjectHeader =>
+					obj !== null,
 			);
 
-			if (hasPostFilters && objects.length < limit && hasMorePages) {
-				console.warn(
-					`searchObjects: stopped after ${pages} page(s)/${Date.now() - startedAt}ms with ${objects.length}/${limit} matches; more may exist (continue via next_cursor).`,
-				);
-			}
-
-			// Enforce limit; on overshoot point the cursor back at the dropped
-			// matches' page (duplicates possible, skips never).
-			let next_cursor = hasMorePages ? String(pageOffset) : null;
-			if (objects.length > limit) {
-				objects = objects.slice(0, limit);
-				next_cursor = String(pageOffset - limit);
-			}
-
-			return {
-				objects,
-				next_cursor,
-			};
-		};
-
-		// Minted once and sent upstream as x-request-id for server-side tracing.
-		const requestId = generateRequestId();
-
-		const term = params.query.trim();
-
-		// Guard empty/whitespace-only input rather than searching upstream for "".
-		if (!term) {
-			return buildError(
-				"INVALID_ARGUMENT",
-				"Provide a non-empty search term.",
-				false,
+		if (owner) {
+			const ownerLower = owner.toLowerCase();
+			pageObjects = pageObjects.filter((o) =>
+				o.owner.toLowerCase().includes(ownerLower),
+			);
+		}
+		if (tag) {
+			const tagLower = tag.toLowerCase();
+			pageObjects = pageObjects.filter((o) =>
+				o.tags.some((t) => t.toLowerCase().includes(tagLower)),
+			);
+		}
+		if (modifiedSince) {
+			pageObjects = pageObjects.filter(
+				(o) => (o.last_modified ?? 0) >= modifiedSince,
 			);
 		}
 
-		try {
-			const raw = await runSearch(term, requestId, params.cursor);
-
-			const results = raw.objects.map(toResult);
-
-			// Query ran but matched nothing — a distinct scenario, not an error.
-			if (results.length === 0) {
-				return {
-					status: "no_results",
-					results: [],
-					next_cursor: null,
-				};
-			}
-
-			// Project the internal headers to the spec-shaped success payload.
-			return {
-				results,
-				next_cursor: raw.next_cursor,
-			};
-		} catch (error) {
-			return classifySearchError(error);
-		}
+		return {
+			pageObjects,
+			rawCount: results.length,
+			// Backend end-of-results signals; may be absent on older clusters.
+			isFinalPage:
+				typeof queryRequest.isFinalPage === "boolean"
+					? queryRequest.isFinalPage
+					: undefined,
+			totalResults:
+				typeof queryRequest.totalResults === "number"
+					? queryRequest.totalResults
+					: undefined,
+		};
 	};
+
+	// Full search for the term; the x-request-id is passed in so it is
+	// preserved even when the call later fails.
+	const runSearch = async (
+		query: string,
+		requestId: string,
+		cursor?: string,
+	): Promise<RawSearchResult> => {
+		// Clamp: LLM callers do fabricate negative cursors.
+		const rawOffset = Math.max(
+			0,
+			cursor ? Number.parseInt(cursor, 10) || 0 : 0,
+		);
+		// Honor the cursor's absolute offset; snapping to the current limit could
+		// move it backwards if the caller changed `limit` between pages.
+		const startOffset = rawOffset;
+
+		// Accumulate pages so post-filters can't return a short page while
+		// matches remain; a page cap AND a wall-clock budget bound the loop so
+		// a sparse filter can never fan out into an unbounded number of/too-slow
+		// upstream calls.
+		const startedAt = Date.now();
+		let objects: SearchObjectHeader[] = [];
+		let pageOffset = startOffset;
+		let hasMorePages = false;
+		let pages = 0;
+		do {
+			const page = await fetchPage(query, requestId, pageOffset);
+			objects.push(...page.pageObjects);
+			// Authoritative signals first (isFinalPage, then totalResults);
+			// rawCount === limit is only a last resort because removeDuplicates
+			// can shrink a page below limit while more results remain.
+			pageOffset += limit;
+			if (page.isFinalPage !== undefined) {
+				hasMorePages = !page.isFinalPage;
+			} else if (page.totalResults !== undefined) {
+				hasMorePages = pageOffset < page.totalResults;
+			} else {
+				hasMorePages = page.rawCount === limit;
+			}
+			pages += 1;
+		} while (
+			hasPostFilters &&
+			objects.length < limit &&
+			hasMorePages &&
+			pages < MAX_PAGES &&
+			Date.now() - startedAt < POST_FILTERING_TIME_LIMIT
+		);
+
+		if (hasPostFilters && objects.length < limit && hasMorePages) {
+			console.warn(
+				`searchObjects: stopped after ${pages} page(s)/${Date.now() - startedAt}ms with ${objects.length}/${limit} matches; more may exist (continue via next_cursor).`,
+			);
+		}
+
+		// Enforce limit; on overshoot point the cursor back at the dropped
+		// matches' page (duplicates possible, skips never).
+		let next_cursor = hasMorePages ? String(pageOffset) : null;
+		if (objects.length > limit) {
+			objects = objects.slice(0, limit);
+			next_cursor = String(pageOffset - limit);
+		}
+
+		return {
+			objects,
+			next_cursor,
+		};
+	};
+
+	// Minted once and sent upstream as x-request-id for server-side tracing.
+	const requestId = generateRequestId();
+
+	const term = params.query.trim();
+
+	// Guard empty/whitespace-only input rather than searching upstream for "".
+	if (!term) {
+		return buildError(
+			"INVALID_ARGUMENT",
+			"Provide a non-empty search term.",
+			false,
+		);
+	}
+
+	try {
+		const raw = await runSearch(term, requestId, params.cursor);
+
+		const results = raw.objects.map(toResult);
+
+		// Query ran but matched nothing — a distinct scenario, not an error.
+		if (results.length === 0) {
+			return {
+				status: "no_results",
+				results: [],
+				next_cursor: null,
+			};
+		}
+
+		// Project the internal headers to the spec-shaped success payload.
+		return {
+			results,
+			next_cursor: raw.next_cursor,
+		};
+	} catch (error) {
+		return classifySearchError(error);
+	}
 }
 
 // Map a thrown search failure to the typed error envelope. Codes are derived

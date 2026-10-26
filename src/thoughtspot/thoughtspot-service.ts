@@ -1,8 +1,5 @@
 import { SpanStatusCode, context, trace } from "@opentelemetry/api";
-import type {
-	AgentConversation,
-	ThoughtSpotRestApi,
-} from "@thoughtspot/rest-api-sdk";
+import type { AgentConversation } from "@thoughtspot/rest-api-sdk";
 import {
 	type MetricsRecorder,
 	scheduleMetricsFlush,
@@ -33,6 +30,7 @@ import type {
 	GetDataResult,
 	SearchObjectsParams,
 	SearchObjectsResponse,
+	ThoughtSpotClient,
 } from "./thoughtspot-client";
 import type {
 	Answer,
@@ -57,7 +55,7 @@ type ThoughtSpotServiceMetricsOptions = {
  */
 export class ThoughtSpotService {
 	constructor(
-		private client: ThoughtSpotRestApi,
+		private client: ThoughtSpotClient,
 		private readonly metrics: ThoughtSpotServiceMetricsOptions = {},
 	) {}
 
@@ -215,7 +213,7 @@ export class ThoughtSpotService {
 				"sourceIds: ",
 				sourceIds,
 				"instanceUrl: ",
-				(this.client as any).instanceUrl,
+				this.client.instanceUrl,
 				"error: ",
 				error,
 			);
@@ -267,7 +265,7 @@ export class ThoughtSpotService {
 				"Error getting answer Data: ",
 				error,
 				"instanceUrl: ",
-				(this.client as any).instanceUrl,
+				this.client.instanceUrl,
 			);
 			throw error;
 		}
@@ -289,7 +287,7 @@ export class ThoughtSpotService {
 			const tml = await this.observeUpstreamCall(
 				UPSTREAM_OPERATION_NAMES.exportUnsavedAnswerTml,
 				() =>
-					(this.client as any).exportUnsavedAnswerTML({
+					this.client.exportUnsavedAnswerTML({
 						session_identifier,
 						generation_number,
 					}),
@@ -322,7 +320,7 @@ export class ThoughtSpotService {
 			const response = await this.observeUpstreamCall(
 				UPSTREAM_OPERATION_NAMES.createAgentConversation,
 				() =>
-					(this.client as any).createAgentConversationWithAutoMode({
+					this.client.createAgentConversationWithAutoMode({
 						isSpotterDataSourceDiscoveryEnabled,
 						isSpotterChatHistoryEnabled,
 						dataSourceId,
@@ -377,9 +375,7 @@ export class ThoughtSpotService {
 			const reader = await this.observeUpstreamCall(
 				UPSTREAM_OPERATION_NAMES.sendAgentConversationMessageStreaming,
 				async () => {
-					const response = await (
-						this.client as any
-					).sendAgentConversationMessageStreaming({
+					const response = await this.client.streamAgentConversationMessage({
 						conversation_identifier: conversationId,
 						message: finalMessage,
 					});
@@ -400,7 +396,7 @@ export class ThoughtSpotService {
 
 			const processStreamPromise =
 				processSendAgentConversationMessageStreamingResponse(
-					(this.client as any).instanceUrl,
+					this.client.instanceUrl,
 					spotterResponseFormat,
 					conversationId,
 					reader,
@@ -486,7 +482,7 @@ export class ThoughtSpotService {
 				this.observeUpstreamCall(
 					UPSTREAM_OPERATION_NAMES.getAnswerSession,
 					() =>
-						(this.client as any).getAnswerSession({
+						this.client.getAnswerSession({
 							session_identifier,
 							generation_number,
 						}),
@@ -496,7 +492,7 @@ export class ThoughtSpotService {
 					: Promise.resolve(null),
 			]);
 
-			const frameUrl = `${(this.client as any).instanceUrl}/?tsmcp=true#/embed/conv-assist-answer?sessionId=${session.sessionId}&genNo=${session.genNo}&acSessionId=${session.acSession.sessionId}&acGenNo=${session.acSession.genNo}`;
+			const frameUrl = `${this.client.instanceUrl}/?tsmcp=true#/embed/conv-assist-answer?sessionId=${session.sessionId}&genNo=${session.genNo}&acSessionId=${session.acSession.sessionId}&acGenNo=${session.acSession.genNo}`;
 
 			return {
 				question,
@@ -519,7 +515,7 @@ export class ThoughtSpotService {
 				" and error: ",
 				error,
 				"instanceUrl: ",
-				(this.client as any).instanceUrl,
+				this.client.instanceUrl,
 			);
 			return {
 				error: error as Error,
@@ -642,7 +638,7 @@ export class ThoughtSpotService {
 	): Promise<{ transactionId: string; generationNumber: string }> {
 		return this.observeUpstreamCall(
 			UPSTREAM_OPERATION_NAMES.createBachPinboardSession,
-			() => (this.client as any).createBachPinboardSession({ liveboardId }),
+			() => this.client.createBachPinboardSession({ liveboardId }),
 		);
 	}
 
@@ -658,7 +654,7 @@ export class ThoughtSpotService {
 		await this.observeUpstreamCall(
 			UPSTREAM_OPERATION_NAMES.saveBachPinboard,
 			() =>
-				(this.client as any).saveBachPinboard({
+				this.client.saveBachPinboard({
 					transactionId,
 					generationNumber,
 				}),
@@ -719,7 +715,7 @@ export class ThoughtSpotService {
 		);
 
 		const liveboardId = resp[0].response.header.id_guid;
-		const liveboardUrl = `${(this.client as any).instanceUrl}/#/insights/pinboard/${liveboardId}`;
+		const liveboardUrl = `${this.client.instanceUrl}/#/insights/pinboard/${liveboardId}`;
 		span?.setAttribute("liveboard_id", liveboardId);
 		span?.setStatus({
 			code: SpanStatusCode.OK,
@@ -776,7 +772,7 @@ export class ThoughtSpotService {
 
 		const info = (await this.observeUpstreamCall(
 			UPSTREAM_OPERATION_NAMES.getSessionInfo,
-			() => (this.client as any).getSessionInfo(),
+			() => this.client.getSessionInfo(),
 		)) as any;
 		const devMixpanelToken = info.configInfo.mixpanelConfig.devSdkKey;
 		const prodMixpanelToken = info.configInfo.mixpanelConfig.prodSdkKey;
@@ -862,7 +858,7 @@ export class ThoughtSpotService {
 
 		const result = await this.observeUpstreamCall(
 			UPSTREAM_OPERATION_NAMES.searchObjects,
-			() => (this.client as any).searchObjects(params),
+			() => this.client.searchObjects(params),
 		);
 
 		span?.setAttribute("results_count", result.results.length);
@@ -880,7 +876,7 @@ export class ThoughtSpotService {
 
 		const result = await this.observeUpstreamCall(
 			UPSTREAM_OPERATION_NAMES.getData,
-			() => (this.client as any).getData(params),
+			() => this.client.getData(params),
 		);
 
 		span?.setAttribute("object_type", params.objectType);
@@ -896,7 +892,7 @@ export class ThoughtSpotService {
 		try {
 			const info = await this.observeUpstreamCall(
 				UPSTREAM_OPERATION_NAMES.getSessionInfo,
-				() => (this.client as any).getSessionInfo(),
+				() => this.client.getSessionInfo(),
 			);
 			return Boolean(info?.userGUID);
 		} catch (error) {
@@ -914,28 +910,28 @@ export class ThoughtSpotService {
 		connectionIdentifier?: string,
 		modelIdentifier?: string,
 	): Promise<CreateModelSessionResult> {
-		return (this.client as any).createModelSession({
+		return this.client.createModelSession({
 			connectionIdentifier,
 			modelIdentifier,
 		});
 	}
 
 	async mintSessionCookie(): Promise<string | null> {
-		return (this.client as any).mintSessionCookie();
+		return this.client.mintSessionCookie();
 	}
 
 	async sendModelMessageStreaming(
 		params: SendModelMessageParams,
 	): Promise<Response> {
-		return (this.client as any).sendModelMessageStreaming(params);
+		return this.client.sendModelMessageStreaming(params);
 	}
 
 	async saveModel(params: SaveModelParams): Promise<SaveModelResult> {
-		return (this.client as any).saveModel(params);
+		return this.client.saveModel(params);
 	}
 
 	async fetchWorksheetModel(params: FetchWorksheetModelParams): Promise<any> {
-		return (this.client as any).fetchWorksheetModel(params);
+		return this.client.fetchWorksheetModel(params);
 	}
 }
 
@@ -944,7 +940,7 @@ export async function getRelevantQuestions(
 	query: string,
 	sourceIds: string[],
 	additionalContext: string,
-	client: ThoughtSpotRestApi,
+	client: ThoughtSpotClient,
 ): Promise<{
 	questions: { question: string; datasourceId: string }[];
 	error: Error | null;
@@ -957,7 +953,7 @@ export async function getAnswerForQuestion(
 	question: string,
 	sourceId: string,
 	shouldGetTML: boolean,
-	client: ThoughtSpotRestApi,
+	client: ThoughtSpotClient,
 ) {
 	const service = new ThoughtSpotService(client);
 	return service.getAnswerForQuestion(question, sourceId, shouldGetTML);
@@ -967,7 +963,7 @@ export async function fetchTMLAndCreateLiveboard(
 	name: string,
 	answers: any[],
 	summary: string,
-	client: ThoughtSpotRestApi,
+	client: ThoughtSpotClient,
 ) {
 	const service = new ThoughtSpotService(client);
 	return service.fetchTMLAndCreateLiveboard(name, answers, summary);
@@ -976,14 +972,14 @@ export async function fetchTMLAndCreateLiveboard(
 export async function createLiveboard(
 	name: string,
 	answers: any[],
-	client: ThoughtSpotRestApi,
+	client: ThoughtSpotClient,
 ) {
 	const service = new ThoughtSpotService(client);
 	return service.createLiveboard(name, answers);
 }
 
 export async function getDataSources(
-	client: ThoughtSpotRestApi,
+	client: ThoughtSpotClient,
 ): Promise<DataSource[]> {
 	const service = new ThoughtSpotService(client);
 	return service.getDataSources();
@@ -991,14 +987,14 @@ export async function getDataSources(
 
 export async function getDataSourceSuggestions(
 	query: string,
-	client: ThoughtSpotRestApi,
+	client: ThoughtSpotClient,
 ): Promise<DataSourceSuggestion[] | null> {
 	const service = new ThoughtSpotService(client);
 	return service.getDataSourceSuggestions(query);
 }
 
 export async function getSessionInfo(
-	client: ThoughtSpotRestApi,
+	client: ThoughtSpotClient,
 ): Promise<SessionInfo> {
 	const service = new ThoughtSpotService(client);
 	return service.getSessionInfo();

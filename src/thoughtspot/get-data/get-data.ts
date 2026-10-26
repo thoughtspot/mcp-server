@@ -1,4 +1,9 @@
-import { buildHeaders, generateRequestId, postJson } from "../rest-utils";
+import {
+	type ApiRequestOptions,
+	generateRequestId,
+	postJson,
+} from "../rest-utils";
+import type { ClientContext } from "../types";
 import { GET_DATA_SUPPORTED_TYPES } from "./get-data-constants";
 import type {
 	GetDataParams,
@@ -131,18 +136,19 @@ function mapContents(
 // so a whole-board fetch can be bounded to the first N instead of pulling every
 // viz. Returns [] if the board exposes no viz headers.
 async function listLiveboardVizIds(
-	instanceUrl: string,
-	headers: Record<string, string>,
+	ctx: ClientContext,
+	opts: ApiRequestOptions,
 	objectId: string,
 ): Promise<string[]> {
 	const result = await postJson(
-		`${instanceUrl}/api/rest/2.0/metadata/search`,
-		headers,
+		ctx,
+		"/api/rest/2.0/metadata/search",
 		{
 			metadata: [{ identifier: objectId, type: LIVEBOARD_TYPE }],
 			include_visualization_headers: true,
 		},
 		"getData failed to list liveboard visualizations",
+		opts,
 	);
 	const vizHeaders: unknown[] = result?.[0]?.visualization_headers ?? [];
 	return (vizHeaders as { id?: unknown; vizType?: unknown }[])
@@ -155,8 +161,9 @@ async function listLiveboardVizIds(
 // next batch as soon as its last one lands, until the deadline aborts the rest.
 // Returns what finished (board order); throws only if nothing did.
 async function fetchVizPool(
-	url: string,
-	headers: Record<string, string>,
+	ctx: ClientContext,
+	endpoint: string,
+	opts: ApiRequestOptions,
 	body: Record<string, unknown>,
 	vizIds: string[],
 ): Promise<RawDataContent[]> {
@@ -176,15 +183,15 @@ async function fetchVizPool(
 			const i = next++;
 			try {
 				const data = await postJson(
-					url,
-					headers,
+					ctx,
+					endpoint,
 					{
 						...body,
 						visualization_identifiers: batches[i],
 						record_size: LIVEBOARD_RECORD_SIZE,
 					},
 					"getData failed",
-					controller.signal,
+					{ ...opts, signal: controller.signal },
 				);
 				fetched[i] = data?.contents ?? [];
 			} catch (error) {
@@ -225,73 +232,82 @@ async function fetchVizPool(
 
 // Custom handler: the rest-api-sdk has no single call that resolves a GUID's
 // type and fetches its data from the matching endpoint.
-export function addGetData(client: any, instanceUrl: string, token: string) {
-	client.getData = async ({
+export async function getData(
+	ctx: ClientContext,
+	{
 		objectId,
 		objectType,
 		vizIds,
 		maxRows = GET_DATA_DEFAULT_MAX_ROWS,
-	}: GetDataParams): Promise<GetDataResult> => {
-		// x-request-id ties the upstream call to tracing.
-		const requestId = generateRequestId();
-		const headers = buildHeaders(token, undefined, undefined, { requestId });
-
-		// The caller-supplied type (from search_objects) picks the data endpoint.
-		const body: Record<string, unknown> = {
-			metadata_identifier: objectId,
-			data_format: DATA_FORMAT,
-			record_offset: 0,
-		};
-		let endpoint: string;
-		if (objectType === ANSWER_TYPE) {
-			endpoint = "/api/rest/2.0/metadata/answer/data";
-		} else if (
-			objectType === LIVEBOARD_TYPE ||
-			objectType === LIVEBOARD_VIZ_TYPE
-		) {
-			endpoint = "/api/rest/2.0/metadata/liveboard/data";
-			if (vizIds?.length) {
-				// Caller scoped the fetch to specific vizzes.
-				body.visualization_identifiers = vizIds;
-			} else {
-				// Whole-board request: enumerate the vizzes so the pool can fetch them
-				// in batches; one unscoped call on a big board times out (524). Fall back
-				// to it only if enumeration returns nothing or itself fails.
-				let allVizIds: string[] = [];
-				try {
-					allVizIds = await listLiveboardVizIds(instanceUrl, headers, objectId);
-				} catch (error) {
-					console.error("getData: liveboard viz enumeration failed", error);
-				}
-				if (allVizIds.length) {
-					body.visualization_identifiers = allVizIds;
-				}
-			}
-		} else {
-			throw new Error(
-				`getData does not support object type "${objectType}" (id ${objectId}); only Answers and Liveboards expose fetchable data.`,
-			);
-		}
-
-		const url = `${instanceUrl}${endpoint}`;
-		const scopedVizIds = body.visualization_identifiers as string[] | undefined;
-		if (scopedVizIds?.length) {
-			const contents = await fetchVizPool(url, headers, body, scopedVizIds);
-			return { data: mapContents(contents, maxRows) };
-		}
-
-		// Answers cap rows via record_size; Liveboards need the whole viz, capped
-		// client-side in mapContents.
-		const recordSize =
-			objectType === ANSWER_TYPE ? maxRows : LIVEBOARD_RECORD_SIZE;
-		const data = await postJson(
-			url,
-			headers,
-			{ ...body, record_size: recordSize },
-			"getData failed",
-		);
-		const contents: RawDataContent[] = data?.contents ?? [];
-
-		return { data: mapContents(contents, maxRows) };
+	}: GetDataParams,
+): Promise<GetDataResult> {
+	// x-request-id ties the upstream call to tracing.
+	const opts: ApiRequestOptions = {
+		requestId: generateRequestId(),
+		scopeToOrg: false,
 	};
+
+	// The caller-supplied type (from search_objects) picks the data endpoint.
+	const body: Record<string, unknown> = {
+		metadata_identifier: objectId,
+		data_format: DATA_FORMAT,
+		record_offset: 0,
+	};
+	let endpoint: string;
+	if (objectType === ANSWER_TYPE) {
+		endpoint = "/api/rest/2.0/metadata/answer/data";
+	} else if (
+		objectType === LIVEBOARD_TYPE ||
+		objectType === LIVEBOARD_VIZ_TYPE
+	) {
+		endpoint = "/api/rest/2.0/metadata/liveboard/data";
+		if (vizIds?.length) {
+			// Caller scoped the fetch to specific vizzes.
+			body.visualization_identifiers = vizIds;
+		} else {
+			// Whole-board request: enumerate the vizzes so the pool can fetch them
+			// in batches; one unscoped call on a big board times out (524). Fall back
+			// to it only if enumeration returns nothing or itself fails.
+			let allVizIds: string[] = [];
+			try {
+				allVizIds = await listLiveboardVizIds(ctx, opts, objectId);
+			} catch (error) {
+				console.error("getData: liveboard viz enumeration failed", error);
+			}
+			if (allVizIds.length) {
+				body.visualization_identifiers = allVizIds;
+			}
+		}
+	} else {
+		throw new Error(
+			`getData does not support object type "${objectType}" (id ${objectId}); only Answers and Liveboards expose fetchable data.`,
+		);
+	}
+
+	const scopedVizIds = body.visualization_identifiers as string[] | undefined;
+	if (scopedVizIds?.length) {
+		const contents = await fetchVizPool(
+			ctx,
+			endpoint,
+			opts,
+			body,
+			scopedVizIds,
+		);
+		return { data: mapContents(contents, maxRows) };
+	}
+
+	// Answers cap rows via record_size; Liveboards need the whole viz, capped
+	// client-side in mapContents.
+	const recordSize =
+		objectType === ANSWER_TYPE ? maxRows : LIVEBOARD_RECORD_SIZE;
+	const data = await postJson(
+		ctx,
+		endpoint,
+		{ ...body, record_size: recordSize },
+		"getData failed",
+		opts,
+	);
+	const contents: RawDataContent[] = data?.contents ?? [];
+
+	return { data: mapContents(contents, maxRows) };
 }
