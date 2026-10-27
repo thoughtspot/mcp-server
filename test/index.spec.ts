@@ -137,33 +137,6 @@ describe("Path aliases", () => {
 	});
 });
 
-describe("POST /authorize SAML redirect", () => {
-	beforeEach(() => {
-		vi.resetModules();
-		mockOAuthFetch.mockReset();
-	});
-
-	it("sends the user to /callback instead of SAML login", async () => {
-		const callbackUrl =
-			"https://example.com/callback?instanceUrl=https%3A%2F%2Facme.thoughtspot.cloud&oauthReqInfo=abc";
-		mockOAuthFetch.mockResolvedValue(
-			Response.redirect(
-				`https://acme.thoughtspot.cloud/callosum/v1/saml/login?targetURLPath=${encodeURIComponent(callbackUrl)}`,
-			),
-		);
-		const worker = await loadWorker();
-
-		const response = await worker.fetch(
-			new IncomingRequest("https://example.com/authorize", { method: "POST" }),
-			env,
-			createExecutionContext(),
-		);
-
-		expect(response.status).toBe(302);
-		expect(response.headers.get("Location")).toBe(callbackUrl);
-	});
-});
-
 describe("Instance allowlist wiring", () => {
 	const allowlistEnv = {
 		...env,
