@@ -57,6 +57,7 @@ Hostnames that aren't listed behave as before. If the value is not valid JSON, t
    ```
 2. **Set up environment variables**:
    - Copy `.dev.vars` and fill in your ThoughtSpot instance URL and access token.
+   - To test OAuth over plain HTTP on a host other than `localhost` (for example a hosts-file alias like `http://myserver.com:8787`), also add `OAUTH_ALLOW_INSECURE_DEV_COOKIE=true`. Browsers otherwise drop the OAuth binding cookie on such hosts and the flow fails with a 403. Never set this in a deployed environment.
 3. **Start the development server**:
    ```sh
    npm run dev
