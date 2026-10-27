@@ -30,7 +30,6 @@ import { fetchToken } from "./oauth-redirect";
 import { ConversationStorageServerSQLite as BaseConversationStorageServer } from "./servers/conversation-storage-server";
 import { MCPServer } from "./servers/mcp-server";
 import { UserTokenStoreSQLite } from "./servers/user-token-store-server";
-import { withExpiredTokenGuard } from "./store-token-guard";
 import { type Props, normalizeClientName } from "./utils";
 
 export { UserTokenStoreSQLite };
@@ -218,12 +217,9 @@ const oauthHandler = {
 
 const instrumentedOAuthHandler = instrument(oauthHandler, config);
 
-// Restricts the authorize page to the per-host instance allowlist (if any), and
-// rejects /store-token tokens that are expired or lack a refresh token.
-const allowlistedOAuthFetch = withInstanceAllowlist(
-	withExpiredTokenGuard(async (request, env, ctx) =>
-		instrumentedOAuthHandler.fetch!(request as any, env, ctx),
-	),
+// Restricts the authorize page to the per-host instance allowlist (if any).
+const allowlistedOAuthFetch = withInstanceAllowlist(async (request, env, ctx) =>
+	instrumentedOAuthHandler.fetch!(request as any, env, ctx),
 );
 
 // OTEL instrumentation automatically uses or passing along some headers from upstream calls, so we
