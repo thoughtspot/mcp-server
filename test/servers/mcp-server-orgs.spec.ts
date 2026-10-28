@@ -2,8 +2,8 @@ import { connect } from "mcp-testing-kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MixpanelTracker } from "../../src/metrics/mixpanel/mixpanel";
 import { MCPServer } from "../../src/servers/mcp-server";
-import * as thoughtspotClient from "../../src/thoughtspot/thoughtspot-client";
-import { ThoughtSpotApiError } from "../../src/thoughtspot/types";
+import * as thoughtspotClient from "../../src/services/clients/thoughtspot-client";
+import { ThoughtSpotApiError } from "../../src/services/types";
 
 vi.mock("../../src/metrics/mixpanel/mixpanel", () => ({
 	MixpanelTracker: vi.fn().mockImplementation(() => ({ track: vi.fn() })),

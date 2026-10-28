@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { ThoughtSpotService } from "../../src/services/thoughtspot-service";
 import type { SpotterVizClient } from "../../src/spotterviz/spotterviz-client";
 import { SpotterVizService } from "../../src/spotterviz/spotterviz-service";
 import {
@@ -7,7 +8,6 @@ import {
 } from "../../src/spotterviz/timeouts";
 import type { AuroraSessionContext } from "../../src/spotterviz/types";
 import type { StorageServiceClient } from "../../src/storage-service/storage-service";
-import type { ThoughtSpotService } from "../../src/thoughtspot/thoughtspot-service";
 
 // ---------------------------------------------------------------------------
 // Test fixtures

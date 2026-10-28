@@ -13,6 +13,30 @@ import {
 } from "../metrics/runtime/metrics-recorder";
 import type { ToolMetricApiSurface } from "../metrics/runtime/tool-metrics";
 import { WithSpan } from "../metrics/tracing/tracing-utils";
+import {
+	MODEL_POLL_INTERVAL_MS,
+	MODEL_POLL_ITERATIONS,
+} from "../services/clients/spotter-model/spotter-model-constants";
+import {
+	buildChoiceAnswer,
+	summarizeWorksheetModel,
+} from "../services/clients/spotter-model/spotter-model-mapper";
+import { consumeModelStream } from "../services/clients/spotter-model/spotter-model-stream";
+import type {
+	ModelSessionState,
+	ModelStreamSink,
+	ModelUpdate,
+} from "../services/clients/spotter-model/spotter-model-types";
+import type {
+	DataSource,
+	ThoughtSpotService,
+} from "../services/thoughtspot-service";
+import {
+	type Answer,
+	SpotterResponseFormat,
+	type StreamingMessagesState,
+	ThoughtSpotApiError,
+} from "../services/types";
 import { pollDashboardTurn } from "../spotterviz/dashboard-orchestrator";
 import {
 	composeConfirmPlanPrompt,
@@ -30,30 +54,6 @@ import {
 } from "../spotterviz/dashboard-tools";
 import { UPSTREAM_CALL_TIMEOUT_MS, withTimeout } from "../spotterviz/timeouts";
 import type { StorageServiceClient } from "../storage-service/storage-service";
-import {
-	MODEL_POLL_INTERVAL_MS,
-	MODEL_POLL_ITERATIONS,
-} from "../thoughtspot/spotter-model/spotter-model-constants";
-import {
-	buildChoiceAnswer,
-	summarizeWorksheetModel,
-} from "../thoughtspot/spotter-model/spotter-model-mapper";
-import { consumeModelStream } from "../thoughtspot/spotter-model/spotter-model-stream";
-import type {
-	ModelSessionState,
-	ModelStreamSink,
-	ModelUpdate,
-} from "../thoughtspot/spotter-model/spotter-model-types";
-import type {
-	DataSource,
-	ThoughtSpotService,
-} from "../thoughtspot/thoughtspot-service";
-import {
-	type Answer,
-	SpotterResponseFormat,
-	type StreamingMessagesState,
-	ThoughtSpotApiError,
-} from "../thoughtspot/types";
 import { McpServerError } from "../utils";
 import { BaseMCPServer, type Context } from "./mcp-server-base";
 import {

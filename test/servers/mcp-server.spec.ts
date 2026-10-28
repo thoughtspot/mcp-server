@@ -4,9 +4,9 @@ import { MixpanelTracker } from "../../src/metrics/mixpanel/mixpanel";
 import { ANALYTICS_ENGINE_SCHEMA_VERSION } from "../../src/metrics/runtime/analytics-engine-sink";
 import { METRIC_NAMES } from "../../src/metrics/runtime/metric-types";
 import { MCPServer } from "../../src/servers/mcp-server";
-import * as thoughtspotClient from "../../src/thoughtspot/thoughtspot-client";
-import { ThoughtSpotService } from "../../src/thoughtspot/thoughtspot-service";
-import { SpotterResponseFormat } from "../../src/thoughtspot/types";
+import * as thoughtspotClient from "../../src/services/clients/thoughtspot-client";
+import { ThoughtSpotService } from "../../src/services/thoughtspot-service";
+import { SpotterResponseFormat } from "../../src/services/types";
 import { makeRequest } from "./helpers";
 
 // Mock the MixpanelTracker

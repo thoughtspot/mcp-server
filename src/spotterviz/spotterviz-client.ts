@@ -1,4 +1,4 @@
-import type { BachSession } from "../thoughtspot/types";
+import type { BachSession } from "../services/types";
 /**
  * SpotterViz client.
  *

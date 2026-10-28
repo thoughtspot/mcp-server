@@ -19,8 +19,8 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MCPServer } from "../../src/servers/mcp-server";
-import { LIVEBOARD_RECORD_SIZE } from "../../src/thoughtspot/get-data/get-data";
-import { ThoughtSpotService } from "../../src/thoughtspot/thoughtspot-service";
+import { LIVEBOARD_RECORD_SIZE } from "../../src/services/clients/get-data/get-data-client";
+import { ThoughtSpotService } from "../../src/services/thoughtspot-service";
 import { makeRequest } from "./helpers";
 
 // Product analytics is out of scope for these tests.
