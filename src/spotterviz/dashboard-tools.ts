@@ -4,8 +4,8 @@
  * plain result; the handlers turn it into an MCP response.
  */
 
+import type { Answer } from "../services/types";
 import type { StorageServiceClient } from "../storage-service/storage-service";
-import type { Answer } from "../thoughtspot/types";
 import {
 	DashboardTurnBusyError,
 	type DashboardTurnOutcome,

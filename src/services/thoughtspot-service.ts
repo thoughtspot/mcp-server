@@ -1,0 +1,1009 @@
+import { SpanStatusCode, context, trace } from "@opentelemetry/api";
+import type { AgentConversation } from "@thoughtspot/rest-api-sdk";
+import {
+	type MetricsRecorder,
+	scheduleMetricsFlush,
+} from "../metrics/runtime/metrics-recorder";
+import type {
+	MetricAnalyticsContext,
+	MetricEventIdentity,
+} from "../metrics/runtime/metrics-sink";
+import { createRequestMetricsRecorder } from "../metrics/runtime/request-metrics";
+import type { MetricsEnvLike } from "../metrics/runtime/runtime-config";
+import {
+	UPSTREAM_OPERATION_NAMES,
+	type UpstreamOperation,
+	observeUpstreamCall,
+	recordUpstreamStreamStartedMetric,
+} from "../metrics/runtime/tool-metrics";
+import { WithSpan, getActiveSpan } from "../metrics/tracing/tracing-utils";
+import { processSendAgentConversationMessageStreamingResponse } from "../streaming-utils";
+import type {
+	CreateModelSessionResult,
+	FetchWorksheetModelParams,
+	SaveModelParams,
+	SaveModelResult,
+	SendModelMessageParams,
+} from "./clients/spotter-model/spotter-model-types";
+import type {
+	GetDataParams,
+	GetDataResult,
+	SearchObjectsParams,
+	SearchObjectsResponse,
+	ThoughtSpotClient,
+} from "./clients/thoughtspot-client";
+import type {
+	Answer,
+	DataSource,
+	DataSourceSuggestion,
+	Message,
+	RawMessage,
+	SessionInfo,
+	SpotterResponseFormat,
+} from "./types";
+
+type ThoughtSpotServiceMetricsOptions = {
+	recorder?: MetricsRecorder;
+	metricsEnv?: MetricsEnvLike;
+	waitUntil?: (promise: Promise<any>) => void;
+	analyticsContext?: MetricAnalyticsContext;
+	eventIdentity?: MetricEventIdentity;
+};
+
+/**
+ * Main ThoughtSpot service class using decorator pattern for tracing
+ */
+export class ThoughtSpotService {
+	constructor(
+		private client: ThoughtSpotClient,
+		private readonly metrics: ThoughtSpotServiceMetricsOptions = {},
+	) {}
+
+	private observeUpstreamCall<T>(
+		operation: UpstreamOperation,
+		call: () => Promise<T>,
+	): Promise<T> {
+		return observeUpstreamCall(this.metrics.recorder, operation, call);
+	}
+
+	private createStreamMetricsRecorder(): MetricsRecorder {
+		const recorder = createRequestMetricsRecorder(this.metrics.metricsEnv);
+		recorder.setAnalyticsContext(this.metrics.analyticsContext);
+		recorder.setEventIdentity(this.metrics.eventIdentity);
+		return recorder;
+	}
+
+	private scheduleBackgroundMetricsFlush(recorder: MetricsRecorder): void {
+		scheduleMetricsFlush(recorder, this.metrics.waitUntil);
+	}
+
+	@WithSpan("discover-data-sources")
+	async discoverDataSources(
+		query?: string,
+	): Promise<DataSource[] | DataSourceSuggestion[] | null> {
+		const span = getActiveSpan();
+
+		// If a query is provided, use intelligent data source suggestions
+		if (query) {
+			span?.addEvent("get-data-source-suggestions");
+			return await this.getDataSourceSuggestions(query);
+		}
+
+		// Otherwise, fallback to getting all data sources
+		const dataSources = await this.getDataSources();
+		return dataSources;
+	}
+
+	/**
+	 * Get intelligent data source suggestions based on a query using GraphQL
+	 */
+	@WithSpan("get-data-source-suggestions")
+	async getDataSourceSuggestions(
+		query: string,
+	): Promise<DataSourceSuggestion[] | null> {
+		const span = getActiveSpan();
+
+		try {
+			span?.setAttribute("query", query);
+			span?.addEvent("query-get-data-source-suggestions");
+
+			const response = await this.observeUpstreamCall(
+				UPSTREAM_OPERATION_NAMES.getDataSourceSuggestions,
+				() =>
+					this.client.getDataSourceSuggestions({
+						query,
+					}),
+			);
+
+			span?.setStatus({
+				code: SpanStatusCode.OK,
+				message: "Data source suggestions retrieved",
+			});
+
+			// Check if we have any data sources
+			if (!response.data_sources || response.data_sources.length === 0) {
+				span?.setAttribute("suggestions_count", 0);
+				return null;
+			}
+
+			span?.setAttribute("suggestions_count", response.data_sources.length);
+
+			// Return top 2 data sources (or just 1 if only 1 available)
+			const topDataSources = response.data_sources
+				.slice(0, 2)
+				.map((source) => ({
+					confidence: source.confidence ?? 0,
+					header: {
+						description: source.details?.description ?? "",
+						displayName: source.details?.data_source_name ?? "",
+						guid: source.details?.data_source_identifier ?? "",
+					},
+					llmReasoning: source.reasoning ?? "",
+				}));
+			return topDataSources;
+		} catch (error) {
+			span?.setStatus({
+				code: SpanStatusCode.ERROR,
+				message: (error as Error).message,
+			});
+			console.error("Error getting data source suggestions: ", error);
+			throw error;
+		}
+	}
+
+	/**
+	 * Get relevant questions for a given query and data sources
+	 */
+	@WithSpan("get-relevant-questions")
+	async getRelevantQuestions(
+		query: string,
+		sourceIds: string[],
+		additionalContext: string,
+	): Promise<{
+		questions: { question: string; datasourceId: string }[];
+		error: Error | null;
+	}> {
+		const span = trace.getSpan(context.active());
+
+		try {
+			additionalContext = additionalContext || "";
+			span?.setAttribute("datasource_ids", sourceIds.join(","));
+			console.log(
+				"[DEBUG] Getting relevant questions with datasource: ",
+				sourceIds,
+			);
+			span?.addEvent("get-decomposed-query");
+
+			const resp = await this.observeUpstreamCall(
+				UPSTREAM_OPERATION_NAMES.queryGetDecomposedQuery,
+				() =>
+					this.client.queryGetDecomposedQuery({
+						nlsRequest: {
+							query: query,
+						},
+						content: [additionalContext],
+						worksheetIds: sourceIds,
+						maxDecomposedQueries: 5,
+					}),
+			);
+
+			const questions =
+				resp.decomposedQueryResponse?.decomposedQueries?.map((q) => ({
+					question: q.query!,
+					datasourceId: q.worksheetId!,
+				})) || [];
+
+			span?.setStatus({
+				code: SpanStatusCode.OK,
+				message: "Relevant questions found",
+			});
+			span?.setAttribute("questions_count", questions.length);
+
+			return {
+				questions,
+				error: null,
+			};
+		} catch (error) {
+			span?.setStatus({
+				code: SpanStatusCode.ERROR,
+				message: (error as Error).message,
+			});
+			console.error(
+				"Error getting relevant questions: ",
+				"sourceIds: ",
+				sourceIds,
+				"instanceUrl: ",
+				this.client.instanceUrl,
+				"error: ",
+				error,
+			);
+			return {
+				questions: [],
+				error: error as Error,
+			};
+		}
+	}
+
+	/**
+	 * Get answer data for a specific question
+	 */
+	@WithSpan("get-answer-data")
+	private async getAnswerData(
+		question: string,
+		session_identifier: string,
+		generation_number: number,
+	): Promise<string> {
+		const span = getActiveSpan();
+
+		try {
+			span?.setAttributes({
+				session_identifier,
+				generation_number,
+			});
+
+			const data = await this.observeUpstreamCall(
+				UPSTREAM_OPERATION_NAMES.exportAnswerReport,
+				() =>
+					this.client.exportAnswerReport({
+						session_identifier,
+						generation_number,
+						file_format: "CSV",
+					}),
+			);
+
+			let csvData = await data.text();
+			// get only the first 100 lines of the csv data
+			csvData = csvData.split("\n").slice(0, 100).join("\n");
+
+			return csvData;
+		} catch (error) {
+			span?.setStatus({
+				code: SpanStatusCode.ERROR,
+				message: `Error getting answer Data ${error}`,
+			});
+			console.error(
+				"Error getting answer Data: ",
+				error,
+				"instanceUrl: ",
+				this.client.instanceUrl,
+			);
+			throw error;
+		}
+	}
+
+	/**
+	 * Get TML for a specific answer
+	 */
+	@WithSpan("get-answer-tml")
+	private async getAnswerTML(
+		title: string,
+		session_identifier: string,
+		generation_number: number,
+	): Promise<any> {
+		const span = getActiveSpan();
+
+		try {
+			span?.setAttribute("session_identifier", session_identifier);
+			const tml = await this.observeUpstreamCall(
+				UPSTREAM_OPERATION_NAMES.exportUnsavedAnswerTml,
+				() =>
+					this.client.exportUnsavedAnswerTML({
+						session_identifier,
+						generation_number,
+					}),
+			);
+			return tml;
+		} catch (error) {
+			span?.setStatus({
+				code: SpanStatusCode.ERROR,
+				message: `Error getting answer TML ${error}`,
+			});
+			console.error("Error getting answer TML: ", error);
+			return null;
+		}
+	}
+
+	/**
+	 * Create a conversation with Spotter agent
+	 */
+	@WithSpan("create-agent-conversation")
+	async createAgentConversation(
+		isSpotterDataSourceDiscoveryEnabled: boolean,
+		isSpotterChatHistoryEnabled: boolean,
+		dataSourceId?: string,
+	): Promise<AgentConversation> {
+		const span = trace.getSpan(context.active());
+		span?.setAttribute("data_source_id", dataSourceId ?? "(none)");
+
+		try {
+			// Use auto mode by default, but support passing an explicit data source context
+			const response = await this.observeUpstreamCall(
+				UPSTREAM_OPERATION_NAMES.createAgentConversation,
+				() =>
+					this.client.createAgentConversationWithAutoMode({
+						isSpotterDataSourceDiscoveryEnabled,
+						isSpotterChatHistoryEnabled,
+						dataSourceId,
+					}),
+			);
+
+			span?.setStatus({
+				code: SpanStatusCode.OK,
+				message: "Agent conversation created",
+			});
+			span?.setAttribute("conversation_id", response.conversation_id);
+
+			return response;
+		} catch (error) {
+			console.error("Error creating agent conversation:", error);
+			span?.setStatus({
+				code: SpanStatusCode.ERROR,
+				message: (error as Error).message,
+			});
+			throw error;
+		}
+	}
+
+	/**
+	 * Send a message to an agent conversation, and collect the streaming response asynchronously
+	 */
+	@WithSpan("send-agent-conversation-message-streaming")
+	async sendAgentConversationMessageStreaming(
+		conversationId: string,
+		message: string,
+		spotterResponseFormat: SpotterResponseFormat,
+		appendStoredMessages: (
+			conversationId: string,
+			messages: (Message | RawMessage)[],
+			isDone?: boolean,
+		) => Promise<void>,
+		additionalContext?: string | undefined,
+	): Promise<void> {
+		const span = trace.getSpan(context.active());
+		span?.setAttributes({
+			conversation_id: conversationId,
+			has_additional_context: !!additionalContext,
+		});
+
+		try {
+			const finalMessage = additionalContext
+				? `${message}\n\nAdditional Context:\n${additionalContext}`
+				: message;
+
+			// Validate the response body inside the observed call so an unusable streaming
+			// response is counted as `upstream_error` instead of a false success.
+			const reader = await this.observeUpstreamCall(
+				UPSTREAM_OPERATION_NAMES.sendAgentConversationMessageStreaming,
+				async () => {
+					const response = await this.client.streamAgentConversationMessage({
+						conversation_identifier: conversationId,
+						message: finalMessage,
+					});
+					const reader = response.body?.getReader();
+					if (!reader) {
+						throw new Error("Failed to get reader from response body");
+					}
+					return reader;
+				},
+			);
+
+			const streamRecorder = this.createStreamMetricsRecorder();
+			recordUpstreamStreamStartedMetric(
+				streamRecorder,
+				UPSTREAM_OPERATION_NAMES.sendAgentConversationMessageStreaming,
+				"success",
+			);
+
+			const processStreamPromise =
+				processSendAgentConversationMessageStreamingResponse(
+					this.client.instanceUrl,
+					spotterResponseFormat,
+					conversationId,
+					reader,
+					appendStoredMessages,
+					streamRecorder,
+				).finally(() => {
+					this.scheduleBackgroundMetricsFlush(streamRecorder);
+				});
+
+			if (this.metrics.waitUntil) {
+				try {
+					this.metrics.waitUntil(processStreamPromise);
+				} catch (error) {
+					console.error(
+						"[metrics] Failed to schedule upstream stream processing",
+						error,
+					);
+				}
+			} else {
+				// Tests and non-Worker runtimes may not expose waitUntil. Keep the
+				// best-effort stream processing running without blocking the caller.
+				void processStreamPromise;
+			}
+
+			span?.setStatus({
+				code: SpanStatusCode.OK,
+				message: "Agent conversation message streaming sent",
+			});
+		} catch (error) {
+			console.error(
+				"Error sending agent conversation message streaming:",
+				error,
+			);
+			span?.setStatus({
+				code: SpanStatusCode.ERROR,
+				message: (error as Error).message,
+			});
+			throw error;
+		}
+	}
+
+	/**
+	 * Get answer for a specific question
+	 */
+	@WithSpan("get-answer-for-question")
+	async getAnswerForQuestion(
+		question: string,
+		sourceId: string,
+		shouldGetTML: boolean,
+	): Promise<any> {
+		const span = getActiveSpan();
+
+		span?.setAttributes({
+			datasource_id: sourceId,
+			should_get_tml: shouldGetTML,
+		});
+
+		console.log(
+			"[DEBUG] Getting answer for sourceId: ",
+			sourceId,
+			"shouldGetTML: ",
+			shouldGetTML,
+		);
+
+		try {
+			const answer = await this.observeUpstreamCall(
+				UPSTREAM_OPERATION_NAMES.singleAnswer,
+				() =>
+					this.client.singleAnswer({
+						query: question,
+						metadata_identifier: sourceId,
+					}),
+			);
+
+			const { session_identifier, generation_number } = answer as any;
+			span?.setAttributes({
+				session_identifier,
+				generation_number,
+			});
+
+			const [data, session, tml] = await Promise.all([
+				this.getAnswerData(question, session_identifier, generation_number),
+				this.observeUpstreamCall(
+					UPSTREAM_OPERATION_NAMES.getAnswerSession,
+					() =>
+						this.client.getAnswerSession({
+							session_identifier,
+							generation_number,
+						}),
+				),
+				shouldGetTML
+					? this.getAnswerTML(question, session_identifier, generation_number)
+					: Promise.resolve(null),
+			]);
+
+			const frameUrl = `${this.client.instanceUrl}/?tsmcp=true#/embed/conv-assist-answer?sessionId=${session.sessionId}&genNo=${session.genNo}&acSessionId=${session.acSession.sessionId}&acGenNo=${session.acSession.genNo}`;
+
+			return {
+				question,
+				...answer,
+				frame_url: frameUrl,
+				data,
+				tml,
+				error: null,
+			};
+		} catch (error) {
+			span?.setStatus({
+				code: SpanStatusCode.ERROR,
+				message: `Error getting answer for question ${error}`,
+			});
+			console.error(
+				"Error getting answer for sourceId: ",
+				sourceId,
+				" and shouldGetTML: ",
+				shouldGetTML,
+				" and error: ",
+				error,
+				"instanceUrl: ",
+				this.client.instanceUrl,
+			);
+			return {
+				error: error as Error,
+			};
+		}
+	}
+
+	/**
+	 * Fetch TML and create liveboard
+	 */
+	@WithSpan("fetch-tml-and-create-liveboard")
+	async fetchTMLAndCreateLiveboard(
+		title: string,
+		answers: Answer[],
+		noteTileParsedHtml?: string,
+	): Promise<{ url?: string; liveboardId?: string; error: Error | null }> {
+		const span = getActiveSpan();
+
+		try {
+			span?.setAttributes({
+				liveboard_name: title,
+				answers_count: answers.length,
+			});
+			span?.addEvent("create-answer-tmls");
+
+			const tmls = await Promise.all(
+				answers.map((answer) =>
+					this.getAnswerTML(
+						answer.title,
+						answer.session_identifier,
+						answer.generation_number,
+					),
+				),
+			);
+
+			// A note tile is only added when the caller supplied content for one.
+			const noteTiles = noteTileParsedHtml
+				? [{ note_tile: { html_parsed_string: noteTileParsedHtml } }]
+				: [];
+
+			// Update answers with TML data to match TML visualization format
+			const visualizationAnswers = answers
+				.map((answer, idx) => {
+					const tml = tmls[idx];
+					if (!tml) return null;
+					return {
+						answer: {
+							...tml.answer,
+							name: answer.title,
+						},
+					};
+				})
+				.filter((viz) => viz !== null);
+
+			// Ids are assigned from final position, because createLiveboard builds the layout's
+			// visualization_id from the array index. Deriving them any other way desyncs the two:
+			// previously the note tile was hardcoded to Viz_0 and answers to Viz_{idx+1}, which
+			// only lined up while a note tile was always present and no answer was ever dropped.
+			const tiles = [...noteTiles, ...visualizationAnswers].map(
+				(tile, idx) => ({
+					id: `Viz_${idx}`,
+					...tile,
+				}),
+			);
+
+			span?.addEvent("create-liveboard");
+
+			const created = await this.createLiveboardWithId(title, tiles);
+			return {
+				url: created.url,
+				liveboardId: created.liveboardId,
+				error: null,
+			};
+		} catch (error) {
+			span?.setStatus({
+				code: SpanStatusCode.ERROR,
+				message: `Error fetching TML and creating liveboard ${error}`,
+			});
+			console.error("Error fetching TML and creating liveboard: ", error);
+			return {
+				error: error as Error,
+			};
+		}
+	}
+
+	/**
+	 * Create an empty liveboard with just a name. Returns the new liveboard's GUID.
+	 */
+	@WithSpan("create-empty-liveboard")
+	async createEmptyLiveboard(name: string): Promise<{ liveboardId: string }> {
+		const tml = {
+			liveboard: { name, visualizations: [], layout: { tiles: [] } },
+		};
+
+		const resp = await this.observeUpstreamCall(
+			UPSTREAM_OPERATION_NAMES.importMetadataTml,
+			() =>
+				this.client.importMetadataTML({
+					metadata_tmls: [JSON.stringify(tml)],
+					import_policy: "ALL_OR_NONE",
+					create_new: true,
+				}),
+		);
+
+		const liveboardId = (resp as any)?.[0]?.response?.header?.id_guid;
+		if (!liveboardId) {
+			throw new Error(
+				`createEmptyLiveboard: id_guid missing in response: ${JSON.stringify(resp)}`,
+			);
+		}
+		return { liveboardId };
+	}
+
+	/**
+	 * Initiate a new BACH pinboard session for a liveboard.
+	 */
+	@WithSpan("create-bach-pinboard-session")
+	async createBachPinboardSession(
+		liveboardId: string,
+	): Promise<{ transactionId: string; generationNumber: string }> {
+		return this.observeUpstreamCall(
+			UPSTREAM_OPERATION_NAMES.createBachPinboardSession,
+			() => this.client.createBachPinboardSession({ liveboardId }),
+		);
+	}
+
+	/**
+	 * Commit the current generation of a BACH pinboard session back to the saved liveboard. The
+	 * BACH session is unaffected by the save and can continue to receive further mutations.
+	 */
+	@WithSpan("save-bach-pinboard")
+	async saveBachPinboard(
+		transactionId: string,
+		generationNumber: string,
+	): Promise<void> {
+		await this.observeUpstreamCall(
+			UPSTREAM_OPERATION_NAMES.saveBachPinboard,
+			() =>
+				this.client.saveBachPinboard({
+					transactionId,
+					generationNumber,
+				}),
+		);
+	}
+
+	/**
+	 * Create liveboard from answers. Returns the URL only; prefer
+	 * `createLiveboardWithId` when the caller also needs the liveboard GUID (e.g. to hand the
+	 * liveboard to a follow-up agent turn).
+	 */
+	async createLiveboard(name: string, answers: any[]): Promise<string> {
+		const { url } = await this.createLiveboardWithId(name, answers);
+		return url;
+	}
+
+	/**
+	 * Create liveboard from answers, returning both the URL and the new liveboard's GUID.
+	 */
+	@WithSpan("create-liveboard")
+	async createLiveboardWithId(
+		name: string,
+		answers: any[],
+	): Promise<{ url: string; liveboardId: string }> {
+		const span = getActiveSpan();
+		span?.setAttributes({
+			total_answers: answers.length,
+		});
+
+		const tml = {
+			liveboard: {
+				name,
+				visualizations: answers,
+				layout: {
+					tiles: answers.map((answer, idx) => {
+						if (answer.note_tile) {
+							return {
+								visualization_id: `Viz_${idx}`,
+								size: "MEDIUM",
+							};
+						}
+						return {
+							visualization_id: `Viz_${idx}`,
+							size: "MEDIUM_SMALL",
+						};
+					}),
+				},
+			},
+		};
+
+		const resp = await this.observeUpstreamCall(
+			UPSTREAM_OPERATION_NAMES.importMetadataTml,
+			() =>
+				this.client.importMetadataTML({
+					metadata_tmls: [JSON.stringify(tml)],
+					import_policy: "ALL_OR_NONE",
+				}),
+		);
+
+		const liveboardId = resp[0].response.header.id_guid;
+		const liveboardUrl = `${this.client.instanceUrl}/#/insights/pinboard/${liveboardId}`;
+		span?.setAttribute("liveboard_id", liveboardId);
+		span?.setStatus({
+			code: SpanStatusCode.OK,
+			message: "Liveboard created successfully",
+		});
+		return { url: liveboardUrl, liveboardId };
+	}
+
+	/**
+	 * Get data sources
+	 */
+	@WithSpan("get-data-sources")
+	async getDataSources(): Promise<DataSource[]> {
+		const span = getActiveSpan();
+
+		span?.addEvent("get-data-sources");
+
+		const resp = await this.observeUpstreamCall(
+			UPSTREAM_OPERATION_NAMES.searchMetadata,
+			() =>
+				this.client.searchMetadata({
+					metadata: [
+						{
+							type: "LOGICAL_TABLE",
+						},
+					],
+					record_size: 2000,
+					sort_options: {
+						field_name: "LAST_ACCESSED",
+						order: "DESC",
+					},
+				}),
+		);
+
+		const results = resp
+			// Tables can also be used for spotter now
+			//.filter(d => d.metadata_header.type === "WORKSHEET" || d.metadata_header.subType === "WORKSHEET")
+			.filter((d) => d.metadata_header.aiAnswerGenerationDisabled === false)
+			.map((d) => ({
+				name: d.metadata_header.name,
+				id: d.metadata_header.id,
+				description: d.metadata_header.description,
+			}));
+
+		return results;
+	}
+
+	/**
+	 * Get session information
+	 */
+	@WithSpan("get-session-info")
+	async getSessionInfo(): Promise<SessionInfo> {
+		const span = getActiveSpan();
+
+		const info = (await this.observeUpstreamCall(
+			UPSTREAM_OPERATION_NAMES.getSessionInfo,
+			() => this.client.getSessionInfo(),
+		)) as any;
+		const devMixpanelToken = info.configInfo.mixpanelConfig.devSdkKey;
+		const prodMixpanelToken = info.configInfo.mixpanelConfig.prodSdkKey;
+		const mixpanelToken = info.configInfo.mixpanelConfig.production
+			? prodMixpanelToken
+			: devMixpanelToken;
+
+		span?.setAttribute("user_guid", info.userGUID);
+		span?.setAttribute("user_name", info.userName);
+		span?.setAttribute("cluster_name", info.configInfo.selfClusterName);
+		span?.setAttribute("release_version", info.releaseVersion);
+
+		return {
+			mixpanelToken,
+			userGUID: info.userGUID,
+			userName: info.userName,
+			clusterName: info.configInfo.selfClusterName,
+			clusterId: info.configInfo.selfClusterId,
+			releaseVersion: info.releaseVersion,
+			currentOrgId: info.currentOrgId,
+			privileges: info.privileges,
+			isSpotterDataSourceDiscoveryEnabled:
+				info.configInfo?.enableSpotterDataSourceDiscovery,
+			orgsEnabled: info.configInfo?.orgsConfiguration?.enabled,
+			isSpotterChatHistoryEnabled:
+				info.configInfo?.showSpotterPastConversations,
+		};
+	}
+
+	/**
+	 * Search worksheets by term
+	 */
+	@WithSpan("search-worksheets")
+	async searchWorksheets(searchTerm: string): Promise<DataSource[]> {
+		const span = getActiveSpan();
+
+		const resp = await this.observeUpstreamCall(
+			UPSTREAM_OPERATION_NAMES.searchMetadata,
+			() =>
+				this.client.searchMetadata({
+					metadata: [
+						{
+							type: "LOGICAL_TABLE",
+						},
+					],
+					record_size: 100,
+					sort_options: {
+						field_name: "NAME",
+						order: "ASC",
+					},
+				}),
+		);
+
+		const results = resp
+			.filter((d) => d.metadata_header.type === "WORKSHEET")
+			.filter((d) =>
+				d.metadata_header.name.toLowerCase().includes(searchTerm.toLowerCase()),
+			)
+			.map((d) => ({
+				name: d.metadata_header.name,
+				id: d.metadata_header.id,
+				description: d.metadata_header.description,
+			}));
+
+		span?.setAttribute("results_count", results.length);
+
+		return results;
+	}
+
+	/**
+	 * Search for objects (answers, liveboards, worksheets, etc.) by a search term
+	 */
+	@WithSpan("search-objects")
+	async searchObjects(
+		params: SearchObjectsParams,
+	): Promise<SearchObjectsResponse> {
+		const span = getActiveSpan();
+		span?.setAttribute(
+			"query",
+			Array.isArray(params.query) ? params.query.join(", ") : params.query,
+		);
+		span?.setAttribute("limit", params.limit ?? 10);
+
+		const result = await this.observeUpstreamCall(
+			UPSTREAM_OPERATION_NAMES.searchObjects,
+			() => this.client.searchObjects(params),
+		);
+
+		span?.setAttribute("results_count", result.results.length);
+		return result;
+	}
+
+	/**
+	 * Fetch the full data of a saved Answer or Liveboard by its GUID, shaped to
+	 * its object type.
+	 */
+	@WithSpan("get-data")
+	async getData(params: GetDataParams): Promise<GetDataResult> {
+		const span = getActiveSpan();
+		span?.setAttribute("object_id", params.objectId);
+
+		const result = await this.observeUpstreamCall(
+			UPSTREAM_OPERATION_NAMES.getData,
+			() => this.client.getData(params),
+		);
+
+		span?.setAttribute("object_type", params.objectType);
+		span?.setAttribute("viz_count", result.data.length);
+		return result;
+	}
+
+	/**
+	 * Validate connection to ThoughtSpot
+	 */
+	@WithSpan("validate-connection")
+	async validateConnection(): Promise<boolean> {
+		try {
+			const info = await this.observeUpstreamCall(
+				UPSTREAM_OPERATION_NAMES.getSessionInfo,
+				() => this.client.getSessionInfo(),
+			);
+			return Boolean(info?.userGUID);
+		} catch (error) {
+			// The decorator will automatically record the exception
+			return false;
+		}
+	}
+
+	// ── Spotter Model (Lumos) — thin wrappers over the client's /lumos handlers ──
+	// Types and request/response shapes live in ./spotter-model/spotter-model-types.
+
+	// Pass modelIdentifier to open an EXISTING model for editing; connectionIdentifier to build a
+	// new one. Exactly one is expected.
+	async createModelSession(
+		connectionIdentifier?: string,
+		modelIdentifier?: string,
+	): Promise<CreateModelSessionResult> {
+		return this.client.createModelSession({
+			connectionIdentifier,
+			modelIdentifier,
+		});
+	}
+
+	async mintSessionCookie(): Promise<string | null> {
+		return this.client.mintSessionCookie();
+	}
+
+	async sendModelMessageStreaming(
+		params: SendModelMessageParams,
+	): Promise<Response> {
+		return this.client.sendModelMessageStreaming(params);
+	}
+
+	async saveModel(params: SaveModelParams): Promise<SaveModelResult> {
+		return this.client.saveModel(params);
+	}
+
+	async fetchWorksheetModel(params: FetchWorksheetModelParams): Promise<any> {
+		return this.client.fetchWorksheetModel(params);
+	}
+}
+
+// Backward compatibility - export functions that use the service class
+export async function getRelevantQuestions(
+	query: string,
+	sourceIds: string[],
+	additionalContext: string,
+	client: ThoughtSpotClient,
+): Promise<{
+	questions: { question: string; datasourceId: string }[];
+	error: Error | null;
+}> {
+	const service = new ThoughtSpotService(client);
+	return service.getRelevantQuestions(query, sourceIds, additionalContext);
+}
+
+export async function getAnswerForQuestion(
+	question: string,
+	sourceId: string,
+	shouldGetTML: boolean,
+	client: ThoughtSpotClient,
+) {
+	const service = new ThoughtSpotService(client);
+	return service.getAnswerForQuestion(question, sourceId, shouldGetTML);
+}
+
+export async function fetchTMLAndCreateLiveboard(
+	name: string,
+	answers: any[],
+	summary: string,
+	client: ThoughtSpotClient,
+) {
+	const service = new ThoughtSpotService(client);
+	return service.fetchTMLAndCreateLiveboard(name, answers, summary);
+}
+
+export async function createLiveboard(
+	name: string,
+	answers: any[],
+	client: ThoughtSpotClient,
+) {
+	const service = new ThoughtSpotService(client);
+	return service.createLiveboard(name, answers);
+}
+
+export async function getDataSources(
+	client: ThoughtSpotClient,
+): Promise<DataSource[]> {
+	const service = new ThoughtSpotService(client);
+	return service.getDataSources();
+}
+
+export async function getDataSourceSuggestions(
+	query: string,
+	client: ThoughtSpotClient,
+): Promise<DataSourceSuggestion[] | null> {
+	const service = new ThoughtSpotService(client);
+	return service.getDataSourceSuggestions(query);
+}
+
+export async function getSessionInfo(
+	client: ThoughtSpotClient,
+): Promise<SessionInfo> {
+	const service = new ThoughtSpotService(client);
+	return service.getSessionInfo();
+}
+
+// Export types
+export type {
+	DataSource,
+	SessionInfo,
+	DataSourceSuggestion,
+	DataSourceSuggestionResponse,
+} from "./types";

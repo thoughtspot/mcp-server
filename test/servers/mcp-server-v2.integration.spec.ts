@@ -23,13 +23,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ConversationStorageServerSQLite } from "../../src";
 import { MCPServer } from "../../src/servers/mcp-server";
+import * as thoughtspotClient from "../../src/services/clients/thoughtspot-client";
+import { type Message, SpotterResponseFormat } from "../../src/services/types";
 import { StorageServiceClient } from "../../src/storage-service/storage-service";
 import { processSendAgentConversationMessageStreamingResponse } from "../../src/streaming-utils";
-import * as thoughtspotClient from "../../src/thoughtspot/thoughtspot-client";
-import {
-	type Message,
-	SpotterResponseFormat,
-} from "../../src/thoughtspot/types";
 import { makeReader, makeRequest } from "./helpers";
 
 vi.mock("../../src/metrics/mixpanel/mixpanel", () => ({

@@ -27,14 +27,14 @@ import {
 	recordToolInvocationMetrics,
 } from "../metrics/runtime/tool-metrics";
 import { getActiveSpan, withSpan } from "../metrics/tracing/tracing-utils";
+import { getThoughtSpotClient } from "../services/clients/thoughtspot-client";
+import { ThoughtSpotOrgsService } from "../services/thoughtspot-orgs-service";
+import { ThoughtSpotService } from "../services/thoughtspot-service";
+import type { SessionInfo } from "../services/types";
 import { SpotterVizClient } from "../spotterviz/spotterviz-client";
 import { SpotterVizService } from "../spotterviz/spotterviz-service";
 import { OrgStorageServiceClient } from "../storage-service/org-storage-service";
 import { StorageServiceClient } from "../storage-service/storage-service";
-import { OrgService } from "../thoughtspot/org-service";
-import { getThoughtSpotClient } from "../thoughtspot/thoughtspot-client";
-import { ThoughtSpotService } from "../thoughtspot/thoughtspot-service";
-import type { SessionInfo } from "../thoughtspot/types";
 import type { Props } from "../utils";
 
 // Response utility types
@@ -339,14 +339,14 @@ export abstract class BaseMCPServer extends Server {
 	// org is active, otherwise the global/cluster token.
 	protected abstract getActiveToken(): string;
 
-	// Build an OrgService bound to an explicit (cluster-wide) token for org listing
+	// Build a ThoughtSpotOrgsService bound to an explicit (cluster-wide) token for org listing
 	// / org-token minting.
 	protected getOrgService(
 		bearerToken: string,
 		orgId?: string,
 		recorder?: MetricsRecorder,
 	) {
-		return new OrgService(
+		return new ThoughtSpotOrgsService(
 			getThoughtSpotClient(this.ctx.props.instanceUrl, bearerToken, orgId),
 			recorder,
 		);

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { GET_DATA_SUPPORTED_TYPES } from "../thoughtspot/get-data/get-data-constants";
+import { GET_DATA_SUPPORTED_TYPES } from "../services/clients/get-data/get-data-constants";
 
 export const PingSchema = z.object({});
 

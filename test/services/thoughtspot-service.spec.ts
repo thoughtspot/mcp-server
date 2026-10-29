@@ -1,0 +1,2077 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { METRIC_NAMES } from "../../src/metrics/runtime/metric-types";
+import { createRequestMetricsRecorder } from "../../src/metrics/runtime/request-metrics";
+import {
+	ThoughtSpotService,
+	createLiveboard,
+	fetchTMLAndCreateLiveboard,
+	getAnswerForQuestion,
+	getDataSourceSuggestions,
+	getDataSources,
+	getRelevantQuestions,
+	getSessionInfo,
+} from "../../src/services/thoughtspot-service";
+import { SpotterResponseFormat } from "../../src/services/types";
+
+// Mock the ThoughtSpot REST API client
+const mockClient = {
+	queryGetDecomposedQuery: vi.fn(),
+	singleAnswer: vi.fn(),
+	exportAnswerReport: vi.fn(),
+	exportUnsavedAnswerTML: vi.fn(),
+	createAgentConversationWithAutoMode: vi.fn(),
+	streamAgentConversationMessage: vi.fn(),
+	importMetadataTML: vi.fn(),
+	searchMetadata: vi.fn(),
+	getSessionInfo: vi.fn(),
+	getAnswerSession: vi.fn(),
+	instanceUrl: "https://test.thoughtspot.com",
+} as any;
+
+describe("thoughtspot-service", () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+		console.error = vi.fn(); // Mock console.error to avoid noise in tests
+	});
+
+	afterEach(() => {
+		vi.restoreAllMocks();
+	});
+
+	describe("getRelevantQuestions", () => {
+		it("should return relevant questions successfully", async () => {
+			const mockResponse = {
+				decomposedQueryResponse: {
+					decomposedQueries: [
+						{ query: "What is the total revenue?", worksheetId: "ws1" },
+						{ query: "Show me sales by region", worksheetId: "ws2" },
+					],
+				},
+			};
+
+			mockClient.queryGetDecomposedQuery = vi
+				.fn()
+				.mockResolvedValue(mockResponse);
+
+			const result = await getRelevantQuestions(
+				"Show me revenue data",
+				["ws1", "ws2"],
+				"Additional context",
+				mockClient,
+			);
+
+			expect(mockClient.queryGetDecomposedQuery).toHaveBeenCalledWith({
+				nlsRequest: {
+					query: "Show me revenue data",
+				},
+				content: ["Additional context"],
+				worksheetIds: ["ws1", "ws2"],
+				maxDecomposedQueries: 5,
+			});
+
+			expect(result).toEqual({
+				questions: [
+					{ question: "What is the total revenue?", datasourceId: "ws1" },
+					{ question: "Show me sales by region", datasourceId: "ws2" },
+				],
+				error: null,
+			});
+		});
+
+		it("should handle empty additional context", async () => {
+			const mockResponse = {
+				decomposedQueryResponse: {
+					decomposedQueries: [],
+				},
+			};
+
+			mockClient.queryGetDecomposedQuery = vi
+				.fn()
+				.mockResolvedValue(mockResponse);
+
+			const result = await getRelevantQuestions(
+				"Test query",
+				["ws1"],
+				"",
+				mockClient,
+			);
+
+			expect(mockClient.queryGetDecomposedQuery).toHaveBeenCalledWith({
+				nlsRequest: {
+					query: "Test query",
+				},
+				content: [""],
+				worksheetIds: ["ws1"],
+				maxDecomposedQueries: 5,
+			});
+
+			expect(result).toEqual({
+				questions: [],
+				error: null,
+			});
+		});
+
+		it("should handle null additional context", async () => {
+			const mockResponse = {
+				decomposedQueryResponse: {
+					decomposedQueries: [],
+				},
+			};
+
+			mockClient.queryGetDecomposedQuery = vi
+				.fn()
+				.mockResolvedValue(mockResponse);
+
+			const result = await getRelevantQuestions(
+				"Test query",
+				["ws1"],
+				null as any,
+				mockClient,
+			);
+
+			expect(mockClient.queryGetDecomposedQuery).toHaveBeenCalledWith({
+				nlsRequest: {
+					query: "Test query",
+				},
+				content: [""],
+				worksheetIds: ["ws1"],
+				maxDecomposedQueries: 5,
+			});
+
+			expect(result).toEqual({
+				questions: [],
+				error: null,
+			});
+		});
+
+		it("should handle missing decomposedQueryResponse", async () => {
+			const mockResponse = {};
+
+			mockClient.queryGetDecomposedQuery = vi
+				.fn()
+				.mockResolvedValue(mockResponse);
+
+			const result = await getRelevantQuestions(
+				"Test query",
+				["ws1"],
+				"context",
+				mockClient,
+			);
+
+			expect(result).toEqual({
+				questions: [],
+				error: null,
+			});
+		});
+
+		it("should handle API errors", async () => {
+			const error = new Error("API Error");
+			mockClient.queryGetDecomposedQuery = vi.fn().mockRejectedValue(error);
+
+			const result = await getRelevantQuestions(
+				"Test query",
+				["ws1"],
+				"context",
+				mockClient,
+			);
+
+			expect(result).toEqual({
+				questions: [],
+				error: error,
+			});
+		});
+	});
+
+	describe("createAgentConversation", () => {
+		it("should create an agent conversation in auto mode by default", async () => {
+			const mockResponse = {
+				conversation_id: "conv-123",
+			};
+
+			mockClient.createAgentConversationWithAutoMode = vi
+				.fn()
+				.mockResolvedValue(mockResponse);
+
+			const service = new ThoughtSpotService(mockClient);
+			const result = await service.createAgentConversation(false, false);
+
+			expect(
+				mockClient.createAgentConversationWithAutoMode,
+			).toHaveBeenCalledWith({
+				isSpotterDataSourceDiscoveryEnabled: false,
+				isSpotterChatHistoryEnabled: false,
+				dataSourceId: undefined,
+			});
+			expect(result).toEqual(mockResponse);
+		});
+
+		it("should create an agent conversation with data source context", async () => {
+			const mockResponse = {
+				conversation_id: "conv-456",
+			};
+
+			mockClient.createAgentConversationWithAutoMode = vi
+				.fn()
+				.mockResolvedValue(mockResponse);
+
+			const service = new ThoughtSpotService(mockClient);
+			await service.createAgentConversation(false, false, "worksheet-123");
+
+			expect(
+				mockClient.createAgentConversationWithAutoMode,
+			).toHaveBeenCalledWith({
+				isSpotterDataSourceDiscoveryEnabled: false,
+				isSpotterChatHistoryEnabled: false,
+				dataSourceId: "worksheet-123",
+			});
+		});
+
+		it("should throw when agent conversation creation fails", async () => {
+			const error = new Error("Conversation API Error");
+			mockClient.createAgentConversationWithAutoMode = vi
+				.fn()
+				.mockRejectedValue(error);
+
+			const service = new ThoughtSpotService(mockClient);
+
+			await expect(service.createAgentConversation()).rejects.toThrow(
+				"Conversation API Error",
+			);
+		});
+	});
+
+	describe("sendAgentConversationMessageStreaming", () => {
+		it("records upstream streaming metrics and flushes stream message metrics in the background", async () => {
+			vi.useFakeTimers();
+
+			const analyticsDataset = {
+				writeDataPoint: vi.fn(),
+			};
+			const waitUntilPromises: Promise<void>[] = [];
+			const recorder = createRequestMetricsRecorder({
+				METRICS_SINK_MODE: "analytics_engine",
+				ANALYTICS: analyticsDataset,
+			});
+			recorder.setAnalyticsContext({
+				apiRequestedVersion: "latest",
+				analyticalSessionId: "conv-123",
+			});
+			recorder.setEventIdentity({
+				tenantId: "tenant-123",
+				userId: "user-123",
+			});
+
+			const encoder = new TextEncoder();
+			const reader = {
+				read: vi
+					.fn()
+					.mockResolvedValueOnce({
+						done: false,
+						value: encoder.encode(
+							'data: [{"type":"text","content":"Hello","metadata":{"format":"markdown"}}]\n',
+						),
+					})
+					.mockResolvedValueOnce({ done: true, value: undefined }),
+			};
+
+			mockClient.streamAgentConversationMessage = vi.fn().mockResolvedValue({
+				body: { getReader: vi.fn().mockReturnValue(reader) },
+			});
+
+			const appendMessages = vi.fn().mockResolvedValue(undefined);
+
+			const service = new ThoughtSpotService(mockClient, {
+				recorder,
+				metricsEnv: {
+					METRICS_SINK_MODE: "analytics_engine",
+					ANALYTICS: analyticsDataset,
+				},
+				waitUntil(promise: Promise<void>) {
+					waitUntilPromises.push(promise);
+				},
+				analyticsContext: {
+					apiRequestedVersion: "latest",
+					analyticalSessionId: "conv-123",
+				},
+				eventIdentity: {
+					tenantId: "tenant-123",
+					userId: "user-123",
+				},
+			});
+
+			await service.sendAgentConversationMessageStreaming(
+				"conv-123",
+				"Show me revenue",
+				SpotterResponseFormat.SIMPLIFIED,
+				appendMessages,
+			);
+			await recorder.flush();
+			await vi.runAllTimersAsync();
+
+			for (let index = 0; index < waitUntilPromises.length; index++) {
+				await waitUntilPromises[index];
+			}
+
+			const dataPoints = analyticsDataset.writeDataPoint.mock.calls.map(
+				([dataPoint]) => dataPoint,
+			);
+
+			expect(
+				dataPoints.some(
+					(dataPoint) =>
+						dataPoint.blobs?.[2] === METRIC_NAMES.upstreamCallsTotal &&
+						dataPoint.blobs?.includes(
+							"send_agent_conversation_message_streaming",
+						) &&
+						dataPoint.blobs?.includes("latest") &&
+						dataPoint.blobs?.includes("conv-123") &&
+						dataPoint.indexes?.[0] === "tenant-123" &&
+						dataPoint.blobs?.includes("user-123"),
+				),
+			).toBe(true);
+			expect(
+				dataPoints.some(
+					(dataPoint) =>
+						dataPoint.blobs?.[2] === METRIC_NAMES.upstreamStreamsStartedTotal &&
+						dataPoint.blobs?.includes(
+							"send_agent_conversation_message_streaming",
+						),
+				),
+			).toBe(true);
+			expect(
+				dataPoints.some(
+					(dataPoint) =>
+						dataPoint.blobs?.[2] === METRIC_NAMES.upstreamStreamMessagesTotal &&
+						dataPoint.blobs?.includes(
+							"send_agent_conversation_message_streaming",
+						) &&
+						dataPoint.blobs?.includes("text") &&
+						dataPoint.blobs?.includes("conv-123"),
+				),
+			).toBe(true);
+
+			vi.useRealTimers();
+		});
+
+		it("should throw when the response body reader is unavailable", async () => {
+			const analyticsDataset = {
+				writeDataPoint: vi.fn(),
+			};
+			const recorder = createRequestMetricsRecorder({
+				METRICS_SINK_MODE: "analytics_engine",
+				ANALYTICS: analyticsDataset,
+			});
+			mockClient.streamAgentConversationMessage = vi.fn().mockResolvedValue({
+				body: undefined,
+			});
+
+			const service = new ThoughtSpotService(mockClient, {
+				recorder,
+				metricsEnv: {
+					METRICS_SINK_MODE: "analytics_engine",
+					ANALYTICS: analyticsDataset,
+				},
+			});
+
+			await expect(
+				service.sendAgentConversationMessageStreaming(
+					"conv-123",
+					"Show me revenue",
+					SpotterResponseFormat.SIMPLIFIED,
+					{
+						appendMessagesAndRestartTtl: vi.fn(),
+					} as any,
+				),
+			).rejects.toThrow("Failed to get reader from response body");
+
+			await recorder.flush();
+
+			const dataPoints = analyticsDataset.writeDataPoint.mock.calls.map(
+				([dataPoint]) => dataPoint,
+			);
+			expect(
+				dataPoints.some(
+					(dataPoint) =>
+						dataPoint.blobs?.[2] === METRIC_NAMES.upstreamCallsTotal &&
+						dataPoint.blobs?.includes(
+							"send_agent_conversation_message_streaming",
+						) &&
+						dataPoint.blobs?.includes("upstream_error"),
+				),
+			).toBe(true);
+			expect(
+				dataPoints.some(
+					(dataPoint) =>
+						dataPoint.blobs?.[2] === METRIC_NAMES.upstreamStreamsStartedTotal,
+				),
+			).toBe(false);
+		});
+
+		it("should throw when sending the streaming message fails", async () => {
+			const error = new Error("Streaming API Error");
+			mockClient.streamAgentConversationMessage = vi
+				.fn()
+				.mockRejectedValue(error);
+
+			const service = new ThoughtSpotService(mockClient);
+
+			await expect(
+				service.sendAgentConversationMessageStreaming(
+					"conv-123",
+					"Show me revenue",
+					SpotterResponseFormat.SIMPLIFIED,
+					{
+						appendMessagesAndRestartTtl: vi.fn(),
+					} as any,
+				),
+			).rejects.toThrow("Streaming API Error");
+		});
+
+		it("should append additionalContext to the message when provided", async () => {
+			vi.useFakeTimers();
+
+			const encoder = new TextEncoder();
+			const reader = {
+				read: vi
+					.fn()
+					.mockResolvedValueOnce({
+						done: false,
+						value: encoder.encode(
+							'data: [{"type":"text","content":"Hello"}]\n',
+						),
+					})
+					.mockResolvedValueOnce({ done: true, value: undefined }),
+			};
+
+			mockClient.streamAgentConversationMessage = vi.fn().mockResolvedValue({
+				body: { getReader: vi.fn().mockReturnValue(reader) },
+			});
+
+			const streamingMessageStorage = {
+				appendMessagesAndRestartTtl: vi.fn().mockResolvedValue(undefined),
+			} as any;
+
+			const service = new ThoughtSpotService(mockClient);
+			await service.sendAgentConversationMessageStreaming(
+				"conv-123",
+				"Show me revenue",
+				SpotterResponseFormat.SIMPLIFIED,
+				streamingMessageStorage,
+				"User is in the EMEA region",
+			);
+
+			expect(mockClient.streamAgentConversationMessage).toHaveBeenCalledWith({
+				conversation_identifier: "conv-123",
+				message:
+					"Show me revenue\n\nAdditional Context:\nUser is in the EMEA region",
+			});
+
+			await vi.runAllTimersAsync();
+			vi.useRealTimers();
+		});
+
+		it("should send the message unchanged when additionalContext is not provided", async () => {
+			vi.useFakeTimers();
+
+			const encoder = new TextEncoder();
+			const reader = {
+				read: vi
+					.fn()
+					.mockResolvedValueOnce({
+						done: false,
+						value: encoder.encode(
+							'data: [{"type":"text","content":"Hello"}]\n',
+						),
+					})
+					.mockResolvedValueOnce({ done: true, value: undefined }),
+			};
+
+			mockClient.streamAgentConversationMessage = vi.fn().mockResolvedValue({
+				body: { getReader: vi.fn().mockReturnValue(reader) },
+			});
+
+			const streamingMessageStorage = {
+				appendMessagesAndRestartTtl: vi.fn().mockResolvedValue(undefined),
+			} as any;
+
+			const service = new ThoughtSpotService(mockClient);
+			await service.sendAgentConversationMessageStreaming(
+				"conv-123",
+				"Show me revenue",
+				SpotterResponseFormat.SIMPLIFIED,
+				streamingMessageStorage,
+			);
+
+			expect(mockClient.streamAgentConversationMessage).toHaveBeenCalledWith({
+				conversation_identifier: "conv-123",
+				message: "Show me revenue",
+			});
+
+			await vi.runAllTimersAsync();
+			vi.useRealTimers();
+		});
+
+		it("should call appendStoredMessages with parsed text messages and mark done when stream ends", async () => {
+			const encoder = new TextEncoder();
+			const reader = {
+				read: vi
+					.fn()
+					.mockResolvedValueOnce({
+						done: false,
+						value: encoder.encode(
+							'data: [{"type":"text","content":"The revenue is $1M","metadata":{"format":"markdown"}}]\n',
+						),
+					})
+					.mockResolvedValueOnce({ done: true, value: undefined }),
+			};
+
+			mockClient.streamAgentConversationMessage = vi.fn().mockResolvedValue({
+				body: { getReader: vi.fn().mockReturnValue(reader) },
+			});
+
+			const appendStoredMessages = vi.fn().mockResolvedValue(undefined);
+
+			const service = new ThoughtSpotService(mockClient);
+			await service.sendAgentConversationMessageStreaming(
+				"conv-123",
+				"Show me revenue",
+				SpotterResponseFormat.SIMPLIFIED,
+				appendStoredMessages,
+			);
+
+			// Wait for the fire-and-forget async loop to complete
+			await vi.waitFor(() => {
+				expect(appendStoredMessages).toHaveBeenLastCalledWith(
+					"conv-123",
+					[],
+					true,
+				);
+			});
+
+			expect(appendStoredMessages).toHaveBeenCalledWith("conv-123", [
+				{ is_thinking: false, type: "text", text: "The revenue is $1M" },
+			]);
+			// Final call marks the conversation as done
+			expect(appendStoredMessages).toHaveBeenLastCalledWith(
+				"conv-123",
+				[],
+				true,
+			);
+		});
+
+		it("should forward the RAW format so stream items reach storage unprocessed", async () => {
+			const encoder = new TextEncoder();
+			// A non-markdown text item: the simplified format drops it, so seeing it
+			// in storage proves the RAW format reached the stream parser.
+			const rawItem = {
+				type: "text",
+				content: "The revenue is $1M",
+				metadata: { format: "plain", type: "thinking" },
+			};
+			const reader = {
+				read: vi
+					.fn()
+					.mockResolvedValueOnce({
+						done: false,
+						value: encoder.encode(`data: ${JSON.stringify([rawItem])}\n`),
+					})
+					.mockResolvedValueOnce({ done: true, value: undefined }),
+			};
+
+			mockClient.streamAgentConversationMessage = vi.fn().mockResolvedValue({
+				body: { getReader: vi.fn().mockReturnValue(reader) },
+			});
+
+			const appendStoredMessages = vi.fn().mockResolvedValue(undefined);
+
+			const service = new ThoughtSpotService(mockClient);
+			await service.sendAgentConversationMessageStreaming(
+				"conv-123",
+				"Show me revenue",
+				SpotterResponseFormat.RAW,
+				appendStoredMessages,
+			);
+
+			await vi.waitFor(() => {
+				expect(appendStoredMessages).toHaveBeenLastCalledWith(
+					"conv-123",
+					[],
+					true,
+				);
+			});
+
+			expect(appendStoredMessages).toHaveBeenCalledWith("conv-123", [rawItem]);
+		});
+
+		it("should call appendStoredMessages with parsed answer messages", async () => {
+			const encoder = new TextEncoder();
+			const answerEvent = JSON.stringify([
+				{
+					type: "answer",
+					metadata: {
+						session_id: "sess-abc",
+						gen_no: 2,
+						transaction_id: "txn-xyz",
+						generation_number: 1,
+						title: "Revenue by Region",
+						sage_query: "revenue by region",
+					},
+				},
+			]);
+			const reader = {
+				read: vi
+					.fn()
+					.mockResolvedValueOnce({
+						done: false,
+						value: encoder.encode(`data: ${answerEvent}\n`),
+					})
+					.mockResolvedValueOnce({ done: true, value: undefined }),
+			};
+
+			mockClient.streamAgentConversationMessage = vi.fn().mockResolvedValue({
+				body: { getReader: vi.fn().mockReturnValue(reader) },
+			});
+
+			const appendStoredMessages = vi.fn().mockResolvedValue(undefined);
+
+			const service = new ThoughtSpotService(mockClient);
+			await service.sendAgentConversationMessageStreaming(
+				"conv-123",
+				"Show me revenue by region",
+				SpotterResponseFormat.SIMPLIFIED,
+				appendStoredMessages,
+			);
+
+			await vi.waitFor(() => {
+				expect(appendStoredMessages).toHaveBeenLastCalledWith(
+					"conv-123",
+					[],
+					true,
+				);
+			});
+
+			expect(appendStoredMessages).toHaveBeenCalledWith("conv-123", [
+				{
+					is_thinking: false,
+					type: "answer",
+					answer_id: JSON.stringify({ session_id: "sess-abc", gen_no: 2 }),
+					answer_title: "Revenue by Region",
+					answer_query: "revenue by region",
+					iframe_url:
+						"https://test.thoughtspot.com/?tsmcp=true#/embed/conv-assist-answer?sessionId=sess-abc&genNo=2&acSessionId=txn-xyz&acGenNo=1",
+				},
+			]);
+			expect(appendStoredMessages).toHaveBeenLastCalledWith(
+				"conv-123",
+				[],
+				true,
+			);
+		});
+
+		it("should skip heartbeat lines and blank lines during streaming", async () => {
+			const encoder = new TextEncoder();
+			const reader = {
+				read: vi
+					.fn()
+					.mockResolvedValueOnce({
+						done: false,
+						value: encoder.encode(
+							': heartbeat\n\ndata: [{"type":"text","content":"Done","metadata":{"format":"markdown"}}]\n',
+						),
+					})
+					.mockResolvedValueOnce({ done: true, value: undefined }),
+			};
+
+			mockClient.streamAgentConversationMessage = vi.fn().mockResolvedValue({
+				body: { getReader: vi.fn().mockReturnValue(reader) },
+			});
+
+			const appendStoredMessages = vi.fn().mockResolvedValue(undefined);
+
+			const service = new ThoughtSpotService(mockClient);
+			await service.sendAgentConversationMessageStreaming(
+				"conv-123",
+				"Test",
+				SpotterResponseFormat.SIMPLIFIED,
+				appendStoredMessages,
+			);
+
+			await vi.waitFor(() => {
+				expect(appendStoredMessages).toHaveBeenLastCalledWith(
+					"conv-123",
+					[],
+					true,
+				);
+			});
+
+			// Only the actual text message should be stored, not heartbeats/blanks
+			expect(appendStoredMessages).toHaveBeenCalledWith("conv-123", [
+				{ is_thinking: false, type: "text", text: "Done" },
+			]);
+		});
+
+		it("should correctly identify thinking messages via metadata type", async () => {
+			const encoder = new TextEncoder();
+			const reader = {
+				read: vi
+					.fn()
+					.mockResolvedValueOnce({
+						done: false,
+						value: encoder.encode(
+							'data: [{"type":"text","content":"Thinking...","metadata":{"type":"thinking","format":"markdown"}}]\n',
+						),
+					})
+					.mockResolvedValueOnce({ done: true, value: undefined }),
+			};
+
+			mockClient.streamAgentConversationMessage = vi.fn().mockResolvedValue({
+				body: { getReader: vi.fn().mockReturnValue(reader) },
+			});
+
+			const appendStoredMessages = vi.fn().mockResolvedValue(undefined);
+
+			const service = new ThoughtSpotService(mockClient);
+			await service.sendAgentConversationMessageStreaming(
+				"conv-123",
+				"Test",
+				SpotterResponseFormat.SIMPLIFIED,
+				appendStoredMessages,
+			);
+
+			await vi.waitFor(() => {
+				expect(appendStoredMessages).toHaveBeenCalledWith("conv-123", [
+					{ is_thinking: true, type: "text", text: "Thinking..." },
+				]);
+			});
+		});
+	});
+
+	describe("getAnswerForQuestion", () => {
+		it("should return answer data successfully without TML", async () => {
+			const mockAnswerResponse = {
+				session_identifier: "session123",
+				generation_number: 1,
+			};
+
+			const mockDataResponse = {
+				text: vi.fn().mockResolvedValue("col1,col2\nval1,val2\nval3,val4"),
+			};
+
+			const mockSessionResponse = {
+				sessionId: "session123",
+				genNo: 1,
+				acSession: {
+					sessionId: "acSession123",
+					genNo: 1,
+				},
+			};
+
+			mockClient.singleAnswer = vi.fn().mockResolvedValue(mockAnswerResponse);
+			mockClient.exportAnswerReport = vi
+				.fn()
+				.mockResolvedValue(mockDataResponse);
+			mockClient.getAnswerSession = vi
+				.fn()
+				.mockResolvedValue(mockSessionResponse);
+
+			const result = await getAnswerForQuestion(
+				"What is the revenue?",
+				"ws1",
+				false,
+				mockClient,
+			);
+
+			expect(mockClient.singleAnswer).toHaveBeenCalledWith({
+				query: "What is the revenue?",
+				metadata_identifier: "ws1",
+			});
+
+			expect(mockClient.exportAnswerReport).toHaveBeenCalledWith({
+				session_identifier: "session123",
+				generation_number: 1,
+				file_format: "CSV",
+			});
+
+			expect(mockClient.getAnswerSession).toHaveBeenCalledWith({
+				session_identifier: "session123",
+				generation_number: 1,
+			});
+
+			expect(result).toEqual({
+				question: "What is the revenue?",
+				...mockAnswerResponse,
+				data: "col1,col2\nval1,val2\nval3,val4",
+				tml: null,
+				frame_url:
+					"https://test.thoughtspot.com/?tsmcp=true#/embed/conv-assist-answer?sessionId=session123&genNo=1&acSessionId=acSession123&acGenNo=1",
+				error: null,
+			});
+		});
+
+		it("should return answer data with TML when requested", async () => {
+			const mockAnswerResponse = {
+				session_identifier: "session123",
+				generation_number: 1,
+			};
+
+			const mockDataResponse = {
+				text: vi.fn().mockResolvedValue("col1,col2\nval1,val2"),
+			};
+
+			const mockTMLResponse = { answer: { name: "Test Answer" } };
+
+			const mockSessionResponse = {
+				sessionId: "session123",
+				genNo: 1,
+				acSession: {
+					sessionId: "acSession123",
+					genNo: 1,
+				},
+			};
+
+			mockClient.singleAnswer = vi.fn().mockResolvedValue(mockAnswerResponse);
+			mockClient.exportAnswerReport = vi
+				.fn()
+				.mockResolvedValue(mockDataResponse);
+			mockClient.exportUnsavedAnswerTML = vi
+				.fn()
+				.mockResolvedValue(mockTMLResponse);
+			mockClient.getAnswerSession = vi
+				.fn()
+				.mockResolvedValue(mockSessionResponse);
+
+			const result = await getAnswerForQuestion(
+				"What is the revenue?",
+				"ws1",
+				true,
+				mockClient,
+			);
+
+			expect(mockClient.exportUnsavedAnswerTML).toHaveBeenCalledWith({
+				session_identifier: "session123",
+				generation_number: 1,
+			});
+
+			expect(result).toEqual({
+				question: "What is the revenue?",
+				...mockAnswerResponse,
+				data: "col1,col2\nval1,val2",
+				tml: mockTMLResponse,
+				frame_url:
+					"https://test.thoughtspot.com/?tsmcp=true#/embed/conv-assist-answer?sessionId=session123&genNo=1&acSessionId=acSession123&acGenNo=1",
+				error: null,
+			});
+		});
+
+		it("should limit CSV data to 100 lines", async () => {
+			const mockAnswerResponse = {
+				session_identifier: "session123",
+				generation_number: 1,
+			};
+
+			// Create CSV with more than 100 lines
+			const longCSV = Array.from(
+				{ length: 150 },
+				(_, i) => `col1,col2\nval${i},val${i}`,
+			).join("\n");
+			const mockDataResponse = {
+				text: vi.fn().mockResolvedValue(longCSV),
+			};
+
+			const mockSessionResponse = {
+				sessionId: "session123",
+				genNo: 1,
+				acSession: {
+					sessionId: "acSession123",
+					genNo: 1,
+				},
+			};
+
+			mockClient.singleAnswer = vi.fn().mockResolvedValue(mockAnswerResponse);
+			mockClient.exportAnswerReport = vi
+				.fn()
+				.mockResolvedValue(mockDataResponse);
+			mockClient.getAnswerSession = vi
+				.fn()
+				.mockResolvedValue(mockSessionResponse);
+
+			const result = await getAnswerForQuestion(
+				"What is the revenue?",
+				"ws1",
+				false,
+				mockClient,
+			);
+
+			// Type guard to check if result has data property
+			if ("data" in result && result.data) {
+				const lines = result.data.split("\n");
+				expect(lines.length).toBeLessThanOrEqual(100);
+			} else {
+				expect.fail("Expected result to have data property");
+			}
+		});
+
+		it("should handle TML export errors gracefully", async () => {
+			const mockAnswerResponse = {
+				session_identifier: "session123",
+				generation_number: 1,
+			};
+
+			const mockDataResponse = {
+				text: vi.fn().mockResolvedValue("col1,col2\nval1,val2"),
+			};
+
+			const mockSessionResponse = {
+				sessionId: "session123",
+				genNo: 1,
+				acSession: {
+					sessionId: "acSession123",
+					genNo: 1,
+				},
+			};
+
+			mockClient.singleAnswer = vi.fn().mockResolvedValue(mockAnswerResponse);
+			mockClient.exportAnswerReport = vi
+				.fn()
+				.mockResolvedValue(mockDataResponse);
+			mockClient.exportUnsavedAnswerTML = vi
+				.fn()
+				.mockRejectedValue(new Error("TML Error"));
+			mockClient.getAnswerSession = vi
+				.fn()
+				.mockResolvedValue(mockSessionResponse);
+
+			const result = await getAnswerForQuestion(
+				"What is the revenue?",
+				"ws1",
+				true,
+				mockClient,
+			);
+
+			expect(result).toEqual({
+				question: "What is the revenue?",
+				...mockAnswerResponse,
+				data: "col1,col2\nval1,val2",
+				tml: null,
+				frame_url:
+					"https://test.thoughtspot.com/?tsmcp=true#/embed/conv-assist-answer?sessionId=session123&genNo=1&acSessionId=acSession123&acGenNo=1",
+				error: null,
+			});
+		});
+
+		it("should handle API errors", async () => {
+			const error = new Error("API Error");
+			mockClient.singleAnswer = vi.fn().mockRejectedValue(error);
+
+			const result = await getAnswerForQuestion(
+				"What is the revenue?",
+				"ws1",
+				false,
+				mockClient,
+			);
+
+			expect(result).toEqual({
+				error: error,
+			});
+		});
+	});
+
+	describe("fetchTMLAndCreateLiveboard", () => {
+		it("should fetch TML and create liveboard successfully", async () => {
+			const answers = [
+				{
+					question: "Question 1",
+					session_identifier: "session1",
+					generation_number: 1,
+				},
+				{
+					question: "Question 2",
+					session_identifier: "session2",
+					generation_number: 1,
+				},
+			];
+
+			const mockTML1 = { answer: { name: "Answer 1" } };
+			const mockTML2 = { answer: { name: "Answer 2" } };
+
+			(mockClient as any).exportUnsavedAnswerTML = vi
+				.fn()
+				.mockResolvedValueOnce(mockTML1)
+				.mockResolvedValueOnce(mockTML2);
+
+			mockClient.importMetadataTML = vi
+				.fn()
+				.mockResolvedValue([
+					{ response: { header: { id_guid: "liveboard123" } } },
+				]);
+
+			const result = await fetchTMLAndCreateLiveboard(
+				"Test Liveboard",
+				answers,
+				"Test summary",
+				mockClient,
+			);
+
+			expect((mockClient as any).exportUnsavedAnswerTML).toHaveBeenCalledTimes(
+				2,
+			);
+			expect(mockClient.importMetadataTML).toHaveBeenCalledWith({
+				metadata_tmls: [expect.any(String)],
+				import_policy: "ALL_OR_NONE",
+			});
+
+			expect(result).toEqual({
+				url: "https://test.thoughtspot.com/#/insights/pinboard/liveboard123",
+				liveboardId: "liveboard123",
+				error: null,
+			});
+		});
+
+		// The layout's visualization_id comes from the array index, so tile ids must be assigned
+		// from final position. Any other scheme desyncs the two and imports a broken liveboard.
+		it("assigns tile ids from final position, with and without a note tile", async () => {
+			const answers = [
+				{ title: "A", session_identifier: "s1", generation_number: 1 },
+				{ title: "B", session_identifier: "s2", generation_number: 1 },
+			];
+
+			const run = async (noteTile?: string) => {
+				(mockClient as any).exportUnsavedAnswerTML = vi
+					.fn()
+					.mockResolvedValue({ answer: { name: "x" } });
+				mockClient.importMetadataTML = vi
+					.fn()
+					.mockResolvedValue([{ response: { header: { id_guid: "lb" } } }]);
+				await fetchTMLAndCreateLiveboard(
+					"T",
+					answers,
+					noteTile as any,
+					mockClient,
+				);
+				const tml = JSON.parse(
+					(mockClient.importMetadataTML as any).mock.calls[0][0]
+						.metadata_tmls[0],
+				);
+				return {
+					vizIds: tml.liveboard.visualizations.map((v: any) => v.id),
+					layoutIds: tml.liveboard.layout.tiles.map(
+						(t: any) => t.visualization_id,
+					),
+					noteTiles: tml.liveboard.visualizations.filter(
+						(v: any) => v.note_tile,
+					).length,
+				};
+			};
+
+			const withNote = await run("<p>hi</p>");
+			expect(withNote.noteTiles).toBe(1);
+			expect(withNote.vizIds).toEqual(["Viz_0", "Viz_1", "Viz_2"]);
+			expect(withNote.layoutIds).toEqual(withNote.vizIds);
+
+			const withoutNote = await run(undefined);
+			expect(withoutNote.noteTiles).toBe(0);
+			expect(withoutNote.vizIds).toEqual(["Viz_0", "Viz_1"]);
+			expect(withoutNote.layoutIds).toEqual(withoutNote.vizIds);
+		});
+
+		it("keeps ids and layout aligned when an answer's TML cannot be fetched", async () => {
+			// Previously ids were Viz_{idx+1} from the pre-filter index, so a dropped answer left
+			// a gap that the position-derived layout did not have.
+			(mockClient as any).exportUnsavedAnswerTML = vi
+				.fn()
+				.mockResolvedValueOnce({ answer: { name: "ok" } })
+				.mockResolvedValueOnce(null);
+			mockClient.importMetadataTML = vi
+				.fn()
+				.mockResolvedValue([{ response: { header: { id_guid: "lb" } } }]);
+
+			await fetchTMLAndCreateLiveboard(
+				"T",
+				[
+					{ title: "A", session_identifier: "s1", generation_number: 1 },
+					{ title: "B", session_identifier: "s2", generation_number: 1 },
+				],
+				undefined as any,
+				mockClient,
+			);
+
+			const tml = JSON.parse(
+				(mockClient.importMetadataTML as any).mock.calls[0][0].metadata_tmls[0],
+			);
+			expect(tml.liveboard.visualizations.map((v: any) => v.id)).toEqual([
+				"Viz_0",
+			]);
+			expect(
+				tml.liveboard.layout.tiles.map((t: any) => t.visualization_id),
+			).toEqual(["Viz_0"]);
+		});
+
+		it("should handle TML fetch errors", async () => {
+			const answers = [
+				{
+					question: "Question 1",
+					session_identifier: "session1",
+					generation_number: 1,
+				},
+			];
+
+			(mockClient as any).exportUnsavedAnswerTML = vi
+				.fn()
+				.mockRejectedValue(new Error("TML Error"));
+
+			const result = await fetchTMLAndCreateLiveboard(
+				"Test Liveboard",
+				answers,
+				"Test summary",
+				mockClient,
+			);
+
+			expect(result).toEqual({
+				error: expect.any(Error),
+			});
+		});
+	});
+
+	describe("createLiveboard", () => {
+		it("should create liveboard with valid TML data", async () => {
+			const answers = [
+				{
+					question: "Question 1",
+					tml: { answer: { name: "Answer 1", content: "test" } },
+				},
+				{
+					question: "Question 2",
+					tml: { answer: { name: "Answer 2", content: "test" } },
+				},
+			];
+
+			mockClient.importMetadataTML = vi
+				.fn()
+				.mockResolvedValue([
+					{ response: { header: { id_guid: "liveboard123" } } },
+				]);
+
+			const result = await createLiveboard(
+				"Test Liveboard",
+				answers,
+				mockClient,
+			);
+
+			expect(mockClient.importMetadataTML).toHaveBeenCalledWith({
+				metadata_tmls: [expect.stringContaining('"liveboard"')],
+				import_policy: "ALL_OR_NONE",
+			});
+
+			expect(result).toBe(
+				"https://test.thoughtspot.com/#/insights/pinboard/liveboard123",
+			);
+		});
+
+		it("should filter out answers without TML", async () => {
+			const answers = [
+				{
+					id: "Viz_1",
+					question: "Question 1",
+					answer: { name: "Answer 1" },
+				},
+				{
+					id: "Viz_2",
+					question: "Question 2",
+					answer: { name: "Answer 2" },
+				},
+			];
+
+			mockClient.importMetadataTML = vi
+				.fn()
+				.mockResolvedValue([
+					{ response: { header: { id_guid: "liveboard123" } } },
+				]);
+
+			await createLiveboard("Test Liveboard", answers, mockClient);
+
+			const tmlCall = (mockClient.importMetadataTML as any).mock.calls[0][0];
+			const tmlData = JSON.parse(tmlCall.metadata_tmls[0]);
+
+			expect(tmlData.liveboard.visualizations).toHaveLength(2);
+			expect(tmlData.liveboard.layout.tiles).toHaveLength(2);
+		});
+
+		it("should handle import errors", async () => {
+			const answers = [
+				{
+					question: "Question 1",
+					tml: { answer: { name: "Answer 1" } },
+				},
+			];
+
+			mockClient.importMetadataTML = vi
+				.fn()
+				.mockRejectedValue(new Error("Import Error"));
+
+			await expect(
+				createLiveboard("Test Liveboard", answers, mockClient),
+			).rejects.toThrow("Import Error");
+		});
+	});
+
+	describe("getDataSources", () => {
+		it("should return data sources successfully", async () => {
+			const mockResponse = [
+				{
+					metadata_header: {
+						type: "WORKSHEET",
+						name: "Sales Data",
+						id: "ws1",
+						description: "Sales information",
+						aiAnswerGenerationDisabled: false,
+					},
+				},
+				{
+					metadata_header: {
+						type: "WORKSHEET",
+						name: "Revenue Data",
+						id: "ws2",
+						description: "Revenue information",
+						aiAnswerGenerationDisabled: false,
+					},
+				},
+				{
+					metadata_header: {
+						type: "WORKSHEET",
+						name: "Revenue Data aiAnswerGenerationDisabled",
+						id: "ws3",
+						description: "Revenue information",
+						aiAnswerGenerationDisabled: true,
+					},
+				},
+				{
+					metadata_header: {
+						type: "LOGICAL_TABLE", // This should be filtered out due to aiAnswerGenerationDisabled: true
+						name: "Other Data",
+						id: "lt1",
+						description: "Other information",
+						aiAnswerGenerationDisabled: true,
+					},
+				},
+				{
+					metadata_header: {
+						type: "LOGICAL_TABLE", // This should be filtered out due to aiAnswerGenerationDisabled: true
+						name: "Other Data 2",
+						id: "lt2",
+						description: "Other information",
+						aiAnswerGenerationDisabled: false,
+					},
+				},
+			];
+
+			mockClient.searchMetadata = vi.fn().mockResolvedValue(mockResponse);
+
+			const result = await getDataSources(mockClient);
+
+			expect(mockClient.searchMetadata).toHaveBeenCalledWith({
+				metadata: [{ type: "LOGICAL_TABLE" }],
+				record_size: 2000,
+				sort_options: {
+					field_name: "LAST_ACCESSED",
+					order: "DESC",
+				},
+			});
+
+			expect(result).toEqual([
+				{
+					name: "Sales Data",
+					id: "ws1",
+					description: "Sales information",
+				},
+				{
+					name: "Revenue Data",
+					id: "ws2",
+					description: "Revenue information",
+				},
+				{
+					name: "Other Data 2",
+					id: "lt2",
+					description: "Other information",
+				},
+			]);
+		});
+
+		it("should handle empty response", async () => {
+			mockClient.searchMetadata = vi.fn().mockResolvedValue([]);
+
+			const result = await getDataSources(mockClient);
+
+			expect(result).toEqual([]);
+		});
+
+		it("should handle API errors", async () => {
+			const error = new Error("API Error");
+			mockClient.searchMetadata = vi.fn().mockRejectedValue(error);
+
+			await expect(getDataSources(mockClient)).rejects.toThrow("API Error");
+		});
+	});
+
+	describe("getSessionInfo", () => {
+		it("should return session info with production mixpanel token", async () => {
+			const mockResponse = {
+				configInfo: {
+					mixpanelConfig: {
+						production: true,
+						devSdkKey: "dev-key",
+						prodSdkKey: "prod-key",
+					},
+					selfClusterName: "test-cluster",
+					selfClusterId: "cluster-123",
+				},
+				userGUID: "user-123",
+				userName: "testuser",
+				releaseVersion: "8.0.0",
+				currentOrgId: "org-123",
+				privileges: ["READ", "WRITE"],
+			};
+
+			(mockClient as any).getSessionInfo = vi
+				.fn()
+				.mockResolvedValue(mockResponse);
+
+			const result = await getSessionInfo(mockClient);
+
+			expect((mockClient as any).getSessionInfo).toHaveBeenCalled();
+
+			expect(result).toEqual({
+				mixpanelToken: "prod-key",
+				userGUID: "user-123",
+				userName: "testuser",
+				clusterName: "test-cluster",
+				clusterId: "cluster-123",
+				releaseVersion: "8.0.0",
+				currentOrgId: "org-123",
+				privileges: ["READ", "WRITE"],
+			});
+		});
+
+		it("should return session info with development mixpanel token", async () => {
+			const mockResponse = {
+				configInfo: {
+					mixpanelConfig: {
+						production: false,
+						devSdkKey: "dev-key",
+						prodSdkKey: "prod-key",
+					},
+					selfClusterName: "test-cluster",
+					selfClusterId: "cluster-123",
+				},
+				userGUID: "user-123",
+				userName: "testuser",
+				releaseVersion: "8.0.0",
+				currentOrgId: "org-123",
+				privileges: ["READ"],
+			};
+
+			(mockClient as any).getSessionInfo = vi
+				.fn()
+				.mockResolvedValue(mockResponse);
+
+			const result = await getSessionInfo(mockClient);
+
+			expect(result.mixpanelToken).toBe("dev-key");
+		});
+
+		it("should handle API errors", async () => {
+			const error = new Error("API Error");
+			(mockClient as any).getSessionInfo = vi.fn().mockRejectedValue(error);
+
+			await expect(getSessionInfo(mockClient)).rejects.toThrow("API Error");
+		});
+	});
+
+	describe("getDataSourceSuggestions", () => {
+		it("should return single data source when only one suggestion is available", async () => {
+			const mockResponse = {
+				data_sources: [
+					{
+						confidence: 0.85,
+						details: {
+							description: "Sales data for the current year",
+							data_source_name: "Sales Data",
+							data_source_identifier: "ds-123",
+						},
+						reasoning:
+							"This data source contains sales information relevant to your query",
+					},
+				],
+			};
+
+			mockClient.getDataSourceSuggestions = vi
+				.fn()
+				.mockResolvedValue(mockResponse);
+
+			const result = await getDataSourceSuggestions(
+				"show me sales data",
+				mockClient,
+			);
+
+			expect(mockClient.getDataSourceSuggestions).toHaveBeenCalledWith({
+				query: "show me sales data",
+			});
+			expect(result).toEqual([
+				{
+					confidence: 0.85,
+					header: {
+						description: "Sales data for the current year",
+						displayName: "Sales Data",
+						guid: "ds-123",
+					},
+					llmReasoning:
+						"This data source contains sales information relevant to your query",
+				},
+			]);
+		});
+
+		it("should return both data sources when multiple suggestions are available", async () => {
+			const mockResponse = {
+				data_sources: [
+					{
+						confidence: 0.7,
+						details: {
+							description: "Sales data for the current year",
+							data_source_name: "Sales Data",
+							data_source_identifier: "ds-123",
+						},
+						reasoning: "This data source contains sales information",
+					},
+					{
+						confidence: 0.65,
+						details: {
+							description: "Revenue analysis data",
+							data_source_name: "Revenue Data",
+							data_source_identifier: "ds-456",
+						},
+						reasoning: "This data source contains revenue information",
+					},
+				],
+			};
+
+			mockClient.getDataSourceSuggestions = vi
+				.fn()
+				.mockResolvedValue(mockResponse);
+
+			const result = await getDataSourceSuggestions(
+				"revenue analysis",
+				mockClient,
+			);
+
+			expect(result).toHaveLength(2);
+			expect(result![0].confidence).toBe(0.7);
+			expect(result![1].confidence).toBe(0.65);
+		});
+
+		it("should return both data sources regardless of confidence difference", async () => {
+			const mockResponse = {
+				data_sources: [
+					{
+						confidence: 0.9,
+						details: {
+							description: "Sales data for the current year",
+							data_source_name: "Sales Data",
+							data_source_identifier: "ds-123",
+						},
+						reasoning: "High confidence match for sales data",
+					},
+					{
+						confidence: 0.55,
+						details: {
+							description: "Customer data",
+							data_source_name: "Customer Data",
+							data_source_identifier: "ds-456",
+						},
+						reasoning: "Lower confidence match",
+					},
+				],
+			};
+
+			mockClient.getDataSourceSuggestions = vi
+				.fn()
+				.mockResolvedValue(mockResponse);
+
+			const result = await getDataSourceSuggestions(
+				"sales performance",
+				mockClient,
+			);
+
+			// Always return both data sources when there are multiple suggestions
+			expect(result).toHaveLength(2);
+			expect(result![0].confidence).toBe(0.9);
+			expect(result![0].header.guid).toBe("ds-123");
+			expect(result![1].confidence).toBe(0.55);
+			expect(result![1].header.guid).toBe("ds-456");
+		});
+
+		it("should sort data sources by confidence in descending order", async () => {
+			const mockResponse = {
+				data_sources: [
+					{
+						confidence: 0.8,
+						details: {
+							description: "Higher confidence data source",
+							data_source_name: "Data Source A",
+							data_source_identifier: "ds-123",
+						},
+						reasoning: "Higher confidence reasoning",
+					},
+					{
+						confidence: 0.6,
+						details: {
+							description: "Lower confidence data source",
+							data_source_name: "Data Source B",
+							data_source_identifier: "ds-456",
+						},
+						reasoning: "Lower confidence reasoning",
+					},
+				],
+			};
+
+			mockClient.getDataSourceSuggestions = vi
+				.fn()
+				.mockResolvedValue(mockResponse);
+
+			const result = await getDataSourceSuggestions("test query", mockClient);
+
+			expect(result![0].confidence).toBe(0.8);
+			expect(result![0].header.guid).toBe("ds-123");
+			expect(result![1].confidence).toBe(0.6);
+			expect(result![1].header.guid).toBe("ds-456");
+		});
+
+		it("should return null when no data sources are available", async () => {
+			const mockResponse = {
+				data_sources: [],
+			};
+
+			mockClient.getDataSourceSuggestions = vi
+				.fn()
+				.mockResolvedValue(mockResponse);
+
+			const result = await getDataSourceSuggestions(
+				"unknown query",
+				mockClient,
+			);
+
+			expect(result).toBeNull();
+		});
+
+		it("should return null when response.dataSources is null or undefined", async () => {
+			const mockResponse = {
+				data_sources: null,
+			};
+
+			mockClient.getDataSourceSuggestions = vi
+				.fn()
+				.mockResolvedValue(mockResponse);
+
+			const result = await getDataSourceSuggestions("test query", mockClient);
+
+			expect(result).toBeNull();
+		});
+
+		it("should handle API errors by throwing the error", async () => {
+			const error = new Error("GraphQL API Error");
+			(mockClient as any).getDataSourceSuggestions = vi
+				.fn()
+				.mockRejectedValue(error);
+
+			await expect(
+				getDataSourceSuggestions("test query", mockClient),
+			).rejects.toThrow("GraphQL API Error");
+		});
+
+		it("should handle multiple data sources with same confidence", async () => {
+			const mockResponse = {
+				data_sources: [
+					{
+						confidence: 0.75,
+						details: {
+							description: "First data source",
+							data_source_name: "Data Source 1",
+							data_source_identifier: "ds-123",
+						},
+						reasoning: "First reasoning",
+					},
+					{
+						confidence: 0.75,
+						details: {
+							description: "Second data source",
+							data_source_name: "Data Source 2",
+							data_source_identifier: "ds-456",
+						},
+						reasoning: "Second reasoning",
+					},
+				],
+			};
+
+			mockClient.getDataSourceSuggestions = vi
+				.fn()
+				.mockResolvedValue(mockResponse);
+
+			const result = await getDataSourceSuggestions("test query", mockClient);
+
+			expect(result).toHaveLength(2);
+			expect(result![0].confidence).toBe(0.75);
+			expect(result![1].confidence).toBe(0.75);
+		});
+
+		it("should use ThoughtSpotService class method correctly", async () => {
+			const mockResponse = {
+				data_sources: [
+					{
+						confidence: 0.85,
+						details: {
+							description: "Test data source",
+							data_source_name: "Test Data",
+							data_source_identifier: "ds-123",
+						},
+						reasoning: "Test reasoning",
+					},
+				],
+			};
+
+			mockClient.getDataSourceSuggestions = vi
+				.fn()
+				.mockResolvedValue(mockResponse);
+
+			const service = new ThoughtSpotService(mockClient);
+			const result = await service.getDataSourceSuggestions("test query");
+
+			expect(mockClient.getDataSourceSuggestions).toHaveBeenCalledWith({
+				query: "test query",
+			});
+			expect(result?.length).toEqual(mockResponse.data_sources.length);
+			expect(result?.[0].confidence).toEqual(
+				mockResponse.data_sources[0].confidence,
+			);
+			expect(result?.[0].header.description).toEqual(
+				mockResponse.data_sources[0].details.description,
+			);
+			expect(result?.[0].header.displayName).toEqual(
+				mockResponse.data_sources[0].details.data_source_name,
+			);
+			expect(result?.[0].header.guid).toEqual(
+				mockResponse.data_sources[0].details.data_source_identifier,
+			);
+			expect(result?.[0].llmReasoning).toEqual(
+				mockResponse.data_sources[0].reasoning,
+			);
+		});
+	});
+
+	describe("searchWorksheets", () => {
+		it("should search and return matching worksheets successfully", async () => {
+			const mockResponse = [
+				{
+					metadata_header: {
+						type: "WORKSHEET",
+						name: "Sales Data Analytics",
+						id: "ws1",
+						description: "Sales analytics worksheet",
+					},
+				},
+				{
+					metadata_header: {
+						type: "WORKSHEET",
+						name: "Revenue Analysis",
+						id: "ws2",
+						description: "Revenue analysis worksheet",
+					},
+				},
+				{
+					metadata_header: {
+						type: "LOGICAL_TABLE", // This should be filtered out
+						name: "Sales Data Table",
+						id: "lt1",
+						description: "Sales data table",
+					},
+				},
+				{
+					metadata_header: {
+						type: "WORKSHEET",
+						name: "Customer Data",
+						id: "ws3",
+						description: "Customer information worksheet",
+					},
+				},
+			];
+
+			mockClient.searchMetadata = vi.fn().mockResolvedValue(mockResponse);
+
+			const service = new ThoughtSpotService(mockClient);
+			const result = await service.searchWorksheets("sales");
+
+			expect(mockClient.searchMetadata).toHaveBeenCalledWith({
+				metadata: [{ type: "LOGICAL_TABLE" }],
+				record_size: 100,
+				sort_options: {
+					field_name: "NAME",
+					order: "ASC",
+				},
+			});
+
+			expect(result).toEqual([
+				{
+					name: "Sales Data Analytics",
+					id: "ws1",
+					description: "Sales analytics worksheet",
+				},
+			]);
+		});
+
+		it("should perform case-insensitive search", async () => {
+			const mockResponse = [
+				{
+					metadata_header: {
+						type: "WORKSHEET",
+						name: "Sales Data Analytics",
+						id: "ws1",
+						description: "Sales analytics worksheet",
+					},
+				},
+				{
+					metadata_header: {
+						type: "WORKSHEET",
+						name: "REVENUE Analysis",
+						id: "ws2",
+						description: "Revenue analysis worksheet",
+					},
+				},
+			];
+
+			mockClient.searchMetadata = vi.fn().mockResolvedValue(mockResponse);
+
+			const service = new ThoughtSpotService(mockClient);
+			const result = await service.searchWorksheets("SALES");
+
+			expect(result).toEqual([
+				{
+					name: "Sales Data Analytics",
+					id: "ws1",
+					description: "Sales analytics worksheet",
+				},
+			]);
+		});
+
+		it("should return empty array when no worksheets match search term", async () => {
+			const mockResponse = [
+				{
+					metadata_header: {
+						type: "WORKSHEET",
+						name: "Customer Data",
+						id: "ws1",
+						description: "Customer information worksheet",
+					},
+				},
+				{
+					metadata_header: {
+						type: "WORKSHEET",
+						name: "Product Catalog",
+						id: "ws2",
+						description: "Product catalog worksheet",
+					},
+				},
+			];
+
+			mockClient.searchMetadata = vi.fn().mockResolvedValue(mockResponse);
+
+			const service = new ThoughtSpotService(mockClient);
+			const result = await service.searchWorksheets("nonexistent");
+
+			expect(result).toEqual([]);
+		});
+
+		it("should handle empty search term", async () => {
+			const mockResponse = [
+				{
+					metadata_header: {
+						type: "WORKSHEET",
+						name: "Sales Data",
+						id: "ws1",
+						description: "Sales worksheet",
+					},
+				},
+				{
+					metadata_header: {
+						type: "WORKSHEET",
+						name: "Revenue Data",
+						id: "ws2",
+						description: "Revenue worksheet",
+					},
+				},
+			];
+
+			mockClient.searchMetadata = vi.fn().mockResolvedValue(mockResponse);
+
+			const service = new ThoughtSpotService(mockClient);
+			const result = await service.searchWorksheets("");
+
+			// Empty string should match all worksheets
+			expect(result).toEqual([
+				{
+					name: "Sales Data",
+					id: "ws1",
+					description: "Sales worksheet",
+				},
+				{
+					name: "Revenue Data",
+					id: "ws2",
+					description: "Revenue worksheet",
+				},
+			]);
+		});
+
+		it("should filter out non-worksheet metadata types", async () => {
+			const mockResponse = [
+				{
+					metadata_header: {
+						type: "LOGICAL_TABLE",
+						name: "Sales Table",
+						id: "lt1",
+						description: "Sales table",
+					},
+				},
+				{
+					metadata_header: {
+						type: "LIVEBOARD",
+						name: "Sales Dashboard",
+						id: "lb1",
+						description: "Sales dashboard",
+					},
+				},
+				{
+					metadata_header: {
+						type: "WORKSHEET",
+						name: "Sales Data",
+						id: "ws1",
+						description: "Sales worksheet",
+					},
+				},
+			];
+
+			mockClient.searchMetadata = vi.fn().mockResolvedValue(mockResponse);
+
+			const service = new ThoughtSpotService(mockClient);
+			const result = await service.searchWorksheets("sales");
+
+			expect(result).toEqual([
+				{
+					name: "Sales Data",
+					id: "ws1",
+					description: "Sales worksheet",
+				},
+			]);
+		});
+
+		it("should handle API errors", async () => {
+			const error = new Error("Search API Error");
+			mockClient.searchMetadata = vi.fn().mockRejectedValue(error);
+
+			const service = new ThoughtSpotService(mockClient);
+
+			await expect(service.searchWorksheets("sales")).rejects.toThrow(
+				"Search API Error",
+			);
+		});
+
+		it("should handle empty API response", async () => {
+			mockClient.searchMetadata = vi.fn().mockResolvedValue([]);
+
+			const service = new ThoughtSpotService(mockClient);
+			const result = await service.searchWorksheets("sales");
+
+			expect(result).toEqual([]);
+		});
+
+		it("should handle partial matches in worksheet names", async () => {
+			const mockResponse = [
+				{
+					metadata_header: {
+						type: "WORKSHEET",
+						name: "Q1 Sales Performance",
+						id: "ws1",
+						description: "Q1 sales performance worksheet",
+					},
+				},
+				{
+					metadata_header: {
+						type: "WORKSHEET",
+						name: "Annual Sales Report",
+						id: "ws2",
+						description: "Annual sales report worksheet",
+					},
+				},
+				{
+					metadata_header: {
+						type: "WORKSHEET",
+						name: "Customer Data",
+						id: "ws3",
+						description: "Customer information worksheet",
+					},
+				},
+			];
+
+			mockClient.searchMetadata = vi.fn().mockResolvedValue(mockResponse);
+
+			const service = new ThoughtSpotService(mockClient);
+			const result = await service.searchWorksheets("sales");
+
+			expect(result).toEqual([
+				{
+					name: "Q1 Sales Performance",
+					id: "ws1",
+					description: "Q1 sales performance worksheet",
+				},
+				{
+					name: "Annual Sales Report",
+					id: "ws2",
+					description: "Annual sales report worksheet",
+				},
+			]);
+		});
+
+		it("should handle search with special characters", async () => {
+			const mockResponse = [
+				{
+					metadata_header: {
+						type: "WORKSHEET",
+						name: "Sales & Marketing Data",
+						id: "ws1",
+						description: "Sales and marketing worksheet",
+					},
+				},
+				{
+					metadata_header: {
+						type: "WORKSHEET",
+						name: "Revenue Analysis",
+						id: "ws2",
+						description: "Revenue analysis worksheet",
+					},
+				},
+			];
+
+			mockClient.searchMetadata = vi.fn().mockResolvedValue(mockResponse);
+
+			const service = new ThoughtSpotService(mockClient);
+			const result = await service.searchWorksheets("&");
+
+			expect(result).toEqual([
+				{
+					name: "Sales & Marketing Data",
+					id: "ws1",
+					description: "Sales and marketing worksheet",
+				},
+			]);
+		});
+	});
+
+	describe("createEmptyLiveboard", () => {
+		it("imports a minimal liveboard TML and returns the new liveboard id", async () => {
+			mockClient.importMetadataTML = vi
+				.fn()
+				.mockResolvedValue([{ response: { header: { id_guid: "lb-new-1" } } }]);
+
+			const service = new ThoughtSpotService(mockClient);
+			const result = await service.createEmptyLiveboard("Q3 Review");
+
+			expect(mockClient.importMetadataTML).toHaveBeenCalledTimes(1);
+			const call = mockClient.importMetadataTML.mock.calls[0][0];
+			expect(call.import_policy).toBe("ALL_OR_NONE");
+			expect(call.create_new).toBe(true);
+
+			const tml = JSON.parse(call.metadata_tmls[0]);
+			expect(tml).toEqual({
+				liveboard: {
+					name: "Q3 Review",
+					visualizations: [],
+					layout: { tiles: [] },
+				},
+			});
+
+			expect(result).toEqual({ liveboardId: "lb-new-1" });
+		});
+
+		it("throws when the import response is missing id_guid", async () => {
+			mockClient.importMetadataTML = vi.fn().mockResolvedValue([{}]);
+
+			const service = new ThoughtSpotService(mockClient);
+			await expect(service.createEmptyLiveboard("LB")).rejects.toThrow(
+				/id_guid missing/,
+			);
+		});
+
+		it("propagates errors from importMetadataTML", async () => {
+			mockClient.importMetadataTML = vi
+				.fn()
+				.mockRejectedValue(new Error("import broke"));
+
+			const service = new ThoughtSpotService(mockClient);
+			await expect(service.createEmptyLiveboard("LB")).rejects.toThrow(
+				"import broke",
+			);
+		});
+	});
+
+	describe("createBachPinboardSession", () => {
+		it("delegates to the client and returns the session ids", async () => {
+			mockClient.createBachPinboardSession = vi.fn().mockResolvedValue({
+				transactionId: "txn-1",
+				generationNumber: "3",
+			});
+
+			const service = new ThoughtSpotService(mockClient);
+			const result = await service.createBachPinboardSession("lb-1");
+
+			expect(mockClient.createBachPinboardSession).toHaveBeenCalledWith({
+				liveboardId: "lb-1",
+			});
+			expect(result).toEqual({
+				transactionId: "txn-1",
+				generationNumber: "3",
+			});
+		});
+
+		it("propagates errors from the client", async () => {
+			mockClient.createBachPinboardSession = vi
+				.fn()
+				.mockRejectedValue(new Error("bach create failed"));
+
+			const service = new ThoughtSpotService(mockClient);
+			await expect(service.createBachPinboardSession("lb-1")).rejects.toThrow(
+				"bach create failed",
+			);
+		});
+	});
+
+	describe("saveBachPinboard", () => {
+		it("delegates to the client with the txn id + generation number", async () => {
+			mockClient.saveBachPinboard = vi.fn().mockResolvedValue(undefined);
+
+			const service = new ThoughtSpotService(mockClient);
+			const result = await service.saveBachPinboard("txn-1", "9");
+
+			expect(mockClient.saveBachPinboard).toHaveBeenCalledWith({
+				transactionId: "txn-1",
+				generationNumber: "9",
+			});
+			expect(result).toBeUndefined();
+		});
+
+		it("propagates errors from the client", async () => {
+			mockClient.saveBachPinboard = vi
+				.fn()
+				.mockRejectedValue(new Error("bach save failed"));
+
+			const service = new ThoughtSpotService(mockClient);
+			await expect(service.saveBachPinboard("txn-1", "9")).rejects.toThrow(
+				"bach save failed",
+			);
+		});
+	});
+});

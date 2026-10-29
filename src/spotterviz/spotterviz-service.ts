@@ -5,8 +5,8 @@ import {
 	observeUpstreamCall,
 } from "../metrics/runtime/tool-metrics";
 import { WithSpan, getActiveSpan } from "../metrics/tracing/tracing-utils";
+import type { ThoughtSpotService } from "../services/thoughtspot-service";
 import type { StorageServiceClient } from "../storage-service/storage-service";
-import type { ThoughtSpotService } from "../thoughtspot/thoughtspot-service";
 import type { SpotterVizClient } from "./spotterviz-client";
 import {
 	STREAM_HEADERS_TIMEOUT_MS,
