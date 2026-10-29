@@ -1,5 +1,8 @@
 import { z } from "zod";
-import { GET_DATA_SUPPORTED_TYPES } from "../thoughtspot/get-data/get-data-constants";
+import {
+	GET_DATA_SUPPORTED_TYPES,
+	GET_DATA_WITH_SPOTTER_ANSWER_TYPES,
+} from "../thoughtspot/get-data/get-data-constants";
 
 export const PingSchema = z.object({});
 
@@ -246,6 +249,21 @@ export const GetDataInputSchema = z.object({
 		),
 });
 
+// get_data input when the Spotter answer data URL flag is on: also accepts an
+// unsaved Analytics Agent answer, addressed by its `answer_id`.
+export const GetDataWithSpotterAnswerInputSchema = GetDataInputSchema.extend({
+	object_id: z
+		.string()
+		.describe(
+			"The GUID of the object to fetch data for, typically an `object_id` returned by a prior `search_objects` call. Supports saved Answers and Liveboards. For an answer from the Analytics Agent, pass the answer's `answer_id` from `get_session_updates` verbatim.",
+		),
+	object_type: z
+		.enum(GET_DATA_WITH_SPOTTER_ANSWER_TYPES)
+		.describe(
+			"The object's type. Required. For a `search_objects` result, pass its `type` verbatim — one of `ANSWER`, `LIVEBOARD`, or `LIVEBOARD_VIZ`. For `LIVEBOARD_VIZ` also pass that result's `visualization_id` in `visualization_ids` (else the request is rejected); it fetches via the parent Liveboard. For an answer from `get_session_updates`, pass `SPOTTER_ANSWER`.",
+		),
+});
+
 const GetDataVizSchema = z.object({
 	viz_id: z
 		.string()
@@ -406,6 +424,40 @@ export const GetSessionUpdatesOutputSchema = z.object({
 			"Whether the Analytics Agent has finished responding. If `is_done` is false, you can make another `get_session_updates` call to get the next set of updates.",
 		),
 });
+
+// When get_data accepts Spotter answers, point `answer_id` at it as well.
+const ConversationUpdateWithAnswerDataSchema = ConversationUpdateSchema.extend({
+	answer_id: z
+		.string()
+		.optional()
+		.describe(
+			"A unique identifier for the answer. Only present when `type` is `answer`. You can use this field to identify this answer when using the `create_dashboard` tool, or pass it to `get_data` with `object_type` `SPOTTER_ANSWER` to fetch the answer's rows.",
+		),
+});
+
+function sessionUpdatesOutputSchemaOf(update: z.ZodObject) {
+	return GetSessionUpdatesOutputSchema.extend({
+		session_updates: z
+			.array(update)
+			.describe(
+				GetSessionUpdatesOutputSchema.shape.session_updates.description ?? "",
+			),
+	});
+}
+
+export const GetSessionUpdatesWithAnswerDataOutputSchema =
+	sessionUpdatesOutputSchemaOf(ConversationUpdateWithAnswerDataSchema);
+
+// With iframes suppressed, answers carry no `iframe_url`, so the schema (which
+// the client reads) must not mention an embedded visualization either.
+export const GetSessionUpdatesSuppressedIframesOutputSchema =
+	sessionUpdatesOutputSchemaOf(
+		ConversationUpdateWithAnswerDataSchema.omit({ iframe_url: true }).extend({
+			type: ConversationUpdateSchema.shape.type.describe(
+				"The type of update: `text` or `text_chunk` for a natural language message from the Analytics Agent, `answer` for a query result, or `step_notification` to announce key progress steps which the Agent is working through. Determines which other fields are populated.",
+			),
+		}),
+	);
 
 export const GetSessionUpdatesRawOutputSchema = z.object({
 	session_updates: z
@@ -1175,6 +1227,56 @@ const getDataToolDefinition = {
 
 // V4 — get_data (object data fetch). Includes all V3 tools plus get_data.
 export const toolDefinitionsV4 = [...toolDefinitionsV3, getDataToolDefinition];
+
+const GET_DATA_SPOTTER_ANSWER_DESCRIPTION =
+	"It can also fetch the rows behind an answer from the Analytics Agent: pass the answer's `answer_id` from `get_session_updates` verbatim as `object_id`, with `object_type` `SPOTTER_ANSWER` (`visualization_ids` is ignored). By default, present the Agent's answer with the visualization it provides and do not build your own chart. Call this for an answer only when the user asks to chart it yourself, reshape or modify it, combine it with other answers or data, or build a dashboard or visualization of your own from the results.";
+
+const GET_DATA_SPOTTER_ANSWER_SUPPRESSED_IFRAMES_DESCRIPTION =
+	"It can also fetch the rows behind an answer from the Analytics Agent: pass the answer's `answer_id` from `get_session_updates` verbatim as `object_id`, with `object_type` `SPOTTER_ANSWER` (`visualization_ids` is ignored). Answers from the Analytics Agent come with no visualization of their own, so whenever a chart or table would help the user understand an answer, or the user asks to chart, reshape, combine, or build a dashboard from results, call this and build the visual from the returned rows.";
+
+/**
+ * Apply the undocumented URL flags to the resolved tool list:
+ * - `spotterAnswerData`: get_data accepts `SPOTTER_ANSWER`, and `answer_id` points at it.
+ * - `suppressIframes`: as above, plus get_session_updates drops `iframe_url`, and get_data is
+ *   described as the way to visualize an answer.
+ * The raw get_session_updates variant is left alone: its updates are unstructured.
+ */
+export function applyUrlFlagToolOverrides(
+	tools: any[],
+	flags: {
+		spotterAnswerData: boolean;
+		suppressIframes: boolean;
+		rawSessionUpdates: boolean;
+	},
+): any[] {
+	if (!flags.spotterAnswerData && !flags.suppressIframes) {
+		return tools;
+	}
+	return tools.map((tool) => {
+		if (tool.name === ToolName.GetData) {
+			return {
+				...tool,
+				description: `${tool.description}\n${
+					flags.suppressIframes
+						? GET_DATA_SPOTTER_ANSWER_SUPPRESSED_IFRAMES_DESCRIPTION
+						: GET_DATA_SPOTTER_ANSWER_DESCRIPTION
+				}`,
+				inputSchema: z.toJSONSchema(GetDataWithSpotterAnswerInputSchema),
+			};
+		}
+		if (tool.name === ToolName.GetSessionUpdates && !flags.rawSessionUpdates) {
+			return {
+				...tool,
+				outputSchema: z.toJSONSchema(
+					flags.suppressIframes
+						? GetSessionUpdatesSuppressedIframesOutputSchema
+						: GetSessionUpdatesWithAnswerDataOutputSchema,
+				),
+			};
+		}
+		return tool;
+	});
+}
 
 /** One-line result contract, for tools other than create_dashboard, which carries the full one. */
 const DASHBOARD_RESULT_CONTRACT_BRIEF =

@@ -9,3 +9,13 @@ export const GET_DATA_SUPPORTED_TYPES = [
 
 // One of the supported input types (not a bare string).
 export type GetDataObjectType = (typeof GET_DATA_SUPPORTED_TYPES)[number];
+
+// An unsaved answer from the Analytics Agent (Spotter), addressed by the
+// `answer_id` that get_session_updates returns. Accepted only when the
+// `enable-spotter-answer-data` (or `suppress-iframes`) URL flag is on.
+export const SPOTTER_ANSWER_TYPE = "SPOTTER_ANSWER";
+
+export const GET_DATA_WITH_SPOTTER_ANSWER_TYPES = [
+	...GET_DATA_SUPPORTED_TYPES,
+	SPOTTER_ANSWER_TYPE,
+] as const;

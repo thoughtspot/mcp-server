@@ -30,6 +30,8 @@ import {
 } from "../spotterviz/dashboard-tools";
 import { UPSTREAM_CALL_TIMEOUT_MS, withTimeout } from "../spotterviz/timeouts";
 import type { StorageServiceClient } from "../storage-service/storage-service";
+import { stripEmbeddedVisualizations } from "../streaming-utils";
+import { SPOTTER_ANSWER_TYPE } from "../thoughtspot/get-data/get-data-constants";
 import {
 	MODEL_POLL_INTERVAL_MS,
 	MODEL_POLL_ITERATIONS,
@@ -65,8 +67,8 @@ import {
 	FinalizeModelInputSchema,
 	GetAnswerSchema,
 	GetDashboardStatusInputSchema,
-	GetDataInputSchema,
 	GetDataSourceSuggestionsSchema,
+	GetDataWithSpotterAnswerInputSchema,
 	GetModelUpdatesInputSchema,
 	GetRelevantQuestionsSchema,
 	GetSessionUpdatesInputSchema,
@@ -77,6 +79,7 @@ import {
 	SendSessionMessageInputSchema,
 	SwitchOrgInputSchema,
 	ToolName,
+	applyUrlFlagToolOverrides,
 } from "./tool-definitions";
 import {
 	type VersionConfig,
@@ -451,6 +454,10 @@ export class MCPServer extends BaseMCPServer {
 			"api_version_requested",
 			this.ctx.props.apiVersion ?? "(not passed)",
 		);
+		span?.setAttributes({
+			enable_spotter_answer_data: this.isSpotterAnswerDataEnabled(),
+			suppress_iframes: !!this.ctx.props.suppressIframes,
+		});
 
 		// Resolve the API version to get the appropriate tool configuration
 		let versionConfig: VersionConfig;
@@ -480,6 +487,12 @@ export class MCPServer extends BaseMCPServer {
 		if (toolIdxToDrop !== -1) {
 			tools.splice(toolIdxToDrop, 1);
 		}
+
+		tools = applyUrlFlagToolOverrides(tools, {
+			spotterAnswerData: this.isSpotterAnswerDataEnabled(),
+			suppressIframes: !!this.ctx.props.suppressIframes,
+			rawSessionUpdates: !!this.ctx.props.enableRawSessionUpdates,
+		});
 
 		// Filter out GetDataSourceSuggestions if feature is disabled
 		if (
@@ -831,15 +844,20 @@ export class MCPServer extends BaseMCPServer {
 			);
 		}
 
+		const fieldsInfo =
+			"data: The csv data as an answer to the question\n session_identifier: The session identifier for the answer, use for liveboard creation\n generation_number: The generation number for the answer, use for liveboard creation\n";
 		return this.createStructuredContentSuccessResponse(
 			{
 				data: answer.data,
 				question: answer.question,
 				session_identifier: answer.session_identifier,
 				generation_number: answer.generation_number,
-				frame_url: answer.frame_url,
-				fields_info:
-					"data: The csv data as an answer to the question\n session_identifier: The session identifier for the answer, use for liveboard creation\n generation_number: The generation number for the answer, use for liveboard creation\n frame_url: A url which can be used to view the answer in an iframe in the browser\n",
+				...(this.ctx.props.suppressIframes
+					? { fields_info: fieldsInfo }
+					: {
+							frame_url: answer.frame_url,
+							fields_info: `${fieldsInfo} frame_url: A url which can be used to view the answer in an iframe in the browser\n`,
+						}),
 			},
 			"Answer created successfully",
 		);
@@ -1064,7 +1082,9 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		});
 		return this.createStructuredContentSuccessResponse(
 			{
-				session_updates: messagesState.messages,
+				session_updates: this.ctx.props.suppressIframes
+					? stripEmbeddedVisualizations(messagesState.messages)
+					: messagesState.messages,
 				is_done: messagesState.isDone,
 			},
 			"Conversation updates retrieved successfully",
@@ -1461,6 +1481,53 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		);
 	}
 
+	/**
+	 * get_data on unsaved Analytics Agent answers, behind the `enable-spotter-answer-data` URL flag.
+	 * `suppress-iframes` implies it: without iframes, get_data is the only way to visualize an answer.
+	 */
+	private isSpotterAnswerDataEnabled(): boolean {
+		return (
+			!!this.ctx.props.enableSpotterAnswerData ||
+			!!this.ctx.props.suppressIframes
+		);
+	}
+
+	private async callGetSpotterAnswerData(
+		answerId: string,
+		maxRows: number | undefined,
+		recorder: MetricsRecorder,
+	) {
+		const [answer] = parseAnswerIds([{ answer_id: answerId, title: "" }]) ?? [];
+		if (!answer) {
+			return this.createErrorResponse(
+				'Invalid answer_id for object_type SPOTTER_ANSWER. Pass the `answer_id` returned from the "get_session_updates" tool verbatim.',
+				`get_data: invalid answer_id ${answerId}`,
+			);
+		}
+
+		try {
+			const result = await this.getThoughtSpotService(
+				recorder,
+			).getSpotterAnswerData({
+				sessionIdentifier: answer.session_identifier,
+				generationNumber: answer.generation_number,
+				maxRows,
+			});
+			return this.createStructuredContentSuccessResponse(
+				result,
+				`Fetched data for Spotter answer ${answerId}`,
+			);
+		} catch (error) {
+			if (this.apiErrorStatus(error) === 401) {
+				throw error;
+			}
+			return this.createErrorResponse(
+				`Failed to fetch answer data: ${summarizeUpstreamError(error)}. The answer may have expired; ask the Analytics Agent the question again and pass the new answer's \`answer_id\`.`,
+				"get_data (SPOTTER_ANSWER) failed",
+			);
+		}
+	}
+
 	@WithSpan("call-get-data")
 	async callGetData(
 		request: z.infer<typeof CallToolRequestSchema>,
@@ -1477,8 +1544,20 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			);
 		}
 
+		// Parse with the wider schema so SPOTTER_ANSWER narrows below; it is only
+		// accepted when the URL flag is on.
 		const { object_id, object_type, visualization_ids, max_rows } =
-			GetDataInputSchema.parse(request.params.arguments);
+			GetDataWithSpotterAnswerInputSchema.parse(request.params.arguments);
+
+		if (object_type === SPOTTER_ANSWER_TYPE) {
+			if (!this.isSpotterAnswerDataEnabled()) {
+				return this.createErrorResponse(
+					"object_type must be one of ANSWER, LIVEBOARD, or LIVEBOARD_VIZ.",
+					"get_data: SPOTTER_ANSWER without the URL flag",
+				);
+			}
+			return this.callGetSpotterAnswerData(object_id, max_rows, recorder);
+		}
 
 		// LIVEBOARD_VIZ scopes to one viz only via visualization_ids; without it the
 		// fetch would silently return the whole board. Guide the caller instead.

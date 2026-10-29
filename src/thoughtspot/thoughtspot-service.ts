@@ -18,6 +18,8 @@ import {
 } from "../metrics/runtime/tool-metrics";
 import { WithSpan, getActiveSpan } from "../metrics/tracing/tracing-utils";
 import { processSendAgentConversationMessageStreamingResponse } from "../streaming-utils";
+import { GET_DATA_DEFAULT_MAX_ROWS } from "./get-data/get-data";
+import { csvToGetDataViz } from "./get-data/spotter-answer-data";
 import type {
 	CreateModelSessionResult,
 	FetchWorksheetModelParams,
@@ -882,6 +884,45 @@ export class ThoughtSpotService {
 		span?.setAttribute("object_type", params.objectType);
 		span?.setAttribute("viz_count", result.data.length);
 		return result;
+	}
+
+	/**
+	 * Fetch the rows of an unsaved Analytics Agent answer through its CSV export.
+	 * Runs as the calling user, so the answer's permissions and row-level security apply.
+	 */
+	@WithSpan("get-spotter-answer-data")
+	async getSpotterAnswerData({
+		sessionIdentifier,
+		generationNumber,
+		title,
+		maxRows = GET_DATA_DEFAULT_MAX_ROWS,
+	}: {
+		sessionIdentifier: string;
+		generationNumber: number;
+		title?: string;
+		maxRows?: number;
+	}): Promise<GetDataResult> {
+		const span = getActiveSpan();
+		span?.setAttributes({
+			session_identifier: sessionIdentifier,
+			generation_number: generationNumber,
+		});
+
+		const csv = await this.observeUpstreamCall(
+			UPSTREAM_OPERATION_NAMES.exportAnswerReport,
+			async () => {
+				const file = await this.client.exportAnswerReport({
+					session_identifier: sessionIdentifier,
+					generation_number: generationNumber,
+					file_format: "CSV",
+				});
+				return file.text();
+			},
+		);
+
+		const viz = csvToGetDataViz(csv, maxRows, title);
+		span?.setAttribute("total_row_count", viz.total_row_count ?? 0);
+		return { data: [viz] };
 	}
 
 	/**

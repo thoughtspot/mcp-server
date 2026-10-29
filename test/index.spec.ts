@@ -4,6 +4,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // Intercept at the pkg's createOAuthHandler so we can assert on the request the
 // worker forwards after its own rewrites (header stripping, path aliasing).
 const mockOAuthFetch = vi.fn();
+// Options the worker passed to createOAuthHandler, to drive its props hooks.
+const oauthHandler = vi.hoisted(() => ({ options: undefined as any }));
 
 vi.mock("@thoughtspot/mcp-auth", async () => {
 	const actual = await vi.importActual<typeof import("@thoughtspot/mcp-auth")>(
@@ -11,10 +13,13 @@ vi.mock("@thoughtspot/mcp-auth", async () => {
 	);
 	return {
 		...actual,
-		createOAuthHandler: () => ({
-			fetch: (request: Request, env: any, ctx: any) =>
-				mockOAuthFetch(request, env, ctx),
-		}),
+		createOAuthHandler: (options: any) => {
+			oauthHandler.options = options;
+			return {
+				fetch: (request: Request, env: any, ctx: any) =>
+					mockOAuthFetch(request, env, ctx),
+			};
+		},
 	};
 });
 
@@ -205,5 +210,45 @@ describe("Instance allowlist wiring", () => {
 
 		expect(response.status).toBe(302);
 		expect(mockOAuthFetch).toHaveBeenCalledOnce();
+	});
+});
+
+describe("Spotter answer data and iframe suppression URL flags", () => {
+	const baseProps = {
+		accessToken: "token",
+		instanceUrl: "https://test.thoughtspot.cloud",
+		clientName: { clientId: "c", clientName: "client", registrationDate: 0 },
+	};
+
+	beforeEach(async () => {
+		vi.resetModules();
+		await loadWorker();
+	});
+
+	it.each([
+		[
+			"token flow",
+			(url: string) =>
+				oauthHandler.options.hooks.extendProps(new Request(url), baseProps),
+		],
+		[
+			"oauth flow",
+			(url: string) =>
+				oauthHandler.options.enrichMcpRequestProps(
+					new Request(url),
+					{},
+					baseProps,
+				),
+		],
+	])("reads both flags from the query string (%s)", (_flow, buildProps) => {
+		expect(
+			buildProps(
+				"https://example.com/mcp?enable-spotter-answer-data=true&suppress-iframes=true",
+			),
+		).toMatchObject({ enableSpotterAnswerData: true, suppressIframes: true });
+		expect(buildProps("https://example.com/mcp")).toMatchObject({
+			enableSpotterAnswerData: false,
+			suppressIframes: false,
+		});
 	});
 });
