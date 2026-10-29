@@ -253,3 +253,44 @@ export const processSendAgentConversationMessageStreamingResponse = async (
 		},
 	);
 };
+
+// A ThoughtSpot embedded-visualization URL: the MCP embed marker or an embed route.
+const EMBED_URL = String.raw`https?:\/\/[^\s()<>"']*(?:tsmcp=true|#\/embed\/)[^\s()<>"']*`;
+const EMBED_IFRAME_TAG = /<iframe\b[^>]*>(?:[\s\S]*?<\/iframe>)?/gi;
+const EMBED_MARKDOWN_IMAGE = new RegExp(
+	String.raw`!\[[^\]]*\]\(${EMBED_URL}\)`,
+	"g",
+);
+const EMBED_MARKDOWN_LINK = new RegExp(
+	String.raw`\[([^\]]*)\]\(${EMBED_URL}\)`,
+	"g",
+);
+const EMBED_BARE_URL = new RegExp(EMBED_URL, "g");
+
+/*
+ * Remove iframe HTML and embedded-visualization links from free text, keeping the label of a
+ * markdown link.
+ */
+export const stripEmbeddedVisualizationText = (text: string): string =>
+	text
+		.replace(EMBED_IFRAME_TAG, "")
+		.replace(EMBED_MARKDOWN_IMAGE, "")
+		.replace(EMBED_MARKDOWN_LINK, "$1")
+		.replace(EMBED_BARE_URL, "");
+
+/*
+ * For the `suppress-iframes` URL flag: drop `iframe_url` from answer updates and strip embed links
+ * from the text of every update (simplified `text`, or raw `content`), thinking included.
+ */
+export const stripEmbeddedVisualizations = (
+	messages: (Message | RawMessage)[],
+): (Message | RawMessage)[] =>
+	messages.map((message) => {
+		const { iframe_url: _iframeUrl, ...rest } = message as RawMessage;
+		for (const key of ["text", "content"]) {
+			if (typeof rest[key] === "string") {
+				rest[key] = stripEmbeddedVisualizationText(rest[key] as string);
+			}
+		}
+		return rest as Message | RawMessage;
+	});

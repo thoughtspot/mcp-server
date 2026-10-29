@@ -797,6 +797,204 @@ describe("MCP Server", () => {
 		});
 	});
 
+	describe("Spotter answer data and iframe suppression URL flags", () => {
+		const answerId = JSON.stringify({ session_id: "session-9", gen_no: 3 });
+		const embedUrl =
+			"https://test.thoughtspot.cloud/?tsmcp=true#/embed/conv-assist-answer?sessionId=session-9&genNo=3";
+
+		const mockClient = () =>
+			thoughtspotClient.getThoughtSpotClient(
+				"https://test.thoughtspot.cloud",
+				"test-access-token",
+			) as any;
+
+		const toolByName = (tools: any[], name: string) =>
+			tools.find((tool) => tool.name === name);
+
+		it("leaves get_data and get_session_updates unchanged when no flag is set", async () => {
+			await server.init();
+			const { listTools } = connect(server);
+
+			const { tools } = await listTools();
+			const getData = toolByName(tools, "get_data");
+			expect(getData.inputSchema.properties.object_type.enum).not.toContain(
+				"SPOTTER_ANSWER",
+			);
+			expect(getData.description).not.toMatch(/SPOTTER_ANSWER/);
+			expect(
+				toolByName(tools, "get_session_updates").outputSchema.properties
+					.session_updates.items.properties,
+			).toHaveProperty("iframe_url");
+		});
+
+		it("exposes SPOTTER_ANSWER on get_data, iframe-first, with enable-spotter-answer-data", async () => {
+			mockProps.enableSpotterAnswerData = true;
+			await server.init();
+			const { listTools } = connect(server);
+
+			const { tools } = await listTools();
+			const getData = toolByName(tools, "get_data");
+			expect(getData.inputSchema.properties.object_type.enum).toContain(
+				"SPOTTER_ANSWER",
+			);
+			expect(getData.description).toMatch(
+				/present the Agent's answer with the visualization it provides/,
+			);
+			const update = toolByName(tools, "get_session_updates").outputSchema
+				.properties.session_updates.items.properties;
+			expect(update).toHaveProperty("iframe_url");
+			expect(update.answer_id.description).toMatch(/get_data/);
+		});
+
+		it("removes iframe references from tool definitions with suppress-iframes", async () => {
+			mockProps.suppressIframes = true;
+			await server.init();
+			const { listTools } = connect(server);
+
+			const { tools } = await listTools();
+			const getData = toolByName(tools, "get_data");
+			expect(getData.inputSchema.properties.object_type.enum).toContain(
+				"SPOTTER_ANSWER",
+			);
+			expect(getData.description).toMatch(/come with no visualization/);
+			const sessionUpdates = toolByName(tools, "get_session_updates");
+			expect(JSON.stringify(sessionUpdates)).not.toMatch(
+				/iframe|embed|visualiz/i,
+			);
+		});
+
+		it("rejects SPOTTER_ANSWER when the flag is off", async () => {
+			await server.init();
+			const { callTool } = connect(server);
+
+			const result = await callTool("get_data", {
+				object_id: answerId,
+				object_type: "SPOTTER_ANSWER",
+			});
+
+			expect(result.isError).toBe(true);
+			expect(mockClient().exportAnswerReport).not.toHaveBeenCalled();
+		});
+
+		it("fetches a Spotter answer's rows through the CSV export", async () => {
+			mockProps.enableSpotterAnswerData = true;
+			mockClient().exportAnswerReport.mockResolvedValueOnce({
+				text: vi.fn().mockResolvedValue("Region,Revenue\nEast,100\nWest,50\n"),
+			});
+			await server.init();
+			const { callTool } = connect(server);
+
+			const result = await callTool("get_data", {
+				object_id: answerId,
+				object_type: "SPOTTER_ANSWER",
+				max_rows: 1,
+			});
+
+			expect(result.isError).toBeUndefined();
+			expect(mockClient().exportAnswerReport).toHaveBeenCalledWith({
+				session_identifier: "session-9",
+				generation_number: 3,
+				file_format: "CSV",
+			});
+			expect(result.structuredContent).toEqual({
+				data: [
+					{
+						columns: ["Region", "Revenue"],
+						data_rows: [["East", 100]],
+						total_row_count: 2,
+					},
+				],
+			});
+		});
+
+		it("returns an error for a malformed answer_id", async () => {
+			mockProps.suppressIframes = true;
+			await server.init();
+			const { callTool } = connect(server);
+
+			const result = await callTool("get_data", {
+				object_id: "not-json",
+				object_type: "SPOTTER_ANSWER",
+			});
+
+			expect(result.isError).toBe(true);
+			expect((result.content as any[])[0].text).toMatch(/Invalid answer_id/);
+		});
+
+		it("returns a re-ask hint when the export fails", async () => {
+			mockProps.enableSpotterAnswerData = true;
+			mockClient().exportAnswerReport.mockRejectedValueOnce(
+				new Error("session expired"),
+			);
+			await server.init();
+			const { callTool } = connect(server);
+
+			const result = await callTool("get_data", {
+				object_id: answerId,
+				object_type: "SPOTTER_ANSWER",
+			});
+
+			expect(result.isError).toBe(true);
+			expect((result.content as any[])[0].text).toMatch(
+				/session expired.*ask the Analytics Agent the question again/s,
+			);
+		});
+
+		it("strips iframe_url and embed links from session updates with suppress-iframes", async () => {
+			mockProps.suppressIframes = true;
+			vi.spyOn(server as any, "getStorageService").mockReturnValue({
+				getNewMessages: vi.fn().mockResolvedValue({
+					isDone: true,
+					messages: [
+						{
+							is_thinking: true,
+							type: "text",
+							text: `Charting at ${embedUrl}`,
+						},
+						{
+							is_thinking: false,
+							type: "answer",
+							answer_id: answerId,
+							answer_title: "Revenue",
+							answer_data_source_id: "ds-1",
+							answer_query: "[revenue]",
+							iframe_url: embedUrl,
+						},
+					],
+				}),
+			});
+			await server.init();
+			const { callTool } = connect(server);
+
+			const result = await callTool("get_session_updates", {
+				analytical_session_id: "conv-1",
+			});
+
+			expect(result.isError).toBeUndefined();
+			const [thinking, answer] = (result.structuredContent as any)
+				.session_updates;
+			expect(thinking.text).toBe("Charting at ");
+			expect(answer).not.toHaveProperty("iframe_url");
+			expect(answer.answer_id).toBe(answerId);
+			expect(JSON.stringify(result)).not.toMatch(/tsmcp|embed/);
+		});
+
+		it("omits frame_url from getAnswer with suppress-iframes", async () => {
+			mockProps.suppressIframes = true;
+			await server.init();
+			const { callTool } = connect(server);
+
+			const result = await callTool("getAnswer", {
+				question: "What is the total revenue?",
+				datasourceId: "ds-123",
+			});
+
+			expect(result.isError).toBeUndefined();
+			expect(result.structuredContent).not.toHaveProperty("frame_url");
+			expect(JSON.stringify(result)).not.toMatch(/iframe|tsmcp|embed/);
+		});
+	});
+
 	describe("Get Relevant Questions Tool", () => {
 		// Using real service with mocked client, no service method mocks needed
 

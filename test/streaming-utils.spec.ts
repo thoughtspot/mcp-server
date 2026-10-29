@@ -27,7 +27,10 @@ import {
 	type MetricsRecorder,
 	NOOP_METRICS_RECORDER,
 } from "../src/metrics/runtime/metrics-recorder";
-import { processSendAgentConversationMessageStreamingResponse } from "../src/streaming-utils";
+import {
+	processSendAgentConversationMessageStreamingResponse,
+	stripEmbeddedVisualizations,
+} from "../src/streaming-utils";
 import { SpotterResponseFormat } from "../src/thoughtspot/types";
 import { makeReader } from "./servers/helpers";
 
@@ -1051,5 +1054,52 @@ describe("processSendAgentConversationMessageStreamingResponse — raw format", 
 			total_answer_messages_parsed: 1,
 			total_messages_ignored: 0,
 		});
+	});
+});
+
+describe("stripEmbeddedVisualizations", () => {
+	const embedUrl =
+		"https://test.thoughtspot.cloud/?tsmcp=true#/embed/conv-assist-answer?sessionId=s1&genNo=2";
+
+	it("drops iframe_url from answer updates and keeps the answer reference", () => {
+		const [answer] = stripEmbeddedVisualizations([
+			{
+				is_thinking: false,
+				type: "answer",
+				answer_id: '{"session_id":"s1","gen_no":2}',
+				answer_title: "Headcount",
+				answer_data_source_id: "ds-1",
+				answer_query: "[headcount]",
+				iframe_url: embedUrl,
+			},
+		]);
+		expect(answer).not.toHaveProperty("iframe_url");
+		expect(answer).toMatchObject({
+			type: "answer",
+			answer_id: '{"session_id":"s1","gen_no":2}',
+			answer_title: "Headcount",
+		});
+	});
+
+	it("strips embed links and iframe tags from thinking and raw text", () => {
+		const [text, raw] = stripEmbeddedVisualizations([
+			{
+				is_thinking: true,
+				type: "text",
+				text: `See [the chart](${embedUrl}) or ${embedUrl} <iframe src="${embedUrl}"></iframe>![viz](${embedUrl})done`,
+			},
+			{ type: "text", content: `Raw ${embedUrl} [Open](https://x.io/a)` },
+		]);
+		expect((text as any).text).toBe("See the chart or  done");
+		expect((raw as any).content).toBe("Raw  [Open](https://x.io/a)");
+	});
+
+	it("leaves non-embed links untouched", () => {
+		const message = {
+			is_thinking: false,
+			type: "text" as const,
+			text: "Open [the Liveboard](https://test.thoughtspot.cloud/#/pinboard/abc)",
+		};
+		expect(stripEmbeddedVisualizations([message])).toEqual([message]);
 	});
 });

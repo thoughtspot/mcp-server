@@ -22,6 +22,10 @@ export type Props = {
 	apiRequestedVersion?: string;
 	authMode?: AuthMode;
 	enableRawSessionUpdates?: boolean;
+	// Undocumented URL flags (see index.ts): get_data on Spotter answers, and
+	// stripping embedded-visualization iframes/links from tool output.
+	enableSpotterAnswerData?: boolean;
+	suppressIframes?: boolean;
 };
 
 const DEFAULT_CLIENT_NAME = "Bearer Token client";
