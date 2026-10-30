@@ -1578,7 +1578,7 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			// forwarded on later /chat calls for cookie-only backend tools (FormulaGen).
 			const [resp, sessionCookie] = await Promise.all([
 				svc.createModelSession(connection_identifier, model_identifier),
-				svc.mintSessionCookie().catch((error) => {
+				svc.mintModelSessionCookie().catch((error) => {
 					console.error(
 						`Failed to mint session cookie for model session: ${(error as Error).message}`,
 					);

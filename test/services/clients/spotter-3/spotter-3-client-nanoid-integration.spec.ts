@@ -44,7 +44,7 @@ function parsedBodies(): any[] {
 	return fetchMock.mock.calls.map((call: any[]) => JSON.parse(call[1].body));
 }
 
-describe("streamAgentConversationMessage — nano ID integration", () => {
+describe("sendSpotter3MessageStreaming — nano ID integration", () => {
 	let client: any;
 
 	beforeEach(() => {
@@ -62,8 +62,8 @@ describe("streamAgentConversationMessage — nano ID integration", () => {
 	it("produces an id with exactly the configured length using the real nanoid library", async () => {
 		mockOkFetch();
 
-		await client.streamAgentConversationMessage({
-			conversation_identifier: "conv-1",
+		await client.sendSpotter3MessageStreaming({
+			conversationId: "conv-1",
 			message: "hello",
 		});
 
@@ -75,8 +75,8 @@ describe("streamAgentConversationMessage — nano ID integration", () => {
 	it("produces an id that only contains characters from the custom alphabet", async () => {
 		mockOkFetch();
 
-		await client.streamAgentConversationMessage({
-			conversation_identifier: "conv-1",
+		await client.sendSpotter3MessageStreaming({
+			conversationId: "conv-1",
 			message: "hello",
 		});
 
@@ -94,8 +94,8 @@ describe("streamAgentConversationMessage — nano ID integration", () => {
 
 		const callCount = 50;
 		for (let i = 0; i < callCount; i++) {
-			await client.streamAgentConversationMessage({
-				conversation_identifier: "conv-streaming",
+			await client.sendSpotter3MessageStreaming({
+				conversationId: "conv-streaming",
 				message: `message-${i}`,
 			});
 		}
@@ -113,8 +113,8 @@ describe("streamAgentConversationMessage — nano ID integration", () => {
 		const callCount = 20;
 		await Promise.all(
 			Array.from({ length: callCount }, (_, i) =>
-				client.streamAgentConversationMessage({
-					conversation_identifier: "conv-concurrent",
+				client.sendSpotter3MessageStreaming({
+					conversationId: "conv-concurrent",
 					message: `parallel-message-${i}`,
 				}),
 			),
@@ -133,8 +133,8 @@ describe("streamAgentConversationMessage — nano ID integration", () => {
 		const callCount = 10;
 		await Promise.all(
 			Array.from({ length: callCount }, (_, i) =>
-				client.streamAgentConversationMessage({
-					conversation_identifier: "conv-format",
+				client.sendSpotter3MessageStreaming({
+					conversationId: "conv-format",
 					message: `msg-${i}`,
 				}),
 			),
@@ -152,8 +152,8 @@ describe("streamAgentConversationMessage — nano ID integration", () => {
 		const conversationId = "realistic-conv-abc123";
 		const userMessage = "What is the total revenue for Q4?";
 
-		await client.streamAgentConversationMessage({
-			conversation_identifier: conversationId,
+		await client.sendSpotter3MessageStreaming({
+			conversationId,
 			message: userMessage,
 		});
 

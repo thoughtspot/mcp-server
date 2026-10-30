@@ -119,15 +119,13 @@ describe("ThoughtSpot Client", () => {
 			expect(client).toHaveProperty("exportUnsavedAnswerTML");
 			expect(client).toHaveProperty("getSessionInfo");
 			expect(client).toHaveProperty("getAnswerSession");
-			expect(client).toHaveProperty("createAgentConversationWithAutoMode");
-			expect(client).toHaveProperty("streamAgentConversationMessage");
+			expect(client).toHaveProperty("createSpotter3Conversation");
+			expect(client).toHaveProperty("sendSpotter3MessageStreaming");
 			expect(typeof client.exportUnsavedAnswerTML).toBe("function");
 			expect(typeof client.getSessionInfo).toBe("function");
 			expect(typeof client.getAnswerSession).toBe("function");
-			expect(typeof client.createAgentConversationWithAutoMode).toBe(
-				"function",
-			);
-			expect(typeof client.streamAgentConversationMessage).toBe("function");
+			expect(typeof client.createSpotter3Conversation).toBe("function");
+			expect(typeof client.sendSpotter3MessageStreaming).toBe("function");
 		});
 	});
 

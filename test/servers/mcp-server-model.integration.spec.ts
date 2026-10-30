@@ -180,7 +180,7 @@ describe("Spotter Model tools + real storage integration", () => {
 				transaction_id: "txn-1",
 				generation_no: "1",
 			}),
-			mintSessionCookie: vi.fn().mockResolvedValue("JSESSIONID=abc"),
+			mintModelSessionCookie: vi.fn().mockResolvedValue("JSESSIONID=abc"),
 			sendModelMessageStreaming: vi
 				.fn()
 				.mockResolvedValue(sseResponse(buildTurnChunks)),
@@ -273,7 +273,9 @@ describe("Spotter Model tools + real storage integration", () => {
 		});
 
 		it("still creates the session when the session cookie cannot be minted", async () => {
-			upstream.mintSessionCookie.mockRejectedValue(new Error("login refused"));
+			upstream.mintModelSessionCookie.mockRejectedValue(
+				new Error("login refused"),
+			);
 
 			const sessionId = await createSession();
 

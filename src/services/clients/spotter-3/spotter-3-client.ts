@@ -4,9 +4,9 @@ import { fetchApi } from "../../rest-utils";
 import { type ClientContext, ThoughtSpotApiError } from "../../types";
 
 /*
- * Using custom handler because we don't have support for Auto Mode through the public API yet
+ * Create a Spotter3 conversation
  */
-export async function createAgentConversationWithAutoMode(
+export async function createSpotter3Conversation(
 	ctx: ClientContext,
 	{
 		isSpotterDataSourceDiscoveryEnabled,
@@ -50,7 +50,7 @@ export async function createAgentConversationWithAutoMode(
 		const errorText = await response.text();
 		throw new ThoughtSpotApiError(
 			response.status,
-			"createAgentConversationWithAutoMode",
+			"createSpotter3Conversation",
 			errorText,
 		);
 	}
@@ -71,23 +71,20 @@ const generateNanoID = customAlphabet(
 );
 
 /*
- * Using custom handler for two reasons:
- * 1. The REST API SDK doesn't have streaming response support
- * 2. The public API itself is exhibiting higher latency than the private API for establishing the
- *    initial connection, prior to starting the streaming response
+ * Send a message to a Spotter3 conversation, with support for a streaming response
  */
-export async function streamAgentConversationMessage(
+export async function sendSpotter3MessageStreaming(
 	ctx: ClientContext,
 	{
-		conversation_identifier,
+		conversationId,
 		message,
 	}: {
-		conversation_identifier: string;
+		conversationId: string;
 		message: string;
 	},
 ): Promise<Response> {
 	// Encoding for safety, though for valid IDs it should not make a difference
-	const endpoint = `/conversation/v2/${encodeURIComponent(conversation_identifier)}/query`;
+	const endpoint = `/conversation/v2/${encodeURIComponent(conversationId)}/query`;
 	const response = await fetchApi(ctx, endpoint, {
 		accept: "text/event-stream",
 		json: {
