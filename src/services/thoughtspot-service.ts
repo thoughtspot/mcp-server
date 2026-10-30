@@ -320,7 +320,7 @@ export class ThoughtSpotService {
 			const response = await this.observeUpstreamCall(
 				UPSTREAM_OPERATION_NAMES.createAgentConversation,
 				() =>
-					this.client.createAgentConversationWithAutoMode({
+					this.client.createSpotter3Conversation({
 						isSpotterDataSourceDiscoveryEnabled,
 						isSpotterChatHistoryEnabled,
 						dataSourceId,
@@ -375,8 +375,8 @@ export class ThoughtSpotService {
 			const reader = await this.observeUpstreamCall(
 				UPSTREAM_OPERATION_NAMES.sendAgentConversationMessageStreaming,
 				async () => {
-					const response = await this.client.streamAgentConversationMessage({
-						conversation_identifier: conversationId,
+					const response = await this.client.sendSpotter3MessageStreaming({
+						conversationId,
 						message: finalMessage,
 					});
 					const reader = response.body?.getReader();
@@ -916,8 +916,8 @@ export class ThoughtSpotService {
 		});
 	}
 
-	async mintSessionCookie(): Promise<string | null> {
-		return this.client.mintSessionCookie();
+	async mintModelSessionCookie(): Promise<string | null> {
+		return this.client.mintModelSessionCookie();
 	}
 
 	async sendModelMessageStreaming(

@@ -37,7 +37,7 @@ describe("spotter-3-client", () => {
 		vi.restoreAllMocks();
 	});
 
-	describe("createAgentConversationWithAutoMode", () => {
+	describe("createSpotter3Conversation", () => {
 		let client: any;
 
 		beforeEach(() => {
@@ -52,7 +52,7 @@ describe("spotter-3-client", () => {
 				json: vi.fn().mockResolvedValue(mockConversation),
 			});
 
-			const result = await client.createAgentConversationWithAutoMode({
+			const result = await client.createSpotter3Conversation({
 				isSpotterDataSourceDiscoveryEnabled: true,
 				isSpotterChatHistoryEnabled: false,
 			});
@@ -90,7 +90,7 @@ describe("spotter-3-client", () => {
 				json: vi.fn().mockResolvedValue(mockConversation),
 			});
 
-			const result = await client.createAgentConversationWithAutoMode({
+			const result = await client.createSpotter3Conversation({
 				isSpotterDataSourceDiscoveryEnabled: true,
 				isSpotterChatHistoryEnabled: false,
 				dataSourceId,
@@ -115,7 +115,7 @@ describe("spotter-3-client", () => {
 				json: vi.fn().mockResolvedValue({ conversation_id: "conv-789" }),
 			});
 
-			await client.createAgentConversationWithAutoMode({
+			await client.createSpotter3Conversation({
 				isSpotterDataSourceDiscoveryEnabled: true,
 				isSpotterChatHistoryEnabled: false,
 			});
@@ -141,20 +141,20 @@ describe("spotter-3-client", () => {
 				text: vi.fn().mockResolvedValue("Unauthorized"),
 			});
 
-			await expect(
-				client.createAgentConversationWithAutoMode({}),
-			).rejects.toMatchObject({
-				status: 401,
-				message: "createAgentConversationWithAutoMode failed with status 401",
-			});
+			await expect(client.createSpotter3Conversation({})).rejects.toMatchObject(
+				{
+					status: 401,
+					message: "createSpotter3Conversation failed with status 401",
+				},
+			);
 		});
 
 		it("should handle network errors", async () => {
 			(fetch as any).mockRejectedValue(new Error("Network error"));
 
-			await expect(
-				client.createAgentConversationWithAutoMode({}),
-			).rejects.toThrow("Network error");
+			await expect(client.createSpotter3Conversation({})).rejects.toThrow(
+				"Network error",
+			);
 		});
 
 		it("should use correct headers", async () => {
@@ -163,7 +163,7 @@ describe("spotter-3-client", () => {
 				json: vi.fn().mockResolvedValue({ conversation_id: "conv-123" }),
 			});
 
-			await client.createAgentConversationWithAutoMode({});
+			await client.createSpotter3Conversation({});
 
 			const fetchCall = (fetch as any).mock.calls[0];
 			const headers = fetchCall[1].headers;
@@ -174,7 +174,7 @@ describe("spotter-3-client", () => {
 		});
 	});
 
-	describe("streamAgentConversationMessage", () => {
+	describe("sendSpotter3MessageStreaming", () => {
 		let client: any;
 
 		beforeEach(() => {
@@ -193,8 +193,8 @@ describe("spotter-3-client", () => {
 			mathObject.random = mockMathRandom;
 
 			try {
-				const result = await client.streamAgentConversationMessage({
-					conversation_identifier: "foo",
+				const result = await client.sendSpotter3MessageStreaming({
+					conversationId: "foo",
 					message: "bar",
 				});
 
@@ -235,8 +235,8 @@ describe("spotter-3-client", () => {
 			(fetch as any).mockRejectedValue(mockError);
 
 			await expect(
-				client.streamAgentConversationMessage({
-					conversation_identifier: "foo",
+				client.sendSpotter3MessageStreaming({
+					conversationId: "foo",
 					message: "bar",
 				}),
 			).rejects.toThrow("Network error");
@@ -253,8 +253,8 @@ describe("spotter-3-client", () => {
 			(fetch as any).mockResolvedValue(mockResponse);
 
 			await expect(
-				client.streamAgentConversationMessage({
-					conversation_identifier: "foo",
+				client.sendSpotter3MessageStreaming({
+					conversationId: "foo",
 					message: "bar",
 				}),
 			).rejects.toMatchObject({
@@ -272,8 +272,8 @@ describe("spotter-3-client", () => {
 			mathObject.random = vi.fn().mockReturnValue(0.123456789);
 
 			try {
-				await client.streamAgentConversationMessage({
-					conversation_identifier: "foo",
+				await client.sendSpotter3MessageStreaming({
+					conversationId: "foo",
 					message: "bar",
 				});
 
@@ -292,8 +292,8 @@ describe("spotter-3-client", () => {
 		it("should generate id with exactly 12 characters using custom alphabet", async () => {
 			(fetch as any).mockResolvedValue({ ok: true });
 
-			await client.streamAgentConversationMessage({
-				conversation_identifier: "conv-id",
+			await client.sendSpotter3MessageStreaming({
+				conversationId: "conv-id",
 				message: "test message",
 			});
 
@@ -304,8 +304,8 @@ describe("spotter-3-client", () => {
 		it("should generate id using only allowed custom alphabet characters", async () => {
 			(fetch as any).mockResolvedValue({ ok: true });
 
-			await client.streamAgentConversationMessage({
-				conversation_identifier: "conv-id",
+			await client.sendSpotter3MessageStreaming({
+				conversationId: "conv-id",
 				message: "test message",
 			});
 
@@ -317,12 +317,12 @@ describe("spotter-3-client", () => {
 		it("should generate unique ids across consecutive calls to avoid collisions", async () => {
 			(fetch as any).mockResolvedValue({ ok: true });
 
-			await client.streamAgentConversationMessage({
-				conversation_identifier: "conv-id",
+			await client.sendSpotter3MessageStreaming({
+				conversationId: "conv-id",
 				message: "first message",
 			});
-			await client.streamAgentConversationMessage({
-				conversation_identifier: "conv-id",
+			await client.sendSpotter3MessageStreaming({
+				conversationId: "conv-id",
 				message: "second message",
 			});
 

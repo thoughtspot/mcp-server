@@ -349,7 +349,7 @@ describe("spotter-model client", () => {
 		});
 	});
 
-	describe("mintSessionCookie", () => {
+	describe("mintModelSessionCookie", () => {
 		// Only .ok and .headers are touched, so a minimal stand-in keeps the cookie
 		// plumbing deterministic across runtimes.
 		const cookieResponse = (opts: {
@@ -377,7 +377,7 @@ describe("spotter-model client", () => {
 			);
 			const client = makeClient();
 
-			expect(await client.mintSessionCookie()).toBe(
+			expect(await client.mintModelSessionCookie()).toBe(
 				"JSESSIONID=abc; clientId=xyz",
 			);
 			expect(lastCall().url).toBe(
@@ -391,7 +391,7 @@ describe("spotter-model client", () => {
 			);
 			const client = makeClient();
 
-			expect(await client.mintSessionCookie()).toBe("JSESSIONID=only");
+			expect(await client.mintModelSessionCookie()).toBe("JSESSIONID=only");
 		});
 
 		it("returns null when login fails", async () => {
@@ -400,7 +400,7 @@ describe("spotter-model client", () => {
 			);
 			const client = makeClient();
 
-			expect(await client.mintSessionCookie()).toBeNull();
+			expect(await client.mintModelSessionCookie()).toBeNull();
 		});
 
 		it("returns null when no usable cookie comes back", async () => {
@@ -409,7 +409,7 @@ describe("spotter-model client", () => {
 			);
 			const client = makeClient();
 
-			expect(await client.mintSessionCookie()).toBeNull();
+			expect(await client.mintModelSessionCookie()).toBeNull();
 		});
 	});
 });

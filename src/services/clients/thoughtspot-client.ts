@@ -21,14 +21,18 @@ import { getData } from "./get-data/get-data-client";
 import { fetchOrgBearerToken, listOrgs } from "./orgs/orgs-client";
 import { searchObjects } from "./search-objects/search-objects-client";
 import {
-	createAgentConversationWithAutoMode,
-	streamAgentConversationMessage,
+	createSpotter3Conversation,
+	sendSpotter3MessageStreaming,
 } from "./spotter-3/spotter-3-client";
 import * as spotterModel from "./spotter-model/spotter-model-client";
 import {
 	createBachPinboardSession,
 	saveBachPinboard,
 } from "./spotter-viz/spotter-viz-client";
+import {
+	createSpotterXConversation,
+	sendSpotterXMessageStreaming,
+} from "./spotter-x/spotter-x-client";
 
 // Re-exported for existing importers; definitions live with the handlers.
 export type {
@@ -102,17 +106,28 @@ export class ThoughtSpotClient extends ThoughtSpotRestApi {
 		return getAnswerSession(this.ctx, params);
 	}
 
-	createAgentConversationWithAutoMode(
-		params: Params<typeof createAgentConversationWithAutoMode>,
+	createSpotter3Conversation(
+		params: Params<typeof createSpotter3Conversation>,
 	) {
-		return createAgentConversationWithAutoMode(this.ctx, params);
+		return createSpotter3Conversation(this.ctx, params);
 	}
 
-	// Named differently from the SDK's public-API sendAgentConversationMessageStreaming
-	streamAgentConversationMessage(
-		params: Params<typeof streamAgentConversationMessage>,
+	sendSpotter3MessageStreaming(
+		params: Params<typeof sendSpotter3MessageStreaming>,
 	) {
-		return streamAgentConversationMessage(this.ctx, params);
+		return sendSpotter3MessageStreaming(this.ctx, params);
+	}
+
+	createSpotterXConversation(
+		params: Params<typeof createSpotterXConversation>,
+	) {
+		return createSpotterXConversation(this.ctx, params);
+	}
+
+	sendSpotterXMessageStreaming(
+		params: Params<typeof sendSpotterXMessageStreaming>,
+	) {
+		return sendSpotterXMessageStreaming(this.ctx, params);
 	}
 
 	searchObjects(params: Params<typeof searchObjects>) {
@@ -139,9 +154,8 @@ export class ThoughtSpotClient extends ThoughtSpotRestApi {
 		return listOrgs(this.ctx);
 	}
 
-	// Spotter Model (Lumos) agentic model-creation handlers
-	mintSessionCookie() {
-		return spotterModel.mintSessionCookie(this.ctx);
+	mintModelSessionCookie() {
+		return spotterModel.mintModelSessionCookie(this.ctx);
 	}
 
 	createModelSession(params: Params<typeof spotterModel.createModelSession>) {

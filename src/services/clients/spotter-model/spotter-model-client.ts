@@ -63,7 +63,7 @@ function buildBachSession(
 // Mint a ThoughtSpot session cookie (JSESSIONID) from the bearer token. The formula-validation
 // backend requires a cookie session; a Bearer token alone hits a broken code path. session/login
 // with the bearer token returns Set-Cookie which we fold into a Cookie header string.
-export async function mintSessionCookie(
+export async function mintModelSessionCookie(
 	ctx: ClientContext,
 ): Promise<string | null> {
 	const response = await fetchApi(ctx, SESSION_LOGIN_ENDPOINT, { json: {} });

@@ -19,8 +19,8 @@ const mockClient = {
 	singleAnswer: vi.fn(),
 	exportAnswerReport: vi.fn(),
 	exportUnsavedAnswerTML: vi.fn(),
-	createAgentConversationWithAutoMode: vi.fn(),
-	streamAgentConversationMessage: vi.fn(),
+	createSpotter3Conversation: vi.fn(),
+	sendSpotter3MessageStreaming: vi.fn(),
 	importMetadataTML: vi.fn(),
 	searchMetadata: vi.fn(),
 	getSessionInfo: vi.fn(),
@@ -188,16 +188,14 @@ describe("thoughtspot-service", () => {
 				conversation_id: "conv-123",
 			};
 
-			mockClient.createAgentConversationWithAutoMode = vi
+			mockClient.createSpotter3Conversation = vi
 				.fn()
 				.mockResolvedValue(mockResponse);
 
 			const service = new ThoughtSpotService(mockClient);
 			const result = await service.createAgentConversation(false, false);
 
-			expect(
-				mockClient.createAgentConversationWithAutoMode,
-			).toHaveBeenCalledWith({
+			expect(mockClient.createSpotter3Conversation).toHaveBeenCalledWith({
 				isSpotterDataSourceDiscoveryEnabled: false,
 				isSpotterChatHistoryEnabled: false,
 				dataSourceId: undefined,
@@ -210,16 +208,14 @@ describe("thoughtspot-service", () => {
 				conversation_id: "conv-456",
 			};
 
-			mockClient.createAgentConversationWithAutoMode = vi
+			mockClient.createSpotter3Conversation = vi
 				.fn()
 				.mockResolvedValue(mockResponse);
 
 			const service = new ThoughtSpotService(mockClient);
 			await service.createAgentConversation(false, false, "worksheet-123");
 
-			expect(
-				mockClient.createAgentConversationWithAutoMode,
-			).toHaveBeenCalledWith({
+			expect(mockClient.createSpotter3Conversation).toHaveBeenCalledWith({
 				isSpotterDataSourceDiscoveryEnabled: false,
 				isSpotterChatHistoryEnabled: false,
 				dataSourceId: "worksheet-123",
@@ -228,9 +224,7 @@ describe("thoughtspot-service", () => {
 
 		it("should throw when agent conversation creation fails", async () => {
 			const error = new Error("Conversation API Error");
-			mockClient.createAgentConversationWithAutoMode = vi
-				.fn()
-				.mockRejectedValue(error);
+			mockClient.createSpotter3Conversation = vi.fn().mockRejectedValue(error);
 
 			const service = new ThoughtSpotService(mockClient);
 
@@ -274,7 +268,7 @@ describe("thoughtspot-service", () => {
 					.mockResolvedValueOnce({ done: true, value: undefined }),
 			};
 
-			mockClient.streamAgentConversationMessage = vi.fn().mockResolvedValue({
+			mockClient.sendSpotter3MessageStreaming = vi.fn().mockResolvedValue({
 				body: { getReader: vi.fn().mockReturnValue(reader) },
 			});
 
@@ -361,7 +355,7 @@ describe("thoughtspot-service", () => {
 				METRICS_SINK_MODE: "analytics_engine",
 				ANALYTICS: analyticsDataset,
 			});
-			mockClient.streamAgentConversationMessage = vi.fn().mockResolvedValue({
+			mockClient.sendSpotter3MessageStreaming = vi.fn().mockResolvedValue({
 				body: undefined,
 			});
 
@@ -409,7 +403,7 @@ describe("thoughtspot-service", () => {
 
 		it("should throw when sending the streaming message fails", async () => {
 			const error = new Error("Streaming API Error");
-			mockClient.streamAgentConversationMessage = vi
+			mockClient.sendSpotter3MessageStreaming = vi
 				.fn()
 				.mockRejectedValue(error);
 
@@ -443,7 +437,7 @@ describe("thoughtspot-service", () => {
 					.mockResolvedValueOnce({ done: true, value: undefined }),
 			};
 
-			mockClient.streamAgentConversationMessage = vi.fn().mockResolvedValue({
+			mockClient.sendSpotter3MessageStreaming = vi.fn().mockResolvedValue({
 				body: { getReader: vi.fn().mockReturnValue(reader) },
 			});
 
@@ -460,8 +454,8 @@ describe("thoughtspot-service", () => {
 				"User is in the EMEA region",
 			);
 
-			expect(mockClient.streamAgentConversationMessage).toHaveBeenCalledWith({
-				conversation_identifier: "conv-123",
+			expect(mockClient.sendSpotter3MessageStreaming).toHaveBeenCalledWith({
+				conversationId: "conv-123",
 				message:
 					"Show me revenue\n\nAdditional Context:\nUser is in the EMEA region",
 			});
@@ -486,7 +480,7 @@ describe("thoughtspot-service", () => {
 					.mockResolvedValueOnce({ done: true, value: undefined }),
 			};
 
-			mockClient.streamAgentConversationMessage = vi.fn().mockResolvedValue({
+			mockClient.sendSpotter3MessageStreaming = vi.fn().mockResolvedValue({
 				body: { getReader: vi.fn().mockReturnValue(reader) },
 			});
 
@@ -502,8 +496,8 @@ describe("thoughtspot-service", () => {
 				streamingMessageStorage,
 			);
 
-			expect(mockClient.streamAgentConversationMessage).toHaveBeenCalledWith({
-				conversation_identifier: "conv-123",
+			expect(mockClient.sendSpotter3MessageStreaming).toHaveBeenCalledWith({
+				conversationId: "conv-123",
 				message: "Show me revenue",
 			});
 
@@ -525,7 +519,7 @@ describe("thoughtspot-service", () => {
 					.mockResolvedValueOnce({ done: true, value: undefined }),
 			};
 
-			mockClient.streamAgentConversationMessage = vi.fn().mockResolvedValue({
+			mockClient.sendSpotter3MessageStreaming = vi.fn().mockResolvedValue({
 				body: { getReader: vi.fn().mockReturnValue(reader) },
 			});
 
@@ -578,7 +572,7 @@ describe("thoughtspot-service", () => {
 					.mockResolvedValueOnce({ done: true, value: undefined }),
 			};
 
-			mockClient.streamAgentConversationMessage = vi.fn().mockResolvedValue({
+			mockClient.sendSpotter3MessageStreaming = vi.fn().mockResolvedValue({
 				body: { getReader: vi.fn().mockReturnValue(reader) },
 			});
 
@@ -628,7 +622,7 @@ describe("thoughtspot-service", () => {
 					.mockResolvedValueOnce({ done: true, value: undefined }),
 			};
 
-			mockClient.streamAgentConversationMessage = vi.fn().mockResolvedValue({
+			mockClient.sendSpotter3MessageStreaming = vi.fn().mockResolvedValue({
 				body: { getReader: vi.fn().mockReturnValue(reader) },
 			});
 
@@ -682,7 +676,7 @@ describe("thoughtspot-service", () => {
 					.mockResolvedValueOnce({ done: true, value: undefined }),
 			};
 
-			mockClient.streamAgentConversationMessage = vi.fn().mockResolvedValue({
+			mockClient.sendSpotter3MessageStreaming = vi.fn().mockResolvedValue({
 				body: { getReader: vi.fn().mockReturnValue(reader) },
 			});
 
@@ -724,7 +718,7 @@ describe("thoughtspot-service", () => {
 					.mockResolvedValueOnce({ done: true, value: undefined }),
 			};
 
-			mockClient.streamAgentConversationMessage = vi.fn().mockResolvedValue({
+			mockClient.sendSpotter3MessageStreaming = vi.fn().mockResolvedValue({
 				body: { getReader: vi.fn().mockReturnValue(reader) },
 			});
 
