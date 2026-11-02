@@ -568,6 +568,31 @@ describe("MCP Server org tools", () => {
 			// getActiveToken must return the warm token, not the props token.
 			expect((server2 as any).getActiveToken()).toBe("refreshed-token");
 		});
+
+		it("sends the warm global token (not props token) to Aurora", async () => {
+			const tokenStore = new Map<string, any>();
+			const { server } = makeServer({
+				authMode: "oauth",
+				session: { orgsEnabled: false },
+				tokenStore,
+			});
+			await server.init();
+			const key = [...tokenStore.keys()][0];
+			tokenStore.set(key, {
+				...tokenStore.get(key),
+				globalToken: "refreshed-token",
+			});
+
+			const { server: server2 } = makeServer({
+				authMode: "oauth",
+				session: { orgsEnabled: false },
+				tokenStore,
+			});
+			await server2.init();
+			vi.spyOn(server2 as any, "getStorageService").mockResolvedValue({});
+			const spotterViz = await (server2 as any).getSpotterVizService();
+			expect(spotterViz.client.bearerToken).toBe("refreshed-token");
+		});
 	});
 
 	describe("list_orgs", () => {
@@ -979,6 +1004,13 @@ describe("MCP Server org tools", () => {
 			// getThoughtSpotService() sources token + org id from these two methods.
 			expect(server.getActiveToken()).toBe("org-101-token");
 			expect(server.getActiveOrgId()).toBe("101");
+		});
+
+		it("sends the org-scoped token to Aurora when an org is active", async () => {
+			const { server } = await serverInOrg();
+			vi.spyOn(server, "getStorageService").mockResolvedValue({});
+			const spotterViz = await server.getSpotterVizService();
+			expect(spotterViz.client.bearerToken).toBe("org-101-token");
 		});
 
 		// A2: fail-closed — org active but no token cached => throw, never global.

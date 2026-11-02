@@ -380,10 +380,10 @@ export abstract class BaseMCPServer extends Server {
 		return new SpotterVizService(
 			this.getThoughtSpotService(recorder),
 			await this.getStorageService(),
-			new SpotterVizClient(
-				this.ctx.props.instanceUrl,
-				this.ctx.props.accessToken,
-			),
+			// Aurora must get the same token as every other upstream call: the grant's
+			// accessToken is frozen at login and 401s once it expires (~24h), even
+			// while the kept-warm token is still valid.
+			new SpotterVizClient(this.ctx.props.instanceUrl, this.getActiveToken()),
 			recorder,
 		);
 	}
