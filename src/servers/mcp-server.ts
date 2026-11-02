@@ -14,6 +14,7 @@ import {
 import type { ToolMetricApiSurface } from "../metrics/runtime/tool-metrics";
 import { WithSpan } from "../metrics/tracing/tracing-utils";
 import { SPOTTER_ANSWER_TYPE } from "../services/clients/get-data/get-data-constants";
+import type { GetDataResult } from "../services/clients/get-data/get-data-types";
 import {
 	MODEL_POLL_INTERVAL_MS,
 	MODEL_POLL_ITERATIONS,
@@ -50,6 +51,7 @@ import {
 	findTaskDashboardMismatch,
 	invalidAnswerIdResult,
 	parseAnswerIds,
+	parseAnswerReloadIds,
 	resolveTaskDashboard,
 	runDashboardWork,
 } from "../spotterviz/dashboard-tools";
@@ -1482,12 +1484,12 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 	}
 
 	/**
-	 * get_data on unsaved Analytics Agent answers, behind the `enable-spotter-answer-data` URL flag.
-	 * `suppress-iframes` implies it: without iframes, get_data is the only way to visualize an answer.
+	 * get_data on unsaved Analytics Agent answers: on unless `enable-spotter-answer-data=false`.
+	 * `suppress-iframes` forces it on: without iframes, get_data is the only way to visualize an answer.
 	 */
 	private isSpotterAnswerDataEnabled(): boolean {
 		return (
-			!!this.ctx.props.enableSpotterAnswerData ||
+			this.ctx.props.enableSpotterAnswerData !== false ||
 			!!this.ctx.props.suppressIframes
 		);
 	}
@@ -1505,14 +1507,35 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			);
 		}
 
-		try {
-			const result = await this.getThoughtSpotService(
-				recorder,
-			).getSpotterAnswerData({
-				sessionIdentifier: answer.session_identifier,
-				generationNumber: answer.generation_number,
+		const service = this.getThoughtSpotService(recorder);
+		const fetchRows = (sessionIdentifier: string, generationNumber: number) =>
+			service.getSpotterAnswerData({
+				sessionIdentifier,
+				generationNumber,
 				maxRows,
 			});
+
+		try {
+			let result: GetDataResult;
+			try {
+				result = await fetchRows(
+					answer.session_identifier,
+					answer.generation_number,
+				);
+			} catch (error) {
+				// The answer's session ids expire after about 8 hours. Load it again
+				// through its conversation for fresh ids, unless auth was the problem.
+				const reload = parseAnswerReloadIds(answerId);
+				const status = this.apiErrorStatus(error);
+				if (!reload || status === 401 || status === 403) {
+					throw error;
+				}
+				const fresh = await service.reloadSpotterAnswer(reload);
+				result = await fetchRows(
+					fresh.sessionIdentifier,
+					fresh.generationNumber,
+				);
+			}
 			return this.createStructuredContentSuccessResponse(
 				result,
 				`Fetched data for Spotter answer ${answerId}`,
@@ -1525,7 +1548,7 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			const hint =
 				status === 403
 					? "You may not have permission to download this answer's data."
-					: "The answer may have expired; ask the Analytics Agent the question again and pass the new answer's `answer_id`.";
+					: "The answer's conversation may have expired; ask the Analytics Agent the question again and pass the new answer's `answer_id`.";
 			return this.createErrorResponse(
 				`Failed to fetch answer data: ${summarizeUpstreamError(error)}. ${hint}`,
 				"get_data (SPOTTER_ANSWER) failed",

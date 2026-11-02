@@ -648,7 +648,11 @@ describe("thoughtspot-service", () => {
 				{
 					is_thinking: false,
 					type: "answer",
-					answer_id: JSON.stringify({ session_id: "sess-abc", gen_no: 2 }),
+					answer_id: JSON.stringify({
+						session_id: "sess-abc",
+						gen_no: 2,
+						conversation_id: "conv-123",
+					}),
 					answer_title: "Revenue by Region",
 					answer_query: "revenue by region",
 					iframe_url:

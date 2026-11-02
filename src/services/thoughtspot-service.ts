@@ -924,6 +924,25 @@ export class ThoughtSpotService {
 	}
 
 	/**
+	 * Load an Analytics Agent answer again through its conversation, for fresh
+	 * session/generation ids once the original ones have expired. Re-runs the query.
+	 */
+	@WithSpan("reload-spotter-answer")
+	async reloadSpotterAnswer(params: {
+		conversationId: string;
+		messageId: string;
+	}): Promise<{ sessionIdentifier: string; generationNumber: number }> {
+		getActiveSpan()?.setAttributes({
+			conversation_id: params.conversationId,
+			message_id: params.messageId,
+		});
+		return this.observeUpstreamCall(
+			UPSTREAM_OPERATION_NAMES.loadAgentConversationAnswer,
+			() => this.client.loadSpotter3Answer(params),
+		);
+	}
+
+	/**
 	 * Validate connection to ThoughtSpot
 	 */
 	@WithSpan("validate-connection")

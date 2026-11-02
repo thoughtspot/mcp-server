@@ -91,6 +91,10 @@ describe("MCP Server", () => {
 			exportAnswerReport: vi.fn().mockResolvedValue({
 				text: vi.fn().mockResolvedValue("The total revenue is $1,000,000"),
 			}),
+			loadSpotter3Answer: vi.fn().mockResolvedValue({
+				sessionIdentifier: "session-fresh",
+				generationNumber: 5,
+			}),
 			exportUnsavedAnswerTML: vi.fn().mockResolvedValue({
 				answer: {
 					name: "Test Answer",
@@ -814,7 +818,8 @@ describe("MCP Server", () => {
 		const toolByName = (tools: any[], name: string) =>
 			tools.find((tool) => tool.name === name);
 
-		it("leaves get_data and get_session_updates unchanged when no flag is set", async () => {
+		it("leaves get_data and get_session_updates unchanged with enable-spotter-answer-data=false", async () => {
+			mockProps.enableSpotterAnswerData = false;
 			await server.init();
 			const { listTools } = connect(server);
 
@@ -830,8 +835,7 @@ describe("MCP Server", () => {
 			).toHaveProperty("iframe_url");
 		});
 
-		it("exposes SPOTTER_ANSWER on get_data, iframe-first, with enable-spotter-answer-data", async () => {
-			mockProps.enableSpotterAnswerData = true;
+		it("exposes SPOTTER_ANSWER on get_data, iframe-first, by default", async () => {
 			await server.init();
 			const { listTools } = connect(server);
 
@@ -867,6 +871,7 @@ describe("MCP Server", () => {
 		});
 
 		it("rejects SPOTTER_ANSWER when the flag is off", async () => {
+			mockProps.enableSpotterAnswerData = false;
 			await server.init();
 			const { callTool } = connect(server);
 
@@ -941,6 +946,104 @@ describe("MCP Server", () => {
 			expect((result.content as any[])[0].text).toMatch(
 				/session expired.*ask the Analytics Agent the question again/s,
 			);
+		});
+
+		describe("expired answers", () => {
+			const reloadableAnswerId = JSON.stringify({
+				session_id: "session-9",
+				gen_no: 3,
+				conversation_id: "conv-1",
+				message_id: "msg-1",
+			});
+
+			it("loads the answer again through its conversation and retries the export", async () => {
+				mockClient()
+					.exportAnswerReport.mockRejectedValueOnce(
+						new ThoughtSpotApiError(400, "exportAnswerReport"),
+					)
+					.mockResolvedValueOnce({
+						text: vi.fn().mockResolvedValue("Region,Revenue\nEast,100\n"),
+					});
+				await server.init();
+				const { callTool } = connect(server);
+
+				const result = await callTool("get_data", {
+					object_id: reloadableAnswerId,
+					object_type: "SPOTTER_ANSWER",
+				});
+
+				expect(result.isError).toBeUndefined();
+				expect(mockClient().loadSpotter3Answer).toHaveBeenCalledWith({
+					conversationId: "conv-1",
+					messageId: "msg-1",
+				});
+				expect(mockClient().exportAnswerReport).toHaveBeenLastCalledWith({
+					session_identifier: "session-fresh",
+					generation_number: 5,
+					file_format: "CSV",
+				});
+				expect(result.structuredContent).toMatchObject({
+					data: [
+						{ columns: ["Region", "Revenue"], data_rows: [["East", 100]] },
+					],
+				});
+			});
+
+			it("does not reload on a permission error", async () => {
+				mockClient().exportAnswerReport.mockRejectedValueOnce(
+					new ThoughtSpotApiError(403, "exportAnswerReport"),
+				);
+				await server.init();
+				const { callTool } = connect(server);
+
+				const result = await callTool("get_data", {
+					object_id: reloadableAnswerId,
+					object_type: "SPOTTER_ANSWER",
+				});
+
+				expect(result.isError).toBe(true);
+				expect(mockClient().loadSpotter3Answer).not.toHaveBeenCalled();
+			});
+
+			it("cannot reload an answer_id without conversation ids", async () => {
+				mockClient().exportAnswerReport.mockRejectedValueOnce(
+					new ThoughtSpotApiError(400, "exportAnswerReport"),
+				);
+				await server.init();
+				const { callTool } = connect(server);
+
+				const result = await callTool("get_data", {
+					object_id: answerId,
+					object_type: "SPOTTER_ANSWER",
+				});
+
+				expect(result.isError).toBe(true);
+				expect(mockClient().loadSpotter3Answer).not.toHaveBeenCalled();
+				expect((result.content as any[])[0].text).toMatch(
+					/ask the Analytics Agent the question again/,
+				);
+			});
+
+			it("asks to re-ask when the conversation itself is gone", async () => {
+				mockClient().exportAnswerReport.mockRejectedValueOnce(
+					new ThoughtSpotApiError(400, "exportAnswerReport"),
+				);
+				mockClient().loadSpotter3Answer.mockRejectedValueOnce(
+					new ThoughtSpotApiError(404, "loadAgentConversationAnswer"),
+				);
+				await server.init();
+				const { callTool } = connect(server);
+
+				const result = await callTool("get_data", {
+					object_id: reloadableAnswerId,
+					object_type: "SPOTTER_ANSWER",
+				});
+
+				expect(result.isError).toBe(true);
+				expect((result.content as any[])[0].text).toMatch(
+					/conversation may have expired.*ask the Analytics Agent the question again/s,
+				);
+			});
 		});
 
 		it("returns a permission hint when the export is forbidden", async () => {

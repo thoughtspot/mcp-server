@@ -11,8 +11,8 @@ export const GET_DATA_SUPPORTED_TYPES = [
 export type GetDataObjectType = (typeof GET_DATA_SUPPORTED_TYPES)[number];
 
 // An unsaved answer from the Analytics Agent (Spotter), addressed by the
-// `answer_id` that get_session_updates returns. Accepted only when the
-// `enable-spotter-answer-data` (or `suppress-iframes`) URL flag is on.
+// `answer_id` that get_session_updates returns. Accepted unless the
+// `enable-spotter-answer-data=false` URL flag turns it off.
 export const SPOTTER_ANSWER_TYPE = "SPOTTER_ANSWER";
 
 export const GET_DATA_WITH_SPOTTER_ANSWER_TYPES = [

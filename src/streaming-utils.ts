@@ -11,6 +11,21 @@ import {
 	SpotterResponseFormat,
 } from "./services/types";
 
+// `session_id` + `gen_no` name the answer for export and dashboards, but expire
+// (about 8 hours). `conversation_id` + `message_id` stay valid as long as the
+// conversation does, and let get_data load the answer again for fresh ids.
+function buildAnswerId(
+	conversationId: string,
+	item: { id?: string; metadata?: { session_id?: string; gen_no?: number } },
+): string {
+	return JSON.stringify({
+		session_id: item.metadata?.session_id,
+		gen_no: item.metadata?.gen_no,
+		conversation_id: conversationId,
+		message_id: item.id,
+	});
+}
+
 /*
  * Handles processing the event stream from a send agent conversation message response. Reads from
  * the stream, parses events into messages, and stores them in the streaming message storage. We
@@ -97,10 +112,7 @@ export const processSendAgentConversationMessageStreamingResponse = async (
 									nAnswerMessagesParsed++;
 									newMessages.push({
 										...item,
-										answer_id: JSON.stringify({
-											session_id: item.metadata?.session_id,
-											gen_no: item.metadata?.gen_no,
-										}),
+										answer_id: buildAnswerId(conversationId, item),
 									});
 								} else {
 									nTextMessagesParsed++;
@@ -160,10 +172,7 @@ export const processSendAgentConversationMessageStreamingResponse = async (
 								newMessages.push({
 									is_thinking: item.metadata?.type === "thinking",
 									type: "answer",
-									answer_id: JSON.stringify({
-										session_id: item.metadata?.session_id,
-										gen_no: item.metadata?.gen_no,
-									}),
+									answer_id: buildAnswerId(conversationId, item),
 									answer_title: item.metadata?.title,
 									answer_data_source_id: item.metadata?.worksheet_id,
 									answer_query: item.metadata?.sage_query,

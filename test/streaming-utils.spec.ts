@@ -369,7 +369,7 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 			sage_query: "show sales",
 			worksheet_id: "ws-123",
 		};
-		const line = `data: ${JSON.stringify([{ type: "answer", metadata }])}\n`;
+		const line = `data: ${JSON.stringify([{ id: "msg-1", type: "answer", metadata }])}\n`;
 		const reader = makeReader([line]);
 
 		await processSendAgentConversationMessageStreamingResponse(
@@ -385,7 +385,12 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 			{
 				is_thinking: false,
 				type: "answer",
-				answer_id: JSON.stringify({ session_id: "sess-1", gen_no: 42 }),
+				answer_id: JSON.stringify({
+					session_id: "sess-1",
+					gen_no: 42,
+					conversation_id: CONV_ID,
+					message_id: "msg-1",
+				}),
 				answer_title: "My Answer",
 				answer_data_source_id: "ws-123",
 				answer_query: "show sales",
@@ -421,7 +426,11 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 			{
 				is_thinking: true,
 				type: "answer",
-				answer_id: JSON.stringify({ session_id: "sess-2", gen_no: 1 }),
+				answer_id: JSON.stringify({
+					session_id: "sess-2",
+					gen_no: 1,
+					conversation_id: CONV_ID,
+				}),
 				answer_title: "Thinking Answer",
 				answer_query: "show revenue",
 				iframe_url: expectedIframeUrl,
@@ -943,7 +952,11 @@ describe("processSendAgentConversationMessageStreamingResponse — raw format", 
 		expect(messages).toEqual([
 			{
 				...item,
-				answer_id: JSON.stringify({ session_id: "sess-1", gen_no: 42 }),
+				answer_id: JSON.stringify({
+					session_id: "sess-1",
+					gen_no: 42,
+					conversation_id: CONV_ID,
+				}),
 			},
 		]);
 		expect(messages[0]).not.toHaveProperty("iframe_url");

@@ -246,9 +246,13 @@ describe("Spotter answer data and iframe suppression URL flags", () => {
 				"https://example.com/mcp?enable-spotter-answer-data=true&suppress-iframes=true",
 			),
 		).toMatchObject({ enableSpotterAnswerData: true, suppressIframes: true });
+		// Answer data is on by default; only an explicit `false` turns it off.
 		expect(buildProps("https://example.com/mcp")).toMatchObject({
-			enableSpotterAnswerData: false,
+			enableSpotterAnswerData: true,
 			suppressIframes: false,
 		});
+		expect(
+			buildProps("https://example.com/mcp?enable-spotter-answer-data=false"),
+		).toMatchObject({ enableSpotterAnswerData: false });
 	});
 });

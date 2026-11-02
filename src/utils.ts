@@ -22,8 +22,8 @@ export type Props = {
 	apiRequestedVersion?: string;
 	authMode?: AuthMode;
 	enableRawSessionUpdates?: boolean;
-	// Undocumented URL flags (see index.ts): get_data on Spotter answers, and
-	// stripping embedded-visualization iframes/links from tool output.
+	// URL flags (see index.ts): get_data on Spotter answers (on unless false),
+	// and the undocumented stripping of embedded-visualization iframes/links.
 	enableSpotterAnswerData?: boolean;
 	suppressIframes?: boolean;
 };
