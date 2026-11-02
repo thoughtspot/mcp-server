@@ -32,7 +32,7 @@ describe("csvToGetDataViz", () => {
 			columns: ["Region", "Revenue", "Label"],
 			data_rows: [
 				["East", 100, "$1"],
-				["West", "-2.5e3", null],
+				["West", -2500, null],
 				["North", 7, "x"],
 			],
 			total_row_count: 3,
@@ -80,18 +80,21 @@ describe("csvToGetDataViz", () => {
 		},
 	);
 
-	it("only coerces cells that round-trip exactly as numbers", () => {
+	it("coerces decimal and E-notation cells but keeps IDs and huge integers as text", () => {
 		const viz = csvToGetDataViz(
-			"v\n00123\n12345678901234567890\n1e3\n1.50\n-0\nInfinity\n42\n-3.25\n",
+			"v\n00123\n12345678901234567890\n1e3\n1.093225231E7\n1.50\n0.5\nInfinity\n+5\n.5\n42\n-3.25\n",
 			25,
 		);
 		expect(viz.data_rows).toEqual([
 			["00123"],
 			["12345678901234567890"],
-			["1e3"],
-			["1.50"],
-			["-0"],
+			[1000],
+			[10932252.31],
+			[1.5],
+			[0.5],
 			["Infinity"],
+			["+5"],
+			[".5"],
 			[42],
 			[-3.25],
 		]);

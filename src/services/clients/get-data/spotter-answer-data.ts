@@ -49,14 +49,25 @@ export function parseCsv(csv: string): string[][] {
 	return rows;
 }
 
+const DECIMAL_NUMBER = /^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:e[+-]?\d+)?$/i;
+
 function toCell(value: string): string | number | null {
 	if (value === "") {
 		return null;
 	}
-	// Only cells that round-trip exactly become numbers, so IDs with leading
-	// zeros, beyond-2^53 integers and other formatted text stay as written.
+	// Plain decimals and E-notation (the export writes large values as
+	// "1.093225231E7") become numbers; IDs with leading zeros, integers beyond
+	// 2^53 and other formatted text stay as written.
+	if (!DECIMAL_NUMBER.test(value)) {
+		return value;
+	}
 	const number = Number(value);
-	return Number.isFinite(number) && String(number) === value ? number : value;
+	if (!Number.isFinite(number)) {
+		return value;
+	}
+	return /^-?\d+$/.test(value) && !Number.isSafeInteger(number)
+		? value
+		: number;
 }
 
 // Clusters with data-extract watermarking prepend single-field lines (e.g.
