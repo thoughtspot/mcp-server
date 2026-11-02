@@ -28,12 +28,11 @@ describe("csvToGetDataViz", () => {
 	const csv = "Region,Revenue,Label\nEast,100,$1\nWest,-2.5e3,\nNorth,7,x\n";
 
 	it("maps the header to columns and coerces plain numbers and empty cells", () => {
-		expect(csvToGetDataViz(csv, 25, "Revenue by region")).toEqual({
-			viz_name: "Revenue by region",
+		expect(csvToGetDataViz(csv, 25)).toEqual({
 			columns: ["Region", "Revenue", "Label"],
 			data_rows: [
 				["East", 100, "$1"],
-				["West", -2500, null],
+				["West", "-2.5e3", null],
 				["North", 7, "x"],
 			],
 			total_row_count: 3,
@@ -65,6 +64,37 @@ describe("csvToGetDataViz", () => {
 			columns: ["Region"],
 			data_rows: [[null], ["East"]],
 		});
+	});
+
+	it.each([2, 3, 4])(
+		"keeps a single-column answer with an empty cell at row %i",
+		(blankRow) => {
+			const values = ["East", "West", "North", "South"];
+			values.splice(blankRow - 1, 0, "");
+			const csv = `${["Region", ...values].map((v) => `"${v}"`).join("\n")}\n`;
+			const viz = csvToGetDataViz(csv, 25);
+			expect(viz.columns).toEqual(["Region"]);
+			expect(viz.total_row_count).toBe(5);
+			expect(viz.data_rows[0]).toEqual(["East"]);
+			expect(viz.data_rows[blankRow - 1]).toEqual([null]);
+		},
+	);
+
+	it("only coerces cells that round-trip exactly as numbers", () => {
+		const viz = csvToGetDataViz(
+			"v\n00123\n12345678901234567890\n1e3\n1.50\n-0\nInfinity\n42\n-3.25\n",
+			25,
+		);
+		expect(viz.data_rows).toEqual([
+			["00123"],
+			["12345678901234567890"],
+			["1e3"],
+			["1.50"],
+			["-0"],
+			["Infinity"],
+			[42],
+			[-3.25],
+		]);
 	});
 
 	it("returns no columns or rows for an empty export", () => {

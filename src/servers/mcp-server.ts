@@ -1518,11 +1518,16 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 				`Fetched data for Spotter answer ${answerId}`,
 			);
 		} catch (error) {
-			if (this.apiErrorStatus(error) === 401) {
+			const status = this.apiErrorStatus(error);
+			if (status === 401) {
 				throw error;
 			}
+			const hint =
+				status === 403
+					? "You may not have permission to download this answer's data."
+					: "The answer may have expired; ask the Analytics Agent the question again and pass the new answer's `answer_id`.";
 			return this.createErrorResponse(
-				`Failed to fetch answer data: ${summarizeUpstreamError(error)}. The answer may have expired; ask the Analytics Agent the question again and pass the new answer's \`answer_id\`.`,
+				`Failed to fetch answer data: ${summarizeUpstreamError(error)}. ${hint}`,
 				"get_data (SPOTTER_ANSWER) failed",
 			);
 		}

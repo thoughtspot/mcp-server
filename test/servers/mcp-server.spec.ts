@@ -6,7 +6,10 @@ import { METRIC_NAMES } from "../../src/metrics/runtime/metric-types";
 import { MCPServer } from "../../src/servers/mcp-server";
 import * as thoughtspotClient from "../../src/services/clients/thoughtspot-client";
 import { ThoughtSpotService } from "../../src/services/thoughtspot-service";
-import { SpotterResponseFormat } from "../../src/services/types";
+import {
+	SpotterResponseFormat,
+	ThoughtSpotApiError,
+} from "../../src/services/types";
 import { makeRequest } from "./helpers";
 
 // Mock the MixpanelTracker
@@ -938,6 +941,25 @@ describe("MCP Server", () => {
 			expect((result.content as any[])[0].text).toMatch(
 				/session expired.*ask the Analytics Agent the question again/s,
 			);
+		});
+
+		it("returns a permission hint when the export is forbidden", async () => {
+			mockProps.enableSpotterAnswerData = true;
+			mockClient().exportAnswerReport.mockRejectedValueOnce(
+				new ThoughtSpotApiError(403, "exportAnswerReport"),
+			);
+			await server.init();
+			const { callTool } = connect(server);
+
+			const result = await callTool("get_data", {
+				object_id: answerId,
+				object_type: "SPOTTER_ANSWER",
+			});
+
+			expect(result.isError).toBe(true);
+			const text = (result.content as any[])[0].text;
+			expect(text).toMatch(/permission to download/);
+			expect(text).not.toMatch(/may have expired/);
 		});
 
 		it("strips iframe_url and embed links from session updates with suppress-iframes", async () => {

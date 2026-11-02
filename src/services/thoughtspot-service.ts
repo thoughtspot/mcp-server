@@ -894,12 +894,10 @@ export class ThoughtSpotService {
 	async getSpotterAnswerData({
 		sessionIdentifier,
 		generationNumber,
-		title,
 		maxRows = GET_DATA_DEFAULT_MAX_ROWS,
 	}: {
 		sessionIdentifier: string;
 		generationNumber: number;
-		title?: string;
 		maxRows?: number;
 	}): Promise<GetDataResult> {
 		const span = getActiveSpan();
@@ -920,7 +918,7 @@ export class ThoughtSpotService {
 			},
 		);
 
-		const viz = csvToGetDataViz(csv, maxRows, title);
+		const viz = csvToGetDataViz(csv, maxRows);
 		span?.setAttribute("total_row_count", viz.total_row_count ?? 0);
 		return { data: [viz] };
 	}
