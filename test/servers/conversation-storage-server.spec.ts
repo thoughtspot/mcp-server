@@ -1,9 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ConversationStorageServerSQLite } from "../../src/servers/conversation-storage-server";
-import type {
-	Message,
-	StreamingMessagesState,
-} from "../../src/thoughtspot/types";
+import type { Message, StreamingMessagesState } from "../../src/services/types";
 
 // ---------------------------------------------------------------------------
 // Helpers

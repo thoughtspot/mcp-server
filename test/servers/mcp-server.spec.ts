@@ -4,9 +4,9 @@ import { MixpanelTracker } from "../../src/metrics/mixpanel/mixpanel";
 import { ANALYTICS_ENGINE_SCHEMA_VERSION } from "../../src/metrics/runtime/analytics-engine-sink";
 import { METRIC_NAMES } from "../../src/metrics/runtime/metric-types";
 import { MCPServer } from "../../src/servers/mcp-server";
-import * as thoughtspotClient from "../../src/thoughtspot/thoughtspot-client";
-import { ThoughtSpotService } from "../../src/thoughtspot/thoughtspot-service";
-import { SpotterResponseFormat } from "../../src/thoughtspot/types";
+import * as thoughtspotClient from "../../src/services/clients/thoughtspot-client";
+import { ThoughtSpotService } from "../../src/services/thoughtspot-service";
+import { SpotterResponseFormat } from "../../src/services/types";
 import { makeRequest } from "./helpers";
 
 // Mock the MixpanelTracker
@@ -1781,7 +1781,7 @@ describe("MCP Server", () => {
 					currentOrgId: "test-org",
 					privileges: ["DATADOWNLOADING"],
 				}),
-				createAgentConversationWithAutoMode: vi.fn().mockResolvedValue({
+				createSpotter3Conversation: vi.fn().mockResolvedValue({
 					conversation_id: "conv-abc-123",
 				}),
 				instanceUrl: "https://test.thoughtspot.cloud",
@@ -1825,8 +1825,7 @@ describe("MCP Server", () => {
 					currentOrgId: "test-org",
 					privileges: ["DATADOWNLOADING"],
 				}),
-				createAgentConversationWithAutoMode:
-					mockCreateAgentConversationWithAutoMode,
+				createSpotter3Conversation: mockCreateAgentConversationWithAutoMode,
 				instanceUrl: "https://test.thoughtspot.cloud",
 			} as any);
 
@@ -1875,7 +1874,7 @@ describe("MCP Server", () => {
 				});
 				vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
 					getSessionInfo,
-					createAgentConversationWithAutoMode: createConversation,
+					createSpotter3Conversation: createConversation,
 					instanceUrl: "https://test.thoughtspot.cloud",
 				} as any);
 				return { createConversation, getSessionInfo };
@@ -1955,7 +1954,7 @@ describe("MCP Server", () => {
 					currentOrgId: "test-org",
 					privileges: ["DATADOWNLOADING"],
 				}),
-				createAgentConversationWithAutoMode: vi
+				createSpotter3Conversation: vi
 					.fn()
 					.mockRejectedValue(new Error("Failed to create conversation")),
 				instanceUrl: "https://test.thoughtspot.cloud",
@@ -1992,12 +1991,10 @@ describe("MCP Server", () => {
 					currentOrgId: "test-org",
 					privileges: ["DATADOWNLOADING"],
 				}),
-				createAgentConversationWithAutoMode: vi
+				createSpotter3Conversation: vi
 					.fn()
 					.mockRejectedValue(
-						new Error(
-							"createAgentConversationWithAutoMode failed with status 401",
-						),
+						new Error("createSpotter3Conversation failed with status 401"),
 					),
 				instanceUrl: "https://test.thoughtspot.cloud",
 			} as any);

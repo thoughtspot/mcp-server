@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { BachSession } from "../../src/services/types";
 import { SpotterVizClient } from "../../src/spotterviz/spotterviz-client";
 import type {
 	AuroraSessionContext,
 	AuroraSessionInitResult,
 } from "../../src/spotterviz/types";
-import type { BachSession } from "../../src/thoughtspot/types";
 
 const INSTANCE_URL = "https://test.thoughtspot.com";
 const BEARER = "test-bearer-token";

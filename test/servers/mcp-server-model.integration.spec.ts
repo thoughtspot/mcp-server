@@ -12,9 +12,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NOOP_METRICS_RECORDER } from "../../src/metrics/runtime/metrics-recorder";
 import { ConversationStorageServerSQLite } from "../../src/servers/conversation-storage-server";
 import { MCPServer } from "../../src/servers/mcp-server";
+import type { ModelSessionState } from "../../src/services/clients/spotter-model/spotter-model-types";
+import * as thoughtspotClient from "../../src/services/clients/thoughtspot-client";
 import { StorageServiceClient } from "../../src/storage-service/storage-service";
-import type { ModelSessionState } from "../../src/thoughtspot/spotter-model/spotter-model-types";
-import * as thoughtspotClient from "../../src/thoughtspot/thoughtspot-client";
 import { makeRequest } from "./helpers";
 
 // ---------------------------------------------------------------------------
@@ -180,7 +180,7 @@ describe("Spotter Model tools + real storage integration", () => {
 				transaction_id: "txn-1",
 				generation_no: "1",
 			}),
-			mintSessionCookie: vi.fn().mockResolvedValue("JSESSIONID=abc"),
+			mintModelSessionCookie: vi.fn().mockResolvedValue("JSESSIONID=abc"),
 			sendModelMessageStreaming: vi
 				.fn()
 				.mockResolvedValue(sseResponse(buildTurnChunks)),
@@ -273,7 +273,9 @@ describe("Spotter Model tools + real storage integration", () => {
 		});
 
 		it("still creates the session when the session cookie cannot be minted", async () => {
-			upstream.mintSessionCookie.mockRejectedValue(new Error("login refused"));
+			upstream.mintModelSessionCookie.mockRejectedValue(
+				new Error("login refused"),
+			);
 
 			const sessionId = await createSession();
 

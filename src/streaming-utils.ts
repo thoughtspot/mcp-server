@@ -9,7 +9,7 @@ import {
 	type Message,
 	type RawMessage,
 	SpotterResponseFormat,
-} from "./thoughtspot/types";
+} from "./services/types";
 
 /*
  * Handles processing the event stream from a send agent conversation message response. Reads from

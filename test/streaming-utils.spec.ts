@@ -27,11 +27,11 @@ import {
 	type MetricsRecorder,
 	NOOP_METRICS_RECORDER,
 } from "../src/metrics/runtime/metrics-recorder";
+import { SpotterResponseFormat } from "../src/services/types";
 import {
 	processSendAgentConversationMessageStreamingResponse,
 	stripEmbeddedVisualizations,
 } from "../src/streaming-utils";
-import { SpotterResponseFormat } from "../src/thoughtspot/types";
 import { makeReader } from "./servers/helpers";
 
 // Mock storage

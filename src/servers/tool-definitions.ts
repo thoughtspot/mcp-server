@@ -2,7 +2,7 @@ import { z } from "zod";
 import {
 	GET_DATA_SUPPORTED_TYPES,
 	GET_DATA_WITH_SPOTTER_ANSWER_TYPES,
-} from "../thoughtspot/get-data/get-data-constants";
+} from "../services/clients/get-data/get-data-constants";
 
 export const PingSchema = z.object({});
 

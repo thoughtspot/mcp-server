@@ -1,7 +1,7 @@
 import {
 	fetchOrgToken,
 	refreshGlobalToken,
-} from "../thoughtspot/token-endpoints";
+} from "../services/clients/thoughtspot-token-client";
 
 const ACTIVE_ORG_KEY = "active-org-id";
 const ORG_TOKEN_KEY = "active-org-token";

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MixpanelTracker } from "../../../src/metrics/mixpanel/mixpanel";
-import type { SessionInfo } from "../../../src/thoughtspot/types";
+import type { SessionInfo } from "../../../src/services/types";
 
 describe("Mixpanel Integration Tests", () => {
 	const mockSessionInfo: SessionInfo = {

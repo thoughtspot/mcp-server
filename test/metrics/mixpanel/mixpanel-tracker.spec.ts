@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MixpanelTracker } from "../../../src/metrics/mixpanel/mixpanel";
 import { MixpanelClient } from "../../../src/metrics/mixpanel/mixpanel-client";
-import type { SessionInfo } from "../../../src/thoughtspot/types";
+import type { SessionInfo } from "../../../src/services/types";
 
 // Mock the MixpanelClient
 vi.mock("../../../src/metrics/mixpanel/mixpanel-client");

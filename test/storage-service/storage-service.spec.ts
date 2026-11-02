@@ -1,10 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { Message, StreamingMessagesState } from "../../src/services/types";
 import { STORAGE_CALL_TIMEOUT_MS } from "../../src/spotterviz/timeouts";
 import { StorageServiceClient } from "../../src/storage-service/storage-service";
-import type {
-	Message,
-	StreamingMessagesState,
-} from "../../src/thoughtspot/types";
 
 // ---------------------------------------------------------------------------
 // Helpers

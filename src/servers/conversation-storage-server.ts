@@ -3,7 +3,7 @@ import type {
 	Message,
 	RawMessage,
 	StreamingMessagesState,
-} from "../thoughtspot/types";
+} from "../services/types";
 
 const DEFAULT_TTL_MS = 30 * 60 * 1000; // 30 minutes
 const STORAGE_BATCH_SIZE = 127; // Cloudflare DO bulk get/put limit is 128, we use 127 to be safe

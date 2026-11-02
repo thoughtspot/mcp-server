@@ -5,12 +5,12 @@ import {
 	propagation,
 	trace,
 } from "@opentelemetry/api";
-import { STORAGE_CALL_TIMEOUT_MS, withTimeout } from "../spotterviz/timeouts";
 import type {
 	Message,
 	RawMessage,
 	StreamingMessagesState,
-} from "../thoughtspot/types";
+} from "../services/types";
+import { STORAGE_CALL_TIMEOUT_MS, withTimeout } from "../spotterviz/timeouts";
 
 /**
  * Client for the ConversationStorageServer Durable Object.

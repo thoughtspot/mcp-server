@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { TrackEvent, type Tracker } from "../../src/metrics";
 import { MixpanelTracker } from "../../src/metrics/mixpanel/mixpanel";
 import { MCPServer } from "../../src/servers/mcp-server";
-import * as thoughtspotClient from "../../src/thoughtspot/thoughtspot-client";
+import * as thoughtspotClient from "../../src/services/clients/thoughtspot-client";
 
 // Mock the MixpanelTracker
 vi.mock("../../src/metrics/mixpanel/mixpanel", () => ({

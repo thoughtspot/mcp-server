@@ -1,4 +1,4 @@
-import type { SessionInfo } from "../../thoughtspot/types";
+import type { SessionInfo } from "../../services/types";
 import type { Tracker } from "../index";
 import { MixpanelClient } from "./mixpanel-client";
 
