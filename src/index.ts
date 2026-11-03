@@ -135,8 +135,6 @@ const hooks: AuthHooks<Props> = {
 		const enableRawSessionUpdates =
 			url.searchParams.get("enable-raw-session-updates") === "true";
 		props.enableRawSessionUpdates = enableRawSessionUpdates;
-		props.enableSpotterAnswerData =
-			url.searchParams.get("enable-spotter-answer-data") !== "false";
 		props.suppressIframes = url.searchParams.get("suppress-iframes") === "true";
 
 		return props;
@@ -180,8 +178,6 @@ const oauthFetchHandler = createOAuthHandler<Props>({
 			// OAuth-authenticated flow; enables the OAuth-only org tools.
 			authMode: "oauth",
 			enableRawSessionUpdates,
-			enableSpotterAnswerData:
-				url.searchParams.get("enable-spotter-answer-data") !== "false",
 			suppressIframes: url.searchParams.get("suppress-iframes") === "true",
 		};
 	},

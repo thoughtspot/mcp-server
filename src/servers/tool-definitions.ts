@@ -1235,23 +1235,18 @@ const GET_DATA_SPOTTER_ANSWER_SUPPRESSED_IFRAMES_DESCRIPTION =
 	"It can also fetch the rows behind an answer from the Analytics Agent: pass the answer's `answer_id` from `get_session_updates` verbatim as `object_id`, with `object_type` `SPOTTER_ANSWER` (`visualization_ids` is ignored). Answers from the Analytics Agent come with no visualization of their own, so whenever a chart or table would help the user understand an answer, or the user asks to chart, reshape, combine, or build a dashboard from results, call this and build the visual from the returned rows.";
 
 /**
- * Apply the Spotter answer-data and undocumented iframe URL flags to the resolved tool list:
- * - `spotterAnswerData` (on by default): get_data accepts `SPOTTER_ANSWER`, and `answer_id` points at it.
- * - `suppressIframes`: as above, plus get_session_updates drops `iframe_url`, and get_data is
- *   described as the way to visualize an answer.
+ * Add Spotter answer data to the resolved tool list: get_data accepts `SPOTTER_ANSWER`, and
+ * `answer_id` points at it. With the undocumented `suppressIframes` URL flag, get_session_updates
+ * also drops `iframe_url`, and get_data is described as the way to visualize an answer.
  * The raw get_session_updates variant is left alone: its updates are unstructured.
  */
 export function applyUrlFlagToolOverrides(
 	tools: any[],
 	flags: {
-		spotterAnswerData: boolean;
 		suppressIframes: boolean;
 		rawSessionUpdates: boolean;
 	},
 ): any[] {
-	if (!flags.spotterAnswerData && !flags.suppressIframes) {
-		return tools;
-	}
 	return tools.map((tool) => {
 		if (tool.name === ToolName.GetData) {
 			return {

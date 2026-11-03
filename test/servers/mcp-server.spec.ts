@@ -818,23 +818,6 @@ describe("MCP Server", () => {
 		const toolByName = (tools: any[], name: string) =>
 			tools.find((tool) => tool.name === name);
 
-		it("leaves get_data and get_session_updates unchanged with enable-spotter-answer-data=false", async () => {
-			mockProps.enableSpotterAnswerData = false;
-			await server.init();
-			const { listTools } = connect(server);
-
-			const { tools } = await listTools();
-			const getData = toolByName(tools, "get_data");
-			expect(getData.inputSchema.properties.object_type.enum).not.toContain(
-				"SPOTTER_ANSWER",
-			);
-			expect(getData.description).not.toMatch(/SPOTTER_ANSWER/);
-			expect(
-				toolByName(tools, "get_session_updates").outputSchema.properties
-					.session_updates.items.properties,
-			).toHaveProperty("iframe_url");
-		});
-
 		it("exposes SPOTTER_ANSWER on get_data, iframe-first, by default", async () => {
 			await server.init();
 			const { listTools } = connect(server);
@@ -870,22 +853,7 @@ describe("MCP Server", () => {
 			);
 		});
 
-		it("rejects SPOTTER_ANSWER when the flag is off", async () => {
-			mockProps.enableSpotterAnswerData = false;
-			await server.init();
-			const { callTool } = connect(server);
-
-			const result = await callTool("get_data", {
-				object_id: answerId,
-				object_type: "SPOTTER_ANSWER",
-			});
-
-			expect(result.isError).toBe(true);
-			expect(mockClient().exportAnswerReport).not.toHaveBeenCalled();
-		});
-
 		it("fetches a Spotter answer's rows through the CSV export", async () => {
-			mockProps.enableSpotterAnswerData = true;
 			mockClient().exportAnswerReport.mockResolvedValueOnce({
 				text: vi.fn().mockResolvedValue("Region,Revenue\nEast,100\nWest,50\n"),
 			});
@@ -930,7 +898,6 @@ describe("MCP Server", () => {
 		});
 
 		it("returns a re-ask hint when the export fails", async () => {
-			mockProps.enableSpotterAnswerData = true;
 			mockClient().exportAnswerReport.mockRejectedValueOnce(
 				new Error("session expired"),
 			);
@@ -1047,7 +1014,6 @@ describe("MCP Server", () => {
 		});
 
 		it("returns a permission hint when the export is forbidden", async () => {
-			mockProps.enableSpotterAnswerData = true;
 			mockClient().exportAnswerReport.mockRejectedValueOnce(
 				new ThoughtSpotApiError(403, "exportAnswerReport"),
 			);

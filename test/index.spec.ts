@@ -240,19 +240,19 @@ describe("Spotter answer data and iframe suppression URL flags", () => {
 					baseProps,
 				),
 		],
-	])("reads both flags from the query string (%s)", (_flow, buildProps) => {
-		expect(
-			buildProps(
-				"https://example.com/mcp?enable-spotter-answer-data=true&suppress-iframes=true",
-			),
-		).toMatchObject({ enableSpotterAnswerData: true, suppressIframes: true });
-		// Answer data is on by default; only an explicit `false` turns it off.
-		expect(buildProps("https://example.com/mcp")).toMatchObject({
-			enableSpotterAnswerData: true,
-			suppressIframes: false,
-		});
-		expect(
-			buildProps("https://example.com/mcp?enable-spotter-answer-data=false"),
-		).toMatchObject({ enableSpotterAnswerData: false });
-	});
+	])(
+		"reads suppress-iframes from the query string (%s)",
+		(_flow, buildProps) => {
+			expect(
+				buildProps("https://example.com/mcp?suppress-iframes=true"),
+			).toMatchObject({ suppressIframes: true });
+			expect(buildProps("https://example.com/mcp")).toMatchObject({
+				suppressIframes: false,
+			});
+			// The retired answer-data flag no longer reaches props.
+			expect(
+				buildProps("https://example.com/mcp?enable-spotter-answer-data=false"),
+			).not.toHaveProperty("enableSpotterAnswerData");
+		},
+	);
 });

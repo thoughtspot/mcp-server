@@ -50,13 +50,12 @@ Hostnames that aren't listed behave as before. If the value is not valid JSON, t
 
 ## URL flags
 
-Add these query parameters to the MCP endpoint URL (`/mcp`, `/token/mcp` and so on), for example `https://agent.thoughtspot.app/mcp?enable-spotter-answer-data=false`.
+Add these query parameters to the MCP endpoint URL (`/mcp`, `/token/mcp` and so on), for example `https://agent.thoughtspot.app/mcp?api-version=beta`.
 
 | Flag | Default | Effect |
 | --- | --- | --- |
 | `api-version` | `latest` | Picks the toolset version: `latest`, `beta`, or a date (`YYYY-MM-DD`), which selects the newest version released on or before that date. `/mcp-<version>` and `/token/mcp-<version>` do the same for clients that can't send a query string. |
 | `enable-raw-session-updates` | `false` | `true` returns the Analytics Agent's updates from `get_session_updates` unprocessed. |
-| `enable-spotter-answer-data` | `true` | `false` stops `get_data` from fetching the rows behind an Analytics Agent answer. |
 
 ### Analytics Agent answer data
 

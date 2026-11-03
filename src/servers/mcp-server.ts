@@ -456,10 +456,7 @@ export class MCPServer extends BaseMCPServer {
 			"api_version_requested",
 			this.ctx.props.apiVersion ?? "(not passed)",
 		);
-		span?.setAttributes({
-			enable_spotter_answer_data: this.isSpotterAnswerDataEnabled(),
-			suppress_iframes: !!this.ctx.props.suppressIframes,
-		});
+		span?.setAttribute("suppress_iframes", !!this.ctx.props.suppressIframes);
 
 		// Resolve the API version to get the appropriate tool configuration
 		let versionConfig: VersionConfig;
@@ -491,7 +488,6 @@ export class MCPServer extends BaseMCPServer {
 		}
 
 		tools = applyUrlFlagToolOverrides(tools, {
-			spotterAnswerData: this.isSpotterAnswerDataEnabled(),
 			suppressIframes: !!this.ctx.props.suppressIframes,
 			rawSessionUpdates: !!this.ctx.props.enableRawSessionUpdates,
 		});
@@ -1483,17 +1479,6 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		);
 	}
 
-	/**
-	 * get_data on unsaved Analytics Agent answers: on unless `enable-spotter-answer-data=false`.
-	 * `suppress-iframes` forces it on: without iframes, get_data is the only way to visualize an answer.
-	 */
-	private isSpotterAnswerDataEnabled(): boolean {
-		return (
-			this.ctx.props.enableSpotterAnswerData !== false ||
-			!!this.ctx.props.suppressIframes
-		);
-	}
-
 	private async callGetSpotterAnswerData(
 		answerId: string,
 		maxRows: number | undefined,
@@ -1572,18 +1557,11 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			);
 		}
 
-		// Parse with the wider schema so SPOTTER_ANSWER narrows below; it is only
-		// accepted when the URL flag is on.
+		// Parse with the wider schema so SPOTTER_ANSWER narrows below.
 		const { object_id, object_type, visualization_ids, max_rows } =
 			GetDataWithSpotterAnswerInputSchema.parse(request.params.arguments);
 
 		if (object_type === SPOTTER_ANSWER_TYPE) {
-			if (!this.isSpotterAnswerDataEnabled()) {
-				return this.createErrorResponse(
-					"object_type must be one of ANSWER, LIVEBOARD, or LIVEBOARD_VIZ.",
-					"get_data: SPOTTER_ANSWER without the URL flag",
-				);
-			}
 			return this.callGetSpotterAnswerData(object_id, max_rows, recorder);
 		}
 
