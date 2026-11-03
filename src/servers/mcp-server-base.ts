@@ -119,7 +119,9 @@ export abstract class BaseMCPServer extends Server {
 			);
 			return true;
 		}
-		return this.sessionInfo.isSpotterDataSourceDiscoveryEnabled === true;
+		return (
+			this.sessionInfo.configInfo?.enableSpotterDataSourceDiscovery === true
+		);
 	}
 
 	/**
@@ -130,7 +132,7 @@ export abstract class BaseMCPServer extends Server {
 			console.warn("Session info not available when checking orgs flag");
 			return true;
 		}
-		return this.sessionInfo.orgsEnabled === true;
+		return this.sessionInfo.configInfo?.orgsConfiguration?.enabled === true;
 	}
 
 	/**
@@ -143,7 +145,18 @@ export abstract class BaseMCPServer extends Server {
 			);
 			return true;
 		}
-		return this.sessionInfo.isSpotterChatHistoryEnabled === true;
+		return this.sessionInfo.configInfo?.showSpotterPastConversations === true;
+	}
+
+	/**
+	 * Whether SpotterX is enabled
+	 */
+	protected isSpotterXEnabled(): boolean {
+		if (!this.sessionInfo) {
+			console.warn("Session info not available when checking SpotterX flag");
+			return false;
+		}
+		return this.sessionInfo.configInfo?.isSpotterXEnabled === true;
 	}
 
 	/**
@@ -164,25 +177,6 @@ export abstract class BaseMCPServer extends Server {
 		return privileges.some((privilege) =>
 			DATA_MODELING_PRIVILEGES.includes(String(privilege)),
 		);
-	}
-
-	/**
-	 * Fallback: refetch session info if it's still null (preInit normally loads the
-	 * token so the init-time fetch succeeds, but if that failed too — e.g. a
-	 * transient error — repair on demand here). Called by callers that read
-	 * session-info-gated state. No-op once populated; best-effort, so a failure
-	 * keeps the gates fail-closed.
-	 */
-	protected async ensureSessionInfo(): Promise<void> {
-		if (this.sessionInfo) {
-			return;
-		}
-		if (!this.sessionInfoPromise) {
-			this.sessionInfoPromise = this.initializeService().finally(() => {
-				this.sessionInfoPromise = undefined;
-			});
-		}
-		await this.sessionInfoPromise;
 	}
 
 	/**
@@ -435,9 +429,8 @@ export abstract class BaseMCPServer extends Server {
 			return undefined;
 		}
 
-		const tenantId = this.sessionInfo.clusterId
-			? String(this.sessionInfo.clusterId)
-			: undefined;
+		const clusterId = this.sessionInfo.configInfo?.selfClusterId;
+		const tenantId = clusterId ? String(clusterId) : undefined;
 		const userId = this.sessionInfo.userGUID
 			? String(this.sessionInfo.userGUID)
 			: undefined;
@@ -528,6 +521,25 @@ export abstract class BaseMCPServer extends Server {
 		} catch (error) {
 			console.error("Error initializing session info:", error);
 		}
+	}
+
+	/**
+	 * Fallback: refetch session info if it's still null (preInit normally loads the
+	 * token so the init-time fetch succeeds, but if that failed too — e.g. a
+	 * transient error — repair on demand here). Called by callers that read
+	 * session-info-gated state. No-op once populated; best-effort, so a failure
+	 * keeps the gates fail-closed.
+	 */
+	protected async ensureSessionInfo(): Promise<void> {
+		if (this.sessionInfo) {
+			return;
+		}
+		if (!this.sessionInfoPromise) {
+			this.sessionInfoPromise = this.initializeService().finally(() => {
+				this.sessionInfoPromise = undefined;
+			});
+		}
+		await this.sessionInfoPromise;
 	}
 
 	// Refetch session info in place (e.g. after an org switch) so privilege-gated

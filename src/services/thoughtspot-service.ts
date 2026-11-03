@@ -770,36 +770,17 @@ export class ThoughtSpotService {
 	async getSessionInfo(): Promise<SessionInfo> {
 		const span = getActiveSpan();
 
-		const info = (await this.observeUpstreamCall(
+		const info = await this.observeUpstreamCall(
 			UPSTREAM_OPERATION_NAMES.getSessionInfo,
 			() => this.client.getSessionInfo(),
-		)) as any;
-		const devMixpanelToken = info.configInfo.mixpanelConfig.devSdkKey;
-		const prodMixpanelToken = info.configInfo.mixpanelConfig.prodSdkKey;
-		const mixpanelToken = info.configInfo.mixpanelConfig.production
-			? prodMixpanelToken
-			: devMixpanelToken;
+		);
 
 		span?.setAttribute("user_guid", info.userGUID);
 		span?.setAttribute("user_name", info.userName);
-		span?.setAttribute("cluster_name", info.configInfo.selfClusterName);
+		span?.setAttribute("cluster_name", info.configInfo?.selfClusterName);
 		span?.setAttribute("release_version", info.releaseVersion);
 
-		return {
-			mixpanelToken,
-			userGUID: info.userGUID,
-			userName: info.userName,
-			clusterName: info.configInfo.selfClusterName,
-			clusterId: info.configInfo.selfClusterId,
-			releaseVersion: info.releaseVersion,
-			currentOrgId: info.currentOrgId,
-			privileges: info.privileges,
-			isSpotterDataSourceDiscoveryEnabled:
-				info.configInfo?.enableSpotterDataSourceDiscovery,
-			orgsEnabled: info.configInfo?.orgsConfiguration?.enabled,
-			isSpotterChatHistoryEnabled:
-				info.configInfo?.showSpotterPastConversations,
-		};
+		return info;
 	}
 
 	/**

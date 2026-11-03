@@ -8,14 +8,20 @@ vi.mock("../../../src/metrics/mixpanel/mixpanel-client");
 
 describe("MixpanelTracker", () => {
 	const mockSessionInfo: SessionInfo = {
-		mixpanelToken: "test-mixpanel-token",
-		clusterName: "test-cluster",
-		clusterId: "cluster-123",
 		userGUID: "user-123",
 		userName: "testuser",
 		releaseVersion: "8.0.0",
 		currentOrgId: "org-123",
 		privileges: ["READ", "WRITE"],
+		configInfo: {
+			selfClusterName: "test-cluster",
+			selfClusterId: "cluster-123",
+			mixpanelConfig: {
+				production: true,
+				prodSdkKey: "test-mixpanel-token",
+				devSdkKey: "dev-sdk-key",
+			},
+		},
 	};
 
 	const mockClient = {
@@ -58,16 +64,26 @@ describe("MixpanelTracker", () => {
 
 			expect(tracker).toBeInstanceOf(MixpanelTracker);
 			expect(MixpanelClient).toHaveBeenCalledWith(
-				mockSessionInfo.mixpanelToken,
+				mockSessionInfo.configInfo.mixpanelConfig.prodSdkKey,
 			);
 		});
 
-		it("should initialize MixpanelClient with correct token", () => {
+		it("should initialize MixpanelClient with the prod or dev token per mixpanelConfig.production", () => {
 			tracker = new MixpanelTracker(mockSessionInfo, mockClient);
+			expect(MixpanelClient).toHaveBeenLastCalledWith("test-mixpanel-token");
 
-			expect(MixpanelClient).toHaveBeenCalledWith(
-				mockSessionInfo.mixpanelToken,
-			);
+			const devSessionInfo: SessionInfo = {
+				...mockSessionInfo,
+				configInfo: {
+					...mockSessionInfo.configInfo,
+					mixpanelConfig: {
+						...mockSessionInfo.configInfo.mixpanelConfig,
+						production: false,
+					},
+				},
+			};
+			tracker = new MixpanelTracker(devSessionInfo, mockClient);
+			expect(MixpanelClient).toHaveBeenLastCalledWith("dev-sdk-key");
 		});
 
 		it("should call identify with userGUID", () => {
@@ -82,8 +98,8 @@ describe("MixpanelTracker", () => {
 			tracker = new MixpanelTracker(mockSessionInfo, mockClient);
 
 			expect(mockMixpanelClient.register).toHaveBeenCalledWith({
-				clusterId: mockSessionInfo.clusterId,
-				clusterName: mockSessionInfo.clusterName,
+				clusterId: mockSessionInfo.configInfo.selfClusterId,
+				clusterName: mockSessionInfo.configInfo.selfClusterName,
 				releaseVersion: mockSessionInfo.releaseVersion,
 				clientName: mockClient.clientName,
 				clientId: mockClient.clientId,
@@ -95,8 +111,8 @@ describe("MixpanelTracker", () => {
 			tracker = new MixpanelTracker(mockSessionInfo, {});
 
 			expect(mockMixpanelClient.register).toHaveBeenCalledWith({
-				clusterId: mockSessionInfo.clusterId,
-				clusterName: mockSessionInfo.clusterName,
+				clusterId: mockSessionInfo.configInfo.selfClusterId,
+				clusterName: mockSessionInfo.configInfo.selfClusterName,
 				releaseVersion: mockSessionInfo.releaseVersion,
 				clientName: undefined,
 				clientId: undefined,
@@ -108,8 +124,8 @@ describe("MixpanelTracker", () => {
 			tracker = new MixpanelTracker(mockSessionInfo);
 
 			expect(mockMixpanelClient.register).toHaveBeenCalledWith({
-				clusterId: mockSessionInfo.clusterId,
-				clusterName: mockSessionInfo.clusterName,
+				clusterId: mockSessionInfo.configInfo.selfClusterId,
+				clusterName: mockSessionInfo.configInfo.selfClusterName,
 				releaseVersion: mockSessionInfo.releaseVersion,
 				clientName: undefined,
 				clientId: undefined,
@@ -122,8 +138,8 @@ describe("MixpanelTracker", () => {
 			tracker = new MixpanelTracker(mockSessionInfo, partialClient);
 
 			expect(mockMixpanelClient.register).toHaveBeenCalledWith({
-				clusterId: mockSessionInfo.clusterId,
-				clusterName: mockSessionInfo.clusterName,
+				clusterId: mockSessionInfo.configInfo.selfClusterId,
+				clusterName: mockSessionInfo.configInfo.selfClusterName,
 				releaseVersion: mockSessionInfo.releaseVersion,
 				clientName: "partial-client",
 				clientId: undefined,
@@ -135,8 +151,8 @@ describe("MixpanelTracker", () => {
 			tracker = new MixpanelTracker(mockSessionInfo, null as any);
 
 			expect(mockMixpanelClient.register).toHaveBeenCalledWith({
-				clusterId: mockSessionInfo.clusterId,
-				clusterName: mockSessionInfo.clusterName,
+				clusterId: mockSessionInfo.configInfo.selfClusterId,
+				clusterName: mockSessionInfo.configInfo.selfClusterName,
 				releaseVersion: mockSessionInfo.releaseVersion,
 				clientName: undefined,
 				clientId: undefined,

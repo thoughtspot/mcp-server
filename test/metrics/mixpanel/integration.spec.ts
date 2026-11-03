@@ -4,14 +4,20 @@ import type { SessionInfo } from "../../../src/services/types";
 
 describe("Mixpanel Integration Tests", () => {
 	const mockSessionInfo: SessionInfo = {
-		mixpanelToken: "test-mixpanel-token",
-		clusterName: "test-cluster",
-		clusterId: "cluster-123",
 		userGUID: "user-123",
 		userName: "testuser",
 		releaseVersion: "8.0.0",
 		currentOrgId: "org-123",
 		privileges: ["READ", "WRITE"],
+		configInfo: {
+			selfClusterName: "test-cluster",
+			selfClusterId: "cluster-123",
+			mixpanelConfig: {
+				production: true,
+				prodSdkKey: "test-mixpanel-token",
+				devSdkKey: "dev-sdk-key",
+			},
+		},
 	};
 
 	const mockClient = {
@@ -74,15 +80,15 @@ describe("Mixpanel Integration Tests", () => {
 			expect(body[0]).toEqual({
 				event: eventName,
 				properties: {
-					clusterId: mockSessionInfo.clusterId,
-					clusterName: mockSessionInfo.clusterName,
+					clusterId: mockSessionInfo.configInfo.selfClusterId,
+					clusterName: mockSessionInfo.configInfo.selfClusterName,
 					releaseVersion: mockSessionInfo.releaseVersion,
 					clientName: mockClient.clientName,
 					clientId: mockClient.clientId,
 					registrationDate: mockClient.registrationDate,
 					action: "click",
 					page: "home",
-					token: mockSessionInfo.mixpanelToken,
+					token: mockSessionInfo.configInfo.mixpanelConfig.prodSdkKey,
 					distinct_id: mockSessionInfo.userGUID,
 					time: expect.any(Number),
 				},
@@ -188,16 +194,22 @@ describe("Mixpanel Integration Tests", () => {
 			const properties = body[0].properties;
 
 			// Check all required properties are present
-			expect(properties).toHaveProperty("token", mockSessionInfo.mixpanelToken);
+			expect(properties).toHaveProperty(
+				"token",
+				mockSessionInfo.configInfo.mixpanelConfig.prodSdkKey,
+			);
 			expect(properties).toHaveProperty(
 				"distinct_id",
 				mockSessionInfo.userGUID,
 			);
 			expect(properties).toHaveProperty("time");
-			expect(properties).toHaveProperty("clusterId", mockSessionInfo.clusterId);
+			expect(properties).toHaveProperty(
+				"clusterId",
+				mockSessionInfo.configInfo.selfClusterId,
+			);
 			expect(properties).toHaveProperty(
 				"clusterName",
-				mockSessionInfo.clusterName,
+				mockSessionInfo.configInfo.selfClusterName,
 			);
 			expect(properties).toHaveProperty(
 				"releaseVersion",
@@ -242,10 +254,10 @@ describe("Mixpanel Integration Tests", () => {
 
 			expect(properties).toMatchObject({
 				...props,
-				token: mockSessionInfo.mixpanelToken,
+				token: mockSessionInfo.configInfo.mixpanelConfig.prodSdkKey,
 				distinct_id: mockSessionInfo.userGUID,
-				clusterId: mockSessionInfo.clusterId,
-				clusterName: mockSessionInfo.clusterName,
+				clusterId: mockSessionInfo.configInfo.selfClusterId,
+				clusterName: mockSessionInfo.configInfo.selfClusterName,
 				releaseVersion: mockSessionInfo.releaseVersion,
 				clientName: mockClient.clientName,
 				clientId: mockClient.clientId,
@@ -257,14 +269,20 @@ describe("Mixpanel Integration Tests", () => {
 	describe("constructor variations", () => {
 		it("should work with minimal session info", async () => {
 			const minimalSessionInfo: SessionInfo = {
-				mixpanelToken: "minimal-token",
-				clusterName: "minimal-cluster",
-				clusterId: "minimal-cluster-id",
 				userGUID: "minimal-user",
 				userName: "minimal-user",
 				releaseVersion: "1.0.0",
 				currentOrgId: "minimal-org",
 				privileges: [],
+				configInfo: {
+					selfClusterName: "minimal-cluster",
+					selfClusterId: "minimal-cluster-id",
+					mixpanelConfig: {
+						production: true,
+						prodSdkKey: "minimal-token",
+						devSdkKey: "dev-sdk-key",
+					},
+				},
 			};
 
 			tracker = new MixpanelTracker(minimalSessionInfo);
@@ -285,10 +303,16 @@ describe("Mixpanel Integration Tests", () => {
 			const properties = body[0].properties;
 
 			// Check that the properties contain the expected values
-			expect(properties.token).toBe(minimalSessionInfo.mixpanelToken);
+			expect(properties.token).toBe(
+				minimalSessionInfo.configInfo.mixpanelConfig.prodSdkKey,
+			);
 			expect(properties.distinct_id).toBe(minimalSessionInfo.userGUID);
-			expect(properties.clusterId).toBe(minimalSessionInfo.clusterId);
-			expect(properties.clusterName).toBe(minimalSessionInfo.clusterName);
+			expect(properties.clusterId).toBe(
+				minimalSessionInfo.configInfo.selfClusterId,
+			);
+			expect(properties.clusterName).toBe(
+				minimalSessionInfo.configInfo.selfClusterName,
+			);
 			expect(properties.releaseVersion).toBe(minimalSessionInfo.releaseVersion);
 			expect(properties.action).toBe("click");
 

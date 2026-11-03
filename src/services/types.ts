@@ -45,18 +45,31 @@ export interface Org {
 	description?: string;
 }
 
+/**
+ * Session info as returned by /prism/preauth/info (the `info` object). Only the fields we read
+ * are typed; the rest of the response is still present on the object
+ */
 export interface SessionInfo {
-	mixpanelToken: string;
 	userGUID: string;
 	userName: string;
-	clusterName: string;
-	clusterId: string;
 	releaseVersion: string;
 	currentOrgId: string;
 	privileges: any;
-	isSpotterDataSourceDiscoveryEnabled?: boolean;
-	orgsEnabled?: boolean;
-	isSpotterChatHistoryEnabled?: boolean;
+	configInfo: {
+		selfClusterName: string;
+		selfClusterId: string;
+		mixpanelConfig: {
+			production: boolean;
+			devSdkKey: string;
+			prodSdkKey: string;
+		};
+		enableSpotterDataSourceDiscovery?: boolean;
+		orgsConfiguration?: {
+			enabled?: boolean;
+		};
+		showSpotterPastConversations?: boolean;
+		isSpotterXEnabled?: boolean;
+	};
 }
 
 export enum SpotterResponseFormat {

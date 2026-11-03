@@ -181,17 +181,24 @@ describe("MCP Server", () => {
 		it("should track initialization event", async () => {
 			await server.init();
 			expect(MixpanelTracker).toHaveBeenCalledWith(
-				{
-					clusterId: "test-cluster-123",
-					clusterName: "test-cluster",
+				// The raw session info response, passed through unmodified
+				expect.objectContaining({
 					releaseVersion: "10.13.0.cl-110",
 					userGUID: "test-user-123",
-					mixpanelToken: "test-dev-token",
 					userName: "test-user",
 					currentOrgId: "test-org",
 					privileges: ["DATADOWNLOADING", "DATAMANAGEMENT"],
-					isSpotterDataSourceDiscoveryEnabled: true,
-				},
+					configInfo: {
+						mixpanelConfig: {
+							devSdkKey: "test-dev-token",
+							prodSdkKey: "test-prod-token",
+							production: false,
+						},
+						selfClusterName: "test-cluster",
+						selfClusterId: "test-cluster-123",
+						enableSpotterDataSourceDiscovery: true,
+					},
+				}),
 				{
 					clientId: "test-client-id",
 					clientName: "test-client",
