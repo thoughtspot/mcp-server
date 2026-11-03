@@ -1307,7 +1307,7 @@ describe("thoughtspot-service", () => {
 	});
 
 	describe("getSessionInfo", () => {
-		it("should return session info with production mixpanel token", async () => {
+		it("should return the raw session info response as-is", async () => {
 			const mockResponse = {
 				configInfo: {
 					mixpanelConfig: {
@@ -1317,12 +1317,15 @@ describe("thoughtspot-service", () => {
 					},
 					selfClusterName: "test-cluster",
 					selfClusterId: "cluster-123",
+					isSpotterXEnabled: true,
+					someUntypedConfig: "kept",
 				},
 				userGUID: "user-123",
 				userName: "testuser",
 				releaseVersion: "8.0.0",
 				currentOrgId: "org-123",
 				privileges: ["READ", "WRITE"],
+				someUntypedField: { nested: true },
 			};
 
 			(mockClient as any).getSessionInfo = vi
@@ -1332,44 +1335,7 @@ describe("thoughtspot-service", () => {
 			const result = await getSessionInfo(mockClient);
 
 			expect((mockClient as any).getSessionInfo).toHaveBeenCalled();
-
-			expect(result).toEqual({
-				mixpanelToken: "prod-key",
-				userGUID: "user-123",
-				userName: "testuser",
-				clusterName: "test-cluster",
-				clusterId: "cluster-123",
-				releaseVersion: "8.0.0",
-				currentOrgId: "org-123",
-				privileges: ["READ", "WRITE"],
-			});
-		});
-
-		it("should return session info with development mixpanel token", async () => {
-			const mockResponse = {
-				configInfo: {
-					mixpanelConfig: {
-						production: false,
-						devSdkKey: "dev-key",
-						prodSdkKey: "prod-key",
-					},
-					selfClusterName: "test-cluster",
-					selfClusterId: "cluster-123",
-				},
-				userGUID: "user-123",
-				userName: "testuser",
-				releaseVersion: "8.0.0",
-				currentOrgId: "org-123",
-				privileges: ["READ"],
-			};
-
-			(mockClient as any).getSessionInfo = vi
-				.fn()
-				.mockResolvedValue(mockResponse);
-
-			const result = await getSessionInfo(mockClient);
-
-			expect(result.mixpanelToken).toBe("dev-key");
+			expect(result).toEqual(mockResponse);
 		});
 
 		it("should handle API errors", async () => {

@@ -7,11 +7,16 @@ export class MixpanelTracker implements Tracker {
 
 	constructor(sessionInfo: SessionInfo, client: any = {}) {
 		client = client || {};
-		this.mixpanel = new MixpanelClient(sessionInfo.mixpanelToken);
+		const { mixpanelConfig, selfClusterId, selfClusterName } =
+			sessionInfo.configInfo;
+		const mixpanelToken = mixpanelConfig.production
+			? mixpanelConfig.prodSdkKey
+			: mixpanelConfig.devSdkKey;
+		this.mixpanel = new MixpanelClient(mixpanelToken);
 		this.mixpanel.identify(sessionInfo.userGUID);
 		this.mixpanel.register({
-			clusterId: sessionInfo.clusterId,
-			clusterName: sessionInfo.clusterName,
+			clusterId: selfClusterId,
+			clusterName: selfClusterName,
 			releaseVersion: sessionInfo.releaseVersion,
 			clientName: client.clientName,
 			clientId: client.clientId,

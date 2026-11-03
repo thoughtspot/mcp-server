@@ -82,6 +82,10 @@ class TestMCPServer extends MCPServer {
 		return this.isOrgsEnabled();
 	}
 
+	public testIsSpotterXEnabled() {
+		return this.isSpotterXEnabled();
+	}
+
 	public setSessionInfo(info: any) {
 		this.sessionInfo = info;
 	}
@@ -594,15 +598,43 @@ describe("MCP Server Base", () => {
 		});
 
 		it("returns true when orgsEnabled is true", () => {
-			server.setSessionInfo({ orgsEnabled: true });
+			server.setSessionInfo({
+				configInfo: { orgsConfiguration: { enabled: true } },
+			});
 			expect(server.testIsOrgsEnabled()).toBe(true);
 		});
 
 		it("returns false when orgsEnabled is false or absent", () => {
-			server.setSessionInfo({ orgsEnabled: false });
+			server.setSessionInfo({
+				configInfo: { orgsConfiguration: { enabled: false } },
+			});
 			expect(server.testIsOrgsEnabled()).toBe(false);
 			server.setSessionInfo({});
 			expect(server.testIsOrgsEnabled()).toBe(false);
+		});
+	});
+
+	describe("isSpotterXEnabled", () => {
+		it("returns false when session info is not initialized", () => {
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+			expect(server.testIsSpotterXEnabled()).toBe(false);
+			expect(warnSpy).toHaveBeenCalledWith(
+				"Session info not available when checking SpotterX flag",
+			);
+		});
+
+		it("returns true when configInfo.isSpotterXEnabled is true", () => {
+			server.setSessionInfo({ configInfo: { isSpotterXEnabled: true } });
+			expect(server.testIsSpotterXEnabled()).toBe(true);
+		});
+
+		it("returns false when configInfo.isSpotterXEnabled is false or absent", () => {
+			server.setSessionInfo({ configInfo: { isSpotterXEnabled: false } });
+			expect(server.testIsSpotterXEnabled()).toBe(false);
+			server.setSessionInfo({ configInfo: {} });
+			expect(server.testIsSpotterXEnabled()).toBe(false);
+			server.setSessionInfo({});
+			expect(server.testIsSpotterXEnabled()).toBe(false);
 		});
 	});
 
