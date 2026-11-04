@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+	SpotterAnswerCsvError,
 	csvToGetDataViz,
 	parseCsv,
 } from "../../../../src/services/clients/get-data/spotter-answer-data";
@@ -27,13 +28,13 @@ describe("parseCsv", () => {
 describe("csvToGetDataViz", () => {
 	const csv = "Region,Revenue,Label\nEast,100,$1\nWest,-2.5e3,\nNorth,7,x\n";
 
-	it("maps the header to columns and coerces plain numbers and empty cells", () => {
+	it("maps the header to columns and keeps cells as strings", () => {
 		expect(csvToGetDataViz(csv, 25)).toEqual({
 			columns: ["Region", "Revenue", "Label"],
 			data_rows: [
-				["East", 100, "$1"],
-				["West", -2500, null],
-				["North", 7, "x"],
+				["East", "100", "$1"],
+				["West", "-2.5e3", ""],
+				["North", "7", "x"],
 			],
 			total_row_count: 3,
 		});
@@ -52,8 +53,8 @@ describe("csvToGetDataViz", () => {
 		expect(csvToGetDataViz(watermarked, 25)).toMatchObject({
 			columns: ["Store Region", "Sales (fx)"],
 			data_rows: [
-				["East", 11109350],
-				["West", 26279683],
+				["East", "11109350"],
+				["West", "26279683"],
 			],
 			total_row_count: 2,
 		});
@@ -62,7 +63,7 @@ describe("csvToGetDataViz", () => {
 	it("keeps a single-column answer whose first cell is empty", () => {
 		expect(csvToGetDataViz('"Region"\n""\n"East"\n', 25)).toMatchObject({
 			columns: ["Region"],
-			data_rows: [[null], ["East"]],
+			data_rows: [[""], ["East"]],
 		});
 	});
 
@@ -76,35 +77,11 @@ describe("csvToGetDataViz", () => {
 			expect(viz.columns).toEqual(["Region"]);
 			expect(viz.total_row_count).toBe(5);
 			expect(viz.data_rows[0]).toEqual(["East"]);
-			expect(viz.data_rows[blankRow - 1]).toEqual([null]);
+			expect(viz.data_rows[blankRow - 1]).toEqual([""]);
 		},
 	);
 
-	it("coerces decimal and E-notation cells but keeps IDs and huge integers as text", () => {
-		const viz = csvToGetDataViz(
-			"v\n00123\n12345678901234567890\n1e3\n1.093225231E7\n1.50\n0.5\nInfinity\n+5\n.5\n42\n-3.25\n",
-			25,
-		);
-		expect(viz.data_rows).toEqual([
-			["00123"],
-			["12345678901234567890"],
-			[1000],
-			[10932252.31],
-			[1.5],
-			[0.5],
-			["Infinity"],
-			["+5"],
-			[".5"],
-			[42],
-			[-3.25],
-		]);
-	});
-
-	it("returns no columns or rows for an empty export", () => {
-		expect(csvToGetDataViz("", 25)).toMatchObject({
-			columns: [],
-			data_rows: [],
-			total_row_count: 0,
-		});
+	it("rejects an export with no header row", () => {
+		expect(() => csvToGetDataViz("", 25)).toThrow(SpotterAnswerCsvError);
 	});
 });

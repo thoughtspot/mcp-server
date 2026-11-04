@@ -49,27 +49,6 @@ export function parseCsv(csv: string): string[][] {
 	return rows;
 }
 
-const DECIMAL_NUMBER = /^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:e[+-]?\d+)?$/i;
-
-function toCell(value: string): string | number | null {
-	if (value === "") {
-		return null;
-	}
-	// Plain decimals and E-notation (the export writes large values as
-	// "1.093225231E7") become numbers; IDs with leading zeros, integers beyond
-	// 2^53 and other formatted text stay as written.
-	if (!DECIMAL_NUMBER.test(value)) {
-		return value;
-	}
-	const number = Number(value);
-	if (!Number.isFinite(number)) {
-		return value;
-	}
-	return /^-?\d+$/.test(value) && !Number.isSafeInteger(number)
-		? value
-		: number;
-}
-
 // Clusters with data-extract watermarking prepend single-field lines (e.g.
 // "Data extract produced by <user> on <date>") and a blank line before the
 // header. Look for that blank line near the top.
@@ -93,12 +72,27 @@ function stripWatermark(rows: string[][]): string[][] {
 	return rows.slice(blank + 1);
 }
 
-// First CSV row (after any watermark) is the header; the rest are capped at `maxRows`.
+// The answer's CSV export could not be read as a table.
+export class SpotterAnswerCsvError extends Error {
+	constructor(cause: unknown) {
+		super(
+			`Could not parse the answer's CSV export: ${cause instanceof Error ? cause.message : String(cause)}`,
+			{ cause },
+		);
+		this.name = "SpotterAnswerCsvError";
+	}
+}
+
+// First CSV row (after any watermark) is the header; the rest are capped at
+// `maxRows`. Cells stay as the strings the export wrote.
 export function csvToGetDataViz(csv: string, maxRows: number): GetDataViz {
-	const [columns = [], ...rows] = stripWatermark(parseCsv(csv));
+	const [columns, ...rows] = stripWatermark(parseCsv(csv));
+	if (!columns?.length) {
+		throw new SpotterAnswerCsvError("the export has no header row");
+	}
 	return {
 		columns,
-		data_rows: rows.slice(0, maxRows).map((row) => row.map(toCell)),
+		data_rows: rows.slice(0, maxRows),
 		// The export returns the whole answer, so this is the full count.
 		total_row_count: rows.length,
 	};

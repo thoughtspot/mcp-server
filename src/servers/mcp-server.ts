@@ -15,6 +15,7 @@ import type { ToolMetricApiSurface } from "../metrics/runtime/tool-metrics";
 import { WithSpan } from "../metrics/tracing/tracing-utils";
 import { SPOTTER_ANSWER_TYPE } from "../services/clients/get-data/get-data-constants";
 import type { GetDataResult } from "../services/clients/get-data/get-data-types";
+import { SpotterAnswerCsvError } from "../services/clients/get-data/spotter-answer-data";
 import {
 	MODEL_POLL_INTERVAL_MS,
 	MODEL_POLL_ITERATIONS,
@@ -57,7 +58,6 @@ import {
 } from "../spotterviz/dashboard-tools";
 import { UPSTREAM_CALL_TIMEOUT_MS, withTimeout } from "../spotterviz/timeouts";
 import type { StorageServiceClient } from "../storage-service/storage-service";
-import { stripEmbeddedVisualizations } from "../streaming-utils";
 import { McpServerError } from "../utils";
 import { BaseMCPServer, type Context } from "./mcp-server-base";
 import {
@@ -67,10 +67,12 @@ import {
 	CreateLiveboardSchema,
 	CreateModelSessionInputSchema,
 	FinalizeModelInputSchema,
+	GET_DATA_SPOTTER_ANSWER_DESCRIPTION,
+	GET_DATA_SPOTTER_ANSWER_SUPPRESSED_IFRAMES_DESCRIPTION,
 	GetAnswerSchema,
 	GetDashboardStatusInputSchema,
+	GetDataInputSchema,
 	GetDataSourceSuggestionsSchema,
-	GetDataWithSpotterAnswerInputSchema,
 	GetModelUpdatesInputSchema,
 	GetRelevantQuestionsSchema,
 	GetSessionUpdatesInputSchema,
@@ -81,7 +83,6 @@ import {
 	SendSessionMessageInputSchema,
 	SwitchOrgInputSchema,
 	ToolName,
-	applyUrlFlagToolOverrides,
 } from "./tool-definitions";
 import {
 	type VersionConfig,
@@ -487,10 +488,21 @@ export class MCPServer extends BaseMCPServer {
 			tools.splice(toolIdxToDrop, 1);
 		}
 
-		tools = applyUrlFlagToolOverrides(tools, {
-			suppressIframes: !!this.ctx.props.suppressIframes,
-			rawSessionUpdates: !!this.ctx.props.enableRawSessionUpdates,
-		});
+		// With iframes suppressed, answers carry no visualization; tell the client to chart
+		// them from get_data instead.
+		if (this.ctx.props.suppressIframes) {
+			tools = tools.map((tool) =>
+				tool.name === ToolName.GetData
+					? {
+							...tool,
+							description: tool.description.replace(
+								GET_DATA_SPOTTER_ANSWER_DESCRIPTION,
+								GET_DATA_SPOTTER_ANSWER_SUPPRESSED_IFRAMES_DESCRIPTION,
+							),
+						}
+					: tool,
+			);
+		}
 
 		// Filter out GetDataSourceSuggestions if feature is disabled
 		if (
@@ -842,20 +854,15 @@ export class MCPServer extends BaseMCPServer {
 			);
 		}
 
-		const fieldsInfo =
-			"data: The csv data as an answer to the question\n session_identifier: The session identifier for the answer, use for liveboard creation\n generation_number: The generation number for the answer, use for liveboard creation\n";
 		return this.createStructuredContentSuccessResponse(
 			{
 				data: answer.data,
 				question: answer.question,
 				session_identifier: answer.session_identifier,
 				generation_number: answer.generation_number,
-				...(this.ctx.props.suppressIframes
-					? { fields_info: fieldsInfo }
-					: {
-							frame_url: answer.frame_url,
-							fields_info: `${fieldsInfo} frame_url: A url which can be used to view the answer in an iframe in the browser\n`,
-						}),
+				frame_url: answer.frame_url,
+				fields_info:
+					"data: The csv data as an answer to the question\n session_identifier: The session identifier for the answer, use for liveboard creation\n generation_number: The generation number for the answer, use for liveboard creation\n frame_url: A url which can be used to view the answer in an iframe in the browser\n",
 			},
 			"Answer created successfully",
 		);
@@ -992,6 +999,7 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 					: SpotterResponseFormat.SIMPLIFIED,
 				storageService.appendMessages.bind(storageService),
 				additional_context,
+				!!this.ctx.props.suppressIframes,
 			);
 		} catch (error) {
 			console.error("Error sending message to Spotter conversation:", error);
@@ -1080,9 +1088,7 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		});
 		return this.createStructuredContentSuccessResponse(
 			{
-				session_updates: this.ctx.props.suppressIframes
-					? stripEmbeddedVisualizations(messagesState.messages)
-					: messagesState.messages,
+				session_updates: messagesState.messages,
 				is_done: messagesState.isDone,
 			},
 			"Conversation updates retrieved successfully",
@@ -1510,9 +1516,15 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			} catch (error) {
 				// The answer's session ids expire after about 8 hours. Load it again
 				// through its conversation for fresh ids, unless auth was the problem.
+				// A CSV that won't parse is not an expiry, so don't re-run the query for it.
 				const reload = parseAnswerReloadIds(answerId);
 				const status = this.apiErrorStatus(error);
-				if (!reload || status === 401 || status === 403) {
+				if (
+					!reload ||
+					error instanceof SpotterAnswerCsvError ||
+					status === 401 ||
+					status === 403
+				) {
 					throw error;
 				}
 				const fresh = await service.reloadSpotterAnswer(reload);
@@ -1526,6 +1538,12 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 				`Fetched data for Spotter answer ${answerId}`,
 			);
 		} catch (error) {
+			if (error instanceof SpotterAnswerCsvError) {
+				return this.createErrorResponse(
+					`Failed to read answer data: ${error.message}.`,
+					"get_data (SPOTTER_ANSWER) CSV parse failed",
+				);
+			}
 			const status = this.apiErrorStatus(error);
 			if (status === 401) {
 				throw error;
@@ -1557,9 +1575,8 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			);
 		}
 
-		// Parse with the wider schema so SPOTTER_ANSWER narrows below.
 		const { object_id, object_type, visualization_ids, max_rows } =
-			GetDataWithSpotterAnswerInputSchema.parse(request.params.arguments);
+			GetDataInputSchema.parse(request.params.arguments);
 
 		if (object_type === SPOTTER_ANSWER_TYPE) {
 			return this.callGetSpotterAnswerData(object_id, max_rows, recorder);

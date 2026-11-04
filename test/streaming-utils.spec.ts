@@ -30,7 +30,7 @@ import {
 import { SpotterResponseFormat } from "../src/services/types";
 import {
 	processSendAgentConversationMessageStreamingResponse,
-	stripEmbeddedVisualizations,
+	stripEmbeddedVisualizationLinks,
 } from "../src/streaming-utils";
 import { makeReader } from "./servers/helpers";
 
@@ -1070,39 +1070,81 @@ describe("processSendAgentConversationMessageStreamingResponse — raw format", 
 	});
 });
 
-describe("stripEmbeddedVisualizations", () => {
+describe("suppress-iframes", () => {
 	const embedUrl =
 		"https://test.thoughtspot.cloud/?tsmcp=true#/embed/conv-assist-answer?sessionId=s1&genNo=2";
 
-	it("drops iframe_url from answer updates and keeps the answer reference", () => {
-		const [answer] = stripEmbeddedVisualizations([
+	it("builds no iframe_url for answers and strips embed links from text", async () => {
+		const storage = makeMockStorage();
+		const line = `data: ${JSON.stringify([
 			{
-				is_thinking: false,
+				id: "msg-1",
 				type: "answer",
-				answer_id: '{"session_id":"s1","gen_no":2}',
-				answer_title: "Headcount",
-				answer_data_source_id: "ds-1",
-				answer_query: "[headcount]",
-				iframe_url: embedUrl,
+				metadata: { session_id: "s1", gen_no: 2, title: "Headcount" },
 			},
-		]);
-		expect(answer).not.toHaveProperty("iframe_url");
-		expect(answer).toMatchObject({
+			{
+				type: "text",
+				content: `See [the chart](${embedUrl})`,
+				metadata: { format: "markdown" },
+			},
+		])}\n`;
+
+		await processSendAgentConversationMessageStreamingResponse(
+			INSTANCE_URL,
+			SpotterResponseFormat.SIMPLIFIED,
+			CONV_ID,
+			makeReader([line]),
+			storage.appendMessages,
+			undefined,
+			true,
+		);
+
+		const [, messages] = storage.appendMessagesAndRestartTtl.mock
+			.calls[0] as any;
+		expect(messages[0]).not.toHaveProperty("iframe_url");
+		expect(messages[0]).toMatchObject({
 			type: "answer",
-			answer_id: '{"session_id":"s1","gen_no":2}',
 			answer_title: "Headcount",
 		});
+		expect(messages[1].text).toBe("See the chart");
 	});
 
-	it("strips embed links and iframe tags from thinking and raw text", () => {
-		const [text, raw] = stripEmbeddedVisualizations([
-			{
-				is_thinking: true,
-				type: "text",
-				text: `See [the chart](${embedUrl}) or ${embedUrl} <iframe src="${embedUrl}"></iframe>![viz](${embedUrl})done`,
-			},
+	it("strips embed links from raw content", async () => {
+		const storage = makeMockStorage();
+		const line = `data: ${JSON.stringify([
 			{ type: "text", content: `Raw ${embedUrl} [Open](https://x.io/a)` },
-		]);
+		])}\n`;
+
+		await processSendAgentConversationMessageStreamingResponse(
+			INSTANCE_URL,
+			SpotterResponseFormat.RAW,
+			CONV_ID,
+			makeReader([line]),
+			storage.appendMessages,
+			undefined,
+			true,
+		);
+
+		const [, messages] = storage.appendMessagesAndRestartTtl.mock
+			.calls[0] as any;
+		expect(messages[0].content).toBe("Raw  [Open](https://x.io/a)");
+	});
+});
+
+describe("stripEmbeddedVisualizationLinks", () => {
+	const embedUrl =
+		"https://test.thoughtspot.cloud/?tsmcp=true#/embed/conv-assist-answer?sessionId=s1&genNo=2";
+
+	it("strips embed links and iframe tags from thinking and raw text", () => {
+		const text = stripEmbeddedVisualizationLinks({
+			is_thinking: true,
+			type: "text",
+			text: `See [the chart](${embedUrl}) or ${embedUrl} <iframe src="${embedUrl}"></iframe>![viz](${embedUrl})done`,
+		});
+		const raw = stripEmbeddedVisualizationLinks({
+			type: "text",
+			content: `Raw ${embedUrl} [Open](https://x.io/a)`,
+		});
 		expect((text as any).text).toBe("See the chart or  done");
 		expect((raw as any).content).toBe("Raw  [Open](https://x.io/a)");
 	});
@@ -1113,6 +1155,6 @@ describe("stripEmbeddedVisualizations", () => {
 			type: "text" as const,
 			text: "Open [the Liveboard](https://test.thoughtspot.cloud/#/pinboard/abc)",
 		};
-		expect(stripEmbeddedVisualizations([message])).toEqual([message]);
+		expect(stripEmbeddedVisualizationLinks(message)).toEqual(message);
 	});
 });

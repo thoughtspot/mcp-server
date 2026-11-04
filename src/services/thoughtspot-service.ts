@@ -19,7 +19,11 @@ import {
 import { WithSpan, getActiveSpan } from "../metrics/tracing/tracing-utils";
 import { processSendAgentConversationMessageStreamingResponse } from "../streaming-utils";
 import { GET_DATA_DEFAULT_MAX_ROWS } from "./clients/get-data/get-data-client";
-import { csvToGetDataViz } from "./clients/get-data/spotter-answer-data";
+import type { GetDataViz } from "./clients/get-data/get-data-types";
+import {
+	SpotterAnswerCsvError,
+	csvToGetDataViz,
+} from "./clients/get-data/spotter-answer-data";
 import type {
 	CreateModelSessionResult,
 	FetchWorksheetModelParams,
@@ -360,6 +364,7 @@ export class ThoughtSpotService {
 			isDone?: boolean,
 		) => Promise<void>,
 		additionalContext?: string | undefined,
+		suppressIframes = false,
 	): Promise<void> {
 		const span = trace.getSpan(context.active());
 		span?.setAttributes({
@@ -404,6 +409,7 @@ export class ThoughtSpotService {
 					reader,
 					appendStoredMessages,
 					streamRecorder,
+					suppressIframes,
 				).finally(() => {
 					this.scheduleBackgroundMetricsFlush(streamRecorder);
 				});
@@ -906,19 +912,25 @@ export class ThoughtSpotService {
 			generation_number: generationNumber,
 		});
 
-		const csv = await this.observeUpstreamCall(
+		const file = await this.observeUpstreamCall(
 			UPSTREAM_OPERATION_NAMES.exportAnswerReport,
-			async () => {
-				const file = await this.client.exportAnswerReport({
+			() =>
+				this.client.exportAnswerReport({
 					session_identifier: sessionIdentifier,
 					generation_number: generationNumber,
 					file_format: "CSV",
-				});
-				return file.text();
-			},
+				}),
 		);
 
-		const viz = csvToGetDataViz(csv, maxRows);
+		const csv = await file.text();
+		let viz: GetDataViz;
+		try {
+			viz = csvToGetDataViz(csv, maxRows);
+		} catch (error) {
+			throw error instanceof SpotterAnswerCsvError
+				? error
+				: new SpotterAnswerCsvError(error);
+		}
 		span?.setAttribute("total_row_count", viz.total_row_count ?? 0);
 		return { data: [viz] };
 	}

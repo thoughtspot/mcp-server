@@ -249,10 +249,6 @@ describe("Spotter answer data and iframe suppression URL flags", () => {
 			expect(buildProps("https://example.com/mcp")).toMatchObject({
 				suppressIframes: false,
 			});
-			// The retired answer-data flag no longer reaches props.
-			expect(
-				buildProps("https://example.com/mcp?enable-spotter-answer-data=false"),
-			).not.toHaveProperty("enableSpotterAnswerData");
 		},
 	);
 });

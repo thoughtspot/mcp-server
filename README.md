@@ -19,8 +19,6 @@ ThoughtSpot Spotter MCP Server provides a set of tools for querying and retrievi
 
 - [Manual client registration](#manual-client-registration)
   - [Associating with a ThoughtSpot instance](#associate-with-a-thoughtspot-instance)
-- [URL flags](#url-flags)
-  - [Analytics Agent answer data](#analytics-agent-answer-data)
 - [Contributing](#contributing)
   - [Local Development](#local-development)
 
@@ -47,21 +45,6 @@ On a listed hostname:
 - MCP requests (`/mcp`, `/sse`, `/token/*`, `/bearer/*`) for any other instance get a 403.
 
 Hostnames that aren't listed behave as before. If the value is not valid JSON, the server rejects requests with a 500 instead of lifting the restriction.
-
-## URL flags
-
-Add these query parameters to the MCP endpoint URL (`/mcp`, `/token/mcp` and so on), for example `https://agent.thoughtspot.app/mcp?api-version=beta`.
-
-| Flag | Default | Effect |
-| --- | --- | --- |
-| `api-version` | `latest` | Picks the toolset version: `latest`, `beta`, or a date (`YYYY-MM-DD`), which selects the newest version released on or before that date. `/mcp-<version>` and `/token/mcp-<version>` do the same for clients that can't send a query string. |
-| `enable-raw-session-updates` | `false` | `true` returns the Analytics Agent's updates from `get_session_updates` unprocessed. |
-
-### Analytics Agent answer data
-
-`get_data` can return the rows behind an answer from the Analytics Agent. Pass the `answer_id` from `get_session_updates` verbatim as `object_id`, with `object_type` set to `SPOTTER_ANSWER`. `max_rows` works the same as for saved Answers (25 rows by default).
-
-The Agent's answer sessions expire after about 8 hours. When the session behind an `answer_id` has expired, the server reloads the answer from its conversation and retries once, so the call may take as long as running the query again. If the conversation itself is gone, the tool asks you to rerun the question and pass the new `answer_id`.
 
 
 ## Contributing

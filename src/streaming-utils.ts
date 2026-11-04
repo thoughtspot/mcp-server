@@ -42,6 +42,9 @@ export const processSendAgentConversationMessageStreamingResponse = async (
 		isDone?: boolean,
 	) => Promise<void>,
 	recorder?: MetricsRecorder,
+	// `suppress-iframes` URL flag: build no `iframe_url` for answers, and strip
+	// embedded-visualization links from message text.
+	suppressIframes = false,
 ) => {
 	return await withSpan(
 		"process-send-agent-conversation-message-streaming-response",
@@ -168,7 +171,6 @@ export const processSendAgentConversationMessageStreamingResponse = async (
 									"answer",
 									item.metadata?.type === "thinking",
 								);
-								const iframeUrl = `${instanceUrl}/?tsmcp=true#/embed/conv-assist-answer?sessionId=${item.metadata?.session_id}&genNo=${item.metadata?.gen_no}&acSessionId=${item.metadata?.transaction_id}&acGenNo=${item.metadata?.generation_number}`;
 								newMessages.push({
 									is_thinking: item.metadata?.type === "thinking",
 									type: "answer",
@@ -176,7 +178,9 @@ export const processSendAgentConversationMessageStreamingResponse = async (
 									answer_title: item.metadata?.title,
 									answer_data_source_id: item.metadata?.worksheet_id,
 									answer_query: item.metadata?.sage_query,
-									iframe_url: iframeUrl,
+									...(!suppressIframes && {
+										iframe_url: `${instanceUrl}/?tsmcp=true#/embed/conv-assist-answer?sessionId=${item.metadata?.session_id}&genNo=${item.metadata?.gen_no}&acSessionId=${item.metadata?.transaction_id}&acGenNo=${item.metadata?.generation_number}`,
+									}),
 								});
 							} else if (item.type === "notification") {
 								if (
@@ -234,7 +238,12 @@ export const processSendAgentConversationMessageStreamingResponse = async (
 
 					// If we parsed any new messages, store them in the storage
 					if (newMessages.length > 0) {
-						await appendStoredMessages(conversationId, newMessages);
+						await appendStoredMessages(
+							conversationId,
+							suppressIframes
+								? newMessages.map(stripEmbeddedVisualizationLinks)
+								: newMessages,
+						);
 					}
 				}
 			} catch (error) {
@@ -288,18 +297,17 @@ export const stripEmbeddedVisualizationText = (text: string): string =>
 		.replace(EMBED_BARE_URL, "");
 
 /*
- * For the `suppress-iframes` URL flag: drop `iframe_url` from answer updates and strip embed links
- * from the text of every update (simplified `text`, or raw `content`), thinking included.
+ * For the `suppress-iframes` URL flag: strip embed links from the text of an update (simplified
+ * `text`, or raw `content`), thinking included.
  */
-export const stripEmbeddedVisualizations = (
-	messages: (Message | RawMessage)[],
-): (Message | RawMessage)[] =>
-	messages.map((message) => {
-		const { iframe_url: _iframeUrl, ...rest } = message as RawMessage;
-		for (const key of ["text", "content"]) {
-			if (typeof rest[key] === "string") {
-				rest[key] = stripEmbeddedVisualizationText(rest[key] as string);
-			}
+export const stripEmbeddedVisualizationLinks = <T extends Message | RawMessage>(
+	message: T,
+): T => {
+	const stripped: Record<string, unknown> = { ...message };
+	for (const key of ["text", "content"]) {
+		if (typeof stripped[key] === "string") {
+			stripped[key] = stripEmbeddedVisualizationText(stripped[key] as string);
 		}
-		return rest as Message | RawMessage;
-	});
+	}
+	return stripped as T;
+};

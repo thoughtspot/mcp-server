@@ -135,7 +135,8 @@ const hooks: AuthHooks<Props> = {
 		const enableRawSessionUpdates =
 			url.searchParams.get("enable-raw-session-updates") === "true";
 		props.enableRawSessionUpdates = enableRawSessionUpdates;
-		props.suppressIframes = url.searchParams.get("suppress-iframes") === "true";
+		const suppressIframes = url.searchParams.get("suppress-iframes") === "true";
+		props.suppressIframes = suppressIframes;
 
 		return props;
 	},
@@ -166,6 +167,7 @@ const oauthFetchHandler = createOAuthHandler<Props>({
 
 		const enableRawSessionUpdates =
 			url.searchParams.get("enable-raw-session-updates") === "true";
+		const suppressIframes = url.searchParams.get("suppress-iframes") === "true";
 
 		return {
 			...(baseProps as Props),
@@ -178,7 +180,7 @@ const oauthFetchHandler = createOAuthHandler<Props>({
 			// OAuth-authenticated flow; enables the OAuth-only org tools.
 			authMode: "oauth",
 			enableRawSessionUpdates,
-			suppressIframes: url.searchParams.get("suppress-iframes") === "true",
+			suppressIframes,
 		};
 	},
 	// Extra routes mounted on the default handler app (consumer-specific).

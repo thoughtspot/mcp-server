@@ -847,9 +847,8 @@ describe("MCP Server", () => {
 				"SPOTTER_ANSWER",
 			);
 			expect(getData.description).toMatch(/come with no visualization/);
-			const sessionUpdates = toolByName(tools, "get_session_updates");
-			expect(JSON.stringify(sessionUpdates)).not.toMatch(
-				/iframe|embed|visualiz/i,
+			expect(getData.description).not.toMatch(
+				/present the Agent's answer with the visualization it provides/,
 			);
 		});
 
@@ -876,7 +875,7 @@ describe("MCP Server", () => {
 				data: [
 					{
 						columns: ["Region", "Revenue"],
-						data_rows: [["East", 100]],
+						data_rows: [["East", "100"]],
 						total_row_count: 2,
 					},
 				],
@@ -951,9 +950,28 @@ describe("MCP Server", () => {
 				});
 				expect(result.structuredContent).toMatchObject({
 					data: [
-						{ columns: ["Region", "Revenue"], data_rows: [["East", 100]] },
+						{ columns: ["Region", "Revenue"], data_rows: [["East", "100"]] },
 					],
 				});
+			});
+
+			it("does not reload when the export's CSV cannot be parsed", async () => {
+				mockClient().exportAnswerReport.mockResolvedValueOnce({
+					text: vi.fn().mockResolvedValue(""),
+				});
+				await server.init();
+				const { callTool } = connect(server);
+
+				const result = await callTool("get_data", {
+					object_id: reloadableAnswerId,
+					object_type: "SPOTTER_ANSWER",
+				});
+
+				expect(result.isError).toBe(true);
+				expect(mockClient().loadSpotter3Answer).not.toHaveBeenCalled();
+				const text = (result.content as any[])[0].text;
+				expect(text).toMatch(/Could not parse the answer's CSV export/);
+				expect(text).not.toMatch(/may have expired/);
 			});
 
 			it("does not reload on a permission error", async () => {
@@ -1031,58 +1049,34 @@ describe("MCP Server", () => {
 			expect(text).not.toMatch(/may have expired/);
 		});
 
-		it("strips iframe_url and embed links from session updates with suppress-iframes", async () => {
+		it("passes suppress-iframes to the stream processing on send_session_message", async () => {
 			mockProps.suppressIframes = true;
 			vi.spyOn(server as any, "getStorageService").mockReturnValue({
-				getNewMessages: vi.fn().mockResolvedValue({
-					isDone: true,
-					messages: [
-						{
-							is_thinking: true,
-							type: "text",
-							text: `Charting at ${embedUrl}`,
-						},
-						{
-							is_thinking: false,
-							type: "answer",
-							answer_id: answerId,
-							answer_title: "Revenue",
-							answer_data_source_id: "ds-1",
-							answer_query: "[revenue]",
-							iframe_url: embedUrl,
-						},
-					],
-				}),
+				initializeConversation: vi.fn().mockResolvedValue(undefined),
+				appendMessages: vi.fn().mockResolvedValue(undefined),
 			});
+			const send = vi
+				.spyOn(
+					ThoughtSpotService.prototype,
+					"sendAgentConversationMessageStreaming",
+				)
+				.mockResolvedValue(undefined);
 			await server.init();
 			const { callTool } = connect(server);
 
-			const result = await callTool("get_session_updates", {
+			await callTool("send_session_message", {
 				analytical_session_id: "conv-1",
+				message: "Revenue by region",
 			});
 
-			expect(result.isError).toBeUndefined();
-			const [thinking, answer] = (result.structuredContent as any)
-				.session_updates;
-			expect(thinking.text).toBe("Charting at ");
-			expect(answer).not.toHaveProperty("iframe_url");
-			expect(answer.answer_id).toBe(answerId);
-			expect(JSON.stringify(result)).not.toMatch(/tsmcp|embed/);
-		});
-
-		it("omits frame_url from getAnswer with suppress-iframes", async () => {
-			mockProps.suppressIframes = true;
-			await server.init();
-			const { callTool } = connect(server);
-
-			const result = await callTool("getAnswer", {
-				question: "What is the total revenue?",
-				datasourceId: "ds-123",
-			});
-
-			expect(result.isError).toBeUndefined();
-			expect(result.structuredContent).not.toHaveProperty("frame_url");
-			expect(JSON.stringify(result)).not.toMatch(/iframe|tsmcp|embed/);
+			expect(send).toHaveBeenCalledWith(
+				"conv-1",
+				"Revenue by region",
+				SpotterResponseFormat.SIMPLIFIED,
+				expect.any(Function),
+				undefined,
+				true,
+			);
 		});
 	});
 
@@ -2169,6 +2163,7 @@ describe("MCP Server", () => {
 				SpotterResponseFormat.SIMPLIFIED,
 				expect.any(Function),
 				undefined,
+				false,
 			);
 		});
 
@@ -2188,6 +2183,7 @@ describe("MCP Server", () => {
 				SpotterResponseFormat.SIMPLIFIED,
 				expect.any(Function),
 				"The user is focused on North America",
+				false,
 			);
 		});
 
