@@ -42,8 +42,7 @@ export const processSendAgentConversationMessageStreamingResponse = async (
 		isDone?: boolean,
 	) => Promise<void>,
 	recorder?: MetricsRecorder,
-	// `suppress-iframes` URL flag: build no `iframe_url` for answers, and strip
-	// embedded-visualization links from message text.
+	// `suppress-iframes` URL flag: build no `iframe_url` for answers.
 	suppressIframes = false,
 ) => {
 	return await withSpan(
@@ -238,12 +237,7 @@ export const processSendAgentConversationMessageStreamingResponse = async (
 
 					// If we parsed any new messages, store them in the storage
 					if (newMessages.length > 0) {
-						await appendStoredMessages(
-							conversationId,
-							suppressIframes
-								? newMessages.map(stripEmbeddedVisualizationLinks)
-								: newMessages,
-						);
+						await appendStoredMessages(conversationId, newMessages);
 					}
 				}
 			} catch (error) {
@@ -270,44 +264,4 @@ export const processSendAgentConversationMessageStreamingResponse = async (
 			}
 		},
 	);
-};
-
-// A ThoughtSpot embedded-visualization URL: the MCP embed marker or an embed route.
-const EMBED_URL = String.raw`https?:\/\/[^\s()<>"']*(?:tsmcp=true|#\/embed\/)[^\s()<>"']*`;
-const EMBED_IFRAME_TAG = /<iframe\b[^>]*>(?:[\s\S]*?<\/iframe>)?/gi;
-const EMBED_MARKDOWN_IMAGE = new RegExp(
-	String.raw`!\[[^\]]*\]\(${EMBED_URL}\)`,
-	"g",
-);
-const EMBED_MARKDOWN_LINK = new RegExp(
-	String.raw`\[([^\]]*)\]\(${EMBED_URL}\)`,
-	"g",
-);
-const EMBED_BARE_URL = new RegExp(EMBED_URL, "g");
-
-/*
- * Remove iframe HTML and embedded-visualization links from free text, keeping the label of a
- * markdown link.
- */
-export const stripEmbeddedVisualizationText = (text: string): string =>
-	text
-		.replace(EMBED_IFRAME_TAG, "")
-		.replace(EMBED_MARKDOWN_IMAGE, "")
-		.replace(EMBED_MARKDOWN_LINK, "$1")
-		.replace(EMBED_BARE_URL, "");
-
-/*
- * For the `suppress-iframes` URL flag: strip embed links from the text of an update (simplified
- * `text`, or raw `content`), thinking included.
- */
-export const stripEmbeddedVisualizationLinks = <T extends Message | RawMessage>(
-	message: T,
-): T => {
-	const stripped: Record<string, unknown> = { ...message };
-	for (const key of ["text", "content"]) {
-		if (typeof stripped[key] === "string") {
-			stripped[key] = stripEmbeddedVisualizationText(stripped[key] as string);
-		}
-	}
-	return stripped as T;
 };

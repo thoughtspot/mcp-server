@@ -22,8 +22,8 @@ export type Props = {
 	apiRequestedVersion?: string;
 	authMode?: AuthMode;
 	enableRawSessionUpdates?: boolean;
-	// Undocumented URL flag (see index.ts): strip embedded-visualization
-	// iframes/links from answers.
+	// Undocumented URL flag (see index.ts): omit `iframe_url` from Analytics
+	// Agent answers.
 	suppressIframes?: boolean;
 };
 
