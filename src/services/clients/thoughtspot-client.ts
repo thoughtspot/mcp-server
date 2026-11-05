@@ -22,6 +22,7 @@ import { fetchOrgBearerToken, listOrgs } from "./orgs/orgs-client";
 import { searchObjects } from "./search-objects/search-objects-client";
 import {
 	createSpotter3Conversation,
+	loadSpotter3Answer,
 	sendSpotter3MessageStreaming,
 } from "./spotter-3/spotter-3-client";
 import * as spotterModel from "./spotter-model/spotter-model-client";
@@ -116,6 +117,10 @@ export class ThoughtSpotClient extends ThoughtSpotRestApi {
 		params: Params<typeof sendSpotter3MessageStreaming>,
 	) {
 		return sendSpotter3MessageStreaming(this.ctx, params);
+	}
+
+	loadSpotter3Answer(params: Params<typeof loadSpotter3Answer>) {
+		return loadSpotter3Answer(this.ctx, params);
 	}
 
 	createSpotterXConversation(

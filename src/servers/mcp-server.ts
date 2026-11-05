@@ -13,6 +13,9 @@ import {
 } from "../metrics/runtime/metrics-recorder";
 import type { ToolMetricApiSurface } from "../metrics/runtime/tool-metrics";
 import { WithSpan } from "../metrics/tracing/tracing-utils";
+import { ANALYTICS_AGENT_ANSWER_TYPE } from "../services/clients/get-data/get-data-constants";
+import type { GetDataResult } from "../services/clients/get-data/get-data-types";
+import { SpotterAnswerCsvError } from "../services/clients/get-data/spotter-answer-data";
 import {
 	MODEL_POLL_INTERVAL_MS,
 	MODEL_POLL_ITERATIONS,
@@ -49,6 +52,7 @@ import {
 	findTaskDashboardMismatch,
 	invalidAnswerIdResult,
 	parseAnswerIds,
+	parseAnswerReloadIds,
 	resolveTaskDashboard,
 	runDashboardWork,
 } from "../spotterviz/dashboard-tools";
@@ -63,6 +67,8 @@ import {
 	CreateLiveboardSchema,
 	CreateModelSessionInputSchema,
 	FinalizeModelInputSchema,
+	GET_DATA_ANALYTICS_AGENT_ANSWER_DESCRIPTION,
+	GET_DATA_ANALYTICS_AGENT_ANSWER_SUPPRESSED_IFRAMES_DESCRIPTION,
 	GetAnswerSchema,
 	GetDashboardStatusInputSchema,
 	GetDataInputSchema,
@@ -451,6 +457,7 @@ export class MCPServer extends BaseMCPServer {
 			"api_version_requested",
 			this.ctx.props.apiVersion ?? "(not passed)",
 		);
+		span?.setAttribute("suppress_iframes", !!this.ctx.props.suppressIframes);
 
 		// Resolve the API version to get the appropriate tool configuration
 		let versionConfig: VersionConfig;
@@ -479,6 +486,22 @@ export class MCPServer extends BaseMCPServer {
 			: tools.findLastIndex((tool) => tool.name === ToolName.GetSessionUpdates);
 		if (toolIdxToDrop !== -1) {
 			tools.splice(toolIdxToDrop, 1);
+		}
+
+		// With iframes suppressed, answers carry no visualization; tell the client to chart
+		// them from get_data instead.
+		if (this.ctx.props.suppressIframes) {
+			tools = tools.map((tool) =>
+				tool.name === ToolName.GetData
+					? {
+							...tool,
+							description: tool.description.replace(
+								GET_DATA_ANALYTICS_AGENT_ANSWER_DESCRIPTION,
+								GET_DATA_ANALYTICS_AGENT_ANSWER_SUPPRESSED_IFRAMES_DESCRIPTION,
+							),
+						}
+					: tool,
+			);
 		}
 
 		// Filter out GetDataSourceSuggestions if feature is disabled
@@ -976,6 +999,7 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 					: SpotterResponseFormat.SIMPLIFIED,
 				storageService.appendMessages.bind(storageService),
 				additional_context,
+				!!this.ctx.props.suppressIframes,
 			);
 		} catch (error) {
 			console.error("Error sending message to Spotter conversation:", error);
@@ -1461,6 +1485,80 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		);
 	}
 
+	private async callGetSpotterAnswerData(
+		answerId: string,
+		maxRows: number | undefined,
+		recorder: MetricsRecorder,
+	) {
+		const [answer] = parseAnswerIds([{ answer_id: answerId, title: "" }]) ?? [];
+		if (!answer) {
+			return this.createErrorResponse(
+				'Invalid answer_id for object_type ANALYTICS_AGENT_ANSWER. Pass the `answer_id` returned from the "get_session_updates" tool verbatim.',
+				`get_data: invalid answer_id ${answerId}`,
+			);
+		}
+
+		const service = this.getThoughtSpotService(recorder);
+		const fetchRows = (sessionIdentifier: string, generationNumber: number) =>
+			service.getSpotterAnswerData({
+				sessionIdentifier,
+				generationNumber,
+				maxRows,
+			});
+
+		try {
+			let result: GetDataResult;
+			try {
+				result = await fetchRows(
+					answer.session_identifier,
+					answer.generation_number,
+				);
+			} catch (error) {
+				// The answer's session ids expire after about 8 hours. Load it again
+				// through its conversation for fresh ids, unless auth was the problem.
+				// A CSV that won't parse is not an expiry, so don't re-run the query for it.
+				const reload = parseAnswerReloadIds(answerId);
+				const status = this.apiErrorStatus(error);
+				if (
+					!reload ||
+					error instanceof SpotterAnswerCsvError ||
+					status === 401 ||
+					status === 403
+				) {
+					throw error;
+				}
+				const fresh = await service.reloadSpotterAnswer(reload);
+				result = await fetchRows(
+					fresh.sessionIdentifier,
+					fresh.generationNumber,
+				);
+			}
+			return this.createStructuredContentSuccessResponse(
+				result,
+				`Fetched data for Spotter answer ${answerId}`,
+			);
+		} catch (error) {
+			if (error instanceof SpotterAnswerCsvError) {
+				return this.createErrorResponse(
+					`Failed to read answer data: ${error.message}.`,
+					"get_data (ANALYTICS_AGENT_ANSWER) CSV parse failed",
+				);
+			}
+			const status = this.apiErrorStatus(error);
+			if (status === 401) {
+				throw error;
+			}
+			const hint =
+				status === 403
+					? "You may not have permission to download this answer's data."
+					: "The answer's conversation may have expired; ask the Analytics Agent the question again and pass the new answer's `answer_id`.";
+			return this.createErrorResponse(
+				`Failed to fetch answer data: ${summarizeUpstreamError(error)}. ${hint}`,
+				"get_data (ANALYTICS_AGENT_ANSWER) failed",
+			);
+		}
+	}
+
 	@WithSpan("call-get-data")
 	async callGetData(
 		request: z.infer<typeof CallToolRequestSchema>,
@@ -1479,6 +1577,10 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 
 		const { object_id, object_type, visualization_ids, max_rows } =
 			GetDataInputSchema.parse(request.params.arguments);
+
+		if (object_type === ANALYTICS_AGENT_ANSWER_TYPE) {
+			return this.callGetSpotterAnswerData(object_id, max_rows, recorder);
+		}
 
 		// LIVEBOARD_VIZ scopes to one viz only via visualization_ids; without it the
 		// fetch would silently return the whole board. Guide the caller instead.

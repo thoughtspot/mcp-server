@@ -331,4 +331,61 @@ describe("spotter-3-client", () => {
 			expect(id1).not.toBe(id2);
 		});
 	});
+
+	describe("loadSpotter3Answer", () => {
+		let client: any;
+
+		beforeEach(() => {
+			client = getThoughtSpotClient(mockInstanceUrl, mockBearerToken) as any;
+		});
+
+		it("loads the answer again and returns its fresh session ids", async () => {
+			(fetch as any).mockResolvedValue({
+				ok: true,
+				json: vi.fn().mockResolvedValue({
+					answer: { session_identifier: "fresh-session", generation_number: 2 },
+				}),
+			});
+
+			const result = await client.loadSpotter3Answer({
+				conversationId: "conv/1",
+				messageId: "msg-1",
+			});
+
+			expect(result).toEqual({
+				sessionIdentifier: "fresh-session",
+				generationNumber: 2,
+			});
+			const [url, init] = (fetch as any).mock.calls[0];
+			expect(url).toBe(
+				`${mockInstanceUrl}/conversation/v2/conv%2F1/message/msg-1/load/public`,
+			);
+			expect(init.method).toBe("POST");
+			expect(init.headers["x-requested-by"]).toBe("ThoughtSpot");
+			expect(JSON.parse(init.body)).toEqual({ type: "TS_ANSWER" });
+		});
+
+		it("throws a ThoughtSpotApiError with the status on failure", async () => {
+			(fetch as any).mockResolvedValue({
+				ok: false,
+				status: 404,
+				text: vi.fn().mockResolvedValue("not found"),
+			});
+
+			await expect(
+				client.loadSpotter3Answer({ conversationId: "c", messageId: "m" }),
+			).rejects.toMatchObject({ status: 404 });
+		});
+
+		it("throws when the response carries no answer session", async () => {
+			(fetch as any).mockResolvedValue({
+				ok: true,
+				json: vi.fn().mockResolvedValue({}),
+			});
+
+			await expect(
+				client.loadSpotter3Answer({ conversationId: "c", messageId: "m" }),
+			).rejects.toThrow(/no answer session/);
+		});
+	});
 });

@@ -112,3 +112,44 @@ export async function sendSpotter3MessageStreaming(
 
 	return response;
 }
+
+/*
+ * Load one answer of a Spotter3 conversation again. Its session/generation ids expire
+ * (about 8 hours); loading it re-runs the query and returns fresh ids. This is the call
+ * the Visual Embed SDK makes when it replays a stored answer.
+ */
+export async function loadSpotter3Answer(
+	ctx: ClientContext,
+	{
+		conversationId,
+		messageId,
+	}: {
+		conversationId: string;
+		messageId: string;
+	},
+): Promise<{ sessionIdentifier: string; generationNumber: number }> {
+	const endpoint = `/conversation/v2/${encodeURIComponent(conversationId)}/message/${encodeURIComponent(messageId)}/load/public`;
+	const response = await fetchApi(ctx, endpoint, {
+		headers: { "x-requested-by": "ThoughtSpot" },
+		json: { type: "TS_ANSWER" },
+	});
+
+	if (!response.ok) {
+		const errorText = await response.text();
+		throw new ThoughtSpotApiError(
+			response.status,
+			"loadAgentConversationAnswer",
+			errorText,
+		);
+	}
+
+	const data = (await response.json()) as {
+		answer?: { session_identifier?: string; generation_number?: number };
+	};
+	const sessionIdentifier = data.answer?.session_identifier;
+	const generationNumber = data.answer?.generation_number;
+	if (!sessionIdentifier || generationNumber === undefined) {
+		throw new Error("loadAgentConversationAnswer returned no answer session");
+	}
+	return { sessionIdentifier, generationNumber };
+}

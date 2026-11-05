@@ -19,6 +19,7 @@ export const UPSTREAM_OPERATION_NAMES = {
 	createAgentConversation: "create_agent_conversation",
 	sendAgentConversationMessageStreaming:
 		"send_agent_conversation_message_streaming",
+	loadAgentConversationAnswer: "load_agent_conversation_answer",
 	importMetadataTml: "import_metadata_tml",
 	searchMetadata: "search_metadata",
 	searchObjects: "search_objects",

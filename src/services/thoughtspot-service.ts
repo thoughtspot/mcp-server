@@ -18,6 +18,12 @@ import {
 } from "../metrics/runtime/tool-metrics";
 import { WithSpan, getActiveSpan } from "../metrics/tracing/tracing-utils";
 import { processSendAgentConversationMessageStreamingResponse } from "../streaming-utils";
+import { GET_DATA_DEFAULT_MAX_ROWS } from "./clients/get-data/get-data-client";
+import type { GetDataViz } from "./clients/get-data/get-data-types";
+import {
+	SpotterAnswerCsvError,
+	csvToGetDataViz,
+} from "./clients/get-data/spotter-answer-data";
 import type {
 	CreateModelSessionResult,
 	FetchWorksheetModelParams,
@@ -358,6 +364,7 @@ export class ThoughtSpotService {
 			isDone?: boolean,
 		) => Promise<void>,
 		additionalContext?: string | undefined,
+		suppressIframes = false,
 	): Promise<void> {
 		const span = trace.getSpan(context.active());
 		span?.setAttributes({
@@ -402,6 +409,7 @@ export class ThoughtSpotService {
 					reader,
 					appendStoredMessages,
 					streamRecorder,
+					suppressIframes,
 				).finally(() => {
 					this.scheduleBackgroundMetricsFlush(streamRecorder);
 				});
@@ -863,6 +871,68 @@ export class ThoughtSpotService {
 		span?.setAttribute("object_type", params.objectType);
 		span?.setAttribute("viz_count", result.data.length);
 		return result;
+	}
+
+	/**
+	 * Fetch the rows of an unsaved Analytics Agent answer through its CSV export.
+	 * Runs as the calling user, so the answer's permissions and row-level security apply.
+	 */
+	@WithSpan("get-spotter-answer-data")
+	async getSpotterAnswerData({
+		sessionIdentifier,
+		generationNumber,
+		maxRows = GET_DATA_DEFAULT_MAX_ROWS,
+	}: {
+		sessionIdentifier: string;
+		generationNumber: number;
+		maxRows?: number;
+	}): Promise<GetDataResult> {
+		const span = getActiveSpan();
+		span?.setAttributes({
+			session_identifier: sessionIdentifier,
+			generation_number: generationNumber,
+		});
+
+		const file = await this.observeUpstreamCall(
+			UPSTREAM_OPERATION_NAMES.exportAnswerReport,
+			() =>
+				this.client.exportAnswerReport({
+					session_identifier: sessionIdentifier,
+					generation_number: generationNumber,
+					file_format: "CSV",
+				}),
+		);
+
+		const csv = await file.text();
+		let viz: GetDataViz;
+		try {
+			viz = csvToGetDataViz(csv, maxRows);
+		} catch (error) {
+			throw error instanceof SpotterAnswerCsvError
+				? error
+				: new SpotterAnswerCsvError(error);
+		}
+		span?.setAttribute("total_row_count", viz.total_row_count ?? 0);
+		return { data: [viz] };
+	}
+
+	/**
+	 * Load an Analytics Agent answer again through its conversation, for fresh
+	 * session/generation ids once the original ones have expired. Re-runs the query.
+	 */
+	@WithSpan("reload-spotter-answer")
+	async reloadSpotterAnswer(params: {
+		conversationId: string;
+		messageId: string;
+	}): Promise<{ sessionIdentifier: string; generationNumber: number }> {
+		getActiveSpan()?.setAttributes({
+			conversation_id: params.conversationId,
+			message_id: params.messageId,
+		});
+		return this.observeUpstreamCall(
+			UPSTREAM_OPERATION_NAMES.loadAgentConversationAnswer,
+			() => this.client.loadSpotter3Answer(params),
+		);
 	}
 
 	/**

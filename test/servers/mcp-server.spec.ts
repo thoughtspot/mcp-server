@@ -6,7 +6,10 @@ import { METRIC_NAMES } from "../../src/metrics/runtime/metric-types";
 import { MCPServer } from "../../src/servers/mcp-server";
 import * as thoughtspotClient from "../../src/services/clients/thoughtspot-client";
 import { ThoughtSpotService } from "../../src/services/thoughtspot-service";
-import { SpotterResponseFormat } from "../../src/services/types";
+import {
+	SpotterResponseFormat,
+	ThoughtSpotApiError,
+} from "../../src/services/types";
 import { makeRequest } from "./helpers";
 
 // Mock the MixpanelTracker
@@ -87,6 +90,10 @@ describe("MCP Server", () => {
 			}),
 			exportAnswerReport: vi.fn().mockResolvedValue({
 				text: vi.fn().mockResolvedValue("The total revenue is $1,000,000"),
+			}),
+			loadSpotter3Answer: vi.fn().mockResolvedValue({
+				sessionIdentifier: "session-fresh",
+				generationNumber: 5,
 			}),
 			exportUnsavedAnswerTML: vi.fn().mockResolvedValue({
 				answer: {
@@ -800,6 +807,282 @@ describe("MCP Server", () => {
 			expect(result.isError).toBe(true);
 			expect((result.content as any[])[0].text).toMatch(
 				/do not have permission to download data/i,
+			);
+		});
+	});
+
+	describe("Spotter answer data and iframe suppression URL flags", () => {
+		const answerId = JSON.stringify({ session_id: "session-9", gen_no: 3 });
+		const embedUrl =
+			"https://test.thoughtspot.cloud/?tsmcp=true#/embed/conv-assist-answer?sessionId=session-9&genNo=3";
+
+		const mockClient = () =>
+			thoughtspotClient.getThoughtSpotClient(
+				"https://test.thoughtspot.cloud",
+				"test-access-token",
+			) as any;
+
+		const toolByName = (tools: any[], name: string) =>
+			tools.find((tool) => tool.name === name);
+
+		it("exposes ANALYTICS_AGENT_ANSWER on get_data, iframe-first, by default", async () => {
+			await server.init();
+			const { listTools } = connect(server);
+
+			const { tools } = await listTools();
+			const getData = toolByName(tools, "get_data");
+			expect(getData.inputSchema.properties.object_type.enum).toContain(
+				"ANALYTICS_AGENT_ANSWER",
+			);
+			expect(getData.description).toMatch(
+				/present the Agent's answer with the visualization it provides/,
+			);
+			const update = toolByName(tools, "get_session_updates").outputSchema
+				.properties.session_updates.items.properties;
+			expect(update).toHaveProperty("iframe_url");
+			expect(update.answer_id.description).toMatch(/get_data/);
+		});
+
+		it("removes iframe references from tool definitions with suppress-iframes", async () => {
+			mockProps.suppressIframes = true;
+			await server.init();
+			const { listTools } = connect(server);
+
+			const { tools } = await listTools();
+			const getData = toolByName(tools, "get_data");
+			expect(getData.inputSchema.properties.object_type.enum).toContain(
+				"ANALYTICS_AGENT_ANSWER",
+			);
+			expect(getData.description).toMatch(/come with no visualization/);
+			expect(getData.description).not.toMatch(
+				/present the Agent's answer with the visualization it provides/,
+			);
+		});
+
+		it("fetches a Spotter answer's rows through the CSV export", async () => {
+			mockClient().exportAnswerReport.mockResolvedValueOnce({
+				text: vi.fn().mockResolvedValue("Region,Revenue\nEast,100\nWest,50\n"),
+			});
+			await server.init();
+			const { callTool } = connect(server);
+
+			const result = await callTool("get_data", {
+				object_id: answerId,
+				object_type: "ANALYTICS_AGENT_ANSWER",
+				max_rows: 1,
+			});
+
+			expect(result.isError).toBeUndefined();
+			expect(mockClient().exportAnswerReport).toHaveBeenCalledWith({
+				session_identifier: "session-9",
+				generation_number: 3,
+				file_format: "CSV",
+			});
+			expect(result.structuredContent).toEqual({
+				data: [
+					{
+						columns: ["Region", "Revenue"],
+						data_rows: [["East", "100"]],
+						total_row_count: 2,
+					},
+				],
+			});
+		});
+
+		it("returns an error for a malformed answer_id", async () => {
+			mockProps.suppressIframes = true;
+			await server.init();
+			const { callTool } = connect(server);
+
+			const result = await callTool("get_data", {
+				object_id: "not-json",
+				object_type: "ANALYTICS_AGENT_ANSWER",
+			});
+
+			expect(result.isError).toBe(true);
+			expect((result.content as any[])[0].text).toMatch(/Invalid answer_id/);
+		});
+
+		it("returns a re-ask hint when the export fails", async () => {
+			mockClient().exportAnswerReport.mockRejectedValueOnce(
+				new Error("session expired"),
+			);
+			await server.init();
+			const { callTool } = connect(server);
+
+			const result = await callTool("get_data", {
+				object_id: answerId,
+				object_type: "ANALYTICS_AGENT_ANSWER",
+			});
+
+			expect(result.isError).toBe(true);
+			expect((result.content as any[])[0].text).toMatch(
+				/session expired.*ask the Analytics Agent the question again/s,
+			);
+		});
+
+		describe("expired answers", () => {
+			const reloadableAnswerId = JSON.stringify({
+				session_id: "session-9",
+				gen_no: 3,
+				conversation_id: "conv-1",
+				message_id: "msg-1",
+			});
+
+			it("loads the answer again through its conversation and retries the export", async () => {
+				mockClient()
+					.exportAnswerReport.mockRejectedValueOnce(
+						new ThoughtSpotApiError(400, "exportAnswerReport"),
+					)
+					.mockResolvedValueOnce({
+						text: vi.fn().mockResolvedValue("Region,Revenue\nEast,100\n"),
+					});
+				await server.init();
+				const { callTool } = connect(server);
+
+				const result = await callTool("get_data", {
+					object_id: reloadableAnswerId,
+					object_type: "ANALYTICS_AGENT_ANSWER",
+				});
+
+				expect(result.isError).toBeUndefined();
+				expect(mockClient().loadSpotter3Answer).toHaveBeenCalledWith({
+					conversationId: "conv-1",
+					messageId: "msg-1",
+				});
+				expect(mockClient().exportAnswerReport).toHaveBeenLastCalledWith({
+					session_identifier: "session-fresh",
+					generation_number: 5,
+					file_format: "CSV",
+				});
+				expect(result.structuredContent).toMatchObject({
+					data: [
+						{ columns: ["Region", "Revenue"], data_rows: [["East", "100"]] },
+					],
+				});
+			});
+
+			it("does not reload when the export's CSV cannot be parsed", async () => {
+				mockClient().exportAnswerReport.mockResolvedValueOnce({
+					text: vi.fn().mockResolvedValue(""),
+				});
+				await server.init();
+				const { callTool } = connect(server);
+
+				const result = await callTool("get_data", {
+					object_id: reloadableAnswerId,
+					object_type: "ANALYTICS_AGENT_ANSWER",
+				});
+
+				expect(result.isError).toBe(true);
+				expect(mockClient().loadSpotter3Answer).not.toHaveBeenCalled();
+				const text = (result.content as any[])[0].text;
+				expect(text).toMatch(/Could not parse the answer's CSV export/);
+				expect(text).not.toMatch(/may have expired/);
+			});
+
+			it("does not reload on a permission error", async () => {
+				mockClient().exportAnswerReport.mockRejectedValueOnce(
+					new ThoughtSpotApiError(403, "exportAnswerReport"),
+				);
+				await server.init();
+				const { callTool } = connect(server);
+
+				const result = await callTool("get_data", {
+					object_id: reloadableAnswerId,
+					object_type: "ANALYTICS_AGENT_ANSWER",
+				});
+
+				expect(result.isError).toBe(true);
+				expect(mockClient().loadSpotter3Answer).not.toHaveBeenCalled();
+			});
+
+			it("cannot reload an answer_id without conversation ids", async () => {
+				mockClient().exportAnswerReport.mockRejectedValueOnce(
+					new ThoughtSpotApiError(400, "exportAnswerReport"),
+				);
+				await server.init();
+				const { callTool } = connect(server);
+
+				const result = await callTool("get_data", {
+					object_id: answerId,
+					object_type: "ANALYTICS_AGENT_ANSWER",
+				});
+
+				expect(result.isError).toBe(true);
+				expect(mockClient().loadSpotter3Answer).not.toHaveBeenCalled();
+				expect((result.content as any[])[0].text).toMatch(
+					/ask the Analytics Agent the question again/,
+				);
+			});
+
+			it("asks to re-ask when the conversation itself is gone", async () => {
+				mockClient().exportAnswerReport.mockRejectedValueOnce(
+					new ThoughtSpotApiError(400, "exportAnswerReport"),
+				);
+				mockClient().loadSpotter3Answer.mockRejectedValueOnce(
+					new ThoughtSpotApiError(404, "loadAgentConversationAnswer"),
+				);
+				await server.init();
+				const { callTool } = connect(server);
+
+				const result = await callTool("get_data", {
+					object_id: reloadableAnswerId,
+					object_type: "ANALYTICS_AGENT_ANSWER",
+				});
+
+				expect(result.isError).toBe(true);
+				expect((result.content as any[])[0].text).toMatch(
+					/conversation may have expired.*ask the Analytics Agent the question again/s,
+				);
+			});
+		});
+
+		it("returns a permission hint when the export is forbidden", async () => {
+			mockClient().exportAnswerReport.mockRejectedValueOnce(
+				new ThoughtSpotApiError(403, "exportAnswerReport"),
+			);
+			await server.init();
+			const { callTool } = connect(server);
+
+			const result = await callTool("get_data", {
+				object_id: answerId,
+				object_type: "ANALYTICS_AGENT_ANSWER",
+			});
+
+			expect(result.isError).toBe(true);
+			const text = (result.content as any[])[0].text;
+			expect(text).toMatch(/permission to download/);
+			expect(text).not.toMatch(/may have expired/);
+		});
+
+		it("passes suppress-iframes to the stream processing on send_session_message", async () => {
+			mockProps.suppressIframes = true;
+			vi.spyOn(server as any, "getStorageService").mockReturnValue({
+				initializeConversation: vi.fn().mockResolvedValue(undefined),
+				appendMessages: vi.fn().mockResolvedValue(undefined),
+			});
+			const send = vi
+				.spyOn(
+					ThoughtSpotService.prototype,
+					"sendAgentConversationMessageStreaming",
+				)
+				.mockResolvedValue(undefined);
+			await server.init();
+			const { callTool } = connect(server);
+
+			await callTool("send_session_message", {
+				analytical_session_id: "conv-1",
+				message: "Revenue by region",
+			});
+
+			expect(send).toHaveBeenCalledWith(
+				"conv-1",
+				"Revenue by region",
+				SpotterResponseFormat.SIMPLIFIED,
+				expect.any(Function),
+				undefined,
+				true,
 			);
 		});
 	});
@@ -1887,6 +2170,7 @@ describe("MCP Server", () => {
 				SpotterResponseFormat.SIMPLIFIED,
 				expect.any(Function),
 				undefined,
+				false,
 			);
 		});
 
@@ -1906,6 +2190,7 @@ describe("MCP Server", () => {
 				SpotterResponseFormat.SIMPLIFIED,
 				expect.any(Function),
 				"The user is focused on North America",
+				false,
 			);
 		});
 

@@ -43,6 +43,23 @@ export function parseAnswerIds(
 	}
 }
 
+/**
+ * The conversation ids in an `answer_id`, which outlive its session ids and let the answer be
+ * loaded again. Undefined for an `answer_id` without them (issued before they were added).
+ */
+export function parseAnswerReloadIds(
+	answerId: string,
+): { conversationId: string; messageId: string } | undefined {
+	try {
+		const { conversation_id, message_id } = JSON.parse(answerId);
+		return typeof conversation_id === "string" && typeof message_id === "string"
+			? { conversationId: conversation_id, messageId: message_id }
+			: undefined;
+	} catch {
+		return undefined;
+	}
+}
+
 export function invalidAnswerIdResult(
 	answers: { answer_id: string }[],
 ): DashboardToolResult {

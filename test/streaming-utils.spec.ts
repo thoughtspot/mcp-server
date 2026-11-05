@@ -366,7 +366,7 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 			sage_query: "show sales",
 			worksheet_id: "ws-123",
 		};
-		const line = `data: ${JSON.stringify([{ type: "answer", metadata }])}\n`;
+		const line = `data: ${JSON.stringify([{ id: "msg-1", type: "answer", metadata }])}\n`;
 		const reader = makeReader([line]);
 
 		await processSendAgentConversationMessageStreamingResponse(
@@ -382,7 +382,12 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 			{
 				is_thinking: false,
 				type: "answer",
-				answer_id: JSON.stringify({ session_id: "sess-1", gen_no: 42 }),
+				answer_id: JSON.stringify({
+					session_id: "sess-1",
+					gen_no: 42,
+					conversation_id: CONV_ID,
+					message_id: "msg-1",
+				}),
 				answer_title: "My Answer",
 				answer_data_source_id: "ws-123",
 				answer_query: "show sales",
@@ -418,7 +423,11 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 			{
 				is_thinking: true,
 				type: "answer",
-				answer_id: JSON.stringify({ session_id: "sess-2", gen_no: 1 }),
+				answer_id: JSON.stringify({
+					session_id: "sess-2",
+					gen_no: 1,
+					conversation_id: CONV_ID,
+				}),
 				answer_title: "Thinking Answer",
 				answer_query: "show revenue",
 				iframe_url: expectedIframeUrl,
@@ -940,7 +949,11 @@ describe("processSendAgentConversationMessageStreamingResponse — raw format", 
 		expect(messages).toEqual([
 			{
 				...item,
-				answer_id: JSON.stringify({ session_id: "sess-1", gen_no: 42 }),
+				answer_id: JSON.stringify({
+					session_id: "sess-1",
+					gen_no: 42,
+					conversation_id: CONV_ID,
+				}),
 			},
 		]);
 		expect(messages[0]).not.toHaveProperty("iframe_url");
@@ -1050,6 +1063,37 @@ describe("processSendAgentConversationMessageStreamingResponse — raw format", 
 			total_text_messages_parsed: 1,
 			total_answer_messages_parsed: 1,
 			total_messages_ignored: 0,
+		});
+	});
+});
+
+describe("suppress-iframes", () => {
+	it("builds no iframe_url for answers", async () => {
+		const storage = makeMockStorage();
+		const line = `data: ${JSON.stringify([
+			{
+				id: "msg-1",
+				type: "answer",
+				metadata: { session_id: "s1", gen_no: 2, title: "Headcount" },
+			},
+		])}\n`;
+
+		await processSendAgentConversationMessageStreamingResponse(
+			INSTANCE_URL,
+			SpotterResponseFormat.SIMPLIFIED,
+			CONV_ID,
+			makeReader([line]),
+			storage.appendMessages,
+			undefined,
+			true,
+		);
+
+		const [, messages] = storage.appendMessagesAndRestartTtl.mock
+			.calls[0] as any;
+		expect(messages[0]).not.toHaveProperty("iframe_url");
+		expect(messages[0]).toMatchObject({
+			type: "answer",
+			answer_title: "Headcount",
 		});
 	});
 });

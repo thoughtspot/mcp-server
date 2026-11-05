@@ -507,7 +507,11 @@ describe("V2 Streaming Parser + Real Storage Integration", () => {
 		const msg = state.messages[0] as any;
 		expect(msg.type).toBe("answer");
 		expect(msg.answer_id).toBe(
-			JSON.stringify({ session_id: "sess-abc", gen_no: 3 }),
+			JSON.stringify({
+				session_id: "sess-abc",
+				gen_no: 3,
+				conversation_id: "stream-conv-2",
+			}),
 		);
 		expect(msg.iframe_url).toContain("sessionId=sess-abc");
 		expect(msg.iframe_url).toContain("genNo=3");

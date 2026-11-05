@@ -22,6 +22,9 @@ export type Props = {
 	apiRequestedVersion?: string;
 	authMode?: AuthMode;
 	enableRawSessionUpdates?: boolean;
+	// Undocumented URL flag (see index.ts): omit `iframe_url` from Analytics
+	// Agent answers.
+	suppressIframes?: boolean;
 };
 
 const DEFAULT_CLIENT_NAME = "Bearer Token client";
