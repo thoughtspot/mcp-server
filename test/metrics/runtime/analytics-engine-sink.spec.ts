@@ -196,6 +196,79 @@ describe("AnalyticsEngineMetricsSink", () => {
 		);
 	});
 
+	it("sums same-series counter observations into a single data point", async () => {
+		const dataset = { writeDataPoint: vi.fn() };
+		const sink = new AnalyticsEngineMetricsSink(dataset);
+		const streamMessage = {
+			kind: "counter",
+			name: METRIC_NAMES.upstreamStreamMessagesTotal,
+			value: 1,
+			labels: {
+				upstream_operation: "agent_conversation",
+				message_type: "data",
+				is_thinking: "false",
+			},
+			timestampMs: 1_714_000_000_000,
+		} satisfies MetricObservation;
+
+		await sink.flush({
+			observations: [
+				streamMessage,
+				{ ...streamMessage, timestampMs: 1_714_000_000_500 },
+				{ ...streamMessage, timestampMs: 1_714_000_000_250 },
+			],
+			resourceAttributes: {},
+		});
+
+		expect(dataset.writeDataPoint).toHaveBeenCalledTimes(1);
+		expect(dataset.writeDataPoint).toHaveBeenCalledWith(
+			expect.objectContaining({
+				doubles: [3, 1_714_000_000_500],
+			}),
+		);
+	});
+
+	it("keeps counters with different names or labels as separate data points", async () => {
+		const dataset = { writeDataPoint: vi.fn() };
+		const sink = new AnalyticsEngineMetricsSink(dataset);
+
+		await sink.flush({
+			observations: [
+				observation,
+				{ ...observation, labels: { ...observation.labels, outcome: "error" } },
+				{ ...observation, name: METRIC_NAMES.httpRequestsTotal },
+			],
+			resourceAttributes: {},
+		});
+
+		expect(dataset.writeDataPoint).toHaveBeenCalledTimes(3);
+	});
+
+	it("does not aggregate histogram observations", async () => {
+		const dataset = { writeDataPoint: vi.fn() };
+		const sink = new AnalyticsEngineMetricsSink(dataset);
+		const histogram = {
+			kind: "histogram",
+			name: METRIC_NAMES.toolDurationMs,
+			value: 120,
+			labels: { tool_name: "create_liveboard", outcome: "success" },
+			timestampMs: 1_714_000_000_000,
+		} satisfies MetricObservation;
+
+		await sink.flush({
+			observations: [histogram, { ...histogram, value: 340 }],
+			resourceAttributes: {},
+		});
+
+		expect(dataset.writeDataPoint).toHaveBeenCalledTimes(2);
+		expect(dataset.writeDataPoint).toHaveBeenCalledWith(
+			expect.objectContaining({ doubles: [120, 1_714_000_000_000] }),
+		);
+		expect(dataset.writeDataPoint).toHaveBeenCalledWith(
+			expect.objectContaining({ doubles: [340, 1_714_000_000_000] }),
+		);
+	});
+
 	it("continues writing remaining data points when one write fails", async () => {
 		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 		const secondObservation = {
