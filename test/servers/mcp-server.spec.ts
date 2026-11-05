@@ -818,14 +818,14 @@ describe("MCP Server", () => {
 		const toolByName = (tools: any[], name: string) =>
 			tools.find((tool) => tool.name === name);
 
-		it("exposes SPOTTER_ANSWER on get_data, iframe-first, by default", async () => {
+		it("exposes ANALYTICS_AGENT_ANSWER on get_data, iframe-first, by default", async () => {
 			await server.init();
 			const { listTools } = connect(server);
 
 			const { tools } = await listTools();
 			const getData = toolByName(tools, "get_data");
 			expect(getData.inputSchema.properties.object_type.enum).toContain(
-				"SPOTTER_ANSWER",
+				"ANALYTICS_AGENT_ANSWER",
 			);
 			expect(getData.description).toMatch(
 				/present the Agent's answer with the visualization it provides/,
@@ -844,7 +844,7 @@ describe("MCP Server", () => {
 			const { tools } = await listTools();
 			const getData = toolByName(tools, "get_data");
 			expect(getData.inputSchema.properties.object_type.enum).toContain(
-				"SPOTTER_ANSWER",
+				"ANALYTICS_AGENT_ANSWER",
 			);
 			expect(getData.description).toMatch(/come with no visualization/);
 			expect(getData.description).not.toMatch(
@@ -861,7 +861,7 @@ describe("MCP Server", () => {
 
 			const result = await callTool("get_data", {
 				object_id: answerId,
-				object_type: "SPOTTER_ANSWER",
+				object_type: "ANALYTICS_AGENT_ANSWER",
 				max_rows: 1,
 			});
 
@@ -889,7 +889,7 @@ describe("MCP Server", () => {
 
 			const result = await callTool("get_data", {
 				object_id: "not-json",
-				object_type: "SPOTTER_ANSWER",
+				object_type: "ANALYTICS_AGENT_ANSWER",
 			});
 
 			expect(result.isError).toBe(true);
@@ -905,7 +905,7 @@ describe("MCP Server", () => {
 
 			const result = await callTool("get_data", {
 				object_id: answerId,
-				object_type: "SPOTTER_ANSWER",
+				object_type: "ANALYTICS_AGENT_ANSWER",
 			});
 
 			expect(result.isError).toBe(true);
@@ -935,7 +935,7 @@ describe("MCP Server", () => {
 
 				const result = await callTool("get_data", {
 					object_id: reloadableAnswerId,
-					object_type: "SPOTTER_ANSWER",
+					object_type: "ANALYTICS_AGENT_ANSWER",
 				});
 
 				expect(result.isError).toBeUndefined();
@@ -964,7 +964,7 @@ describe("MCP Server", () => {
 
 				const result = await callTool("get_data", {
 					object_id: reloadableAnswerId,
-					object_type: "SPOTTER_ANSWER",
+					object_type: "ANALYTICS_AGENT_ANSWER",
 				});
 
 				expect(result.isError).toBe(true);
@@ -983,7 +983,7 @@ describe("MCP Server", () => {
 
 				const result = await callTool("get_data", {
 					object_id: reloadableAnswerId,
-					object_type: "SPOTTER_ANSWER",
+					object_type: "ANALYTICS_AGENT_ANSWER",
 				});
 
 				expect(result.isError).toBe(true);
@@ -999,7 +999,7 @@ describe("MCP Server", () => {
 
 				const result = await callTool("get_data", {
 					object_id: answerId,
-					object_type: "SPOTTER_ANSWER",
+					object_type: "ANALYTICS_AGENT_ANSWER",
 				});
 
 				expect(result.isError).toBe(true);
@@ -1021,7 +1021,7 @@ describe("MCP Server", () => {
 
 				const result = await callTool("get_data", {
 					object_id: reloadableAnswerId,
-					object_type: "SPOTTER_ANSWER",
+					object_type: "ANALYTICS_AGENT_ANSWER",
 				});
 
 				expect(result.isError).toBe(true);
@@ -1040,7 +1040,7 @@ describe("MCP Server", () => {
 
 			const result = await callTool("get_data", {
 				object_id: answerId,
-				object_type: "SPOTTER_ANSWER",
+				object_type: "ANALYTICS_AGENT_ANSWER",
 			});
 
 			expect(result.isError).toBe(true);

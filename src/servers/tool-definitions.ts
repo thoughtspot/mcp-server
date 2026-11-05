@@ -223,7 +223,7 @@ export const GetDataInputSchema = z.object({
 	object_type: z
 		.enum(GET_DATA_SUPPORTED_TYPES)
 		.describe(
-			"The object's type. Required. For a `search_objects` result, pass its `type` verbatim — one of `ANSWER`, `LIVEBOARD`, or `LIVEBOARD_VIZ`. For `LIVEBOARD_VIZ` also pass that result's `visualization_id` in `visualization_ids` (else the request is rejected); it fetches via the parent Liveboard. For an answer from `get_session_updates`, pass `SPOTTER_ANSWER`.",
+			"The object's type. Required. For a `search_objects` result, pass its `type` verbatim — one of `ANSWER`, `LIVEBOARD`, or `LIVEBOARD_VIZ`. For `LIVEBOARD_VIZ` also pass that result's `visualization_id` in `visualization_ids` (else the request is rejected); it fetches via the parent Liveboard. For an answer from `get_session_updates`, pass `ANALYTICS_AGENT_ANSWER`.",
 		),
 	visualization_ids: z
 		.array(
@@ -366,7 +366,7 @@ export const ConversationUpdateSchema = z.object({
 		.string()
 		.optional()
 		.describe(
-			"A unique identifier for the answer. Only present when `type` is `answer`. You can use this field to identify this answer when using the `create_dashboard` tool, or pass it to `get_data` with `object_type` `SPOTTER_ANSWER` to fetch the answer's rows.",
+			"A unique identifier for the answer. Only present when `type` is `answer`. You can use this field to identify this answer when using the `create_dashboard` tool, or pass it to `get_data` with `object_type` `ANALYTICS_AGENT_ANSWER` to fetch the answer's rows.",
 		),
 	answer_title: z
 		.string()
@@ -1012,7 +1012,7 @@ export const toolDefinitionsV2 = [
 	},
 	{
 		...GET_SESSION_UPDATES_SHARED_TOOL_DEFINITION,
-		description: `${GET_SESSION_UPDATES_SHARED_TOOL_DEFINITION.description} The \`session_updates\` are returned in their raw and unmodified form. The shape of each update may be different, and there are no guarantees on what fields may be present. For \`answer\` updates, an \`answer_id\` field is added: pass it verbatim to the \`create_dashboard\` tool, or to \`get_data\` with \`object_type\` \`SPOTTER_ANSWER\`.`,
+		description: `${GET_SESSION_UPDATES_SHARED_TOOL_DEFINITION.description} The \`session_updates\` are returned in their raw and unmodified form. The shape of each update may be different, and there are no guarantees on what fields may be present. For \`answer\` updates, an \`answer_id\` field is added: pass it verbatim to the \`create_dashboard\` tool, or to \`get_data\` with \`object_type\` \`ANALYTICS_AGENT_ANSWER\`.`,
 		outputSchema: z.toJSONSchema(GetSessionUpdatesRawOutputSchema),
 	},
 	{
@@ -1153,13 +1153,13 @@ export const toolDefinitionsV3 = [
 	},
 ];
 
-export const GET_DATA_SPOTTER_ANSWER_DESCRIPTION =
-	"It can also fetch the rows behind an answer from the Analytics Agent: pass the answer's `answer_id` from `get_session_updates` verbatim as `object_id`, with `object_type` `SPOTTER_ANSWER` (`visualization_ids` is ignored). By default, present the Agent's answer with the visualization it provides and do not build your own chart. Call this for an answer only when the user asks to chart it yourself, reshape or modify it, combine it with other answers or data, or build a dashboard or visualization of your own from the results.";
+export const GET_DATA_ANALYTICS_AGENT_ANSWER_DESCRIPTION =
+	"It can also fetch the rows behind an answer from the Analytics Agent: pass the answer's `answer_id` from `get_session_updates` verbatim as `object_id`, with `object_type` `ANALYTICS_AGENT_ANSWER` (`visualization_ids` is ignored). By default, present the Agent's answer with the visualization it provides and do not build your own chart. Call this for an answer only when the user asks to chart it yourself, reshape or modify it, combine it with other answers or data, or build a dashboard or visualization of your own from the results.";
 
 // With the undocumented `suppress-iframes` URL flag, answers carry no
 // visualization, so get_data's description swaps this in for the default one.
-export const GET_DATA_SPOTTER_ANSWER_SUPPRESSED_IFRAMES_DESCRIPTION =
-	"It can also fetch the rows behind an answer from the Analytics Agent: pass the answer's `answer_id` from `get_session_updates` verbatim as `object_id`, with `object_type` `SPOTTER_ANSWER` (`visualization_ids` is ignored). Answers from the Analytics Agent come with no visualization of their own, so whenever a chart or table would help the user understand an answer, or the user asks to chart, reshape, combine, or build a dashboard from results, call this and build the visual from the returned rows.";
+export const GET_DATA_ANALYTICS_AGENT_ANSWER_SUPPRESSED_IFRAMES_DESCRIPTION =
+	"It can also fetch the rows behind an answer from the Analytics Agent: pass the answer's `answer_id` from `get_session_updates` verbatim as `object_id`, with `object_type` `ANALYTICS_AGENT_ANSWER` (`visualization_ids` is ignored). Answers from the Analytics Agent come with no visualization of their own, so whenever a chart or table would help the user understand an answer, or the user asks to chart, reshape, combine, or build a dashboard from results, call this and build the visual from the returned rows.";
 
 // The get_data tool (fetch full data for a saved Answer/Liveboard). Gated behind
 // the data-download privilege at runtime in listTools/callGetData.
@@ -1170,7 +1170,7 @@ const getDataToolDefinition = {
 		"When the user wants to explain, describe, summarize, analyze, or interpret what a specific object contains or shows, an accurate answer comes from this tool's data, so you should fetch it first with the object's `id` and answer from the returned rows.",
 		"Runs the object's saved question (its existing filters and columns, unchanged) against the current data and returns the result, so the rows reflect the latest data and may differ from when the object was first saved. The result is shaped to the object's type: an Answer returns a single tabular result, a Liveboard returns one tabular result per visualization (each with its visualization id and name). To pull a single visualization pinned on a Liveboard, pass the Liveboard GUID as `object_id` and the visualization GUID in `visualization_ids`. Each result includes the column names and data rows. Use the optional `max_rows` to bound the rows returned per visualization (defaults to 25).",
 		"Liveboard fetches are time-bound: they return as many visualizations as can be fetched within the time limit, so not every requested visualization is guaranteed to come back, even when `visualization_ids` is given. A typical call handles about 25 visualizations. If a visualization you need is missing from the result, request it by GUID in a follow-up call. If `visualization_ids` is omitted, the call returns as many of the Liveboard's visualizations as fit within the time limit.",
-		GET_DATA_SPOTTER_ANSWER_DESCRIPTION,
+		GET_DATA_ANALYTICS_AGENT_ANSWER_DESCRIPTION,
 	].join("\n"),
 	inputSchema: z.toJSONSchema(GetDataInputSchema),
 	outputSchema: z.toJSONSchema(GetDataOutputSchema),

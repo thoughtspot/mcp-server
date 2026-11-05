@@ -13,7 +13,7 @@ import {
 } from "../metrics/runtime/metrics-recorder";
 import type { ToolMetricApiSurface } from "../metrics/runtime/tool-metrics";
 import { WithSpan } from "../metrics/tracing/tracing-utils";
-import { SPOTTER_ANSWER_TYPE } from "../services/clients/get-data/get-data-constants";
+import { ANALYTICS_AGENT_ANSWER_TYPE } from "../services/clients/get-data/get-data-constants";
 import type { GetDataResult } from "../services/clients/get-data/get-data-types";
 import { SpotterAnswerCsvError } from "../services/clients/get-data/spotter-answer-data";
 import {
@@ -67,8 +67,8 @@ import {
 	CreateLiveboardSchema,
 	CreateModelSessionInputSchema,
 	FinalizeModelInputSchema,
-	GET_DATA_SPOTTER_ANSWER_DESCRIPTION,
-	GET_DATA_SPOTTER_ANSWER_SUPPRESSED_IFRAMES_DESCRIPTION,
+	GET_DATA_ANALYTICS_AGENT_ANSWER_DESCRIPTION,
+	GET_DATA_ANALYTICS_AGENT_ANSWER_SUPPRESSED_IFRAMES_DESCRIPTION,
 	GetAnswerSchema,
 	GetDashboardStatusInputSchema,
 	GetDataInputSchema,
@@ -496,8 +496,8 @@ export class MCPServer extends BaseMCPServer {
 					? {
 							...tool,
 							description: tool.description.replace(
-								GET_DATA_SPOTTER_ANSWER_DESCRIPTION,
-								GET_DATA_SPOTTER_ANSWER_SUPPRESSED_IFRAMES_DESCRIPTION,
+								GET_DATA_ANALYTICS_AGENT_ANSWER_DESCRIPTION,
+								GET_DATA_ANALYTICS_AGENT_ANSWER_SUPPRESSED_IFRAMES_DESCRIPTION,
 							),
 						}
 					: tool,
@@ -1493,7 +1493,7 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		const [answer] = parseAnswerIds([{ answer_id: answerId, title: "" }]) ?? [];
 		if (!answer) {
 			return this.createErrorResponse(
-				'Invalid answer_id for object_type SPOTTER_ANSWER. Pass the `answer_id` returned from the "get_session_updates" tool verbatim.',
+				'Invalid answer_id for object_type ANALYTICS_AGENT_ANSWER. Pass the `answer_id` returned from the "get_session_updates" tool verbatim.',
 				`get_data: invalid answer_id ${answerId}`,
 			);
 		}
@@ -1541,7 +1541,7 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			if (error instanceof SpotterAnswerCsvError) {
 				return this.createErrorResponse(
 					`Failed to read answer data: ${error.message}.`,
-					"get_data (SPOTTER_ANSWER) CSV parse failed",
+					"get_data (ANALYTICS_AGENT_ANSWER) CSV parse failed",
 				);
 			}
 			const status = this.apiErrorStatus(error);
@@ -1554,7 +1554,7 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 					: "The answer's conversation may have expired; ask the Analytics Agent the question again and pass the new answer's `answer_id`.";
 			return this.createErrorResponse(
 				`Failed to fetch answer data: ${summarizeUpstreamError(error)}. ${hint}`,
-				"get_data (SPOTTER_ANSWER) failed",
+				"get_data (ANALYTICS_AGENT_ANSWER) failed",
 			);
 		}
 	}
@@ -1578,7 +1578,7 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		const { object_id, object_type, visualization_ids, max_rows } =
 			GetDataInputSchema.parse(request.params.arguments);
 
-		if (object_type === SPOTTER_ANSWER_TYPE) {
+		if (object_type === ANALYTICS_AGENT_ANSWER_TYPE) {
 			return this.callGetSpotterAnswerData(object_id, max_rows, recorder);
 		}
 
