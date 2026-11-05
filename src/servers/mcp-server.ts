@@ -61,7 +61,7 @@ import type { StorageServiceClient } from "../storage-service/storage-service";
 import { McpServerError } from "../utils";
 import { BaseMCPServer, type Context } from "./mcp-server-base";
 import {
-	CreateAnalysisSessionInputSchema,
+	CreateAnalysisSessionSpotter3InputSchema,
 	CreateDashboardInputSchema,
 	CreateDashboardLegacyInputSchema,
 	CreateLiveboardSchema,
@@ -83,6 +83,7 @@ import {
 	SendSessionMessageInputSchema,
 	SwitchOrgInputSchema,
 	ToolName,
+	createAnalysisSessionToolDefinitionSpotterX,
 } from "./tool-definitions";
 import {
 	type VersionConfig,
@@ -478,6 +479,21 @@ export class MCPServer extends BaseMCPServer {
 		);
 
 		let tools = [...versionConfig.tools];
+
+		// If the cluster is using SpotterX and all required flags are enabled, then replace the
+		// Spotter 3 CreateAnalysisSession tool with the SpotterX version
+		if (versionConfig.version.includes("beta") && this.isSpotterXEnabled()) {
+			const toolIdxToReplace = tools.findIndex(
+				(tool) => tool.name === ToolName.CreateAnalysisSession,
+			);
+			if (toolIdxToReplace !== -1) {
+				tools.splice(
+					toolIdxToReplace,
+					1,
+					createAnalysisSessionToolDefinitionSpotterX,
+				);
+			}
+		}
 
 		// Select which get_session_updates tool to expose based on raw session updates flag (for
 		// v1 toolset we don't do anything)
@@ -908,7 +924,7 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		recorder: MetricsRecorder,
 	) {
 		const span = trace.getSpan(context.active());
-		const { data_source_id } = CreateAnalysisSessionInputSchema.parse(
+		const { data_source_id } = CreateAnalysisSessionSpotter3InputSchema.parse(
 			request.params.arguments,
 		);
 		span?.setAttribute("data_source_id", data_source_id ?? "(none)");

@@ -297,7 +297,7 @@ export const CheckConnectivityOutputSchema = z.object({
 		),
 });
 
-export const CreateAnalysisSessionInputSchema = z.object({
+export const CreateAnalysisSessionSpotter3InputSchema = z.object({
 	data_source_id: z
 		.string()
 		.optional()
@@ -305,6 +305,16 @@ export const CreateAnalysisSessionInputSchema = z.object({
 			'The ID of the data source to query. You can provide this when the user has specified or confirmed a data source, or when context makes a particular source obvious. Omit it to let the Analytics Agent automatically select the most relevant source based on the question; if the instance does not support automatic selection, the tool returns an error asking for a data source, which you can find with `search_objects`. A valid ID follows the following format: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" (for example, "de1b3cfd-1725-400a-b6c7-0cd0f2b70bf1"). If you only have the data source name but not the ID, you can provide it in the `additional_context` field of the `send_session_message` tool instead.',
 		),
 });
+
+export const CreateAnalysisSessionSpotterXInputSchema =
+	CreateAnalysisSessionSpotter3InputSchema.extend({
+		dashboard_id: z
+			.string()
+			.optional()
+			.describe(
+				'The ID of the dashboard to ask questions about. You can provide this when the user has specified or confirmed a dashboard, or when context makes a particular dashboard obvious. You can find dashboards with the `search_objects` tool. A valid ID follows the following format: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" (for example, "de1b3cfd-1725-400a-b6c7-0cd0f2b70bf1"). If you only have the dashboard name but not the ID, you can search for it using the `search_objects` tool.',
+			),
+	});
 
 export const CreateAnalysisSessionOutputSchema = z.object({
 	analytical_session_id: z
@@ -982,7 +992,7 @@ export const toolDefinitionsV2 = [
 		name: ToolName.CreateAnalysisSession,
 		description:
 			"Start an analytical session with the Analytics Agent. This is the first step in a three-step workflow: create a session, send a message, then poll for updates. Once created, you can use the returned `analytical_session_id` to send analytical questions via `send_session_message` and retrieve answers via `get_session_updates`. Sessions are conversational, so you can ask follow-up questions in the same session without creating a new one. Using a single analytical session is preferable, because it reuses the same data source selection. When the user's intent is to create a dashboard, use the first message in this session to plan: ask the Analytics Agent what data and metrics are available for the topic, what trends or breakdowns would be most meaningful, and what chart types best fit the data. Use the Agent's response to form a dashboard plan before requesting any specific charts.",
-		inputSchema: z.toJSONSchema(CreateAnalysisSessionInputSchema),
+		inputSchema: z.toJSONSchema(CreateAnalysisSessionSpotter3InputSchema),
 		outputSchema: z.toJSONSchema(CreateAnalysisSessionOutputSchema),
 		annotations: {
 			title: "Create Analysis Session",
@@ -1267,3 +1277,18 @@ export const toolDefinitionsV5 = [
 	modifyDashboardToolDefinition,
 	getDashboardStatusToolDefinition,
 ];
+
+// CreateAnalysisSession has a slightly different contract for SpotterX
+export const createAnalysisSessionToolDefinitionSpotterX = {
+	name: ToolName.CreateAnalysisSession,
+	description:
+		"Start an analytical session with the Analytics Agent. This is the first step in a three-step workflow: create a session, send a message, then poll for updates. Once created, you can use the returned `analytical_session_id` to send analytical questions via `send_session_message` and retrieve answers via `get_session_updates`. Sessions are conversational, so you can ask follow-up questions in the same session without creating a new one. Using a single analytical session is preferable, because it reuses the same data source selection. You can also create an analysis session in the context of a dashboard or visualization within a dashboard, to ask questions about that content. When the user's intent is to create a dashboard, use the first message in this session to plan: ask the Analytics Agent what data and metrics are available for the topic, what trends or breakdowns would be most meaningful, and what chart types best fit the data. Use the Agent's response to form a dashboard plan before requesting any specific charts.",
+	inputSchema: z.toJSONSchema(CreateAnalysisSessionSpotterXInputSchema),
+	outputSchema: z.toJSONSchema(CreateAnalysisSessionOutputSchema),
+	annotations: {
+		title: "Create Analysis Session",
+		readOnlyHint: true,
+		destructiveHint: false,
+		openWorldHint: false,
+	},
+};
