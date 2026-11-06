@@ -128,9 +128,15 @@ export function createTestClient(
 	// This would be used in integration tests or when you want to test
 	// the actual client creation without mocking
 	const {
-		getThoughtSpotClient,
+		ThoughtSpotClient,
 	} = require("../../src/services/clients/thoughtspot-client");
-	return getThoughtSpotClient(instanceUrl, bearerToken);
+	return new ThoughtSpotClient({
+		instanceUrl,
+		token: bearerToken,
+		tenantId: "",
+		orgId: "",
+		userId: "",
+	});
 }
 
 /**

@@ -8,7 +8,9 @@ export interface DataSource {
 export interface ClientContext {
 	instanceUrl: string;
 	token: string;
-	orgId?: string;
+	tenantId: string;
+	orgId: string;
+	userId: string;
 }
 
 // Error from a ThoughtSpot HTTP call, carrying the numeric status so callers can

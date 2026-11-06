@@ -95,6 +95,18 @@ export class ThoughtSpotClient extends ThoughtSpotRestApi {
 		return this.ctx.instanceUrl;
 	}
 
+	get tenantId(): string {
+		return this.ctx.tenantId;
+	}
+
+	get orgId(): string {
+		return this.ctx.orgId;
+	}
+
+	get userId(): string {
+		return this.ctx.userId;
+	}
+
 	exportUnsavedAnswerTML(params: Params<typeof exportUnsavedAnswerTML>) {
 		return exportUnsavedAnswerTML(this.ctx, params);
 	}
@@ -181,12 +193,6 @@ export class ThoughtSpotClient extends ThoughtSpotRestApi {
 		return spotterModel.fetchWorksheetModel(this.ctx, params);
 	}
 }
-
-export const getThoughtSpotClient = (
-	instanceUrl: string,
-	bearerToken: string,
-	orgId?: string,
-) => new ThoughtSpotClient({ instanceUrl, token: bearerToken, orgId });
 
 /*
  * Using custom handler because we don't have a public API for this

@@ -163,7 +163,7 @@ describe("Spotter Model tools + real storage integration", () => {
 	beforeEach(async () => {
 		vi.clearAllMocks();
 
-		vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
+		vi.spyOn(thoughtspotClient, "ThoughtSpotClient").mockReturnValue({
 			getSessionInfo: vi.fn().mockResolvedValue(mockSessionInfoResponse),
 			instanceUrl: "https://test.thoughtspot.cloud",
 		} as any);

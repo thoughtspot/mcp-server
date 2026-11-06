@@ -182,7 +182,7 @@ describe("thoughtspot-service", () => {
 		});
 	});
 
-	describe("createAgentConversation", () => {
+	describe("createSpotter3Conversation", () => {
 		it("should create an agent conversation in auto mode by default", async () => {
 			const mockResponse = {
 				conversation_id: "conv-123",
@@ -193,7 +193,7 @@ describe("thoughtspot-service", () => {
 				.mockResolvedValue(mockResponse);
 
 			const service = new ThoughtSpotService(mockClient);
-			const result = await service.createAgentConversation(false, false);
+			const result = await service.createSpotter3Conversation(false, false);
 
 			expect(mockClient.createSpotter3Conversation).toHaveBeenCalledWith({
 				isSpotterDataSourceDiscoveryEnabled: false,
@@ -213,7 +213,7 @@ describe("thoughtspot-service", () => {
 				.mockResolvedValue(mockResponse);
 
 			const service = new ThoughtSpotService(mockClient);
-			await service.createAgentConversation(false, false, "worksheet-123");
+			await service.createSpotter3Conversation(false, false, "worksheet-123");
 
 			expect(mockClient.createSpotter3Conversation).toHaveBeenCalledWith({
 				isSpotterDataSourceDiscoveryEnabled: false,
@@ -228,13 +228,59 @@ describe("thoughtspot-service", () => {
 
 			const service = new ThoughtSpotService(mockClient);
 
-			await expect(service.createAgentConversation()).rejects.toThrow(
+			await expect(service.createSpotter3Conversation()).rejects.toThrow(
 				"Conversation API Error",
 			);
 		});
 	});
 
-	describe("sendAgentConversationMessageStreaming", () => {
+	describe("createSpotterXConversation", () => {
+		const spotterXClient = {
+			...mockClient,
+			tenantId: "tenant-1",
+			orgId: "42",
+			userId: "user-guid-1",
+		};
+
+		it("passes the client identity, data source and liveboard to the client", async () => {
+			spotterXClient.createSpotterXConversation = vi
+				.fn()
+				.mockResolvedValue({ conversation_id: "conv-x" });
+
+			const service = new ThoughtSpotService(spotterXClient);
+			const result = await service.createSpotterXConversation(
+				true,
+				false,
+				"worksheet-123",
+				"lb-123",
+			);
+
+			expect(spotterXClient.createSpotterXConversation).toHaveBeenCalledWith({
+				isSpotterDataSourceDiscoveryEnabled: true,
+				isSpotterChatHistoryEnabled: false,
+				tenantId: "tenant-1",
+				orgId: "42",
+				userId: "user-guid-1",
+				dataSourceId: "worksheet-123",
+				liveboardId: "lb-123",
+			});
+			expect(result).toEqual({ conversation_id: "conv-x" });
+		});
+
+		it("rethrows when conversation creation fails", async () => {
+			spotterXClient.createSpotterXConversation = vi
+				.fn()
+				.mockRejectedValue(new Error("SpotterX API Error"));
+
+			const service = new ThoughtSpotService(spotterXClient);
+
+			await expect(
+				service.createSpotterXConversation(false, false),
+			).rejects.toThrow("SpotterX API Error");
+		});
+	});
+
+	describe("sendSpotter3MessageStreaming", () => {
 		it("records upstream streaming metrics and flushes stream message metrics in the background", async () => {
 			vi.useFakeTimers();
 
@@ -293,7 +339,7 @@ describe("thoughtspot-service", () => {
 				},
 			});
 
-			await service.sendAgentConversationMessageStreaming(
+			await service.sendSpotter3MessageStreaming(
 				"conv-123",
 				"Show me revenue",
 				SpotterResponseFormat.SIMPLIFIED,
@@ -368,7 +414,7 @@ describe("thoughtspot-service", () => {
 			});
 
 			await expect(
-				service.sendAgentConversationMessageStreaming(
+				service.sendSpotter3MessageStreaming(
 					"conv-123",
 					"Show me revenue",
 					SpotterResponseFormat.SIMPLIFIED,
@@ -410,7 +456,7 @@ describe("thoughtspot-service", () => {
 			const service = new ThoughtSpotService(mockClient);
 
 			await expect(
-				service.sendAgentConversationMessageStreaming(
+				service.sendSpotter3MessageStreaming(
 					"conv-123",
 					"Show me revenue",
 					SpotterResponseFormat.SIMPLIFIED,
@@ -446,7 +492,7 @@ describe("thoughtspot-service", () => {
 			} as any;
 
 			const service = new ThoughtSpotService(mockClient);
-			await service.sendAgentConversationMessageStreaming(
+			await service.sendSpotter3MessageStreaming(
 				"conv-123",
 				"Show me revenue",
 				SpotterResponseFormat.SIMPLIFIED,
@@ -489,7 +535,7 @@ describe("thoughtspot-service", () => {
 			} as any;
 
 			const service = new ThoughtSpotService(mockClient);
-			await service.sendAgentConversationMessageStreaming(
+			await service.sendSpotter3MessageStreaming(
 				"conv-123",
 				"Show me revenue",
 				SpotterResponseFormat.SIMPLIFIED,
@@ -526,7 +572,7 @@ describe("thoughtspot-service", () => {
 			const appendStoredMessages = vi.fn().mockResolvedValue(undefined);
 
 			const service = new ThoughtSpotService(mockClient);
-			await service.sendAgentConversationMessageStreaming(
+			await service.sendSpotter3MessageStreaming(
 				"conv-123",
 				"Show me revenue",
 				SpotterResponseFormat.SIMPLIFIED,
@@ -579,7 +625,7 @@ describe("thoughtspot-service", () => {
 			const appendStoredMessages = vi.fn().mockResolvedValue(undefined);
 
 			const service = new ThoughtSpotService(mockClient);
-			await service.sendAgentConversationMessageStreaming(
+			await service.sendSpotter3MessageStreaming(
 				"conv-123",
 				"Show me revenue",
 				SpotterResponseFormat.RAW,
@@ -629,7 +675,7 @@ describe("thoughtspot-service", () => {
 			const appendStoredMessages = vi.fn().mockResolvedValue(undefined);
 
 			const service = new ThoughtSpotService(mockClient);
-			await service.sendAgentConversationMessageStreaming(
+			await service.sendSpotter3MessageStreaming(
 				"conv-123",
 				"Show me revenue by region",
 				SpotterResponseFormat.SIMPLIFIED,
@@ -687,7 +733,7 @@ describe("thoughtspot-service", () => {
 			const appendStoredMessages = vi.fn().mockResolvedValue(undefined);
 
 			const service = new ThoughtSpotService(mockClient);
-			await service.sendAgentConversationMessageStreaming(
+			await service.sendSpotter3MessageStreaming(
 				"conv-123",
 				"Test",
 				SpotterResponseFormat.SIMPLIFIED,
@@ -729,7 +775,7 @@ describe("thoughtspot-service", () => {
 			const appendStoredMessages = vi.fn().mockResolvedValue(undefined);
 
 			const service = new ThoughtSpotService(mockClient);
-			await service.sendAgentConversationMessageStreaming(
+			await service.sendSpotter3MessageStreaming(
 				"conv-123",
 				"Test",
 				SpotterResponseFormat.SIMPLIFIED,

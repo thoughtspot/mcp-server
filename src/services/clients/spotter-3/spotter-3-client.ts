@@ -105,7 +105,7 @@ export async function sendSpotter3MessageStreaming(
 		const errorText = await response.text();
 		throw new ThoughtSpotApiError(
 			response.status,
-			"sendAgentConversationMessageStreaming",
+			"sendSpotter3MessageStreaming",
 			errorText,
 		);
 	}

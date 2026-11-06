@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MixpanelTracker } from "../../src/metrics/mixpanel/mixpanel";
 import { ANALYTICS_ENGINE_SCHEMA_VERSION } from "../../src/metrics/runtime/analytics-engine-sink";
 import { METRIC_NAMES } from "../../src/metrics/runtime/metric-types";
+import { NOOP_METRICS_RECORDER } from "../../src/metrics/runtime/metrics-recorder";
 import { MCPServer } from "../../src/servers/mcp-server";
 import * as thoughtspotClient from "../../src/services/clients/thoughtspot-client";
 import { ThoughtSpotService } from "../../src/services/thoughtspot-service";
@@ -29,8 +30,8 @@ describe("MCP Server", () => {
 
 		// Remove service mocks - using real service with mocked client
 
-		// Mock getThoughtSpotClient
-		vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
+		// Mock the ThoughtSpotClient constructor
+		vi.spyOn(thoughtspotClient, "ThoughtSpotClient").mockReturnValue({
 			getSessionInfo: vi.fn().mockResolvedValue({
 				clusterId: "test-cluster-123",
 				clusterName: "test-cluster",
@@ -297,8 +298,8 @@ describe("MCP Server", () => {
 		});
 
 		it("should return 13 tools regardless of enableSpotterDataSourceDiscovery when using latest", async () => {
-			// Mock getThoughtSpotClient with enableSpotterDataSourceDiscovery set to false
-			vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
+			// Mock the ThoughtSpotClient constructor with enableSpotterDataSourceDiscovery set to false
+			vi.spyOn(thoughtspotClient, "ThoughtSpotClient").mockReturnValue({
 				getSessionInfo: vi.fn().mockResolvedValue({
 					clusterId: "test-cluster-123",
 					clusterName: "test-cluster",
@@ -410,7 +411,7 @@ describe("MCP Server", () => {
 		it("hides get_data (fails closed) when session info is unavailable", async () => {
 			// getSessionInfo fails at init AND the listTools ensureSessionInfo
 			// refetch, so sessionInfo never loads and the gate stays closed.
-			vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
+			vi.spyOn(thoughtspotClient, "ThoughtSpotClient").mockReturnValue({
 				getSessionInfo: vi.fn().mockRejectedValue(new Error("unauthorized")),
 				instanceUrl: "https://test.thoughtspot.cloud",
 			} as any);
@@ -456,7 +457,7 @@ describe("MCP Server", () => {
 
 		// A server whose session info reports exactly these privileges.
 		async function serverWithPrivileges(privileges: unknown) {
-			vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
+			vi.spyOn(thoughtspotClient, "ThoughtSpotClient").mockReturnValue({
 				getSessionInfo: vi.fn().mockResolvedValue({
 					clusterId: "test-cluster-123",
 					clusterName: "test-cluster",
@@ -733,10 +734,13 @@ describe("MCP Server", () => {
 			await server.init();
 			const { callTool } = connect(server);
 
-			const client = thoughtspotClient.getThoughtSpotClient(
-				"https://test.thoughtspot.cloud",
-				"test-access-token",
-			);
+			const client = new thoughtspotClient.ThoughtSpotClient({
+				instanceUrl: "https://test.thoughtspot.cloud",
+				token: "test-access-token",
+				tenantId: "",
+				orgId: "",
+				userId: "",
+			});
 
 			await callTool("search_objects", {
 				query: "sales",
@@ -803,10 +807,13 @@ describe("MCP Server", () => {
 			await server.init();
 			const { callTool } = connect(server);
 
-			const client = thoughtspotClient.getThoughtSpotClient(
-				"https://test.thoughtspot.cloud",
-				"test-access-token",
-			);
+			const client = new thoughtspotClient.ThoughtSpotClient({
+				instanceUrl: "https://test.thoughtspot.cloud",
+				token: "test-access-token",
+				tenantId: "",
+				orgId: "",
+				userId: "",
+			});
 
 			await callTool("get_data", {
 				object_id: "answer-123",
@@ -865,10 +872,13 @@ describe("MCP Server", () => {
 			"https://test.thoughtspot.cloud/?tsmcp=true#/embed/conv-assist-answer?sessionId=session-9&genNo=3";
 
 		const mockClient = () =>
-			thoughtspotClient.getThoughtSpotClient(
-				"https://test.thoughtspot.cloud",
-				"test-access-token",
-			) as any;
+			new thoughtspotClient.ThoughtSpotClient({
+				instanceUrl: "https://test.thoughtspot.cloud",
+				token: "test-access-token",
+				tenantId: "",
+				orgId: "",
+				userId: "",
+			}) as any;
 
 		const toolByName = (tools: any[], name: string) =>
 			tools.find((tool) => tool.name === name);
@@ -1111,10 +1121,7 @@ describe("MCP Server", () => {
 				appendMessages: vi.fn().mockResolvedValue(undefined),
 			});
 			const send = vi
-				.spyOn(
-					ThoughtSpotService.prototype,
-					"sendAgentConversationMessageStreaming",
-				)
+				.spyOn(ThoughtSpotService.prototype, "sendSpotter3MessageStreaming")
 				.mockResolvedValue(undefined);
 			await server.init();
 			const { callTool } = connect(server);
@@ -1159,7 +1166,7 @@ describe("MCP Server", () => {
 
 		it("should handle error from service", async () => {
 			// Mock client to return error
-			vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
+			vi.spyOn(thoughtspotClient, "ThoughtSpotClient").mockReturnValue({
 				getSessionInfo: vi.fn().mockResolvedValue({
 					clusterId: "test-cluster-123",
 					clusterName: "test-cluster",
@@ -1203,7 +1210,7 @@ describe("MCP Server", () => {
 
 		it("should handle error from service with multiple datasource IDs", async () => {
 			// Mock client to return error
-			vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
+			vi.spyOn(thoughtspotClient, "ThoughtSpotClient").mockReturnValue({
 				getSessionInfo: vi.fn().mockResolvedValue({
 					clusterId: "test-cluster-123",
 					clusterName: "test-cluster",
@@ -1251,7 +1258,7 @@ describe("MCP Server", () => {
 
 		it("should handle error from service with empty datasourceIds array", async () => {
 			// Mock client to return error
-			vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
+			vi.spyOn(thoughtspotClient, "ThoughtSpotClient").mockReturnValue({
 				getSessionInfo: vi.fn().mockResolvedValue({
 					clusterId: "test-cluster-123",
 					clusterName: "test-cluster",
@@ -1295,7 +1302,7 @@ describe("MCP Server", () => {
 
 		it("should handle empty questions response", async () => {
 			// Mock client to return empty questions
-			vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
+			vi.spyOn(thoughtspotClient, "ThoughtSpotClient").mockReturnValue({
 				getSessionInfo: vi.fn().mockResolvedValue({
 					clusterId: "test-cluster-123",
 					clusterName: "test-cluster",
@@ -1389,7 +1396,7 @@ describe("MCP Server", () => {
 
 		it("should handle error from service", async () => {
 			// Mock client to return error
-			vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
+			vi.spyOn(thoughtspotClient, "ThoughtSpotClient").mockReturnValue({
 				getSessionInfo: vi.fn().mockResolvedValue({
 					clusterId: "test-cluster-123",
 					clusterName: "test-cluster",
@@ -1468,7 +1475,7 @@ describe("MCP Server", () => {
 
 		it("should handle error from service", async () => {
 			// Mock client to return error
-			vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
+			vi.spyOn(thoughtspotClient, "ThoughtSpotClient").mockReturnValue({
 				getSessionInfo: vi.fn().mockResolvedValue({
 					clusterId: "test-cluster-123",
 					clusterName: "test-cluster",
@@ -1709,7 +1716,7 @@ describe("MCP Server", () => {
 					method: "resources/read",
 					params: { uri: "datasource:///ds-123" },
 				});
-				const mockGetClient = vi.mocked(thoughtspotClient.getThoughtSpotClient);
+				const mockGetClient = vi.mocked(thoughtspotClient.ThoughtSpotClient);
 				const mockClientInstance = mockGetClient.mock.results[0].value;
 				expect(mockClientInstance.searchMetadata).toHaveBeenCalledTimes(1);
 
@@ -1726,7 +1733,7 @@ describe("MCP Server", () => {
 	describe("getDataSourceSuggestions Tool", () => {
 		it("should return data source suggestions successfully", async () => {
 			// Mock getDataSourceSuggestions method
-			vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
+			vi.spyOn(thoughtspotClient, "ThoughtSpotClient").mockReturnValue({
 				getSessionInfo: vi.fn().mockResolvedValue({
 					clusterId: "test-cluster-123",
 					clusterName: "test-cluster",
@@ -1806,7 +1813,7 @@ describe("MCP Server", () => {
 
 		it("should handle empty data source suggestions", async () => {
 			// Mock empty response
-			vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
+			vi.spyOn(thoughtspotClient, "ThoughtSpotClient").mockReturnValue({
 				getSessionInfo: vi.fn().mockResolvedValue({
 					clusterId: "test-cluster-123",
 					clusterName: "test-cluster",
@@ -1847,7 +1854,7 @@ describe("MCP Server", () => {
 
 		it("should handle single data source suggestion", async () => {
 			// Mock single suggestion response
-			vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
+			vi.spyOn(thoughtspotClient, "ThoughtSpotClient").mockReturnValue({
 				getSessionInfo: vi.fn().mockResolvedValue({
 					clusterId: "test-cluster-123",
 					clusterName: "test-cluster",
@@ -1901,7 +1908,7 @@ describe("MCP Server", () => {
 
 	describe("Create Analysis Session Tool", () => {
 		it("should create a session and return analytical_session_id", async () => {
-			vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
+			vi.spyOn(thoughtspotClient, "ThoughtSpotClient").mockReturnValue({
 				getSessionInfo: vi.fn().mockResolvedValue({
 					clusterId: "test-cluster-123",
 					clusterName: "test-cluster",
@@ -1945,7 +1952,7 @@ describe("MCP Server", () => {
 					conversation_id: "conv-with-ds-456",
 				});
 
-			vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
+			vi.spyOn(thoughtspotClient, "ThoughtSpotClient").mockReturnValue({
 				getSessionInfo: vi.fn().mockResolvedValue({
 					clusterId: "test-cluster-123",
 					clusterName: "test-cluster",
@@ -2012,7 +2019,7 @@ describe("MCP Server", () => {
 					currentOrgId: "test-org",
 					privileges: [],
 				});
-				vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
+				vi.spyOn(thoughtspotClient, "ThoughtSpotClient").mockReturnValue({
 					getSessionInfo,
 					createSpotter3Conversation: createConversation,
 					instanceUrl: "https://test.thoughtspot.cloud",
@@ -2073,8 +2080,173 @@ describe("MCP Server", () => {
 			});
 		});
 
+		describe("SpotterX routing", () => {
+			function setup({
+				apiVersion = "beta",
+				isSpotterXEnabled = true,
+				discovery = true,
+				createSpotterX = vi
+					.fn()
+					.mockResolvedValue({ conversation_id: "conv-x-1" }),
+			}: {
+				apiVersion?: string;
+				isSpotterXEnabled?: boolean;
+				discovery?: boolean;
+				createSpotterX?: ReturnType<typeof vi.fn>;
+			} = {}) {
+				const createSpotter3 = vi
+					.fn()
+					.mockResolvedValue({ conversation_id: "conv-3-1" });
+				vi.spyOn(thoughtspotClient, "ThoughtSpotClient").mockReturnValue({
+					getSessionInfo: vi.fn().mockResolvedValue({
+						clusterId: "test-cluster-123",
+						clusterName: "test-cluster",
+						releaseVersion: "10.13.0.cl-110",
+						userGUID: "test-user-123",
+						configInfo: {
+							mixpanelConfig: {
+								devSdkKey: "test-dev-token",
+								prodSdkKey: "test-prod-token",
+								production: false,
+							},
+							selfClusterName: "test-cluster",
+							selfClusterId: "test-cluster-123",
+							enableSpotterDataSourceDiscovery: discovery,
+							isSpotterXEnabled,
+						},
+						userName: "test-user",
+						currentOrgId: "test-org",
+						privileges: [],
+					}),
+					createSpotter3Conversation: createSpotter3,
+					createSpotterXConversation: createSpotterX,
+					tenantId: "test-cluster-123",
+					orgId: "test-org",
+					userId: "test-user-123",
+					instanceUrl: "https://test.thoughtspot.cloud",
+				} as any);
+				const testServer = new MCPServer({
+					props: { ...mockProps, apiVersion },
+					env: {} as any,
+				});
+				return { testServer, createSpotter3, createSpotterX };
+			}
+
+			it("creates a SpotterX conversation with data source and dashboard context", async () => {
+				const { testServer, createSpotter3, createSpotterX } = setup();
+				await testServer.init();
+
+				const result = await connect(testServer).callTool(
+					"create_analysis_session",
+					{ data_source_id: "ds-123", dashboard_id: "lb-456" },
+				);
+
+				expect(result.isError).toBeUndefined();
+				expect((result.structuredContent as any).analytical_session_id).toBe(
+					"conv-x-1",
+				);
+				expect(createSpotterX).toHaveBeenCalledWith({
+					isSpotterDataSourceDiscoveryEnabled: true,
+					isSpotterChatHistoryEnabled: false,
+					tenantId: "test-cluster-123",
+					orgId: "test-org",
+					userId: "test-user-123",
+					dataSourceId: "ds-123",
+					liveboardId: "lb-456",
+				});
+				expect(createSpotter3).not.toHaveBeenCalled();
+			});
+
+			it.each([
+				{ apiVersion: "beta", isSpotterXEnabled: false },
+				{ apiVersion: "latest", isSpotterXEnabled: true },
+			])(
+				"uses Spotter 3 when apiVersion=$apiVersion, isSpotterXEnabled=$isSpotterXEnabled",
+				async ({ apiVersion, isSpotterXEnabled }) => {
+					const { testServer, createSpotter3, createSpotterX } = setup({
+						apiVersion,
+						isSpotterXEnabled,
+					});
+					await testServer.init();
+
+					const result = await connect(testServer).callTool(
+						"create_analysis_session",
+						{},
+					);
+
+					expect((result.structuredContent as any).analytical_session_id).toBe(
+						"conv-3-1",
+					);
+					expect(createSpotterX).not.toHaveBeenCalled();
+				},
+			);
+
+			it("rejects a session with neither data_source_id nor dashboard_id when discovery is disabled", async () => {
+				const { testServer, createSpotterX } = setup({ discovery: false });
+				await testServer.init();
+
+				const result = await connect(testServer).callTool(
+					"create_analysis_session",
+					{},
+				);
+
+				expect(result.isError).toBe(true);
+				expect((result.content as any)[0].text).toContain(
+					"either `data_source_id` or `dashboard_id` is required",
+				);
+				expect(createSpotterX).not.toHaveBeenCalled();
+			});
+
+			it("accepts a dashboard_id alone when discovery is disabled", async () => {
+				const { testServer, createSpotterX } = setup({ discovery: false });
+				await testServer.init();
+
+				const result = await connect(testServer).callTool(
+					"create_analysis_session",
+					{ dashboard_id: "lb-456" },
+				);
+
+				expect(result.isError).toBeUndefined();
+				expect(createSpotterX).toHaveBeenCalledWith(
+					expect.objectContaining({
+						isSpotterDataSourceDiscoveryEnabled: false,
+						dataSourceId: undefined,
+						liveboardId: "lb-456",
+					}),
+				);
+			});
+
+			it("returns an auth-expired error on 401 and rethrows other errors", async () => {
+				const createSpotterX = vi
+					.fn()
+					.mockRejectedValueOnce(
+						new Error("createSpotterXConversation failed with status 401"),
+					)
+					.mockRejectedValueOnce(new Error("SpotterX unavailable"));
+				const { testServer } = setup({ createSpotterX });
+				await testServer.init();
+				const request = {
+					method: "tools/call" as const,
+					params: { name: "create_analysis_session", arguments: {} },
+				};
+
+				const result = (await testServer.callCreateAnalysisSession(
+					request,
+					NOOP_METRICS_RECORDER,
+				)) as any;
+				expect(result.isError).toBe(true);
+				expect((result.content[0] as any).text).toContain(
+					"Your authentication has expired",
+				);
+
+				await expect(
+					testServer.callCreateAnalysisSession(request, NOOP_METRICS_RECORDER),
+				).rejects.toThrow("SpotterX unavailable");
+			});
+		});
+
 		it("should handle error from service", async () => {
-			vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
+			vi.spyOn(thoughtspotClient, "ThoughtSpotClient").mockReturnValue({
 				getSessionInfo: vi.fn().mockResolvedValue({
 					clusterId: "test-cluster-123",
 					clusterName: "test-cluster",
@@ -2111,7 +2283,7 @@ describe("MCP Server", () => {
 		});
 
 		it("should return auth-expired error response when service throws 401 error", async () => {
-			vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
+			vi.spyOn(thoughtspotClient, "ThoughtSpotClient").mockReturnValue({
 				getSessionInfo: vi.fn().mockResolvedValue({
 					clusterId: "test-cluster-123",
 					clusterName: "test-cluster",
@@ -2160,7 +2332,7 @@ describe("MCP Server", () => {
 
 			// First call should fetch from service
 			await listResources();
-			const mockGetClient = vi.mocked(thoughtspotClient.getThoughtSpotClient);
+			const mockGetClient = vi.mocked(thoughtspotClient.ThoughtSpotClient);
 			const mockClientInstance = mockGetClient.mock.results[0].value;
 			expect(mockClientInstance.searchMetadata).toHaveBeenCalledTimes(1);
 
@@ -2191,10 +2363,7 @@ describe("MCP Server", () => {
 			);
 
 			mockSendAgentConversationMessageStreaming = vi
-				.spyOn(
-					ThoughtSpotService.prototype,
-					"sendAgentConversationMessageStreaming",
-				)
+				.spyOn(ThoughtSpotService.prototype, "sendSpotter3MessageStreaming")
 				.mockResolvedValue(undefined) as unknown as ReturnType<typeof vi.fn>;
 		});
 
@@ -3181,7 +3350,7 @@ describe("MCP Server", () => {
 
 			// Spy on service after init() so init() uses the default mock for getSessionInfo
 			vi.spyOn(server as any, "getThoughtSpotService").mockReturnValue({
-				sendAgentConversationMessageStreaming: vi
+				sendSpotter3MessageStreaming: vi
 					.fn()
 					.mockImplementation(
 						async (
@@ -3238,7 +3407,7 @@ describe("MCP Server", () => {
 			});
 			await server.init();
 			vi.spyOn(server as any, "getThoughtSpotService").mockReturnValue({
-				sendAgentConversationMessageStreaming: mockSendStreaming,
+				sendSpotter3MessageStreaming: mockSendStreaming,
 			});
 
 			await server.callSendSessionMessage(
@@ -3279,7 +3448,7 @@ describe("MCP Server", () => {
 			});
 			await server.init();
 			vi.spyOn(server as any, "getThoughtSpotService").mockReturnValue({
-				sendAgentConversationMessageStreaming: mockSendStreaming,
+				sendSpotter3MessageStreaming: mockSendStreaming,
 			});
 
 			await server.callSendSessionMessage(

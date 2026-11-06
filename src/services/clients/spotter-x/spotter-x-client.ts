@@ -31,6 +31,7 @@ export async function createSpotterXConversation(
 		orgId,
 		userId,
 		dataSourceId,
+		liveboardId,
 	}: {
 		isSpotterDataSourceDiscoveryEnabled: boolean;
 		isSpotterChatHistoryEnabled: boolean;
@@ -38,6 +39,7 @@ export async function createSpotterXConversation(
 		orgId: string;
 		userId: string;
 		dataSourceId?: string;
+		liveboardId?: string;
 	},
 ): Promise<AgentConversation> {
 	const endpoint = "/agents/v1/agents/spotterx/sessions";
@@ -58,6 +60,7 @@ export async function createSpotterXConversation(
 				},
 			},
 			...(dataSourceId && { context: { dataset_ids: [dataSourceId] } }),
+			...(liveboardId && { object_type: "liveboard", object_id: liveboardId }),
 		},
 	});
 

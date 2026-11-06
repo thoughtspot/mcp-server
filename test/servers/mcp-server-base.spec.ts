@@ -124,8 +124,8 @@ describe("MCP Server Base", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
 
-		// Mock getThoughtSpotClient
-		vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
+		// Mock the ThoughtSpotClient constructor
+		vi.spyOn(thoughtspotClient, "ThoughtSpotClient").mockReturnValue({
 			getSessionInfo: vi.fn().mockResolvedValue(makeSessionInfo()),
 			searchMetadata: vi.fn().mockResolvedValue([]),
 			instanceUrl: "https://test.thoughtspot.cloud",
@@ -271,7 +271,7 @@ describe("MCP Server Base", () => {
 		});
 
 		it("should return false when enableSpotterDataSourceDiscovery is disabled", async () => {
-			vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
+			vi.spyOn(thoughtspotClient, "ThoughtSpotClient").mockReturnValue({
 				getSessionInfo: vi.fn().mockResolvedValue(
 					makeSessionInfo({
 						configInfo: { enableSpotterDataSourceDiscovery: false },
@@ -287,7 +287,7 @@ describe("MCP Server Base", () => {
 		});
 
 		it("should return false when enableSpotterDataSourceDiscovery is undefined", async () => {
-			vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
+			vi.spyOn(thoughtspotClient, "ThoughtSpotClient").mockReturnValue({
 				getSessionInfo: vi.fn().mockResolvedValue(
 					makeSessionInfo({
 						configInfo: { enableSpotterDataSourceDiscovery: undefined },
@@ -329,7 +329,7 @@ describe("MCP Server Base", () => {
 		});
 
 		it("should catch and log error if getSessionInfo throws", async () => {
-			vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
+			vi.spyOn(thoughtspotClient, "ThoughtSpotClient").mockReturnValue({
 				getSessionInfo: vi
 					.fn()
 					.mockRejectedValue(new Error("Session info fetch failed")),
@@ -370,7 +370,7 @@ describe("MCP Server Base", () => {
 		});
 
 		it("should track Init even when getSessionInfo fails (trackers may be empty)", async () => {
-			vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
+			vi.spyOn(thoughtspotClient, "ThoughtSpotClient").mockReturnValue({
 				getSessionInfo: vi.fn().mockRejectedValue(new Error("fail")),
 				instanceUrl: "https://test.thoughtspot.cloud",
 			} as any);

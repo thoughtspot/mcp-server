@@ -17,7 +17,7 @@ import {
 	recordUpstreamStreamStartedMetric,
 } from "../metrics/runtime/tool-metrics";
 import { WithSpan, getActiveSpan } from "../metrics/tracing/tracing-utils";
-import { processSendAgentConversationMessageStreamingResponse } from "../streaming-utils";
+import { processSpotter3EventStream } from "../streaming-utils";
 import { GET_DATA_DEFAULT_MAX_ROWS } from "./clients/get-data/get-data-client";
 import type { GetDataViz } from "./clients/get-data/get-data-types";
 import {
@@ -310,10 +310,10 @@ export class ThoughtSpotService {
 	}
 
 	/**
-	 * Create a conversation with Spotter agent
+	 * Create a conversation with Spotter 3
 	 */
-	@WithSpan("create-agent-conversation")
-	async createAgentConversation(
+	@WithSpan("create-spotter3-conversation")
+	async createSpotter3Conversation(
 		isSpotterDataSourceDiscoveryEnabled: boolean,
 		isSpotterChatHistoryEnabled: boolean,
 		dataSourceId?: string,
@@ -335,13 +335,13 @@ export class ThoughtSpotService {
 
 			span?.setStatus({
 				code: SpanStatusCode.OK,
-				message: "Agent conversation created",
+				message: "Spotter 3 conversation created",
 			});
 			span?.setAttribute("conversation_id", response.conversation_id);
 
 			return response;
 		} catch (error) {
-			console.error("Error creating agent conversation:", error);
+			console.error("Error creating Spotter 3 conversation:", error);
 			span?.setStatus({
 				code: SpanStatusCode.ERROR,
 				message: (error as Error).message,
@@ -351,10 +351,10 @@ export class ThoughtSpotService {
 	}
 
 	/**
-	 * Send a message to an agent conversation, and collect the streaming response asynchronously
+	 * Send a message a Spotter 3 conversation, and collect the streaming response asynchronously
 	 */
-	@WithSpan("send-agent-conversation-message-streaming")
-	async sendAgentConversationMessageStreaming(
+	@WithSpan("send-spotter3-message-streaming")
+	async sendSpotter3MessageStreaming(
 		conversationId: string,
 		message: string,
 		spotterResponseFormat: SpotterResponseFormat,
@@ -401,18 +401,17 @@ export class ThoughtSpotService {
 				"success",
 			);
 
-			const processStreamPromise =
-				processSendAgentConversationMessageStreamingResponse(
-					this.client.instanceUrl,
-					spotterResponseFormat,
-					conversationId,
-					reader,
-					appendStoredMessages,
-					streamRecorder,
-					suppressIframes,
-				).finally(() => {
-					this.scheduleBackgroundMetricsFlush(streamRecorder);
-				});
+			const processStreamPromise = processSpotter3EventStream(
+				this.client.instanceUrl,
+				spotterResponseFormat,
+				conversationId,
+				reader,
+				appendStoredMessages,
+				streamRecorder,
+				suppressIframes,
+			).finally(() => {
+				this.scheduleBackgroundMetricsFlush(streamRecorder);
+			});
 
 			if (this.metrics.waitUntil) {
 				try {
@@ -431,13 +430,59 @@ export class ThoughtSpotService {
 
 			span?.setStatus({
 				code: SpanStatusCode.OK,
-				message: "Agent conversation message streaming sent",
+				message: "Spotter 3 conversation message streaming sent",
 			});
 		} catch (error) {
 			console.error(
-				"Error sending agent conversation message streaming:",
+				"Error sending Spotter 3 conversation message streaming:",
 				error,
 			);
+			span?.setStatus({
+				code: SpanStatusCode.ERROR,
+				message: (error as Error).message,
+			});
+			throw error;
+		}
+	}
+
+	/**
+	 * Create a conversation with SpotterX
+	 */
+	@WithSpan("create-spotterx-conversation")
+	async createSpotterXConversation(
+		isSpotterDataSourceDiscoveryEnabled: boolean,
+		isSpotterChatHistoryEnabled: boolean,
+		dataSourceId?: string,
+		liveboardId?: string,
+	): Promise<AgentConversation> {
+		const span = trace.getSpan(context.active());
+		span?.setAttribute("data_source_id", dataSourceId ?? "(none)");
+
+		try {
+			// Use auto mode by default, but support passing an explicit data source context
+			const response = await this.observeUpstreamCall(
+				UPSTREAM_OPERATION_NAMES.createAgentConversation,
+				() =>
+					this.client.createSpotterXConversation({
+						isSpotterDataSourceDiscoveryEnabled,
+						isSpotterChatHistoryEnabled,
+						tenantId: this.client.tenantId,
+						orgId: this.client.orgId,
+						userId: this.client.userId,
+						dataSourceId,
+						liveboardId,
+					}),
+			);
+
+			span?.setStatus({
+				code: SpanStatusCode.OK,
+				message: "SpotterX conversation created",
+			});
+			span?.setAttribute("conversation_id", response.conversation_id);
+
+			return response;
+		} catch (error) {
+			console.error("Error creating SpotterX conversation:", error);
 			span?.setStatus({
 				code: SpanStatusCode.ERROR,
 				message: (error as Error).message,
