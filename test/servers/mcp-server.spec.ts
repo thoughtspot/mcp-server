@@ -348,6 +348,54 @@ describe("MCP Server", () => {
 			]);
 		});
 
+		it.each([
+			{ apiVersion: "beta", isSpotterXEnabled: true, expectSpotterX: true },
+			{ apiVersion: "beta", isSpotterXEnabled: false, expectSpotterX: false },
+			{
+				apiVersion: undefined,
+				isSpotterXEnabled: true,
+				expectSpotterX: false,
+			},
+		])(
+			"uses SpotterX create_analysis_session=$expectSpotterX for apiVersion=$apiVersion, isSpotterXEnabled=$isSpotterXEnabled",
+			async ({ apiVersion, isSpotterXEnabled, expectSpotterX }) => {
+				const testServer = new MCPServer({
+					props: { ...mockProps, apiVersion },
+					env: {} as any,
+				});
+				await testServer.init();
+				(testServer as any).sessionInfo.configInfo.isSpotterXEnabled =
+					isSpotterXEnabled;
+				const { listTools } = connect(testServer);
+
+				const tools = (await listTools()).tools ?? [];
+				const sessionTools = tools.filter(
+					(t) => t.name === "create_analysis_session",
+				);
+				// Swapped in place, never duplicated or dropped
+				expect(sessionTools).toHaveLength(1);
+				expect(
+					tools.map((t) => t.name).indexOf("create_analysis_session"),
+				).toBe(2);
+				expect(tools).toHaveLength(13);
+
+				const [sessionTool] = sessionTools;
+				const properties = (sessionTool.inputSchema as any).properties;
+				expect(properties).toHaveProperty("data_source_id");
+				if (expectSpotterX) {
+					expect(properties).toHaveProperty("dashboard_id");
+					expect(sessionTool.description).toMatch(
+						/in the context of a dashboard/i,
+					);
+				} else {
+					expect(properties).not.toHaveProperty("dashboard_id");
+					expect(sessionTool.description).not.toMatch(
+						/in the context of a dashboard/i,
+					);
+				}
+			},
+		);
+
 		it("hides get_data when the user lacks the data-download privilege", async () => {
 			await server.init();
 			(server as any).sessionInfo.privileges = [];

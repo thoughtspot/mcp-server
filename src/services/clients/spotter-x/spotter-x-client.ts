@@ -48,6 +48,7 @@ export async function createSpotterXConversation(
 			tenant_id: tenantId,
 			org_id: orgId,
 			saved: isSpotterChatHistoryEnabled,
+			labels: { client: "mcp-server" },
 			settings_override: {
 				map: {
 					connector_tool_approvals: false,

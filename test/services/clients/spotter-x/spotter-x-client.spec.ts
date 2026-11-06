@@ -128,6 +128,7 @@ describe("spotter-x-client", () => {
 				tenant_id: "tenant-1",
 				org_id: "42",
 				saved: false,
+				labels: { client: "mcp-server" },
 				settings_override: {
 					map: {
 						connector_tool_approvals: false,
