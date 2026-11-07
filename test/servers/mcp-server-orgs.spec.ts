@@ -1459,4 +1459,136 @@ describe("MCP Server org tools", () => {
 			expect(s.getActiveToken()).toBe("rotated-global");
 		});
 	});
+
+	describe("org tools when the global token is dead but the org token is still valid", () => {
+		// The keep-warm chain can die (two failed refreshes in a row, or a cluster
+		// outage) while the 30-day org token is still live. Every data tool keeps
+		// working on the org token; only list_orgs (cluster-scoped) and switch_org
+		// (mints from the global token) need the dead global token. They must say
+		// so rather than claim the whole session expired, and must not mislabel the
+		// 401 as "no access to that org".
+		const goodSession = {
+			clusterId: "test-cluster-123",
+			clusterName: "test-cluster",
+			releaseVersion: "10.13.0.cl-110",
+			userGUID: "test-user-123",
+			userName: "test-user",
+			currentOrgId: "101",
+			privileges: [],
+			configInfo: {
+				mixpanelConfig: { devSdkKey: "k", prodSdkKey: "k", production: false },
+				selfClusterName: "test-cluster",
+				selfClusterId: "test-cluster-123",
+				enableSpotterDataSourceDiscovery: false,
+				orgsConfiguration: { enabled: true },
+			},
+		};
+
+		async function serverWithLiveOrgTokenOnly(
+			opts: { orgToken?: boolean } = {},
+		) {
+			const store = new Map<
+				string,
+				{ activeOrgId?: string; orgToken?: string }
+			>();
+			const tokenStore = new Map<string, any>();
+			const namespace = makeStorageNamespace(store, tokenStore);
+			const listOrgs = vi.fn().mockResolvedValue([
+				{ id: 0, name: "Primary", status: "ACTIVE" },
+				{ id: 101, name: "Sales", status: "ACTIVE" },
+			]);
+			const mint = vi.fn().mockResolvedValue("minted-token");
+			const sessionInfoTokens: string[] = [];
+			// Only the live org token is accepted upstream; the frozen props token is
+			// expired on the cluster and there is no keep-warm global token at all.
+			vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockImplementation(
+				(_instanceUrl: string, bearerToken: string) =>
+					({
+						getSessionInfo: vi.fn(async () => {
+							sessionInfoTokens.push(bearerToken);
+							if (bearerToken !== "org-101-token") {
+								throw new ThoughtSpotApiError(401, "getSessionInfo", "expired");
+							}
+							return goodSession;
+						}),
+						searchOrgs: vi.fn().mockResolvedValue([]),
+						listOrgs,
+						fetchOrgBearerToken: mint,
+						validateConnection: vi.fn(
+							async () => bearerToken === "org-101-token",
+						),
+						instanceUrl: "https://test.thoughtspot.cloud",
+					}) as any,
+			);
+			const keyHash = Buffer.from(
+				await crypto.subtle.digest(
+					"SHA-256",
+					new TextEncoder().encode("refresh-token"),
+				),
+			).toString("base64url");
+			if (opts.orgToken !== false) {
+				store.set(`${keyHash}:__active_org__`, {
+					activeOrgId: "101",
+					orgToken: "org-101-token",
+				});
+			}
+			const props = {
+				instanceUrl: "https://test.thoughtspot.cloud",
+				accessToken: "expired-props-token",
+				globalRefreshToken: "refresh-token",
+				globalTokenExpiresAt: 1, // frozen login token long expired
+				authMode: "oauth",
+				apiVersion: "latest",
+				clientName: { clientId: "c", clientName: "c", registrationDate: 0 },
+			};
+			const env = {
+				CONVERSATION_STORAGE_OBJECT: namespace,
+				USER_TOKEN_OBJECT: namespace,
+			} as any;
+			const server = new MCPServer({ props, env });
+			await server.init();
+			return { server, store, listOrgs, mint, sessionInfoTokens };
+		}
+
+		it("data tools keep working on the live org token", async () => {
+			const { server, sessionInfoTokens } = await serverWithLiveOrgTokenOnly();
+			const res = await connect(server).callTool("ping", {});
+			expect(res.isError).toBeFalsy();
+			expect(res.content[0].text).toMatch(/pong/i);
+			// Session info was (re)fetched under the org token after the dead-global
+			// init attempt, so the privilege/flag gates are real.
+			expect(sessionInfoTokens).toContain("org-101-token");
+		});
+
+		it("list_orgs says org listing is unavailable, not that authentication expired", async () => {
+			const { server, listOrgs } = await serverWithLiveOrgTokenOnly();
+			const res = await connect(server).callTool("list_orgs", {});
+			expect(res.isError).toBe(true);
+			expect(res.content[0].text).toMatch(/current org "101" is still active/);
+			expect(res.content[0].text).toMatch(/all other tools keep working/);
+			expect(res.content[0].text).not.toMatch(/authentication has expired/i);
+			expect(listOrgs).not.toHaveBeenCalled();
+		});
+
+		it("switch_org says the same, does not mint, and leaves the active org unchanged", async () => {
+			const { server, store, mint } = await serverWithLiveOrgTokenOnly();
+			const res = await connect(server).callTool("switch_org", { org_id: 0 });
+			expect(res.isError).toBe(true);
+			expect(res.content[0].text).toMatch(/current org "101" is still active/);
+			// Must not be mislabelled as "no access to org 0" (the pre-existing 4xx
+			// mapping only applies to the mint itself).
+			expect(res.content[0].text).not.toMatch(/do not have access/i);
+			expect(mint).not.toHaveBeenCalled();
+			const rec = [...store.values()][0];
+			expect(rec.activeOrgId).toBe("101");
+			expect(rec.orgToken).toBe("org-101-token");
+		});
+
+		it("without a live org token the session gets the normal reauthenticate message", async () => {
+			const { server } = await serverWithLiveOrgTokenOnly({ orgToken: false });
+			const res = await connect(server).callTool("list_orgs", {});
+			expect(res.isError).toBe(true);
+			expect(res.content[0].text).toMatch(/reauthenticate/i);
+		});
+	});
 });
