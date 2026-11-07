@@ -265,6 +265,15 @@ export class MCPServer extends BaseMCPServer {
 		// areOrgToolsAvailable() already requires authMode === "oauth", so this
 		// gates the whole active-org bootstrap on oauth + orgs-enabled + refresh token.
 		if (!this.areOrgToolsAvailable()) {
+			// preInit loaded the stored org while the orgs gate still failed open (no
+			// session info yet). Now that the gate is real and closed — e.g. orgs were
+			// disabled on the cluster after an org was stored — drop it so every call
+			// uses the global token, and re-read session info under that token.
+			if (this.activeOrgToken) {
+				this.activeOrgId = undefined;
+				this.activeOrgToken = undefined;
+				await this.refreshSessionInfo();
+			}
 			return;
 		}
 		try {

@@ -531,6 +531,41 @@ describe("MCP Server org tools", () => {
 			expect((server as any).getActiveOrgId()).toBeUndefined();
 		});
 
+		it("drops a previously stored org when the cluster now reports orgs disabled", async () => {
+			// An org was stored while orgs were enabled; the admin then disabled orgs.
+			// preInit loads it before session info exists (gate fails open); once the
+			// gate is real, the stale org token must not be used for any call.
+			const keyHash = Buffer.from(
+				await crypto.subtle.digest(
+					"SHA-256",
+					new TextEncoder().encode("refresh-token"),
+				),
+			).toString("base64url");
+			const store = new Map<
+				string,
+				{ activeOrgId?: string; orgToken?: string }
+			>([
+				[
+					`${keyHash}:__active_org__`,
+					{ activeOrgId: "101", orgToken: "stale-org-token" },
+				],
+			]);
+			const { server } = makeServer({
+				authMode: "oauth",
+				session: { orgsEnabled: false },
+				store,
+			});
+			await server.init();
+			const s = server as any;
+			expect(s.getActiveOrgId()).toBeUndefined();
+			expect(s.getActiveToken()).toBe("global-token");
+			// Session info was re-read under the token actually in use.
+			expect(s.sessionInfoToken).toBe("global-token");
+			const { listTools } = connect(server);
+			const names = (await listTools()).tools.map((t: any) => t.name);
+			expect(names).not.toContain("list_orgs");
+		});
+
 		it("still seeds the cluster-wide keep-warm token when orgs are disabled", async () => {
 			const tokenStore = new Map<string, any>();
 			const { server } = makeServer({
