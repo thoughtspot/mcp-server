@@ -131,8 +131,22 @@ export class MCPServer extends BaseMCPServer {
 		super(ctx, "ThoughtSpot", "2.0.0");
 	}
 
+	// The org to scope requests to (x-thoughtspot-orgs header). On a cluster without Orgs the
+	// minted token is still used, but no org scoping is sent. Unknown (no session info yet)
+	// counts as enabled, matching isOrgsEnabled(), without its warning on every request.
 	protected getActiveOrgId(): string | undefined {
-		return this.activeOrgId;
+		const orgsEnabled = this.sessionInfo
+			? this.sessionInfo.configInfo?.orgsConfiguration?.enabled === true
+			: true;
+		return orgsEnabled ? this.activeOrgId : undefined;
+	}
+
+	// Every OAuth session with a refresh token works on a token MINTED from the global token,
+	// whether or not the cluster has Orgs (on a non-org cluster it is minted for the current org,
+	// org 0, and used without org scoping). The global token itself is then only used to mint and
+	// to list/switch orgs, so a dead global token does not end the session.
+	private canUseMintedToken(): boolean {
+		return this.ctx.props.authMode === "oauth" && this.grantHasRefreshToken;
 	}
 
 	protected getActiveToken(): string {
@@ -245,11 +259,10 @@ export class MCPServer extends BaseMCPServer {
 				error,
 			);
 		}
-		// Load the stored active org (id + token) too, so the init-time session info is fetched
-		// under the ORG token whenever one exists: privileges and flags are per-org, and the org
-		// token outlives a dead global token. Session info is still null here, so the orgs-enabled
-		// gate fails open; a cluster without orgs simply has nothing stored. Needs only the DO.
-		if (this.areOrgToolsAvailable()) {
+		// Load the stored active org (id + minted token) too, so the init-time session info is
+		// fetched under the minted token whenever one exists: privileges and flags are per-org, and
+		// the minted token outlives a dead global token. Needs only the DO.
+		if (this.canUseMintedToken()) {
 			try {
 				await this.loadActiveOrg();
 			} catch (error) {
@@ -262,18 +275,8 @@ export class MCPServer extends BaseMCPServer {
 	}
 
 	protected async postInit(): Promise<void> {
-		// areOrgToolsAvailable() already requires authMode === "oauth", so this
-		// gates the whole active-org bootstrap on oauth + orgs-enabled + refresh token.
-		if (!this.areOrgToolsAvailable()) {
-			// preInit loaded the stored org while the orgs gate still failed open (no
-			// session info yet). Now that the gate is real and closed — e.g. orgs were
-			// disabled on the cluster after an org was stored — drop it so every call
-			// uses the global token, and re-read session info under that token.
-			if (this.activeOrgToken) {
-				this.activeOrgId = undefined;
-				this.activeOrgToken = undefined;
-				await this.refreshSessionInfo();
-			}
+		// Bearer/token connections and pre-multi-org grants keep using their own token.
+		if (!this.canUseMintedToken()) {
 			return;
 		}
 		try {
@@ -300,10 +303,14 @@ export class MCPServer extends BaseMCPServer {
 	private async ensureActiveOrg(): Promise<void> {
 		await this.loadActiveOrg();
 		if (!this.activeOrgId) {
+			// A cluster without Orgs reports the primary org (0); fall back to it if the
+			// field is absent. Without session info there is nothing to seed from.
 			const currentOrgId =
 				this.sessionInfo?.currentOrgId != null
 					? String(this.sessionInfo.currentOrgId)
-					: undefined;
+					: this.sessionInfo
+						? "0"
+						: undefined;
 			if (currentOrgId) {
 				// In memory only; persisted with the token once the mint succeeds, so
 				// a mint failure never leaves a tokenless active org in the DO.
@@ -635,7 +642,7 @@ export class MCPServer extends BaseMCPServer {
 			this.touchLastSeen();
 		}
 
-		if (this.areOrgToolsAvailable()) {
+		if (this.canUseMintedToken()) {
 			// Reload the shared active org from the DO per call so a switch_org in
 			// another session is picked up (an instance-cached value would go stale).
 			await this.loadActiveOrg();
@@ -647,7 +654,9 @@ export class MCPServer extends BaseMCPServer {
 					// return a graceful error rather than a raw throw.
 					console.error("Failed to mint active org token on call:", error);
 					return this.createErrorResponse(
-						`Could not access the active org "${this.activeOrgId}"; it may no longer be available to you. Call list_orgs to see your orgs and switch_org to select a different one.`,
+						this.areOrgToolsAvailable()
+							? `Could not access the active org "${this.activeOrgId}"; it may no longer be available to you. Call list_orgs to see your orgs and switch_org to select a different one.`
+							: "Could not obtain a session token from ThoughtSpot. Please try again, or disconnect and reconnect the MCP server.",
 						"Active org token mint failed",
 					);
 				}
