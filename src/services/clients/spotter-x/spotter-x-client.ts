@@ -87,17 +87,17 @@ export async function createSpotterXConversation(
 export async function sendSpotterXMessageStreaming(
 	ctx: ClientContext,
 	{
-		conversationId,
-		message,
 		tenantId,
 		orgId,
 		userId,
+		conversationId,
+		message,
 	}: {
-		conversationId: string;
-		message: string;
 		tenantId: string;
 		orgId: string;
 		userId: string;
+		conversationId: string;
+		message: string;
 	},
 ): Promise<Response> {
 	// Encoding for safety, though for valid IDs it should not make a difference

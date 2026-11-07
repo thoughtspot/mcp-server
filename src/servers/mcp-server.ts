@@ -1034,8 +1034,7 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		);
 	}
 
-	@WithSpan("call-send-session-message")
-	async callSendSessionMessage(
+	async callSendSessionMessageSpotterX(
 		request: z.infer<typeof CallToolRequestSchema>,
 		recorder: MetricsRecorder = NOOP_METRICS_RECORDER,
 	) {
@@ -1055,12 +1054,95 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			await storageService.initializeConversation(analytical_session_id);
 		} catch (error) {
 			console.error(
-				"Error initializing conversation in storage service:",
+				"Error initializing SpotterX conversation in storage service:",
 				error,
 			);
 			return this.createErrorResponse(
 				"The analytical session has an ongoing response to the previous message. Please continue to call `get_session_updates` until `is_done` is true before sending a followup message.",
-				`Error sending message to conversation ${analytical_session_id}: ${error}`,
+				`Error sending message to SpotterX conversation ${analytical_session_id}: ${error}`,
+			);
+		}
+
+		try {
+			await this.getThoughtSpotService(recorder, {
+				analyticalSessionId: analytical_session_id,
+			}).sendSpotterXMessageStreaming(
+				analytical_session_id,
+				message,
+				this.ctx.props.enableRawSessionUpdates
+					? SpotterResponseFormat.RAW
+					: SpotterResponseFormat.SIMPLIFIED,
+				storageService.appendMessages.bind(storageService),
+				additional_context,
+				!!this.ctx.props.suppressIframes,
+			);
+		} catch (error) {
+			console.error("Error sending message to SpotterX conversation:", error);
+			try {
+				// Close out the conversation state in the storage (mark isDone = true), so
+				// that clients don't accidentally get stuck polling for updates forever
+				await storageService.appendMessages(
+					analytical_session_id,
+					[
+						{
+							is_thinking: false,
+							type: "text",
+							text: "Something went wrong",
+						},
+					],
+					true,
+				);
+			} catch (storageError) {
+				console.error(
+					"Error appending error message to storage service for SpotterX conversation:",
+					storageError,
+				);
+			}
+			throw error;
+		}
+
+		return this.createStructuredContentSuccessResponse(
+			{ success: true },
+			"Conversation message sent successfully",
+		);
+	}
+
+	@WithSpan("call-send-session-message")
+	async callSendSessionMessage(
+		request: z.infer<typeof CallToolRequestSchema>,
+		recorder: MetricsRecorder = NOOP_METRICS_RECORDER,
+	) {
+		// Alternate path if we are using SpotterX
+		await this.ensureSessionInfo();
+		if (
+			resolveApiVersion(this.ctx.props.apiVersion).version.includes("beta") &&
+			this.isSpotterXEnabled()
+		) {
+			return this.callSendSessionMessageSpotterX(request, recorder);
+		}
+
+		const span = trace.getSpan(context.active());
+		const { analytical_session_id, message, additional_context } =
+			SendSessionMessageInputSchema.parse(request.params.arguments);
+		recorder.setAnalyticsContext({
+			analyticalSessionId: analytical_session_id,
+		});
+		span?.setAttributes({
+			analytical_session_id,
+			has_additional_context: !!additional_context,
+		});
+
+		const storageService = await this.getStorageService();
+		try {
+			await storageService.initializeConversation(analytical_session_id);
+		} catch (error) {
+			console.error(
+				"Error initializing Spotter 3 conversation in storage service:",
+				error,
+			);
+			return this.createErrorResponse(
+				"The analytical session has an ongoing response to the previous message. Please continue to call `get_session_updates` until `is_done` is true before sending a followup message.",
+				`Error sending message to Spotter 3 conversation ${analytical_session_id}: ${error}`,
 			);
 		}
 
@@ -1078,7 +1160,7 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 				!!this.ctx.props.suppressIframes,
 			);
 		} catch (error) {
-			console.error("Error sending message to Spotter conversation:", error);
+			console.error("Error sending message to Spotter 3 conversation:", error);
 			try {
 				// Close out the conversation state in the storage (mark isDone = true), so
 				// that clients don't accidentally get stuck polling for updates forever
@@ -1095,7 +1177,7 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 				);
 			} catch (storageError) {
 				console.error(
-					"Error appending error message to storage service:",
+					"Error appending error message to storage service for Spotter 3 conversation:",
 					storageError,
 				);
 			}

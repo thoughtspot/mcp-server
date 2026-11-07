@@ -790,6 +790,236 @@ describe("thoughtspot-service", () => {
 		});
 	});
 
+	describe("sendSpotterXMessageStreaming", () => {
+		const spotterXClient = {
+			...mockClient,
+			tenantId: "tenant-1",
+			orgId: "42",
+			userId: "user-guid-1",
+		};
+
+		const makeStreamReader = (chunks: string[]) => {
+			const encoder = new TextEncoder();
+			const read = vi.fn();
+			for (const chunk of chunks) {
+				read.mockResolvedValueOnce({
+					done: false,
+					value: encoder.encode(chunk),
+				});
+			}
+			read.mockResolvedValue({ done: true, value: undefined });
+			return { read };
+		};
+
+		const mockStreamingResponse = (chunks: string[] = []) => {
+			const reader = makeStreamReader(chunks);
+			spotterXClient.sendSpotterXMessageStreaming = vi.fn().mockResolvedValue({
+				body: { getReader: vi.fn().mockReturnValue(reader) },
+			});
+			return reader;
+		};
+
+		it("passes the client identity, conversation and message to the client", async () => {
+			mockStreamingResponse();
+			const service = new ThoughtSpotService(spotterXClient);
+
+			await service.sendSpotterXMessageStreaming(
+				"conv-x",
+				"Show me revenue",
+				SpotterResponseFormat.RAW,
+				vi.fn().mockResolvedValue(undefined),
+			);
+
+			expect(spotterXClient.sendSpotterXMessageStreaming).toHaveBeenCalledWith({
+				tenantId: "tenant-1",
+				orgId: "42",
+				userId: "user-guid-1",
+				conversationId: "conv-x",
+				message: "Show me revenue",
+			});
+		});
+
+		it("appends additionalContext to the message when provided", async () => {
+			mockStreamingResponse();
+			const service = new ThoughtSpotService(spotterXClient);
+
+			await service.sendSpotterXMessageStreaming(
+				"conv-x",
+				"Show me revenue",
+				SpotterResponseFormat.RAW,
+				vi.fn().mockResolvedValue(undefined),
+				"User is in the EMEA region",
+			);
+
+			expect(spotterXClient.sendSpotterXMessageStreaming).toHaveBeenCalledWith(
+				expect.objectContaining({
+					message:
+						"Show me revenue\n\nAdditional Context:\nUser is in the EMEA region",
+				}),
+			);
+		});
+
+		it("processes the stream in the background and stores raw messages", async () => {
+			const item = { type: "text", content: "Hello" };
+			mockStreamingResponse([`data: ${JSON.stringify(item)}\n`]);
+			const appendMessages = vi.fn().mockResolvedValue(undefined);
+			const waitUntilPromises: Promise<void>[] = [];
+			const service = new ThoughtSpotService(spotterXClient, {
+				waitUntil(promise: Promise<void>) {
+					waitUntilPromises.push(promise);
+				},
+			});
+
+			await service.sendSpotterXMessageStreaming(
+				"conv-x",
+				"Show me revenue",
+				SpotterResponseFormat.RAW,
+				appendMessages,
+			);
+
+			expect(waitUntilPromises).toHaveLength(1);
+			await waitUntilPromises[0];
+			expect(appendMessages).toHaveBeenCalledWith("conv-x", [item]);
+			expect(appendMessages).toHaveBeenCalledWith("conv-x", [], true);
+		});
+
+		it("still processes the stream when waitUntil is unavailable", async () => {
+			vi.useFakeTimers();
+			mockStreamingResponse();
+			const appendMessages = vi.fn().mockResolvedValue(undefined);
+			const service = new ThoughtSpotService(spotterXClient);
+
+			await service.sendSpotterXMessageStreaming(
+				"conv-x",
+				"Show me revenue",
+				SpotterResponseFormat.RAW,
+				appendMessages,
+			);
+			await vi.runAllTimersAsync();
+
+			expect(appendMessages).toHaveBeenCalledWith("conv-x", [], true);
+			vi.useRealTimers();
+		});
+
+		it("does not throw when scheduling with waitUntil fails", async () => {
+			mockStreamingResponse();
+			const service = new ThoughtSpotService(spotterXClient, {
+				waitUntil() {
+					throw new Error("waitUntil unavailable");
+				},
+			});
+
+			await expect(
+				service.sendSpotterXMessageStreaming(
+					"conv-x",
+					"Show me revenue",
+					SpotterResponseFormat.RAW,
+					vi.fn().mockResolvedValue(undefined),
+				),
+			).resolves.toBeUndefined();
+			expect(console.error).toHaveBeenCalledWith(
+				"[metrics] Failed to schedule upstream stream processing",
+				expect.any(Error),
+			);
+		});
+
+		it("records upstream call and stream-started metrics", async () => {
+			const analyticsDataset = { writeDataPoint: vi.fn() };
+			const metricsEnv = {
+				METRICS_SINK_MODE: "analytics_engine",
+				ANALYTICS: analyticsDataset,
+			};
+			const recorder = createRequestMetricsRecorder(metricsEnv);
+			const waitUntilPromises: Promise<void>[] = [];
+			mockStreamingResponse([`data: ${JSON.stringify({ a: 1 })}\n`]);
+
+			const service = new ThoughtSpotService(spotterXClient, {
+				recorder,
+				metricsEnv,
+				waitUntil(promise: Promise<void>) {
+					waitUntilPromises.push(promise);
+				},
+			});
+
+			await service.sendSpotterXMessageStreaming(
+				"conv-x",
+				"Show me revenue",
+				SpotterResponseFormat.RAW,
+				vi.fn().mockResolvedValue(undefined),
+			);
+			await recorder.flush();
+			await Promise.all(waitUntilPromises);
+
+			const metricNames = analyticsDataset.writeDataPoint.mock.calls.map(
+				([dataPoint]) => dataPoint.blobs?.[2],
+			);
+			expect(metricNames).toContain(METRIC_NAMES.upstreamCallsTotal);
+			expect(metricNames).toContain(METRIC_NAMES.upstreamStreamsStartedTotal);
+		});
+
+		it("throws and records an upstream error when the response body reader is unavailable", async () => {
+			const analyticsDataset = { writeDataPoint: vi.fn() };
+			const metricsEnv = {
+				METRICS_SINK_MODE: "analytics_engine",
+				ANALYTICS: analyticsDataset,
+			};
+			const recorder = createRequestMetricsRecorder(metricsEnv);
+			spotterXClient.sendSpotterXMessageStreaming = vi
+				.fn()
+				.mockResolvedValue({ body: undefined });
+
+			const service = new ThoughtSpotService(spotterXClient, {
+				recorder,
+				metricsEnv,
+			});
+
+			await expect(
+				service.sendSpotterXMessageStreaming(
+					"conv-x",
+					"Show me revenue",
+					SpotterResponseFormat.RAW,
+					vi.fn(),
+				),
+			).rejects.toThrow("Failed to get reader from response body");
+
+			await recorder.flush();
+			const dataPoints = analyticsDataset.writeDataPoint.mock.calls.map(
+				([dataPoint]) => dataPoint,
+			);
+			expect(
+				dataPoints.some(
+					(dataPoint) =>
+						dataPoint.blobs?.[2] === METRIC_NAMES.upstreamCallsTotal &&
+						dataPoint.blobs?.includes("upstream_error"),
+				),
+			).toBe(true);
+			expect(
+				dataPoints.some(
+					(dataPoint) =>
+						dataPoint.blobs?.[2] === METRIC_NAMES.upstreamStreamsStartedTotal,
+				),
+			).toBe(false);
+		});
+
+		it("rethrows when sending the message fails", async () => {
+			spotterXClient.sendSpotterXMessageStreaming = vi
+				.fn()
+				.mockRejectedValue(new Error("SpotterX Streaming Error"));
+			const appendMessages = vi.fn();
+			const service = new ThoughtSpotService(spotterXClient);
+
+			await expect(
+				service.sendSpotterXMessageStreaming(
+					"conv-x",
+					"Show me revenue",
+					SpotterResponseFormat.RAW,
+					appendMessages,
+				),
+			).rejects.toThrow("SpotterX Streaming Error");
+			expect(appendMessages).not.toHaveBeenCalled();
+		});
+	});
+
 	describe("getAnswerForQuestion", () => {
 		it("should return answer data successfully without TML", async () => {
 			const mockAnswerResponse = {

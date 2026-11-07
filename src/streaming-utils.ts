@@ -267,3 +267,142 @@ export const processSpotter3EventStream = async (
 		}
 	});
 };
+
+/*
+ * Parses the event stream for a SpotterX conversation. Converts the stream into discrete
+ * events, which are stored in the conversation storage server for later retrieval.
+ */
+export const processSpotterXEventStream = async (
+	instanceUrl: string,
+	spotterResponseFormat: SpotterResponseFormat,
+	conversationId: string,
+	streamingResponseReader: ReadableStreamDefaultReader,
+	appendStoredMessages: (
+		conversationId: string,
+		messages: (Message | RawMessage)[],
+		isDone?: boolean,
+	) => Promise<void>,
+	recorder?: MetricsRecorder,
+	suppressIframes = false,
+) => {
+	return await withSpan("process-spotterx-event-stream", async (span: Span) => {
+		// Include the operation on every stream-message metric so future streamed
+		// upstream calls do not collapse into the same series.
+		const upstreamOperation =
+			UPSTREAM_OPERATION_NAMES.sendAgentConversationMessageStreaming;
+		span.setAttribute("conversation_id", conversationId);
+		let nTextMessagesParsed = 0;
+		const nAnswerMessagesParsed = 0;
+		const nMessagesIgnored = 0;
+		let spanHasError = false;
+
+		try {
+			const decoder = new TextDecoder();
+			let buffer = "";
+
+			// Keep looping to read more content from the stream
+			while (true) {
+				const { done, value } = await streamingResponseReader.read();
+
+				// If stream is marked done, mark the conversation as done and exit
+				if (done) {
+					await appendStoredMessages(conversationId, [], true);
+					break;
+				}
+
+				// Decode the latest contents from the stream, and split by line. Leave the
+				// last line in the buffer as it may be incomplete, so we'll check it on the
+				// next loop.
+				buffer += decoder.decode(value, { stream: true });
+				const lines = buffer.split("\n");
+				buffer = lines.pop() || "";
+
+				// Loop through the lines and parse them into messages to be stored
+				const newMessages: (Message | RawMessage)[] = [];
+				for (const line of lines) {
+					// Ignore blank lines, comment lines, and id lines
+					if (
+						line.trim() === "" ||
+						line.startsWith(":") ||
+						line.startsWith("id:")
+					) {
+						continue;
+					}
+
+					// Check for other unexpected line formats
+					if (!line.startsWith("data: ")) {
+						console.warn(
+							"Unknown line in event stream, does not start with 'data:'",
+							line,
+						);
+						continue;
+					}
+
+					// Trim the "data: " prefix, then parse the line if it's non-empty
+					const prefixTrimmedLine = line.slice(6);
+					if (prefixTrimmedLine.trim() === "") {
+						continue;
+					}
+					const item = JSON.parse(prefixTrimmedLine);
+
+					// For the raw format, we don't need to perform any post-processing, so
+					// just add the messages directly. The one exception is for answer
+					// messages, where we generate the answer_id field for convenience.
+					if (spotterResponseFormat === SpotterResponseFormat.RAW) {
+						recordUpstreamStreamMessageMetric(
+							recorder,
+							upstreamOperation,
+							"raw_untyped",
+							false, // TODO discern thinking steps
+						);
+						nTextMessagesParsed++;
+						newMessages.push({ ...item });
+						continue;
+					}
+
+					// TODO implement simplified response format
+					await appendStoredMessages(
+						conversationId,
+						[
+							{
+								is_thinking: false,
+								type: "text",
+								text: "Simplified response format is not available with this version of Spotter. Note that you are using a beta API version.",
+							},
+						],
+						true,
+					);
+					throw new Error(
+						"Simplified response format for SpotterX not yet implemented",
+					);
+				}
+
+				// If we parsed any new messages, store them in the storage
+				if (newMessages.length > 0) {
+					await appendStoredMessages(conversationId, newMessages);
+				}
+			}
+		} catch (error) {
+			console.error("Error while processing streaming response:", error);
+			spanHasError = true;
+			span.setStatus({
+				code: SpanStatusCode.ERROR,
+				message: error instanceof Error ? error.message : String(error),
+			});
+		}
+
+		span.setAttributes({
+			spotter_response_format: spotterResponseFormat,
+			total_messages_parsed: nTextMessagesParsed + nAnswerMessagesParsed,
+			total_text_messages_parsed: nTextMessagesParsed,
+			total_answer_messages_parsed: nAnswerMessagesParsed,
+			total_messages_ignored: nMessagesIgnored,
+		});
+		if (!spanHasError) {
+			span.setStatus({
+				code: SpanStatusCode.OK,
+				message: "Streaming response concluded successfully",
+			});
+		}
+	});
+};
