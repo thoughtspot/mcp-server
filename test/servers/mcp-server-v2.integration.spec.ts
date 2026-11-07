@@ -15,7 +15,7 @@
  *     (external network boundary) is mocked.
  *
  *   Group 3 — Streaming parser + real storage
- *     processSendAgentConversationMessageStreamingResponse writes parsed messages
+ *     processSpotter3EventStream writes parsed messages
  *     into a real ConversationStorageServerSQLite via a real StorageServiceClient.
  *     Verifies that SSE bytes produce the correct DO state end-to-end.
  */
@@ -26,7 +26,7 @@ import { MCPServer } from "../../src/servers/mcp-server";
 import * as thoughtspotClient from "../../src/services/clients/thoughtspot-client";
 import { type Message, SpotterResponseFormat } from "../../src/services/types";
 import { StorageServiceClient } from "../../src/storage-service/storage-service";
-import { processSendAgentConversationMessageStreamingResponse } from "../../src/streaming-utils";
+import { processSpotter3EventStream } from "../../src/streaming-utils";
 import { makeReader, makeRequest } from "./helpers";
 
 vi.mock("../../src/metrics/mixpanel/mixpanel", () => ({
@@ -256,7 +256,7 @@ describe("V2 MCPServer + Real Storage Integration", () => {
 		vi.clearAllMocks();
 
 		// Mock the external ThoughtSpot API client (network boundary)
-		vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue({
+		vi.spyOn(thoughtspotClient, "ThoughtSpotClient").mockReturnValue({
 			getSessionInfo: vi.fn().mockResolvedValue(mockSessionInfoResponse),
 			instanceUrl: "https://test.thoughtspot.cloud",
 		} as any);
@@ -283,7 +283,7 @@ describe("V2 MCPServer + Real Storage Integration", () => {
 
 		// After init(), spy getThoughtSpotService so tool calls get our controlled streaming mock
 		vi.spyOn(testServer as any, "getThoughtSpotService").mockReturnValue({
-			sendAgentConversationMessageStreaming: vi
+			sendSpotter3MessageStreaming: vi
 				.fn()
 				.mockImplementation(
 					async (
@@ -321,7 +321,7 @@ describe("V2 MCPServer + Real Storage Integration", () => {
 	it("second send_session_message fails when first session response is still ongoing", async () => {
 		// First send: streaming mock does NOT mark the conversation done
 		vi.spyOn(testServer as any, "getThoughtSpotService").mockReturnValue({
-			sendAgentConversationMessageStreaming: vi
+			sendSpotter3MessageStreaming: vi
 				.fn()
 				.mockImplementation(
 					async (
@@ -375,7 +375,7 @@ describe("V2 MCPServer + Real Storage Integration", () => {
 
 		// First turn: mark isDone=true so the poll loop exits immediately (no 3s wait)
 		vi.spyOn(testServer as any, "getThoughtSpotService").mockReturnValue({
-			sendAgentConversationMessageStreaming: vi
+			sendSpotter3MessageStreaming: vi
 				.fn()
 				.mockImplementation(
 					async (
@@ -409,7 +409,7 @@ describe("V2 MCPServer + Real Storage Integration", () => {
 
 		// Second turn: re-initialize the same session id and send a follow-up
 		vi.spyOn(testServer as any, "getThoughtSpotService").mockReturnValue({
-			sendAgentConversationMessageStreaming: vi
+			sendSpotter3MessageStreaming: vi
 				.fn()
 				.mockImplementation(
 					async (
@@ -458,7 +458,7 @@ describe("V2 Streaming Parser + Real Storage Integration", () => {
 			`data: [{"type":"text","content":"Revenue is $5M","metadata":{"format":"markdown"}}]\n`,
 		]);
 
-		await processSendAgentConversationMessageStreamingResponse(
+		await processSpotter3EventStream(
 			INSTANCE_URL,
 			SpotterResponseFormat.SIMPLIFIED,
 			"stream-conv-1",
@@ -494,7 +494,7 @@ describe("V2 Streaming Parser + Real Storage Integration", () => {
 		};
 		const reader = makeReader([`data: ${JSON.stringify([answerEvent])}\n`]);
 
-		await processSendAgentConversationMessageStreamingResponse(
+		await processSpotter3EventStream(
 			INSTANCE_URL,
 			SpotterResponseFormat.SIMPLIFIED,
 			"stream-conv-2",
@@ -528,7 +528,7 @@ describe("V2 Streaming Parser + Real Storage Integration", () => {
 
 		const reader = makeReader([thinkingLine, answerLine, textLine]);
 
-		await processSendAgentConversationMessageStreamingResponse(
+		await processSpotter3EventStream(
 			INSTANCE_URL,
 			SpotterResponseFormat.SIMPLIFIED,
 			"stream-conv-3",

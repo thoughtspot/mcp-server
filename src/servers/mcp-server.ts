@@ -62,6 +62,7 @@ import { McpServerError } from "../utils";
 import { BaseMCPServer, type Context } from "./mcp-server-base";
 import {
 	CreateAnalysisSessionSpotter3InputSchema,
+	CreateAnalysisSessionSpotterXInputSchema,
 	CreateDashboardInputSchema,
 	CreateDashboardLegacyInputSchema,
 	CreateLiveboardSchema,
@@ -918,25 +919,84 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		);
 	}
 
+	private async callCreateAnalysisSessionSpotterX(
+		request: z.infer<typeof CallToolRequestSchema>,
+		recorder: MetricsRecorder,
+	) {
+		const span = trace.getSpan(context.active());
+		const { data_source_id, dashboard_id } =
+			CreateAnalysisSessionSpotterXInputSchema.parse(request.params.arguments);
+		span?.setAttribute("data_source_id", data_source_id ?? "(none)");
+		span?.setAttribute("dashboard_id", dashboard_id ?? "(none)");
+
+		if (
+			!data_source_id &&
+			!dashboard_id &&
+			!this.isSpotterDataSourceDiscoveryEnabled()
+		) {
+			return this.createErrorResponse(
+				"This ThoughtSpot instance does not select a data source automatically, so either `data_source_id` or `dashboard_id` is required. Find data sources or dashboards using `search_objects` tool.",
+				"Create analysis session rejected: no data_source_id/dashboard_id and data source discovery is disabled",
+			);
+		}
+
+		let response: AgentConversation;
+		try {
+			response = await this.getThoughtSpotService(
+				recorder,
+			).createSpotterXConversation(
+				this.isSpotterDataSourceDiscoveryEnabled(),
+				this.isSpotterChatHistoryEnabled(),
+				data_source_id,
+				dashboard_id,
+			);
+		} catch (error) {
+			if (this.apiErrorStatus(error) !== 401) {
+				throw error;
+			}
+
+			return this.createErrorResponse(
+				"Your authentication has expired, please reauthenticate and try again. You may need to disconnect and reconnect the MCP Server if you don't have any other way to reauthenticate.",
+				"User authentication has expired, prompting them to reauthenticate",
+			);
+		}
+		recorder.setAnalyticsContext({
+			analyticalSessionId: response.conversation_id,
+		});
+		span?.setAttribute("analytical_session_id", response.conversation_id);
+
+		// Conversation is initialized in Storage Server from callSendSessionMessage, since that is
+		// the common entrypoint for both initial messages and followup messages.
+
+		return this.createStructuredContentSuccessResponse(
+			{ analytical_session_id: response.conversation_id },
+			"Conversation created successfully",
+		);
+	}
+
 	@WithSpan("call-create-analysis-session")
 	async callCreateAnalysisSession(
 		request: z.infer<typeof CallToolRequestSchema>,
 		recorder: MetricsRecorder,
 	) {
+		// Alternate path if we are using SpotterX
+		await this.ensureSessionInfo();
+		if (
+			resolveApiVersion(this.ctx.props.apiVersion).version.includes("beta") &&
+			this.isSpotterXEnabled()
+		) {
+			return this.callCreateAnalysisSessionSpotterX(request, recorder);
+		}
+
 		const span = trace.getSpan(context.active());
 		const { data_source_id } = CreateAnalysisSessionSpotter3InputSchema.parse(
 			request.params.arguments,
 		);
 		span?.setAttribute("data_source_id", data_source_id ?? "(none)");
 
-		// With auto data-source selection off, a session without a data source is
-		// created with an empty context and dataset search disabled, so the agent
-		// cannot answer any data question. Refuse it and let the client pick one.
-		// Repair session info first: without it the discovery check fails open.
-		await this.ensureSessionInfo();
 		if (!data_source_id && !this.isSpotterDataSourceDiscoveryEnabled()) {
 			return this.createErrorResponse(
-				"This ThoughtSpot instance does not select a data source automatically, so `data_source_id` is required. Find the data source with `search_objects` (types: ['WORKSHEET']), confirm it with the user if more than one matches, then call `create_analysis_session` again with its `object_id` as `data_source_id`.",
+				"This ThoughtSpot instance does not select a data source automatically, so `data_source_id` is required. Find data sources using `search_objects` tool.",
 				"Create analysis session rejected: no data_source_id and data source discovery is disabled",
 			);
 		}
@@ -945,7 +1005,7 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		try {
 			response = await this.getThoughtSpotService(
 				recorder,
-			).createAgentConversation(
+			).createSpotter3Conversation(
 				this.isSpotterDataSourceDiscoveryEnabled(),
 				this.isSpotterChatHistoryEnabled(),
 				data_source_id,
@@ -1007,7 +1067,7 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		try {
 			await this.getThoughtSpotService(recorder, {
 				analyticalSessionId: analytical_session_id,
-			}).sendAgentConversationMessageStreaming(
+			}).sendSpotter3MessageStreaming(
 				analytical_session_id,
 				message,
 				this.ctx.props.enableRawSessionUpdates

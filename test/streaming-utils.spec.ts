@@ -28,7 +28,7 @@ import {
 	NOOP_METRICS_RECORDER,
 } from "../src/metrics/runtime/metrics-recorder";
 import { SpotterResponseFormat } from "../src/services/types";
-import { processSendAgentConversationMessageStreamingResponse } from "../src/streaming-utils";
+import { processSpotter3EventStream } from "../src/streaming-utils";
 import { makeReader } from "./servers/helpers";
 
 // Mock storage
@@ -43,7 +43,7 @@ function makeMockStorage() {
 const INSTANCE_URL = "https://test.thoughtspot.com";
 const CONV_ID = "conv-123";
 
-describe("processSendAgentConversationMessageStreamingResponse", () => {
+describe("processSpotter3EventStream", () => {
 	let consoleWarnSpy: ReturnType<typeof vi.spyOn>;
 	let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
 
@@ -62,7 +62,7 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		const storage = makeMockStorage();
 		const reader = makeReader([]);
 
-		await processSendAgentConversationMessageStreamingResponse(
+		await processSpotter3EventStream(
 			INSTANCE_URL,
 			SpotterResponseFormat.SIMPLIFIED,
 			CONV_ID,
@@ -83,7 +83,7 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		const line = `data: ${JSON.stringify([{ type: "text", content: "Hello world", metadata: { format: "markdown" } }])}\n`;
 		const reader = makeReader([line]);
 
-		await processSendAgentConversationMessageStreamingResponse(
+		await processSpotter3EventStream(
 			INSTANCE_URL,
 			SpotterResponseFormat.SIMPLIFIED,
 			CONV_ID,
@@ -111,7 +111,7 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		const line = `data: ${JSON.stringify([{ type: "text", content: "Hello world", metadata: { format: "markdown" } }])}\n`;
 		const reader = makeReader([line]);
 
-		await processSendAgentConversationMessageStreamingResponse(
+		await processSpotter3EventStream(
 			INSTANCE_URL,
 			SpotterResponseFormat.SIMPLIFIED,
 			CONV_ID,
@@ -136,7 +136,7 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		const line = `data: ${JSON.stringify([{ type: "text", content: "Reasoning...", metadata: { type: "thinking", format: "markdown" } }])}\n`;
 		const reader = makeReader([line]);
 
-		await processSendAgentConversationMessageStreamingResponse(
+		await processSpotter3EventStream(
 			INSTANCE_URL,
 			SpotterResponseFormat.SIMPLIFIED,
 			CONV_ID,
@@ -154,7 +154,7 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		const line = `data: ${JSON.stringify([{ type: "text-chunk", content: "chunk content", metadata: { format: "markdown" } }])}\n`;
 		const reader = makeReader([line]);
 
-		await processSendAgentConversationMessageStreamingResponse(
+		await processSpotter3EventStream(
 			INSTANCE_URL,
 			SpotterResponseFormat.SIMPLIFIED,
 			CONV_ID,
@@ -172,7 +172,7 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		const line = `data: ${JSON.stringify([{ type: "text-chunk", content: "thinking chunk", metadata: { type: "thinking", format: "markdown" } }])}\n`;
 		const reader = makeReader([line]);
 
-		await processSendAgentConversationMessageStreamingResponse(
+		await processSpotter3EventStream(
 			INSTANCE_URL,
 			SpotterResponseFormat.SIMPLIFIED,
 			CONV_ID,
@@ -190,7 +190,7 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		const line = `data: ${JSON.stringify([{ type: "text", content: "plain text", metadata: { format: "plaintext" } }])}\n`;
 		const reader = makeReader([line]);
 
-		await processSendAgentConversationMessageStreamingResponse(
+		await processSpotter3EventStream(
 			INSTANCE_URL,
 			SpotterResponseFormat.SIMPLIFIED,
 			CONV_ID,
@@ -219,7 +219,7 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		const line = `data: ${JSON.stringify([{ type: "text", content: "no format", metadata: {} }])}\n`;
 		const reader = makeReader([line]);
 
-		await processSendAgentConversationMessageStreamingResponse(
+		await processSpotter3EventStream(
 			INSTANCE_URL,
 			SpotterResponseFormat.SIMPLIFIED,
 			CONV_ID,
@@ -251,7 +251,7 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		const line = `data: ${JSON.stringify([{ type: "text", content: "plain text", metadata: { format: "plaintext" } }])}\n`;
 		const reader = makeReader([line]);
 
-		await processSendAgentConversationMessageStreamingResponse(
+		await processSpotter3EventStream(
 			INSTANCE_URL,
 			SpotterResponseFormat.SIMPLIFIED,
 			CONV_ID,
@@ -268,7 +268,7 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		const line = `data: ${JSON.stringify([{ type: "text-chunk", content: "plain chunk", metadata: { format: "plaintext" } }])}\n`;
 		const reader = makeReader([line]);
 
-		await processSendAgentConversationMessageStreamingResponse(
+		await processSpotter3EventStream(
 			INSTANCE_URL,
 			SpotterResponseFormat.SIMPLIFIED,
 			CONV_ID,
@@ -296,7 +296,7 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		const line = `data: ${JSON.stringify([{ type: "text-chunk", content: "no format chunk", metadata: {} }])}\n`;
 		const reader = makeReader([line]);
 
-		await processSendAgentConversationMessageStreamingResponse(
+		await processSpotter3EventStream(
 			INSTANCE_URL,
 			SpotterResponseFormat.SIMPLIFIED,
 			CONV_ID,
@@ -334,7 +334,7 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		const line = `data: ${JSON.stringify(items)}\n`;
 		const reader = makeReader([line]);
 
-		await processSendAgentConversationMessageStreamingResponse(
+		await processSpotter3EventStream(
 			INSTANCE_URL,
 			SpotterResponseFormat.SIMPLIFIED,
 			CONV_ID,
@@ -369,7 +369,7 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		const line = `data: ${JSON.stringify([{ id: "msg-1", type: "answer", metadata }])}\n`;
 		const reader = makeReader([line]);
 
-		await processSendAgentConversationMessageStreamingResponse(
+		await processSpotter3EventStream(
 			INSTANCE_URL,
 			SpotterResponseFormat.SIMPLIFIED,
 			CONV_ID,
@@ -410,7 +410,7 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		const line = `data: ${JSON.stringify([{ type: "answer", metadata }])}\n`;
 		const reader = makeReader([line]);
 
-		await processSendAgentConversationMessageStreamingResponse(
+		await processSpotter3EventStream(
 			INSTANCE_URL,
 			SpotterResponseFormat.SIMPLIFIED,
 			CONV_ID,
@@ -437,10 +437,16 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 
 	it("parses an error event and stores a text message with the display_message", async () => {
 		const storage = makeMockStorage();
-		const line = `data: ${JSON.stringify([{ type: "error", code: "ERR_001", message: "internal", display_message: "Something went wrong" }])}\n`;
+		const item = {
+			type: "error",
+			code: "ERR_001",
+			message: "internal",
+			display_message: "Something went wrong",
+		};
+		const line = `data: ${JSON.stringify([item])}\n`;
 		const reader = makeReader([line]);
 
-		await processSendAgentConversationMessageStreamingResponse(
+		await processSpotter3EventStream(
 			INSTANCE_URL,
 			SpotterResponseFormat.SIMPLIFIED,
 			CONV_ID,
@@ -451,6 +457,14 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		expect(storage.appendMessagesAndRestartTtl).toHaveBeenCalledWith(CONV_ID, [
 			{ is_thinking: false, type: "text", text: "Something went wrong" },
 		]);
+		expect(consoleErrorSpy).toHaveBeenCalledWith(
+			"Error event in event stream:",
+			JSON.stringify(item),
+		);
+		expect(tracingState.span?.setStatus).toHaveBeenCalledWith({
+			code: SpanStatusCode.ERROR,
+			message: `Error event in event stream, error code: ${JSON.stringify(item)}`,
+		});
 	});
 
 	it("falls back to 'Something went wrong' when error event has no display_message", async () => {
@@ -458,7 +472,7 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		const line = `data: ${JSON.stringify([{ type: "error" }])}\n`;
 		const reader = makeReader([line]);
 
-		await processSendAgentConversationMessageStreamingResponse(
+		await processSpotter3EventStream(
 			INSTANCE_URL,
 			SpotterResponseFormat.SIMPLIFIED,
 			CONV_ID,
@@ -476,7 +490,7 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		const line = `data: ${JSON.stringify([{ type: "error", display_message: "Something went wrong" }])}\n`;
 		const reader = makeReader([line]);
 
-		await processSendAgentConversationMessageStreamingResponse(
+		await processSpotter3EventStream(
 			INSTANCE_URL,
 			SpotterResponseFormat.SIMPLIFIED,
 			CONV_ID,
@@ -506,7 +520,7 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		const line = `data: ${JSON.stringify(items)}\n`;
 		const reader = makeReader([line]);
 
-		await processSendAgentConversationMessageStreamingResponse(
+		await processSpotter3EventStream(
 			INSTANCE_URL,
 			SpotterResponseFormat.SIMPLIFIED,
 			CONV_ID,
@@ -529,7 +543,7 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		const chunk = `\n: heartbeat\ndata: ${JSON.stringify([{ type: "text", content: "hi", metadata: { format: "markdown" } }])}\n`;
 		const reader = makeReader([chunk]);
 
-		await processSendAgentConversationMessageStreamingResponse(
+		await processSpotter3EventStream(
 			INSTANCE_URL,
 			SpotterResponseFormat.SIMPLIFIED,
 			CONV_ID,
@@ -547,7 +561,7 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		const chunk = "unexpected line format\n";
 		const reader = makeReader([chunk]);
 
-		await processSendAgentConversationMessageStreamingResponse(
+		await processSpotter3EventStream(
 			INSTANCE_URL,
 			SpotterResponseFormat.SIMPLIFIED,
 			CONV_ID,
@@ -557,6 +571,7 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 
 		expect(consoleWarnSpy).toHaveBeenCalledWith(
 			"Unknown line in event stream, does not start with 'data:'",
+			"unexpected line format",
 		);
 		// Only done call, no messages stored
 		expect(storage.appendMessagesAndRestartTtl).toHaveBeenCalledOnce();
@@ -567,7 +582,7 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		const chunk = "data: {not valid json}\n";
 		const reader = makeReader([chunk]);
 
-		await processSendAgentConversationMessageStreamingResponse(
+		await processSpotter3EventStream(
 			INSTANCE_URL,
 			SpotterResponseFormat.SIMPLIFIED,
 			CONV_ID,
@@ -586,7 +601,7 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		const line = `data: ${JSON.stringify([{ type: "mystery_event" }])}\n`;
 		const reader = makeReader([line]);
 
-		await processSendAgentConversationMessageStreamingResponse(
+		await processSpotter3EventStream(
 			INSTANCE_URL,
 			SpotterResponseFormat.SIMPLIFIED,
 			CONV_ID,
@@ -596,7 +611,7 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 
 		expect(consoleWarnSpy).toHaveBeenCalledWith(
 			"Unknown event in event stream:",
-			{ type: "mystery_event" },
+			JSON.stringify({ type: "mystery_event" }),
 		);
 		expect(storage.appendMessagesAndRestartTtl).toHaveBeenCalledOnce();
 	});
@@ -609,7 +624,7 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		const part2 = `${fullLine.slice(20)}\n`;
 		const reader = makeReader([part1, part2]);
 
-		await processSendAgentConversationMessageStreamingResponse(
+		await processSpotter3EventStream(
 			INSTANCE_URL,
 			SpotterResponseFormat.SIMPLIFIED,
 			CONV_ID,
@@ -628,7 +643,7 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		const chunk2 = `data: ${JSON.stringify([{ type: "text-chunk", content: "second", metadata: { format: "markdown" } }])}\n`;
 		const reader = makeReader([chunk1, chunk2]);
 
-		await processSendAgentConversationMessageStreamingResponse(
+		await processSpotter3EventStream(
 			INSTANCE_URL,
 			SpotterResponseFormat.SIMPLIFIED,
 			CONV_ID,
@@ -663,7 +678,7 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		const chunk = `data: ${JSON.stringify(items)}\n`;
 		const reader = makeReader([chunk]);
 
-		await processSendAgentConversationMessageStreamingResponse(
+		await processSpotter3EventStream(
 			INSTANCE_URL,
 			SpotterResponseFormat.SIMPLIFIED,
 			CONV_ID,
@@ -682,7 +697,7 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		const line = `data: ${JSON.stringify([{ type: "notification", code: "TOOL_CALL_NOTIFICATION", metadata: { tool_title: "Running query" } }])}\n`;
 		const reader = makeReader([line]);
 
-		await processSendAgentConversationMessageStreamingResponse(
+		await processSpotter3EventStream(
 			INSTANCE_URL,
 			SpotterResponseFormat.SIMPLIFIED,
 			CONV_ID,
@@ -705,7 +720,7 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		const line = `data: ${JSON.stringify([{ type: "notification", code: "TOOL_CALL_NOTIFICATION", metadata: { tool_title: "Thinking step", type: "thinking" } }])}\n`;
 		const reader = makeReader([line]);
 
-		await processSendAgentConversationMessageStreamingResponse(
+		await processSpotter3EventStream(
 			INSTANCE_URL,
 			SpotterResponseFormat.SIMPLIFIED,
 			CONV_ID,
@@ -727,7 +742,7 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		const line = `data: ${JSON.stringify([{ type: "notification", code: "TOOL_CALL_NOTIFICATION", metadata: { tool_title: "Running query" } }])}\n`;
 		const reader = makeReader([line]);
 
-		await processSendAgentConversationMessageStreamingResponse(
+		await processSpotter3EventStream(
 			INSTANCE_URL,
 			SpotterResponseFormat.SIMPLIFIED,
 			CONV_ID,
@@ -752,7 +767,7 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		const line = `data: ${JSON.stringify([{ type: "notification", code: "TOOL_CALL_NOTIFICATION", metadata: { tool_title: "Running query" } }])}\n`;
 		const reader = makeReader([line]);
 
-		await processSendAgentConversationMessageStreamingResponse(
+		await processSpotter3EventStream(
 			INSTANCE_URL,
 			SpotterResponseFormat.SIMPLIFIED,
 			CONV_ID,
@@ -774,7 +789,7 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		const line = `data: ${JSON.stringify([{ type: "notification", code: "OTHER_NOTIFICATION", metadata: { tool_title: "Running query" } }])}\n`;
 		const reader = makeReader([line]);
 
-		await processSendAgentConversationMessageStreamingResponse(
+		await processSpotter3EventStream(
 			INSTANCE_URL,
 			SpotterResponseFormat.SIMPLIFIED,
 			CONV_ID,
@@ -802,7 +817,7 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 		const line = `data: ${JSON.stringify([{ type: "notification", code: "TOOL_CALL_NOTIFICATION", metadata: {} }])}\n`;
 		const reader = makeReader([line]);
 
-		await processSendAgentConversationMessageStreamingResponse(
+		await processSpotter3EventStream(
 			INSTANCE_URL,
 			SpotterResponseFormat.SIMPLIFIED,
 			CONV_ID,
@@ -826,7 +841,7 @@ describe("processSendAgentConversationMessageStreamingResponse", () => {
 	});
 });
 
-describe("processSendAgentConversationMessageStreamingResponse — raw format", () => {
+describe("processSpotter3EventStream — raw format", () => {
 	let consoleWarnSpy: ReturnType<typeof vi.spyOn>;
 	let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
 
@@ -846,7 +861,7 @@ describe("processSendAgentConversationMessageStreamingResponse — raw format", 
 		storage: ReturnType<typeof makeMockStorage>,
 		recorder?: MetricsRecorder,
 	) =>
-		processSendAgentConversationMessageStreamingResponse(
+		processSpotter3EventStream(
 			INSTANCE_URL,
 			SpotterResponseFormat.RAW,
 			CONV_ID,
@@ -976,10 +991,9 @@ describe("processSendAgentConversationMessageStreamingResponse — raw format", 
 			item,
 		]);
 		expect(consoleErrorSpy).not.toHaveBeenCalled();
-		expect(tracingState.span?.setStatus).not.toHaveBeenCalledWith({
-			code: SpanStatusCode.ERROR,
-			message: "Error event in event stream, error code: SPOTTER_500",
-		});
+		expect(tracingState.span?.setStatus).not.toHaveBeenCalledWith(
+			expect.objectContaining({ code: SpanStatusCode.ERROR }),
+		);
 	});
 
 	it("marks the conversation as done when the stream ends", async () => {
@@ -1078,7 +1092,7 @@ describe("suppress-iframes", () => {
 			},
 		])}\n`;
 
-		await processSendAgentConversationMessageStreamingResponse(
+		await processSpotter3EventStream(
 			INSTANCE_URL,
 			SpotterResponseFormat.SIMPLIFIED,
 			CONV_ID,

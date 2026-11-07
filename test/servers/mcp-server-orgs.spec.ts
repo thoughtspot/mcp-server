@@ -171,7 +171,7 @@ function makeServer(opts: {
 	accessToken?: string;
 	globalTokenExpiresAt?: number;
 }) {
-	vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockReturnValue(
+	vi.spyOn(thoughtspotClient, "ThoughtSpotClient").mockReturnValue(
 		makeClientMock(opts),
 	);
 	const store =
@@ -383,8 +383,8 @@ describe("MCP Server org tools", () => {
 			// getSessionInfo fails when the client was built with the expired props
 			// getSessionInfo fails only for the expired props token; any reconciled
 			// token (warm DO token or a minted org token) succeeds.
-			vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockImplementation(
-				(_instanceUrl: string, bearerToken: string) =>
+			vi.spyOn(thoughtspotClient, "ThoughtSpotClient").mockImplementation(
+				({ token: bearerToken }: { token: string }) =>
 					({
 						getSessionInfo: vi.fn(async () => {
 							if (bearerToken === "expired-props-token") {
@@ -634,16 +634,16 @@ describe("MCP Server org tools", () => {
 			// Put an org token in play (the thing list_orgs must NOT use).
 			await s.setActiveOrg("101", "org-101-token");
 
-			const spy = vi.mocked(thoughtspotClient.getThoughtSpotClient);
+			const spy = vi.mocked(thoughtspotClient.ThoughtSpotClient);
 			spy.mockClear();
 			await s.callListOrgs(undefined);
 
-			// Every getThoughtSpotClient call made while serving list_orgs must use the
-			// global token ("global-token") and pass orgId undefined (no org header).
+			// Every ThoughtSpotClient construction made while serving list_orgs must use the
+			// global token ("global-token") and pass an empty orgId (no org header).
 			expect(spy).toHaveBeenCalled();
 			for (const call of spy.mock.calls) {
-				expect(call[1]).toBe("global-token"); // bearerToken arg
-				expect(call[2]).toBeUndefined(); // orgId arg
+				expect(call[0].token).toBe("global-token");
+				expect(call[0].orgId).toBe("");
 			}
 		});
 
@@ -980,7 +980,7 @@ describe("MCP Server org tools", () => {
 	// token + header; the global token must never authenticate a data call.
 	describe("data-call org isolation (never the global token)", () => {
 		// Build an OAuth+orgs server already switched into org 101, returning the
-		// server plus the getThoughtSpotClient spy for asserting outbound (bearer,
+		// server plus the ThoughtSpotClient constructor spy for asserting outbound (bearer,
 		// orgId) pairs.
 		async function serverInOrg(
 			store = new Map<string, { activeOrgId?: string; orgToken?: string }>(),
@@ -994,16 +994,27 @@ describe("MCP Server org tools", () => {
 			});
 			await server.init();
 			await connect(server).callTool("switch_org", { org_id: 101 });
-			const spy = vi.mocked(thoughtspotClient.getThoughtSpotClient);
+			const spy = vi.mocked(thoughtspotClient.ThoughtSpotClient);
 			return { server: server as any, store, mint, spy };
 		}
 
 		// A1: an org-active data path builds its client with the org token + header.
 		it("uses the org-scoped token and org id (header) on a data call", async () => {
-			const { server } = await serverInOrg();
+			const { server, spy } = await serverInOrg();
 			// getThoughtSpotService() sources token + org id from these two methods.
 			expect(server.getActiveToken()).toBe("org-101-token");
 			expect(server.getActiveOrgId()).toBe("101");
+
+			// The client carries the tenant (cluster), active org and user identity
+			spy.mockClear();
+			server.getThoughtSpotService();
+			expect(spy).toHaveBeenLastCalledWith({
+				instanceUrl: "https://test.thoughtspot.cloud",
+				token: "org-101-token",
+				tenantId: "test-cluster-123",
+				orgId: "101",
+				userId: "test-user-123",
+			});
 		});
 
 		it("sends the org-scoped token to Aurora when an org is active", async () => {
@@ -1145,13 +1156,15 @@ describe("MCP Server org tools", () => {
 				store,
 			});
 			await server.init();
-			const spy = vi.mocked(thoughtspotClient.getThoughtSpotClient);
+			const spy = vi.mocked(thoughtspotClient.ThoughtSpotClient);
 			spy.mockClear();
 			await connect(server).callTool("switch_org", { org_id: 101 });
 			// The mint client is built global-token + no org id.
-			const mintClient = spy.mock.calls.find((c) => c[1] === "global-token");
+			const mintClient = spy.mock.calls.find(
+				(c) => c[0].token === "global-token",
+			);
 			expect(mintClient).toBeDefined();
-			expect(mintClient?.[2]).toBeUndefined();
+			expect(mintClient?.[0].orgId).toBe("");
 		});
 	});
 
@@ -1332,8 +1345,10 @@ describe("MCP Server org tools", () => {
 			});
 			await connect(server).callTool("switch_org", { org_id: 101 });
 			// The mint used the rotated token, not the connect-time "global-token".
-			const spy = vi.mocked(thoughtspotClient.getThoughtSpotClient);
-			const mintClient = spy.mock.calls.find((c) => c[1] === "rotated-global");
+			const spy = vi.mocked(thoughtspotClient.ThoughtSpotClient);
+			const mintClient = spy.mock.calls.find(
+				(c) => c[0].token === "rotated-global",
+			);
 			expect(mintClient).toBeDefined();
 		});
 	});

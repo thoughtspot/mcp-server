@@ -1,6 +1,6 @@
 import { createBearerAuthenticationConfig } from "@thoughtspot/rest-api-sdk";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getThoughtSpotClient } from "../../../../src/services/clients/thoughtspot-client";
+import { ThoughtSpotClient } from "../../../../src/services/clients/thoughtspot-client";
 
 // Mock the ThoughtSpot REST API SDK
 vi.mock("@thoughtspot/rest-api-sdk", () => ({
@@ -39,7 +39,13 @@ describe("orgs-client", () => {
 
 	describe("fetchOrgBearerToken (org-scoped token mint)", () => {
 		function makeClient() {
-			return getThoughtSpotClient(mockInstanceUrl, mockBearerToken) as any;
+			return new ThoughtSpotClient({
+				instanceUrl: mockInstanceUrl,
+				token: mockBearerToken,
+				tenantId: "",
+				orgId: "",
+				userId: "",
+			}) as any;
 		}
 
 		it("calls the v2 auth/token/fetch endpoint with org_identifier and a 24-hour validity", async () => {
@@ -113,7 +119,13 @@ describe("orgs-client", () => {
 
 	describe("listOrgs (user-scoped org membership)", () => {
 		function makeClient() {
-			return getThoughtSpotClient(mockInstanceUrl, mockBearerToken) as any;
+			return new ThoughtSpotClient({
+				instanceUrl: mockInstanceUrl,
+				token: mockBearerToken,
+				tenantId: "",
+				orgId: "",
+				userId: "",
+			}) as any;
 		}
 
 		it("calls the v1 session/orgs endpoint and maps orgId/orgName/description", async () => {

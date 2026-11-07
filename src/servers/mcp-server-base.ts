@@ -27,7 +27,7 @@ import {
 	recordToolInvocationMetrics,
 } from "../metrics/runtime/tool-metrics";
 import { getActiveSpan, withSpan } from "../metrics/tracing/tracing-utils";
-import { getThoughtSpotClient } from "../services/clients/thoughtspot-client";
+import { ThoughtSpotClient } from "../services/clients/thoughtspot-client";
 import { ThoughtSpotOrgsService } from "../services/thoughtspot-orgs-service";
 import { ThoughtSpotService } from "../services/thoughtspot-service";
 import type { SessionInfo } from "../services/types";
@@ -341,7 +341,13 @@ export abstract class BaseMCPServer extends Server {
 		recorder?: MetricsRecorder,
 	) {
 		return new ThoughtSpotOrgsService(
-			getThoughtSpotClient(this.ctx.props.instanceUrl, bearerToken, orgId),
+			new ThoughtSpotClient({
+				instanceUrl: this.ctx.props.instanceUrl,
+				token: bearerToken,
+				tenantId: this.sessionInfo?.configInfo?.selfClusterId ?? "",
+				orgId: orgId ?? "",
+				userId: this.sessionInfo?.userGUID ?? "",
+			}),
 			recorder,
 		);
 	}
@@ -351,11 +357,13 @@ export abstract class BaseMCPServer extends Server {
 		analyticsContextOverride?: MetricAnalyticsContext,
 	) {
 		return new ThoughtSpotService(
-			getThoughtSpotClient(
-				this.ctx.props.instanceUrl,
-				this.getActiveToken(),
-				this.getActiveOrgId(),
-			),
+			new ThoughtSpotClient({
+				instanceUrl: this.ctx.props.instanceUrl,
+				token: this.getActiveToken(),
+				tenantId: this.sessionInfo?.configInfo?.selfClusterId ?? "",
+				orgId: this.getActiveOrgId() ?? "",
+				userId: this.sessionInfo?.userGUID ?? "",
+			}),
 			{
 				recorder,
 				metricsEnv: this.ctx.env as unknown as Record<string, unknown>,

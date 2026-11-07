@@ -1,6 +1,6 @@
 import { createBearerAuthenticationConfig } from "@thoughtspot/rest-api-sdk";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getThoughtSpotClient } from "../../../../src/services/clients/thoughtspot-client";
+import { ThoughtSpotClient } from "../../../../src/services/clients/thoughtspot-client";
 
 // Mock the ThoughtSpot REST API SDK
 vi.mock("@thoughtspot/rest-api-sdk", () => ({
@@ -47,7 +47,13 @@ describe("spotter-x-client", () => {
 		let client: any;
 
 		beforeEach(() => {
-			client = getThoughtSpotClient(mockInstanceUrl, mockBearerToken) as any;
+			client = new ThoughtSpotClient({
+				instanceUrl: mockInstanceUrl,
+				token: mockBearerToken,
+				tenantId: "",
+				orgId: "",
+				userId: "",
+			}) as any;
 		});
 
 		it("should create a conversation without a data source successfully", async () => {
@@ -107,6 +113,26 @@ describe("spotter-x-client", () => {
 			expect(body.settings_override.map.enable_dataset_search).toBe(false);
 
 			expect(result).toEqual({ conversation_id: "session-456" });
+		});
+
+		it("should scope the conversation to a liveboard when one is provided", async () => {
+			(fetch as any).mockResolvedValue({
+				ok: true,
+				json: vi.fn().mockResolvedValue({ session: { id: "session-lb" } }),
+			});
+
+			const result = await client.createSpotterXConversation({
+				isSpotterDataSourceDiscoveryEnabled: false,
+				isSpotterChatHistoryEnabled: false,
+				liveboardId: "lb-123",
+				...identity,
+			});
+
+			const body = JSON.parse((fetch as any).mock.calls[0][1].body);
+			expect(body.object_type).toBe("liveboard");
+			expect(body.object_id).toBe("lb-123");
+			expect(body).not.toHaveProperty("context");
+			expect(result).toEqual({ conversation_id: "session-lb" });
 		});
 
 		it("should include correct identity and settings in the request body", async () => {
@@ -191,11 +217,13 @@ describe("spotter-x-client", () => {
 			});
 
 			// An org on the client must not add the org header; the org travels in the fuid
-			const orgClient = getThoughtSpotClient(
-				mockInstanceUrl,
-				mockBearerToken,
-				"99",
-			) as any;
+			const orgClient = new ThoughtSpotClient({
+				instanceUrl: mockInstanceUrl,
+				token: mockBearerToken,
+				tenantId: "",
+				orgId: "99",
+				userId: "",
+			}) as any;
 			await orgClient.createSpotterXConversation(identity);
 
 			const fetchCall = (fetch as any).mock.calls[0];
@@ -213,7 +241,13 @@ describe("spotter-x-client", () => {
 		let client: any;
 
 		beforeEach(() => {
-			client = getThoughtSpotClient(mockInstanceUrl, mockBearerToken) as any;
+			client = new ThoughtSpotClient({
+				instanceUrl: mockInstanceUrl,
+				token: mockBearerToken,
+				tenantId: "",
+				orgId: "",
+				userId: "",
+			}) as any;
 		});
 
 		it("should send conversation message streaming successfully", async () => {
@@ -316,11 +350,13 @@ describe("spotter-x-client", () => {
 			});
 
 			// An org on the client must not add the org header; the org travels in the fuid
-			const orgClient = getThoughtSpotClient(
-				mockInstanceUrl,
-				mockBearerToken,
-				"99",
-			) as any;
+			const orgClient = new ThoughtSpotClient({
+				instanceUrl: mockInstanceUrl,
+				token: mockBearerToken,
+				tenantId: "",
+				orgId: "99",
+				userId: "",
+			}) as any;
 			await orgClient.sendSpotterXMessageStreaming({
 				conversationId: "foo",
 				message: "bar",

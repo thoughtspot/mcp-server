@@ -9,7 +9,7 @@
 
 import { createBearerAuthenticationConfig } from "@thoughtspot/rest-api-sdk";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getThoughtSpotClient } from "../../../../src/services/clients/thoughtspot-client";
+import { ThoughtSpotClient } from "../../../../src/services/clients/thoughtspot-client";
 
 // Mock only the SDK plumbing — nanoid is intentionally NOT mocked so that the
 // real customAlphabet implementation is exercised.
@@ -33,7 +33,13 @@ function buildClient() {
 
 	(createBearerAuthenticationConfig as any).mockReturnValue(mockConfig);
 
-	return getThoughtSpotClient(INSTANCE_URL, BEARER_TOKEN);
+	return new ThoughtSpotClient({
+		instanceUrl: INSTANCE_URL,
+		token: BEARER_TOKEN,
+		tenantId: "",
+		orgId: "",
+		userId: "",
+	});
 }
 
 function mockOkFetch() {

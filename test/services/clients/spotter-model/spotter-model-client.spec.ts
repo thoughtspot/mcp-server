@@ -14,7 +14,9 @@ function makeClient(orgId?: string): any {
 	return new ThoughtSpotClient({
 		instanceUrl: INSTANCE_URL,
 		token: TOKEN,
-		orgId,
+		tenantId: "",
+		orgId: orgId ?? "",
+		userId: "",
 	});
 }
 

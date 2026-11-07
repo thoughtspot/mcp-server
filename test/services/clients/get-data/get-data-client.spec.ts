@@ -6,7 +6,7 @@ import {
 	GET_DATA_VIZ_CONCURRENCY,
 	LIVEBOARD_RECORD_SIZE,
 } from "../../../../src/services/clients/get-data/get-data-client";
-import { getThoughtSpotClient } from "../../../../src/services/clients/thoughtspot-client";
+import { ThoughtSpotClient } from "../../../../src/services/clients/thoughtspot-client";
 
 // Mock the ThoughtSpot REST API SDK
 vi.mock("@thoughtspot/rest-api-sdk", () => ({
@@ -47,7 +47,13 @@ describe("get-data-client", () => {
 		let client: any;
 
 		beforeEach(() => {
-			client = getThoughtSpotClient(mockInstanceUrl, mockBearerToken) as any;
+			client = new ThoughtSpotClient({
+				instanceUrl: mockInstanceUrl,
+				token: mockBearerToken,
+				tenantId: "",
+				orgId: "",
+				userId: "",
+			}) as any;
 		});
 
 		// Mirrors the real /metadata/answer/data FULL response: column_names plus

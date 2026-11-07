@@ -1,6 +1,6 @@
 import { createBearerAuthenticationConfig } from "@thoughtspot/rest-api-sdk";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getThoughtSpotClient } from "../../../../src/services/clients/thoughtspot-client";
+import { ThoughtSpotClient } from "../../../../src/services/clients/thoughtspot-client";
 
 // Mock the ThoughtSpot REST API SDK
 vi.mock("@thoughtspot/rest-api-sdk", () => ({
@@ -41,7 +41,13 @@ describe("spotter-viz-client", () => {
 		let client: any;
 
 		beforeEach(() => {
-			client = getThoughtSpotClient(mockInstanceUrl, mockBearerToken) as any;
+			client = new ThoughtSpotClient({
+				instanceUrl: mockInstanceUrl,
+				token: mockBearerToken,
+				tenantId: "",
+				orgId: "",
+				userId: "",
+			}) as any;
 		});
 
 		it("POSTs to /callosum/v1/bach/pinboard/ with a LOAD_PINBOARD request and a fresh client transaction id", async () => {
@@ -187,11 +193,13 @@ describe("spotter-viz-client", () => {
 
 	describe("createBachPinboardSession org scoping", () => {
 		it("sends the org header when an org is active", async () => {
-			const orgClient = getThoughtSpotClient(
-				mockInstanceUrl,
-				mockBearerToken,
-				"101",
-			) as any;
+			const orgClient = new ThoughtSpotClient({
+				instanceUrl: mockInstanceUrl,
+				token: mockBearerToken,
+				tenantId: "",
+				orgId: "101",
+				userId: "",
+			}) as any;
 			(fetch as any).mockResolvedValue({
 				ok: true,
 				json: vi.fn().mockResolvedValue({
@@ -212,10 +220,13 @@ describe("spotter-viz-client", () => {
 		});
 
 		it("omits the org header when no org is active", async () => {
-			const plainClient = getThoughtSpotClient(
-				mockInstanceUrl,
-				mockBearerToken,
-			) as any;
+			const plainClient = new ThoughtSpotClient({
+				instanceUrl: mockInstanceUrl,
+				token: mockBearerToken,
+				tenantId: "",
+				orgId: "",
+				userId: "",
+			}) as any;
 			(fetch as any).mockResolvedValue({
 				ok: true,
 				json: vi.fn().mockResolvedValue({
@@ -239,7 +250,13 @@ describe("spotter-viz-client", () => {
 		let client: any;
 
 		beforeEach(() => {
-			client = getThoughtSpotClient(mockInstanceUrl, mockBearerToken) as any;
+			client = new ThoughtSpotClient({
+				instanceUrl: mockInstanceUrl,
+				token: mockBearerToken,
+				tenantId: "",
+				orgId: "",
+				userId: "",
+			}) as any;
 		});
 
 		it("POSTs to /callosum/v1/bach/pinboard/ with a SAVE_PINBOARD request and the supplied session ids", async () => {
@@ -283,11 +300,13 @@ describe("spotter-viz-client", () => {
 		});
 
 		it("scopes the request to the active org when one is set", async () => {
-			const orgClient = getThoughtSpotClient(
-				mockInstanceUrl,
-				mockBearerToken,
-				"101",
-			) as any;
+			const orgClient = new ThoughtSpotClient({
+				instanceUrl: mockInstanceUrl,
+				token: mockBearerToken,
+				tenantId: "",
+				orgId: "101",
+				userId: "",
+			}) as any;
 			(fetch as any).mockResolvedValue({
 				ok: true,
 				json: vi.fn().mockResolvedValue({ status: { statusCode: "OK" } }),

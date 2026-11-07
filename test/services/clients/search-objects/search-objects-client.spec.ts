@@ -1,6 +1,6 @@
 import { createBearerAuthenticationConfig } from "@thoughtspot/rest-api-sdk";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getThoughtSpotClient } from "../../../../src/services/clients/thoughtspot-client";
+import { ThoughtSpotClient } from "../../../../src/services/clients/thoughtspot-client";
 
 // Mock the ThoughtSpot REST API SDK
 vi.mock("@thoughtspot/rest-api-sdk", () => ({
@@ -41,7 +41,13 @@ describe("search-objects-client", () => {
 		let client: any;
 
 		beforeEach(() => {
-			client = getThoughtSpotClient(mockInstanceUrl, mockBearerToken) as any;
+			client = new ThoughtSpotClient({
+				instanceUrl: mockInstanceUrl,
+				token: mockBearerToken,
+				tenantId: "",
+				orgId: "",
+				userId: "",
+			}) as any;
 		});
 
 		it("should search objects and map the results", async () => {

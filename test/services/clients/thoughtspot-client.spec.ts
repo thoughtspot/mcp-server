@@ -4,10 +4,7 @@ import {
 } from "@thoughtspot/rest-api-sdk";
 import type { ResponseContext } from "@thoughtspot/rest-api-sdk";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-	ThoughtSpotClient,
-	getThoughtSpotClient,
-} from "../../../src/services/clients/thoughtspot-client";
+import { ThoughtSpotClient } from "../../../src/services/clients/thoughtspot-client";
 
 // Mock the ThoughtSpot REST API SDK
 vi.mock("@thoughtspot/rest-api-sdk", () => ({
@@ -44,12 +41,15 @@ describe("ThoughtSpot Client", () => {
 		vi.restoreAllMocks();
 	});
 
-	describe("getThoughtSpotClient", () => {
+	describe("ThoughtSpotClient construction", () => {
 		it("should create a ThoughtSpot client with bearer authentication", () => {
-			const client = getThoughtSpotClient(
-				mockInstanceUrl,
-				mockBearerToken,
-			) as any;
+			const client = new ThoughtSpotClient({
+				instanceUrl: mockInstanceUrl,
+				token: mockBearerToken,
+				tenantId: "tenant-1",
+				orgId: "42",
+				userId: "user-guid-1",
+			}) as any;
 
 			expect(createBearerAuthenticationConfig).toHaveBeenCalledWith(
 				mockInstanceUrl,
@@ -58,10 +58,19 @@ describe("ThoughtSpot Client", () => {
 			expect(ThoughtSpotRestApi).toHaveBeenCalledWith(mockConfig);
 			expect(client).toBeInstanceOf(ThoughtSpotClient);
 			expect(client.instanceUrl).toBe(mockInstanceUrl);
+			expect(client.tenantId).toBe("tenant-1");
+			expect(client.orgId).toBe("42");
+			expect(client.userId).toBe("user-guid-1");
 		});
 
 		it("should add middleware with Accept-Language header", async () => {
-			const client = getThoughtSpotClient(mockInstanceUrl, mockBearerToken);
+			const client = new ThoughtSpotClient({
+				instanceUrl: mockInstanceUrl,
+				token: mockBearerToken,
+				tenantId: "",
+				orgId: "",
+				userId: "",
+			});
 
 			expect(mockConfig.middleware).toHaveLength(1);
 
@@ -86,7 +95,13 @@ describe("ThoughtSpot Client", () => {
 		});
 
 		it("should not override existing Accept-Language header", async () => {
-			const client = getThoughtSpotClient(mockInstanceUrl, mockBearerToken);
+			const client = new ThoughtSpotClient({
+				instanceUrl: mockInstanceUrl,
+				token: mockBearerToken,
+				tenantId: "",
+				orgId: "",
+				userId: "",
+			});
 
 			const middleware = mockConfig.middleware[0];
 			const mockContext = {
@@ -100,7 +115,13 @@ describe("ThoughtSpot Client", () => {
 		});
 
 		it("should handle post middleware correctly", async () => {
-			const client = getThoughtSpotClient(mockInstanceUrl, mockBearerToken);
+			const client = new ThoughtSpotClient({
+				instanceUrl: mockInstanceUrl,
+				token: mockBearerToken,
+				tenantId: "",
+				orgId: "",
+				userId: "",
+			});
 
 			const middleware = mockConfig.middleware[0];
 			const mockContext = {} as ResponseContext;
@@ -111,10 +132,13 @@ describe("ThoughtSpot Client", () => {
 		});
 
 		it("should add custom methods to the client", () => {
-			const client = getThoughtSpotClient(
-				mockInstanceUrl,
-				mockBearerToken,
-			) as any;
+			const client = new ThoughtSpotClient({
+				instanceUrl: mockInstanceUrl,
+				token: mockBearerToken,
+				tenantId: "",
+				orgId: "",
+				userId: "",
+			}) as any;
 
 			expect(client).toHaveProperty("exportUnsavedAnswerTML");
 			expect(client).toHaveProperty("getSessionInfo");
@@ -133,7 +157,13 @@ describe("ThoughtSpot Client", () => {
 		let client: any;
 
 		beforeEach(() => {
-			client = getThoughtSpotClient(mockInstanceUrl, mockBearerToken) as any;
+			client = new ThoughtSpotClient({
+				instanceUrl: mockInstanceUrl,
+				token: mockBearerToken,
+				tenantId: "",
+				orgId: "",
+				userId: "",
+			}) as any;
 		});
 
 		it("should get session info successfully", async () => {
