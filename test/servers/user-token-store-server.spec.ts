@@ -505,7 +505,7 @@ describe("UserTokenStoreSQLite", () => {
 			expect(mintCall).toBeDefined();
 			const [mintUrl, mintInit] = mintCall as [string, any];
 			expect(mintUrl).toContain("org_identifier=101");
-			expect(mintUrl).toContain(`validity_time_in_sec=${24 * 60 * 60}`);
+			expect(mintUrl).toContain(`validity_time_in_sec=${30 * 24 * 60 * 60}`);
 			expect(mintInit.headers.Authorization).toBe("Bearer access-2");
 			spy.mockRestore();
 		});

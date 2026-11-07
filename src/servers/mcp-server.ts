@@ -59,7 +59,11 @@ import {
 import { UPSTREAM_CALL_TIMEOUT_MS, withTimeout } from "../spotterviz/timeouts";
 import type { StorageServiceClient } from "../storage-service/storage-service";
 import { McpServerError } from "../utils";
-import { BaseMCPServer, type Context } from "./mcp-server-base";
+import {
+	BaseMCPServer,
+	type Context,
+	type ErrorResponse,
+} from "./mcp-server-base";
 import {
 	CreateAnalysisSessionSpotter3InputSchema,
 	CreateAnalysisSessionSpotterXInputSchema,
@@ -1480,10 +1484,34 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 	}
 
 	@WithSpan("call-list-orgs")
+	// list_orgs and switch_org need the GLOBAL token (listing is cluster-scoped; switching mints
+	// the new org's token from it). It can be expired while the active org token is still valid, in
+	// which case every other tool keeps working in that org — so say that, rather than
+	// "authentication expired", which the client would read as a dead session. Anything else is
+	// re-thrown for the central 401 handler / the caller.
+	private async globalTokenForOrgTools(
+		toolName: string,
+	): Promise<string | ErrorResponse> {
+		try {
+			return await this.initGlobalTokenAndReconcileWithStorage();
+		} catch (error) {
+			if (this.apiErrorStatus(error) !== 401 || !this.activeOrgToken) {
+				throw error;
+			}
+			return this.createErrorResponse(
+				`${toolName} is unavailable right now: the cluster session used to list and switch orgs has expired, but your current org "${this.activeOrgId}" is still active and all other tools keep working in it. To list or switch orgs, disconnect and reconnect the MCP server to log in again.`,
+				`${toolName} rejected: global token expired while the token for org ${this.activeOrgId} is still active`,
+			);
+		}
+	}
+
 	async callListOrgs(recorder: MetricsRecorder) {
 		const span = trace.getSpan(context.active());
 
-		const globalToken = await this.initGlobalTokenAndReconcileWithStorage();
+		const globalToken = await this.globalTokenForOrgTools(ToolName.ListOrgs);
+		if (typeof globalToken !== "string") {
+			return globalToken;
+		}
 		const orgs = await this.getOrgService(
 			globalToken,
 			undefined,
@@ -1516,9 +1544,13 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		const orgId = String(org_id);
 		span?.setAttribute("requested_org_id", orgId);
 
+		const globalToken = await this.globalTokenForOrgTools(ToolName.SwitchOrg);
+		if (typeof globalToken !== "string") {
+			return globalToken;
+		}
+
 		let orgToken: string;
 		try {
-			const globalToken = await this.initGlobalTokenAndReconcileWithStorage();
 			orgToken = await this.getOrgService(
 				globalToken,
 				undefined,
