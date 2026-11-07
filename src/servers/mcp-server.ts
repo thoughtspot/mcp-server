@@ -174,6 +174,14 @@ export class MCPServer extends BaseMCPServer {
 		return typeof expiresAt === "number" && expiresAt <= Date.now();
 	}
 
+	// Refetch session info if it was last fetched under a token other than the active org token
+	// (never fetched, fetched under the global token, or under a previous org's token).
+	private async ensureSessionInfoMatchesOrgToken(): Promise<void> {
+		if (this.activeOrgToken && this.sessionInfoToken !== this.activeOrgToken) {
+			await this.refreshSessionInfo();
+		}
+	}
+
 	private async loadActiveOrg(): Promise<void> {
 		const store = await this.getOrgStorageService();
 		const stored = await store.getActiveOrgIdAndToken();
@@ -237,6 +245,20 @@ export class MCPServer extends BaseMCPServer {
 				error,
 			);
 		}
+		// Load the stored active org (id + token) too, so the init-time session info is fetched
+		// under the ORG token whenever one exists: privileges and flags are per-org, and the org
+		// token outlives a dead global token. Session info is still null here, so the orgs-enabled
+		// gate fails open; a cluster without orgs simply has nothing stored. Needs only the DO.
+		if (this.areOrgToolsAvailable()) {
+			try {
+				await this.loadActiveOrg();
+			} catch (error) {
+				console.error(
+					"Failed to load the active org on connect (init will use the global token):",
+					error,
+				);
+			}
+		}
 	}
 
 	protected async postInit(): Promise<void> {
@@ -247,16 +269,10 @@ export class MCPServer extends BaseMCPServer {
 		}
 		try {
 			await this.ensureActiveOrg();
-			// sessionInfo was fetched under the global token before the active-org
-			// mint. Refetch under the org token only when the active org differs from
-			// the one init already fetched — otherwise the init-time fetch stands.
-			const activeOrgId = this.getActiveOrgId();
-			if (
-				activeOrgId &&
-				String(this.sessionInfo?.currentOrgId ?? "") !== activeOrgId
-			) {
-				await this.refreshSessionInfo();
-			}
+			// Session info must come from the org token. preInit already loaded a stored org, so
+			// the init-time fetch normally used it; this only refetches on a first connect, where
+			// the org token was just minted and init had to use the global token.
+			await this.ensureSessionInfoMatchesOrgToken();
 		} catch (error) {
 			// A failed bootstrap must not leave the session with an active org but
 			// no token; fall back to the global token until the next connect or the
@@ -627,6 +643,10 @@ export class MCPServer extends BaseMCPServer {
 					);
 				}
 			}
+			// A sibling session may have switched org (or the keep-warm alarm re-minted the
+			// token) since session info was fetched; the privilege/flag gates below must
+			// describe the org this call runs in.
+			await this.ensureSessionInfoMatchesOrgToken();
 		}
 
 		try {

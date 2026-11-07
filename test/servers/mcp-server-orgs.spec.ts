@@ -1,6 +1,7 @@
 import { connect } from "mcp-testing-kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MixpanelTracker } from "../../src/metrics/mixpanel/mixpanel";
+import { NOOP_METRICS_RECORDER } from "../../src/metrics/runtime/metrics-recorder";
 import { MCPServer } from "../../src/servers/mcp-server";
 import * as thoughtspotClient from "../../src/services/clients/thoughtspot-client";
 import { ThoughtSpotApiError } from "../../src/services/types";
@@ -1485,7 +1486,7 @@ describe("MCP Server org tools", () => {
 		};
 
 		async function serverWithLiveOrgTokenOnly(
-			opts: { orgToken?: boolean } = {},
+			opts: { orgToken?: boolean; warmGlobal?: boolean } = {},
 		) {
 			const store = new Map<
 				string,
@@ -1506,7 +1507,12 @@ describe("MCP Server org tools", () => {
 					({
 						getSessionInfo: vi.fn(async () => {
 							sessionInfoTokens.push(bearerToken);
-							if (bearerToken !== "org-101-token") {
+							if (bearerToken === "org-0-token") {
+								return { ...goodSession, currentOrgId: "0" };
+							}
+							const accepted = ["org-101-token"];
+							if (opts.warmGlobal) accepted.push("warm-do-token");
+							if (!accepted.includes(bearerToken)) {
 								throw new ThoughtSpotApiError(401, "getSessionInfo", "expired");
 							}
 							return goodSession;
@@ -1532,6 +1538,14 @@ describe("MCP Server org tools", () => {
 					orgToken: "org-101-token",
 				});
 			}
+			if (opts.warmGlobal) {
+				tokenStore.set(`${keyHash}:__active_org__`, {
+					globalToken: "warm-do-token",
+					globalRefreshToken: "refresh-token",
+					instanceUrl: "https://test.thoughtspot.cloud",
+					globalTokenExpiresAt: 1893456000000,
+				});
+			}
 			const props = {
 				instanceUrl: "https://test.thoughtspot.cloud",
 				accessToken: "expired-props-token",
@@ -1547,8 +1561,55 @@ describe("MCP Server org tools", () => {
 			} as any;
 			const server = new MCPServer({ props, env });
 			await server.init();
-			return { server, store, listOrgs, mint, sessionInfoTokens };
+			return { server, store, listOrgs, mint, sessionInfoTokens, keyHash };
 		}
+
+		it("fetches session info under the ORG token at init, never the global token, when an org is stored", async () => {
+			// Both a warm global token and a stored org token exist: privileges and
+			// flags are per-org, so even a healthy session must read them under the
+			// org token. preInit loads the stored org before the init-time fetch.
+			const { server, sessionInfoTokens } = await serverWithLiveOrgTokenOnly({
+				warmGlobal: true,
+			});
+			expect(sessionInfoTokens).toEqual(["org-101-token"]);
+			expect((server as any).getActiveToken()).toBe("org-101-token");
+		});
+
+		it("refetches session info under the new org token when a sibling session switched org", async () => {
+			const { server, store, sessionInfoTokens, keyHash } =
+				await serverWithLiveOrgTokenOnly();
+			expect(sessionInfoTokens).toEqual(["org-101-token"]);
+			// Call the server directly: the test kit's connect() can only await the
+			// first response per connection, and this test needs several calls.
+			const ping = () =>
+				(server as any).callTool(
+					{ method: "tools/call", params: { name: "ping", arguments: {} } },
+					NOOP_METRICS_RECORDER,
+				);
+			// Same org: no refetch. ping's own connectivity probe is the only fetch.
+			await ping();
+			expect(sessionInfoTokens).toEqual(["org-101-token", "org-101-token"]);
+			// Another fanned-out session switches to org 0 (shared store).
+			store.set(`${keyHash}:__active_org__`, {
+				activeOrgId: "0",
+				orgToken: "org-0-token",
+			});
+			const res = await ping();
+			expect(res.isError).toBeFalsy();
+			// Session info was refetched under org 0's token before the tool ran
+			// (then ping's probe), so the gates now describe org 0, not org 101.
+			expect(sessionInfoTokens).toEqual([
+				"org-101-token",
+				"org-101-token",
+				"org-0-token",
+				"org-0-token",
+			]);
+			expect((server as any).sessionInfoToken).toBe("org-0-token");
+			expect((server as any).sessionInfo.currentOrgId).toBe("0");
+			// Same org again: no refetch.
+			await ping();
+			expect(sessionInfoTokens).toHaveLength(5);
+		});
 
 		it("data tools keep working on the live org token", async () => {
 			const { server, sessionInfoTokens } = await serverWithLiveOrgTokenOnly();
