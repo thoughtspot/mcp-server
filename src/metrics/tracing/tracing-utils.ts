@@ -7,11 +7,10 @@ export function getActiveSpan(spanOverride?: Span): Span | undefined {
 
 // Thrown errors otherwise leave the span with no status message in Honeycomb.
 function recordSpanError(span: Span, err: unknown): void {
-	span.recordException(err as Error);
-	span.setStatus({
-		code: SpanStatusCode.ERROR,
-		message: err instanceof Error ? err.message : String(err),
-	});
+	const message = err instanceof Error ? err.message : String(err);
+	// Non-Error throws (null, objects) are passed as a string to keep the SDK safe.
+	span.recordException(err instanceof Error ? err : message);
+	span.setStatus({ code: SpanStatusCode.ERROR, message });
 }
 
 export async function withSpan<T>(

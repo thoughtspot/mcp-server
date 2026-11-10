@@ -115,6 +115,28 @@ describe("tracing-utils", () => {
 			expect(mockSpan.end).toHaveBeenCalled();
 		});
 
+		it("should record a non-Error throw as a string and rethrow it", async () => {
+			const mockSpan = {
+				recordException: vi.fn(),
+				setStatus: vi.fn(),
+				end: vi.fn(),
+			};
+			vi.mocked(trace.getTracer).mockReturnValue({
+				startActiveSpan: vi.fn((name, fn) => fn(mockSpan)),
+			} as any);
+
+			await expect(
+				withSpan("test-operation", vi.fn().mockRejectedValue(null)),
+			).rejects.toBeNull();
+
+			expect(mockSpan.recordException).toHaveBeenCalledWith("null");
+			expect(mockSpan.setStatus).toHaveBeenCalledWith({
+				code: SpanStatusCode.ERROR,
+				message: "null",
+			});
+			expect(mockSpan.end).toHaveBeenCalled();
+		});
+
 		it("should ignore parentSpan parameter for backward compatibility", async () => {
 			const mockSpan = {
 				setAttribute: vi.fn(),
