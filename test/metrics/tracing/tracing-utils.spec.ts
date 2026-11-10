@@ -1,4 +1,4 @@
-import { context, trace } from "@opentelemetry/api";
+import { SpanStatusCode, context, trace } from "@opentelemetry/api";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	WithSpan,
@@ -21,6 +21,7 @@ describe("tracing-utils", () => {
 			const mockSpan = {
 				setAttribute: vi.fn(),
 				recordException: vi.fn(),
+				setStatus: vi.fn(),
 				end: vi.fn(),
 			};
 			const result = getActiveSpan(mockSpan as any);
@@ -32,6 +33,7 @@ describe("tracing-utils", () => {
 			const mockActiveSpan = {
 				setAttribute: vi.fn(),
 				recordException: vi.fn(),
+				setStatus: vi.fn(),
 				end: vi.fn(),
 			};
 
@@ -61,6 +63,7 @@ describe("tracing-utils", () => {
 			const mockSpan = {
 				setAttribute: vi.fn(),
 				recordException: vi.fn(),
+				setStatus: vi.fn(),
 				end: vi.fn(),
 			};
 
@@ -87,6 +90,7 @@ describe("tracing-utils", () => {
 			const mockSpan = {
 				setAttribute: vi.fn(),
 				recordException: vi.fn(),
+				setStatus: vi.fn(),
 				end: vi.fn(),
 			};
 
@@ -104,6 +108,10 @@ describe("tracing-utils", () => {
 			);
 
 			expect(mockSpan.recordException).toHaveBeenCalledWith(testError);
+			expect(mockSpan.setStatus).toHaveBeenCalledWith({
+				code: SpanStatusCode.ERROR,
+				message: "Test error",
+			});
 			expect(mockSpan.end).toHaveBeenCalled();
 		});
 
@@ -111,6 +119,7 @@ describe("tracing-utils", () => {
 			const mockSpan = {
 				setAttribute: vi.fn(),
 				recordException: vi.fn(),
+				setStatus: vi.fn(),
 				end: vi.fn(),
 			};
 
@@ -138,6 +147,7 @@ describe("tracing-utils", () => {
 			const mockSpan = {
 				setAttribute: vi.fn(),
 				recordException: vi.fn(),
+				setStatus: vi.fn(),
 				end: vi.fn(),
 			};
 
@@ -170,6 +180,7 @@ describe("tracing-utils", () => {
 			const mockSpan = {
 				setAttribute: vi.fn(),
 				recordException: vi.fn(),
+				setStatus: vi.fn(),
 				end: vi.fn(),
 			};
 
@@ -198,6 +209,7 @@ describe("tracing-utils", () => {
 			const mockSpan = {
 				setAttribute: vi.fn(),
 				recordException: vi.fn(),
+				setStatus: vi.fn(),
 				end: vi.fn(),
 			};
 
@@ -237,6 +249,7 @@ describe("tracing-utils", () => {
 			const mockSpan = {
 				setAttribute: vi.fn(),
 				recordException: vi.fn(),
+				setStatus: vi.fn(),
 				end: vi.fn(),
 			};
 
@@ -273,6 +286,7 @@ describe("tracing-utils", () => {
 			const mockSpan = {
 				setAttribute: vi.fn(),
 				recordException: vi.fn(),
+				setStatus: vi.fn(),
 				end: vi.fn(),
 			};
 
@@ -300,6 +314,7 @@ describe("tracing-utils", () => {
 			const mockSpan = {
 				setAttribute: vi.fn(),
 				recordException: vi.fn(),
+				setStatus: vi.fn(),
 				end: vi.fn(),
 			};
 
@@ -318,6 +333,10 @@ describe("tracing-utils", () => {
 			);
 
 			expect(mockSpan.recordException).toHaveBeenCalledWith(testError);
+			expect(mockSpan.setStatus).toHaveBeenCalledWith({
+				code: SpanStatusCode.ERROR,
+				message: "Named function failed",
+			});
 			expect(mockSpan.end).toHaveBeenCalled();
 		});
 
@@ -325,6 +344,7 @@ describe("tracing-utils", () => {
 			const mockSpan = {
 				setAttribute: vi.fn(),
 				recordException: vi.fn(),
+				setStatus: vi.fn(),
 				end: vi.fn(),
 			};
 
@@ -351,6 +371,7 @@ describe("tracing-utils", () => {
 			const mockSpan = {
 				setAttribute: vi.fn(),
 				recordException: vi.fn(),
+				setStatus: vi.fn(),
 				end: vi.fn(),
 			};
 
@@ -385,6 +406,7 @@ describe("tracing-utils", () => {
 			const mockSpan = {
 				setAttribute: vi.fn(),
 				recordException: vi.fn(),
+				setStatus: vi.fn(),
 				end: vi.fn(),
 			};
 
@@ -409,6 +431,7 @@ describe("tracing-utils", () => {
 			const mockSpan = {
 				setAttribute: vi.fn(),
 				recordException: vi.fn(),
+				setStatus: vi.fn(),
 				end: vi.fn(),
 			};
 

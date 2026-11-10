@@ -12,7 +12,7 @@ import {
 	NOOP_METRICS_RECORDER,
 } from "../metrics/runtime/metrics-recorder";
 import type { ToolMetricApiSurface } from "../metrics/runtime/tool-metrics";
-import { WithSpan } from "../metrics/tracing/tracing-utils";
+import { WithSpan, getActiveSpan } from "../metrics/tracing/tracing-utils";
 import { ANALYTICS_AGENT_ANSWER_TYPE } from "../services/clients/get-data/get-data-constants";
 import type { GetDataResult } from "../services/clients/get-data/get-data-types";
 import { SpotterAnswerCsvError } from "../services/clients/get-data/spotter-answer-data";
@@ -116,6 +116,28 @@ function summarizeUpstreamError(error: unknown): string {
 		return generic;
 	}
 }
+
+// Tag the span with the condensed upstream error; returns it plus a
+// low-cardinality status so Honeycomb splits upstream vs our own failures.
+function recordGetDataFailure(
+	error: unknown,
+	status: number | undefined,
+	label = "get_data",
+): { summary: string; statusMessage: string } {
+	const summary = summarizeUpstreamError(error);
+	getActiveSpan()?.setAttributes({
+		...(status ? { upstream_status: status } : {}),
+		upstream_error: summary,
+	});
+	let kind = "internal error";
+	if (status) {
+		kind = `upstream error (status ${status})`;
+	} else if (/timed out/i.test(summary)) {
+		kind = "upstream timeout";
+	}
+	return { summary, statusMessage: `${label} ${kind}` };
+}
+
 export class MCPServer extends BaseMCPServer {
 	private activeOrgId: string | undefined;
 	private activeOrgToken: string | undefined;
@@ -1628,9 +1650,14 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 				status === 403
 					? "You may not have permission to download this answer's data."
 					: "The answer's conversation may have expired; ask the Analytics Agent the question again and pass the new answer's `answer_id`.";
+			const { summary, statusMessage } = recordGetDataFailure(
+				error,
+				status,
+				"get_data (ANALYTICS_AGENT_ANSWER)",
+			);
 			return this.createErrorResponse(
-				`Failed to fetch answer data: ${summarizeUpstreamError(error)}. ${hint}`,
-				"get_data (ANALYTICS_AGENT_ANSWER) failed",
+				`Failed to fetch answer data: ${summary}. ${hint}`,
+				statusMessage,
 			);
 		}
 	}
@@ -1682,14 +1709,16 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		} catch (error) {
 			// Let a 401 propagate to the central reauth handler in callTool, which
 			// returns an explicit "reauthenticate" message.
-			if (this.apiErrorStatus(error) === 401) {
+			const status = this.apiErrorStatus(error);
+			if (status === 401) {
 				throw error;
 			}
 			// Surface a condensed upstream message (external text + status), not the
 			// raw debug/stacktrace blob a 500 body carries.
+			const { summary, statusMessage } = recordGetDataFailure(error, status);
 			return this.createErrorResponse(
-				`Failed to fetch object data: ${summarizeUpstreamError(error)}`,
-				"get_data failed",
+				`Failed to fetch object data: ${summary}`,
+				statusMessage,
 			);
 		}
 	}
