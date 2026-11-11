@@ -140,6 +140,39 @@ describe("spotter-3-client", () => {
 			});
 		});
 
+		it("should bind the conversation to an Analyst via spot_ids", async () => {
+			(fetch as any).mockResolvedValue({
+				ok: true,
+				json: vi.fn().mockResolvedValue({ conversation_id: "conv-analyst" }),
+			});
+
+			await client.createSpotter3Conversation({
+				isSpotterDataSourceDiscoveryEnabled: true,
+				isSpotterChatHistoryEnabled: false,
+				analystId: "analyst-1",
+			});
+
+			const body = JSON.parse((fetch as any).mock.calls[0][1].body);
+			expect(body.spot_ids).toEqual(["analyst-1"]);
+			expect(body.context).toEqual({ type: "empty" });
+			expect(body.conv_settings.tags).toEqual(["mcp-server"]);
+		});
+
+		it("should not send spot_ids without an Analyst", async () => {
+			(fetch as any).mockResolvedValue({
+				ok: true,
+				json: vi.fn().mockResolvedValue({ conversation_id: "conv-plain" }),
+			});
+
+			await client.createSpotter3Conversation({
+				isSpotterDataSourceDiscoveryEnabled: true,
+				isSpotterChatHistoryEnabled: false,
+			});
+
+			const body = JSON.parse((fetch as any).mock.calls[0][1].body);
+			expect(body).not.toHaveProperty("spot_ids");
+		});
+
 		it("should handle HTTP error responses", async () => {
 			(fetch as any).mockResolvedValue({
 				ok: false,

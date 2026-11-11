@@ -13,6 +13,7 @@ import {
 } from "../metrics/runtime/metrics-recorder";
 import type { ToolMetricApiSurface } from "../metrics/runtime/tool-metrics";
 import { WithSpan } from "../metrics/tracing/tracing-utils";
+import type { Analyst } from "../services/clients/analysts/analysts-types";
 import { ANALYTICS_AGENT_ANSWER_TYPE } from "../services/clients/get-data/get-data-constants";
 import type { GetDataResult } from "../services/clients/get-data/get-data-types";
 import { SpotterAnswerCsvError } from "../services/clients/get-data/spotter-answer-data";
@@ -61,6 +62,7 @@ import type { StorageServiceClient } from "../storage-service/storage-service";
 import { McpServerError } from "../utils";
 import { BaseMCPServer, type Context } from "./mcp-server-base";
 import {
+	CreateAnalysisSessionBetaInputSchema,
 	CreateAnalysisSessionSpotter3InputSchema,
 	CreateAnalysisSessionSpotterXInputSchema,
 	CreateDashboardInputSchema,
@@ -77,6 +79,7 @@ import {
 	GetModelUpdatesInputSchema,
 	GetRelevantQuestionsSchema,
 	GetSessionUpdatesInputSchema,
+	MCP_CONNECTORS_UNSUPPORTED_NOTICE,
 	MODEL_TOOL_NAMES,
 	ModifyDashboardInputSchema,
 	SearchObjectsInputSchema,
@@ -951,6 +954,104 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		);
 	}
 
+	/**
+	 * Map an Analyst lookup/create failure to a clear, coded error. Returns undefined for errors that
+	 * are not about Analyst access (the caller rethrows those; 401 is handled by the tool wrapper).
+	 */
+	private analystErrorResponse(error: unknown, analystId: string) {
+		const status = this.apiErrorStatus(error);
+		const body = error instanceof ThoughtSpotApiError ? (error.body ?? "") : "";
+		// Spotter 3 conversation create reports an unknown spot as a 400 "Spot <id> not found" /
+		// "Failed to load spot <id>"; the analyst lookup reports it as a 404.
+		const isNotFound =
+			status === 404 ||
+			(status === 400 && /spot \S+ not found|failed to load spot/i.test(body));
+		if (isNotFound) {
+			return this.createErrorResponse(
+				`analyst_not_found: Analyst "${analystId}" was not found. Check the ID, or use \`list_analysts\` to find the Analysts the user can access. The session was not created.`,
+				"Create analysis session rejected: analyst not found",
+			);
+		}
+		if (status === 403) {
+			return this.createErrorResponse(
+				`analyst_forbidden: The user does not have access to Analyst "${analystId}". Ask the Analyst's owner or a ThoughtSpot administrator to share it, or use \`list_analysts\` to find the Analysts the user can access. The session was not created.`,
+				"Create analysis session rejected: analyst access denied",
+			);
+		}
+		return undefined;
+	}
+
+	/**
+	 * Create a Spotter 3 conversation bound to a saved Analyst. The Analyst is looked up first with
+	 * the caller's permissions, so an unknown or inaccessible ID is a clear error rather than a
+	 * silent fallback to the default agent.
+	 */
+	private async callCreateAnalystSessionSpotter3(
+		analystId: string,
+		dataSourceId: string | undefined,
+		recorder: MetricsRecorder,
+	) {
+		const span = trace.getSpan(context.active());
+
+		if (dataSourceId) {
+			return this.createErrorResponse(
+				"`analyst_id` cannot be combined with `data_source_id`: the Analyst brings its own data sources. Pass only `analyst_id` to use the Analyst, or only `data_source_id` to use the default Analytics Agent on that data source.",
+				"Create analysis session rejected: analyst_id combined with data_source_id",
+			);
+		}
+
+		const service = this.getThoughtSpotService(recorder);
+		let analyst: Analyst;
+		let response: AgentConversation;
+		try {
+			analyst = await service.getAnalyst(analystId);
+			response = await service.createSpotter3Conversation(
+				this.isSpotterDataSourceDiscoveryEnabled(),
+				this.isSpotterChatHistoryEnabled(),
+				undefined,
+				analyst.id,
+			);
+		} catch (error) {
+			const analystError = this.analystErrorResponse(error, analystId);
+			if (analystError) {
+				return analystError;
+			}
+			throw error;
+		}
+
+		recorder.setAnalyticsContext({
+			analyticalSessionId: response.conversation_id,
+		});
+		span?.setAttributes({
+			analytical_session_id: response.conversation_id,
+			analyst_connector_count: analyst.connectors.length,
+		});
+
+		// Best-effort: remember which Analyst the session runs on, for later calls' traces. The
+		// binding itself lives in ThoughtSpot, so a storage failure must not fail the create.
+		try {
+			const storageService = await this.getStorageService();
+			await storageService.updateMetadata(response.conversation_id, {
+				analyst_id: analyst.id,
+				analyst_name: analyst.name,
+			});
+		} catch (error) {
+			console.error("Error storing analyst metadata for session:", error);
+		}
+
+		const connectorNames = analyst.connectors.map((c) => c.name || c.id);
+		return this.createStructuredContentSuccessResponse(
+			{
+				analytical_session_id: response.conversation_id,
+				analyst: { id: analyst.id, name: analyst.name },
+				...(connectorNames.length > 0 && {
+					connector_notice: `This Analyst's Spotter connectors were skipped: ${connectorNames.join(", ")}. ${MCP_CONNECTORS_UNSUPPORTED_NOTICE}`,
+				}),
+			},
+			"Analyst conversation created successfully",
+		);
+	}
+
 	@WithSpan("call-create-analysis-session")
 	async callCreateAnalysisSession(
 		request: z.infer<typeof CallToolRequestSchema>,
@@ -966,10 +1067,29 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		}
 
 		const span = trace.getSpan(context.active());
-		const { data_source_id } = CreateAnalysisSessionSpotter3InputSchema.parse(
-			request.params.arguments,
-		);
+		// analyst_id is only offered on beta; elsewhere the plain Spotter 3 schema applies (and strips
+		// any analyst_id a client sends without seeing it in the tool list).
+		const isBeta = resolveApiVersion(
+			this.ctx.props.apiVersion,
+		).version.includes("beta");
+		const { data_source_id, analyst_id } = isBeta
+			? CreateAnalysisSessionBetaInputSchema.parse(request.params.arguments)
+			: {
+					...CreateAnalysisSessionSpotter3InputSchema.parse(
+						request.params.arguments,
+					),
+					analyst_id: undefined,
+				};
 		span?.setAttribute("data_source_id", data_source_id ?? "(none)");
+
+		if (analyst_id) {
+			span?.setAttribute("analyst_id", analyst_id);
+			return this.callCreateAnalystSessionSpotter3(
+				analyst_id,
+				data_source_id,
+				recorder,
+			);
+		}
 
 		if (!data_source_id && !this.isSpotterDataSourceDiscoveryEnabled()) {
 			return this.createErrorResponse(
