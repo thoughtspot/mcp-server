@@ -13,6 +13,7 @@ import {
 	type SessionInfo,
 	ThoughtSpotApiError,
 } from "../types";
+import { getAnalyst, searchAnalysts } from "./analysts/analysts-client";
 import {
 	exportUnsavedAnswerTML,
 	getAnswerSession,
@@ -46,6 +47,12 @@ export type {
 	SearchObjectsResponse,
 	SearchObjectsResult,
 } from "./search-objects/search-objects-types";
+export type {
+	Analyst,
+	AnalystListType,
+	SearchAnalystsParams,
+	SearchAnalystsResult,
+} from "./analysts/analysts-types";
 export type {
 	GetDataParams,
 	GetDataResult,
@@ -149,6 +156,14 @@ export class ThoughtSpotClient extends ThoughtSpotRestApi {
 
 	searchObjects(params: Params<typeof searchObjects>) {
 		return searchObjects(this.ctx, params);
+	}
+
+	searchAnalysts(params: Params<typeof searchAnalysts>) {
+		return searchAnalysts(this.ctx, params);
+	}
+
+	getAnalyst(params: Params<typeof getAnalyst>) {
+		return getAnalyst(this.ctx, params);
 	}
 
 	getData(params: Params<typeof getData>) {

@@ -32,8 +32,11 @@ import type {
 	SendModelMessageParams,
 } from "./clients/spotter-model/spotter-model-types";
 import type {
+	Analyst,
 	GetDataParams,
 	GetDataResult,
+	SearchAnalystsParams,
+	SearchAnalystsResult,
 	SearchObjectsParams,
 	SearchObjectsResponse,
 	ThoughtSpotClient,
@@ -897,6 +900,41 @@ export class ThoughtSpotService {
 
 		span?.setAttribute("results_count", result.results.length);
 		return result;
+	}
+
+	/**
+	 * List the Analysts (saved Spotter configurations) the caller can access
+	 */
+	@WithSpan("search-analysts")
+	async searchAnalysts(
+		params: SearchAnalystsParams,
+	): Promise<SearchAnalystsResult> {
+		const span = getActiveSpan();
+		span?.setAttributes({
+			record_size: params.recordSize,
+			record_offset: params.recordOffset,
+			has_query: !!params.query,
+		});
+
+		const result = await this.observeUpstreamCall(
+			UPSTREAM_OPERATION_NAMES.searchAnalysts,
+			() => this.client.searchAnalysts(params),
+		);
+
+		span?.setAttribute("results_count", result.analysts.length);
+		span?.setAttribute("total_size", result.totalSize);
+		return result;
+	}
+
+	/**
+	 * Fetch one Analyst by id, enforcing the caller's access to it
+	 */
+	@WithSpan("get-analyst")
+	async getAnalyst(analystId: string): Promise<Analyst> {
+		getActiveSpan()?.setAttribute("analyst_id", analystId);
+		return this.observeUpstreamCall(UPSTREAM_OPERATION_NAMES.getAnalyst, () =>
+			this.client.getAnalyst({ analystId }),
+		);
 	}
 
 	/**

@@ -13,6 +13,7 @@ import {
 } from "../metrics/runtime/metrics-recorder";
 import type { ToolMetricApiSurface } from "../metrics/runtime/tool-metrics";
 import { WithSpan } from "../metrics/tracing/tracing-utils";
+import type { SearchAnalystsResult } from "../services/clients/analysts/analysts-types";
 import { ANALYTICS_AGENT_ANSWER_TYPE } from "../services/clients/get-data/get-data-constants";
 import type { GetDataResult } from "../services/clients/get-data/get-data-types";
 import { SpotterAnswerCsvError } from "../services/clients/get-data/spotter-answer-data";
@@ -77,6 +78,8 @@ import {
 	GetModelUpdatesInputSchema,
 	GetRelevantQuestionsSchema,
 	GetSessionUpdatesInputSchema,
+	LIST_ANALYSTS_DEFAULT_PAGE_SIZE,
+	ListAnalystsInputSchema,
 	MODEL_TOOL_NAMES,
 	ModifyDashboardInputSchema,
 	SearchObjectsInputSchema,
@@ -116,6 +119,34 @@ function summarizeUpstreamError(error: unknown): string {
 		return generic;
 	}
 }
+
+// list_analysts cursors are opaque to the client; they encode the next record offset.
+const ANALYSTS_CURSOR_PREFIX = "analysts:";
+
+function encodeAnalystsCursor(offset: number): string {
+	return btoa(`${ANALYSTS_CURSOR_PREFIX}${offset}`)
+		.replace(/\+/g, "-")
+		.replace(/\//g, "_")
+		.replace(/=+$/, "");
+}
+
+function decodeAnalystsCursor(cursor: string): number | undefined {
+	try {
+		const padded = cursor.replace(/-/g, "+").replace(/_/g, "/");
+		const decoded = atob(padded + "=".repeat((4 - (padded.length % 4)) % 4));
+		if (!decoded.startsWith(ANALYSTS_CURSOR_PREFIX)) {
+			return undefined;
+		}
+		const raw = decoded.slice(ANALYSTS_CURSOR_PREFIX.length);
+		const offset = Number(raw);
+		return /^\d+$/.test(raw) && Number.isSafeInteger(offset)
+			? offset
+			: undefined;
+	} catch {
+		return undefined;
+	}
+}
+
 export class MCPServer extends BaseMCPServer {
 	private activeOrgId: string | undefined;
 	private activeOrgToken: string | undefined;
@@ -494,6 +525,9 @@ export class MCPServer extends BaseMCPServer {
 					createAnalysisSessionToolDefinitionSpotterX,
 				);
 			}
+			// Analysts are Spotter 3 only for now: SpotterX sessions cannot be created on an Analyst,
+			// so listing Analysts there would offer something the user cannot use.
+			tools = tools.filter((tool) => tool.name !== ToolName.ListAnalysts);
 		}
 
 		// Select which get_session_updates tool to expose based on raw session updates flag (for
@@ -701,6 +735,10 @@ export class MCPServer extends BaseMCPServer {
 
 			case ToolName.SearchObjects: {
 				return this.callSearchObjects(request, recorder);
+			}
+
+			case ToolName.ListAnalysts: {
+				return this.callListAnalysts(request, recorder);
 			}
 
 			case ToolName.GetData: {
@@ -971,6 +1009,63 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		return this.createStructuredContentSuccessResponse(
 			{ analytical_session_id: response.conversation_id },
 			"Conversation created successfully",
+		);
+	}
+
+	@WithSpan("call-list-analysts")
+	async callListAnalysts(
+		request: z.infer<typeof CallToolRequestSchema>,
+		recorder: MetricsRecorder,
+	) {
+		const span = trace.getSpan(context.active());
+		const {
+			query,
+			type,
+			page_size = LIST_ANALYSTS_DEFAULT_PAGE_SIZE,
+			cursor,
+		} = ListAnalystsInputSchema.parse(request.params.arguments ?? {});
+
+		const offset = cursor === undefined ? 0 : decodeAnalystsCursor(cursor);
+		if (offset === undefined) {
+			return this.createErrorResponse(
+				"Invalid `cursor`. Pass the `next_cursor` value from a previous `list_analysts` response unchanged, or omit it to start from the first page.",
+				"list_analysts rejected: invalid cursor",
+			);
+		}
+		span?.setAttributes({ page_size, offset, has_query: !!query });
+
+		let result: SearchAnalystsResult;
+		try {
+			result = await this.getThoughtSpotService(recorder).searchAnalysts({
+				recordSize: page_size,
+				recordOffset: offset,
+				query,
+				type,
+			});
+		} catch (error) {
+			if (this.apiErrorStatus(error) === 401) {
+				throw error;
+			}
+			console.error("Error listing analysts:", error);
+			return this.createErrorResponse(
+				`Failed to list Analysts: ${summarizeUpstreamError(error)}`,
+				"list_analysts failed",
+			);
+		}
+
+		const nextOffset = offset + result.analysts.length;
+		const hasMore = result.analysts.length > 0 && nextOffset < result.totalSize;
+		return this.createStructuredContentSuccessResponse(
+			{
+				analysts: result.analysts.map(({ id, name, description }) => ({
+					id,
+					name,
+					description,
+				})),
+				...(hasMore && { next_cursor: encodeAnalystsCursor(nextOffset) }),
+				total_size: result.totalSize,
+			},
+			`${result.analysts.length} analyst(s) listed`,
 		);
 	}
 
