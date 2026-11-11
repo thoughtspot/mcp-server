@@ -17,7 +17,10 @@ import {
 	recordUpstreamStreamStartedMetric,
 } from "../metrics/runtime/tool-metrics";
 import { WithSpan, getActiveSpan } from "../metrics/tracing/tracing-utils";
-import { processSpotter3EventStream } from "../streaming-utils";
+import {
+	processSpotter3EventStream,
+	processSpotterXEventStream,
+} from "../streaming-utils";
 import { GET_DATA_DEFAULT_MAX_ROWS } from "./clients/get-data/get-data-client";
 import type { GetDataViz } from "./clients/get-data/get-data-types";
 import {
@@ -483,6 +486,104 @@ export class ThoughtSpotService {
 			return response;
 		} catch (error) {
 			console.error("Error creating SpotterX conversation:", error);
+			span?.setStatus({
+				code: SpanStatusCode.ERROR,
+				message: (error as Error).message,
+			});
+			throw error;
+		}
+	}
+
+	/**
+	 * Send a message a SpotterX conversation, and collect the streaming response asynchronously
+	 */
+	@WithSpan("send-spotterx-message-streaming")
+	async sendSpotterXMessageStreaming(
+		conversationId: string,
+		message: string,
+		spotterResponseFormat: SpotterResponseFormat,
+		appendStoredMessages: (
+			conversationId: string,
+			messages: (Message | RawMessage)[],
+			isDone?: boolean,
+		) => Promise<void>,
+		additionalContext?: string | undefined,
+		suppressIframes = false,
+	): Promise<void> {
+		const span = trace.getSpan(context.active());
+		span?.setAttributes({
+			conversation_id: conversationId,
+			has_additional_context: !!additionalContext,
+		});
+
+		try {
+			const finalMessage = additionalContext
+				? `${message}\n\nAdditional Context:\n${additionalContext}`
+				: message;
+
+			// Validate the response body inside the observed call so an unusable streaming
+			// response is counted as `upstream_error` instead of a false success.
+			const reader = await this.observeUpstreamCall(
+				UPSTREAM_OPERATION_NAMES.sendAgentConversationMessageStreaming,
+				async () => {
+					const response = await this.client.sendSpotterXMessageStreaming({
+						tenantId: this.client.tenantId,
+						orgId: this.client.orgId,
+						userId: this.client.userId,
+						conversationId,
+						message: finalMessage,
+					});
+					const reader = response.body?.getReader();
+					if (!reader) {
+						throw new Error("Failed to get reader from response body");
+					}
+					return reader;
+				},
+			);
+
+			const streamRecorder = this.createStreamMetricsRecorder();
+			recordUpstreamStreamStartedMetric(
+				streamRecorder,
+				UPSTREAM_OPERATION_NAMES.sendAgentConversationMessageStreaming,
+				"success",
+			);
+
+			const processStreamPromise = processSpotterXEventStream(
+				this.client.instanceUrl,
+				spotterResponseFormat,
+				conversationId,
+				reader,
+				appendStoredMessages,
+				streamRecorder,
+				suppressIframes,
+			).finally(() => {
+				this.scheduleBackgroundMetricsFlush(streamRecorder);
+			});
+
+			if (this.metrics.waitUntil) {
+				try {
+					this.metrics.waitUntil(processStreamPromise);
+				} catch (error) {
+					console.error(
+						"[metrics] Failed to schedule upstream stream processing",
+						error,
+					);
+				}
+			} else {
+				// Tests and non-Worker runtimes may not expose waitUntil. Keep the
+				// best-effort stream processing running without blocking the caller.
+				void processStreamPromise;
+			}
+
+			span?.setStatus({
+				code: SpanStatusCode.OK,
+				message: "SpotterX conversation message streaming sent",
+			});
+		} catch (error) {
+			console.error(
+				"Error sending SpotterX conversation message streaming:",
+				error,
+			);
 			span?.setStatus({
 				code: SpanStatusCode.ERROR,
 				message: (error as Error).message,

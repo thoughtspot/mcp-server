@@ -28,7 +28,10 @@ import {
 	NOOP_METRICS_RECORDER,
 } from "../src/metrics/runtime/metrics-recorder";
 import { SpotterResponseFormat } from "../src/services/types";
-import { processSpotter3EventStream } from "../src/streaming-utils";
+import {
+	processSpotter3EventStream,
+	processSpotterXEventStream,
+} from "../src/streaming-utils";
 import { makeReader } from "./servers/helpers";
 
 // Mock storage
@@ -1108,6 +1111,274 @@ describe("suppress-iframes", () => {
 		expect(messages[0]).toMatchObject({
 			type: "answer",
 			answer_title: "Headcount",
+		});
+	});
+});
+
+describe("processSpotterXEventStream", () => {
+	let consoleWarnSpy: ReturnType<typeof vi.spyOn>;
+	let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
+
+	beforeEach(() => {
+		vi.clearAllMocks();
+		tracingState.span = undefined;
+		consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+		consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+	});
+
+	afterEach(() => {
+		vi.restoreAllMocks();
+	});
+
+	const process = (
+		reader: ReadableStreamDefaultReader,
+		storage: ReturnType<typeof makeMockStorage>,
+		format: SpotterResponseFormat = SpotterResponseFormat.RAW,
+		recorder?: MetricsRecorder,
+	) =>
+		processSpotterXEventStream(
+			INSTANCE_URL,
+			format,
+			CONV_ID,
+			reader,
+			storage.appendMessages,
+			recorder,
+		);
+
+	it("marks the conversation as done when the stream ends with no data", async () => {
+		const storage = makeMockStorage();
+
+		await process(makeReader([]), storage);
+
+		expect(storage.appendMessages).toHaveBeenCalledOnce();
+		expect(storage.appendMessages).toHaveBeenCalledWith(CONV_ID, [], true);
+	});
+
+	describe("raw format", () => {
+		it("stores each data event verbatim, then marks the conversation done", async () => {
+			const storage = makeMockStorage();
+			const first = { type: "text", content: "Hello" };
+			const second = { type: "tool_call", name: "search", args: { q: "x" } };
+			const reader = makeReader([
+				`data: ${JSON.stringify(first)}\ndata: ${JSON.stringify(second)}\n`,
+			]);
+
+			await process(reader, storage);
+
+			expect(storage.appendMessages).toHaveBeenNthCalledWith(1, CONV_ID, [
+				first,
+				second,
+			]);
+			expect(storage.appendMessages).toHaveBeenNthCalledWith(
+				2,
+				CONV_ID,
+				[],
+				true,
+			);
+		});
+
+		it("ignores blank lines, id lines, and empty data lines", async () => {
+			const storage = makeMockStorage();
+			const item = { type: "text", content: "Hello" };
+			const reader = makeReader([
+				`id: 1\n\ndata: \ndata:    \ndata: ${JSON.stringify(item)}\n\n`,
+			]);
+
+			await process(reader, storage);
+
+			expect(storage.appendMessages).toHaveBeenCalledWith(CONV_ID, [item]);
+			expect(consoleWarnSpy).not.toHaveBeenCalled();
+		});
+
+		it("ignores SSE comment lines, including keep-alive pings", async () => {
+			const storage = makeMockStorage();
+			const item = { type: "text", content: "Hello" };
+			const reader = makeReader([
+				`: ping\n:\n:data: ${JSON.stringify({ hidden: true })}\n`,
+				`data: ${JSON.stringify(item)}\n: keep-alive\n`,
+			]);
+
+			await process(reader, storage);
+
+			expect(storage.appendMessages).toHaveBeenCalledTimes(2);
+			expect(storage.appendMessages).toHaveBeenNthCalledWith(1, CONV_ID, [
+				item,
+			]);
+			expect(storage.appendMessages).toHaveBeenNthCalledWith(
+				2,
+				CONV_ID,
+				[],
+				true,
+			);
+			expect(consoleWarnSpy).not.toHaveBeenCalled();
+		});
+
+		it("warns and skips lines that do not start with 'data: '", async () => {
+			const storage = makeMockStorage();
+			const item = { type: "text", content: "Hello" };
+			const reader = makeReader([
+				`event: message\ndata: ${JSON.stringify(item)}\n`,
+			]);
+
+			await process(reader, storage);
+
+			expect(consoleWarnSpy).toHaveBeenCalledWith(
+				"Unknown line in event stream, does not start with 'data:'",
+				"event: message",
+			);
+			expect(storage.appendMessages).toHaveBeenCalledWith(CONV_ID, [item]);
+		});
+
+		it("buffers a line split across chunks until it is complete", async () => {
+			const storage = makeMockStorage();
+			const item = { type: "text", content: "Split across chunks" };
+			const line = `data: ${JSON.stringify(item)}\n`;
+			const reader = makeReader([line.slice(0, 15), line.slice(15)]);
+
+			await process(reader, storage);
+
+			expect(storage.appendMessages).toHaveBeenCalledTimes(2);
+			expect(storage.appendMessages).toHaveBeenNthCalledWith(1, CONV_ID, [
+				item,
+			]);
+			expect(storage.appendMessages).toHaveBeenNthCalledWith(
+				2,
+				CONV_ID,
+				[],
+				true,
+			);
+		});
+
+		it("does not store anything for a chunk with no complete events", async () => {
+			const storage = makeMockStorage();
+			const reader = makeReader(["id: 1\n\n"]);
+
+			await process(reader, storage);
+
+			expect(storage.appendMessages).toHaveBeenCalledOnce();
+			expect(storage.appendMessages).toHaveBeenCalledWith(CONV_ID, [], true);
+		});
+
+		it("records a raw_untyped stream message metric per event", async () => {
+			const storage = makeMockStorage();
+			const recorder: MetricsRecorder = {
+				...NOOP_METRICS_RECORDER,
+				count: vi.fn(),
+			};
+			const reader = makeReader([
+				`data: ${JSON.stringify({ a: 1 })}\ndata: ${JSON.stringify({ b: 2 })}\n`,
+			]);
+
+			await process(reader, storage, SpotterResponseFormat.RAW, recorder);
+
+			expect(recorder.count).toHaveBeenCalledTimes(2);
+			expect(recorder.count).toHaveBeenCalledWith(
+				METRIC_NAMES.upstreamStreamMessagesTotal,
+				1,
+				{
+					upstream_operation: "send_agent_conversation_message_streaming",
+					message_type: "raw_untyped",
+					is_thinking: false,
+				},
+			);
+		});
+
+		it("sets span attributes and an OK status on success", async () => {
+			const storage = makeMockStorage();
+			const reader = makeReader([
+				`data: ${JSON.stringify({ a: 1 })}\ndata: ${JSON.stringify({ b: 2 })}\n`,
+			]);
+
+			await process(reader, storage);
+
+			const span = tracingState.span!;
+			expect(span.setAttribute).toHaveBeenCalledWith(
+				"conversation_id",
+				CONV_ID,
+			);
+			expect(span.setAttributes).toHaveBeenCalledWith({
+				spotter_response_format: SpotterResponseFormat.RAW,
+				total_messages_parsed: 2,
+				total_text_messages_parsed: 2,
+				total_answer_messages_parsed: 0,
+				total_messages_ignored: 0,
+			});
+			expect(span.setStatus).toHaveBeenCalledWith({
+				code: SpanStatusCode.OK,
+				message: "Streaming response concluded successfully",
+			});
+		});
+
+		it("sets an error span status without throwing on malformed JSON", async () => {
+			const storage = makeMockStorage();
+			const reader = makeReader(["data: {not json\n"]);
+
+			await expect(process(reader, storage)).resolves.toBeUndefined();
+
+			const span = tracingState.span!;
+			expect(span.setStatus).toHaveBeenCalledWith(
+				expect.objectContaining({ code: SpanStatusCode.ERROR }),
+			);
+			expect(span.setStatus).not.toHaveBeenCalledWith(
+				expect.objectContaining({ code: SpanStatusCode.OK }),
+			);
+			expect(consoleErrorSpy).toHaveBeenCalled();
+		});
+
+		it("sets an error span status when the reader throws", async () => {
+			const storage = makeMockStorage();
+			const reader = {
+				read: vi.fn().mockRejectedValue(new Error("connection reset")),
+			} as unknown as ReadableStreamDefaultReader;
+
+			await process(reader, storage);
+
+			expect(tracingState.span!.setStatus).toHaveBeenCalledWith({
+				code: SpanStatusCode.ERROR,
+				message: "connection reset",
+			});
+			expect(storage.appendMessages).not.toHaveBeenCalled();
+		});
+	});
+
+	describe("simplified format", () => {
+		it("stores a not-available message, marks the conversation done, and stops reading", async () => {
+			const storage = makeMockStorage();
+			const reader = makeReader([
+				`data: ${JSON.stringify({ a: 1 })}\n`,
+				`data: ${JSON.stringify({ b: 2 })}\n`,
+			]);
+
+			await process(reader, storage, SpotterResponseFormat.SIMPLIFIED);
+
+			expect(storage.appendMessages).toHaveBeenCalledOnce();
+			expect(storage.appendMessages).toHaveBeenCalledWith(
+				CONV_ID,
+				[
+					{
+						is_thinking: false,
+						type: "text",
+						text: expect.stringContaining(
+							"Simplified response format is not available",
+						),
+					},
+				],
+				true,
+			);
+			expect(reader.read).toHaveBeenCalledOnce();
+			expect(tracingState.span!.setStatus).toHaveBeenCalledWith({
+				code: SpanStatusCode.ERROR,
+				message: "Simplified response format for SpotterX not yet implemented",
+			});
+		});
+
+		it("still marks the conversation done when the stream has no events", async () => {
+			const storage = makeMockStorage();
+
+			await process(makeReader([]), storage, SpotterResponseFormat.SIMPLIFIED);
+
+			expect(storage.appendMessages).toHaveBeenCalledOnce();
+			expect(storage.appendMessages).toHaveBeenCalledWith(CONV_ID, [], true);
 		});
 	});
 });

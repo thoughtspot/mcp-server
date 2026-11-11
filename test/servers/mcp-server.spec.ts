@@ -2499,6 +2499,209 @@ describe("MCP Server", () => {
 				true,
 			);
 		});
+
+		describe("SpotterX routing", () => {
+			let mockSendSpotterX: ReturnType<typeof vi.fn>;
+
+			function setup({
+				apiVersion = "beta",
+				isSpotterXEnabled = true,
+				enableRawSessionUpdates = true,
+				suppressIframes = false,
+			}: {
+				apiVersion?: string;
+				isSpotterXEnabled?: boolean;
+				enableRawSessionUpdates?: boolean;
+				suppressIframes?: boolean;
+			} = {}) {
+				vi.spyOn(thoughtspotClient, "ThoughtSpotClient").mockReturnValue({
+					getSessionInfo: vi.fn().mockResolvedValue({
+						clusterId: "test-cluster-123",
+						clusterName: "test-cluster",
+						releaseVersion: "10.13.0.cl-110",
+						userGUID: "test-user-123",
+						configInfo: {
+							mixpanelConfig: {
+								devSdkKey: "test-dev-token",
+								prodSdkKey: "test-prod-token",
+								production: false,
+							},
+							selfClusterName: "test-cluster",
+							selfClusterId: "test-cluster-123",
+							enableSpotterDataSourceDiscovery: true,
+							isSpotterXEnabled,
+						},
+						userName: "test-user",
+						currentOrgId: "test-org",
+						privileges: [],
+					}),
+					instanceUrl: "https://test.thoughtspot.cloud",
+				} as any);
+				const testServer = new MCPServer({
+					props: {
+						...mockProps,
+						apiVersion,
+						enableRawSessionUpdates,
+						suppressIframes,
+					},
+					env: {} as any,
+				});
+				vi.spyOn(testServer as any, "getStorageService").mockReturnValue(
+					mockStorageService,
+				);
+				return testServer;
+			}
+
+			const sendRequest = (args: Record<string, unknown>) => ({
+				method: "tools/call" as const,
+				params: { name: "send_session_message", arguments: args },
+			});
+
+			beforeEach(() => {
+				mockSendSpotterX = vi
+					.spyOn(ThoughtSpotService.prototype, "sendSpotterXMessageStreaming")
+					.mockResolvedValue(undefined) as unknown as ReturnType<typeof vi.fn>;
+			});
+
+			it("sends the message to SpotterX with the raw format", async () => {
+				const testServer = setup();
+				await testServer.init();
+
+				const result = await connect(testServer).callTool(
+					"send_session_message",
+					{
+						analytical_session_id: "conv-x-1",
+						message: "Compare revenue by region",
+						additional_context: "Focus on North America",
+					},
+				);
+
+				expect(result.isError).toBeUndefined();
+				expect((result.structuredContent as any).success).toBe(true);
+				expect(mockStorageService.initializeConversation).toHaveBeenCalledWith(
+					"conv-x-1",
+				);
+				expect(mockSendSpotterX).toHaveBeenCalledWith(
+					"conv-x-1",
+					"Compare revenue by region",
+					SpotterResponseFormat.RAW,
+					expect.any(Function),
+					"Focus on North America",
+					false,
+				);
+				expect(
+					mockSendAgentConversationMessageStreaming,
+				).not.toHaveBeenCalled();
+			});
+
+			it("passes the simplified format and suppress-iframes flag through", async () => {
+				const testServer = setup({
+					enableRawSessionUpdates: false,
+					suppressIframes: true,
+				});
+				await testServer.init();
+
+				await testServer.callSendSessionMessage(
+					sendRequest({ analytical_session_id: "conv-x-1", message: "Hi" }),
+				);
+
+				expect(mockSendSpotterX).toHaveBeenCalledWith(
+					"conv-x-1",
+					"Hi",
+					SpotterResponseFormat.SIMPLIFIED,
+					expect.any(Function),
+					undefined,
+					true,
+				);
+			});
+
+			it("binds the storage service when appending streamed messages", async () => {
+				const testServer = setup();
+				await testServer.init();
+
+				await testServer.callSendSessionMessage(
+					sendRequest({ analytical_session_id: "conv-x-1", message: "Hi" }),
+				);
+
+				const append = mockSendSpotterX.mock.calls[0][3];
+				await append("conv-x-1", [{ type: "text" }], true);
+				expect(mockStorageService.appendMessages).toHaveBeenCalledWith(
+					"conv-x-1",
+					[{ type: "text" }],
+					true,
+				);
+			});
+
+			it.each([
+				{ apiVersion: "beta", isSpotterXEnabled: false },
+				{ apiVersion: "latest", isSpotterXEnabled: true },
+			])(
+				"uses Spotter 3 when apiVersion=$apiVersion, isSpotterXEnabled=$isSpotterXEnabled",
+				async ({ apiVersion, isSpotterXEnabled }) => {
+					const testServer = setup({ apiVersion, isSpotterXEnabled });
+					await testServer.init();
+
+					await testServer.callSendSessionMessage(
+						sendRequest({ analytical_session_id: "conv-3-1", message: "Hi" }),
+					);
+
+					expect(mockSendAgentConversationMessageStreaming).toHaveBeenCalled();
+					expect(mockSendSpotterX).not.toHaveBeenCalled();
+				},
+			);
+
+			it("returns an error when the conversation is already in progress", async () => {
+				mockStorageService.initializeConversation.mockRejectedValue(
+					new Error("Conversation already exists and is not marked done"),
+				);
+				const testServer = setup();
+				await testServer.init();
+
+				const result = (await testServer.callSendSessionMessage(
+					sendRequest({ analytical_session_id: "conv-x-1", message: "Hi" }),
+				)) as any;
+
+				expect(result.isError).toBe(true);
+				expect(result.content[0].text).toContain(
+					"ERROR: The analytical session has an ongoing response",
+				);
+				expect(mockSendSpotterX).not.toHaveBeenCalled();
+			});
+
+			it("closes out the conversation and rethrows when sending fails", async () => {
+				mockSendSpotterX.mockRejectedValue(new Error("SpotterX stream failed"));
+				const testServer = setup();
+				await testServer.init();
+
+				await expect(
+					testServer.callSendSessionMessage(
+						sendRequest({ analytical_session_id: "conv-x-1", message: "Hi" }),
+					),
+				).rejects.toThrow("SpotterX stream failed");
+
+				expect(mockStorageService.appendMessages).toHaveBeenCalledWith(
+					"conv-x-1",
+					[{ is_thinking: false, type: "text", text: "Something went wrong" }],
+					true,
+				);
+			});
+
+			it("still rethrows the send error when closing out the conversation fails", async () => {
+				mockSendSpotterX.mockRejectedValue(new Error("SpotterX stream failed"));
+				mockStorageService.appendMessages.mockRejectedValue(
+					new Error("Storage write failed"),
+				);
+				const testServer = setup();
+				await testServer.init();
+
+				await expect(
+					testServer.callSendSessionMessage(
+						sendRequest({ analytical_session_id: "conv-x-1", message: "Hi" }),
+					),
+				).rejects.toThrow("SpotterX stream failed");
+				expect(mockStorageService.appendMessages).toHaveBeenCalled();
+			});
+		});
 	});
 
 	describe("Get Session Updates Tool", () => {
