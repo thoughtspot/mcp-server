@@ -1565,8 +1565,8 @@ describe("MCP Server org tools", () => {
 			const sessionInfoTokens: string[] = [];
 			// Only the live org token is accepted upstream; the frozen props token is
 			// expired on the cluster and there is no keep-warm global token at all.
-			vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockImplementation(
-				(_instanceUrl: string, bearerToken: string) =>
+			vi.spyOn(thoughtspotClient, "ThoughtSpotClient").mockImplementation(
+				({ token: bearerToken }: { token: string }) =>
 					({
 						getSessionInfo: vi.fn(async () => {
 							sessionInfoTokens.push(bearerToken);
