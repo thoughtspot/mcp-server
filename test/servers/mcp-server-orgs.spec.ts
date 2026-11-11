@@ -1201,7 +1201,7 @@ describe("MCP Server org tools", () => {
 			const res = await connect(server).callTool("check_connectivity", {});
 			expect(mint).toHaveBeenCalled();
 			expect(res.isError).toBe(true);
-			expect(res.content[0].text).toMatch(/could not access the active org/i);
+			expect(res.content[0].text).toMatch(/authentication has expired/i);
 		});
 
 		// list_orgs / mint still use the global token, header-less.
@@ -1565,8 +1565,8 @@ describe("MCP Server org tools", () => {
 			const sessionInfoTokens: string[] = [];
 			// Only the live org token is accepted upstream; the frozen props token is
 			// expired on the cluster and there is no keep-warm global token at all.
-			vi.spyOn(thoughtspotClient, "getThoughtSpotClient").mockImplementation(
-				(_instanceUrl: string, bearerToken: string) =>
+			vi.spyOn(thoughtspotClient, "ThoughtSpotClient").mockImplementation(
+				({ token: bearerToken }: { token: string }) =>
 					({
 						getSessionInfo: vi.fn(async () => {
 							sessionInfoTokens.push(bearerToken);
@@ -1684,13 +1684,16 @@ describe("MCP Server org tools", () => {
 			expect(sessionInfoTokens).toContain("org-101-token");
 		});
 
-		it("list_orgs says org listing is unavailable, not that authentication expired", async () => {
+		it("list_orgs asks to reauthenticate and says other tools keep working in the current org", async () => {
 			const { server, listOrgs } = await serverWithLiveOrgTokenOnly();
 			const res = await connect(server).callTool("list_orgs", {});
 			expect(res.isError).toBe(true);
-			expect(res.content[0].text).toMatch(/current org "101" is still active/);
-			expect(res.content[0].text).toMatch(/all other tools keep working/);
-			expect(res.content[0].text).not.toMatch(/authentication has expired/i);
+			expect(res.content[0].text).toMatch(
+				/authentication for list_orgs has expired/i,
+			);
+			expect(res.content[0].text).toMatch(
+				/other tools keep working in your current org "101"/i,
+			);
 			expect(listOrgs).not.toHaveBeenCalled();
 		});
 
@@ -1698,7 +1701,9 @@ describe("MCP Server org tools", () => {
 			const { server, store, mint } = await serverWithLiveOrgTokenOnly();
 			const res = await connect(server).callTool("switch_org", { org_id: 0 });
 			expect(res.isError).toBe(true);
-			expect(res.content[0].text).toMatch(/current org "101" is still active/);
+			expect(res.content[0].text).toMatch(
+				/other tools keep working in your current org "101"/i,
+			);
 			// Must not be mislabelled as "no access to org 0" (the pre-existing 4xx
 			// mapping only applies to the mint itself).
 			expect(res.content[0].text).not.toMatch(/do not have access/i);
