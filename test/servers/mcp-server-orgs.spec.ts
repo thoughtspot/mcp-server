@@ -1,6 +1,7 @@
 import { connect } from "mcp-testing-kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MixpanelTracker } from "../../src/metrics/mixpanel/mixpanel";
+import { NOOP_METRICS_RECORDER } from "../../src/metrics/runtime/metrics-recorder";
 import { MCPServer } from "../../src/servers/mcp-server";
 import * as thoughtspotClient from "../../src/services/clients/thoughtspot-client";
 import { ThoughtSpotApiError } from "../../src/services/types";
@@ -260,7 +261,7 @@ describe("MCP Server org tools", () => {
 			expect(names).not.toContain("switch_org");
 		});
 
-		it("does NOT apply the org overlay (no active org / no mint) on a v1 session", async () => {
+		it("mints the working token on a v1 session too, while the org tools stay hidden", async () => {
 			const mint = vi.fn().mockResolvedValue("org-scoped-token");
 			const store = new Map<
 				string,
@@ -274,9 +275,16 @@ describe("MCP Server org tools", () => {
 				store,
 			});
 			await server.init();
-			// v1 session: no active org defaulted, no org token minted.
-			expect(mint).not.toHaveBeenCalled();
-			expect([...store.values()].some((r) => r.activeOrgId)).toBe(false);
+			// The minted token is server-internal, so a v1 client gets it too; only
+			// the org TOOLS are gated on the API version.
+			expect(mint).toHaveBeenCalledWith({
+				accessToken: "global-token",
+				orgId: "0",
+			});
+			expect([...store.values()][0]?.activeOrgId).toBe("0");
+			const { listTools } = connect(server);
+			const names = (await listTools()).tools.map((t: any) => t.name);
+			expect(names).not.toContain("list_orgs");
 		});
 
 		it("fails closed: hides org tools when orgs-enabled flag is absent", async () => {
@@ -509,8 +517,8 @@ describe("MCP Server org tools", () => {
 		});
 	});
 
-	describe("non-org cluster (orgs disabled): no org overlay on connect", () => {
-		it("does NOT mint an org token or set an active org when orgs are disabled", async () => {
+	describe("non-org cluster (orgs disabled): minted working token, no org scoping", () => {
+		it("mints a working token from the global token even when orgs are disabled, and sends no org header", async () => {
 			const mint = vi.fn().mockResolvedValue("org-scoped-token");
 			const store = new Map<
 				string,
@@ -523,11 +531,57 @@ describe("MCP Server org tools", () => {
 				fetchOrgBearerToken: mint,
 			});
 			await server.init();
-			// postInit must skip the org overlay entirely: no mint, no active-org write,
-			// and getActiveOrgId stays undefined (so no x-thoughtspot-orgs header).
-			expect(mint).not.toHaveBeenCalled();
-			expect(store.size).toBe(0);
+			// The token is minted for the current (primary) org from the global token
+			// and persisted, exactly as on an org cluster...
+			expect(mint).toHaveBeenCalledWith({
+				accessToken: "global-token",
+				orgId: "0",
+			});
+			const rec = [...store.values()][0];
+			expect(rec.activeOrgId).toBe("0");
+			expect(rec.orgToken).toBe("org-scoped-token");
+			// ...and every call uses it, but without org scoping (no x-thoughtspot-orgs).
+			expect((server as any).getActiveToken()).toBe("org-scoped-token");
 			expect((server as any).getActiveOrgId()).toBeUndefined();
+			// Session info was fetched under the minted token after the mint.
+			expect((server as any).sessionInfoToken).toBe("org-scoped-token");
+		});
+
+		it("uses a previously stored minted token when orgs are disabled, without an org header", async () => {
+			// A token was stored on an earlier connect (or while orgs were enabled).
+			// preInit loads it before session info exists, so even the init-time
+			// session-info fetch uses it; the global token is never needed.
+			const keyHash = Buffer.from(
+				await crypto.subtle.digest(
+					"SHA-256",
+					new TextEncoder().encode("refresh-token"),
+				),
+			).toString("base64url");
+			const store = new Map<
+				string,
+				{ activeOrgId?: string; orgToken?: string }
+			>([
+				[
+					`${keyHash}:__active_org__`,
+					{ activeOrgId: "0", orgToken: "stored-minted-token" },
+				],
+			]);
+			const mint = vi.fn().mockResolvedValue("fresh-token");
+			const { server } = makeServer({
+				authMode: "oauth",
+				session: { orgsEnabled: false },
+				store,
+				fetchOrgBearerToken: mint,
+			});
+			await server.init();
+			const s = server as any;
+			expect(mint).not.toHaveBeenCalled();
+			expect(s.getActiveToken()).toBe("stored-minted-token");
+			expect(s.getActiveOrgId()).toBeUndefined();
+			expect(s.sessionInfoToken).toBe("stored-minted-token");
+			const { listTools } = connect(server);
+			const names = (await listTools()).tools.map((t: any) => t.name);
+			expect(names).not.toContain("list_orgs");
 		});
 
 		it("still seeds the cluster-wide keep-warm token when orgs are disabled", async () => {
@@ -543,7 +597,7 @@ describe("MCP Server org tools", () => {
 			expect(seeded?.globalToken).toBe("global-token");
 		});
 
-		it("uses the warm global token (not props token) for tool calls when orgs are disabled", async () => {
+		it("mints from the warm global token (not the props token) when orgs are disabled", async () => {
 			const tokenStore = new Map<string, any>();
 			const { server } = makeServer({
 				authMode: "oauth",
@@ -558,18 +612,24 @@ describe("MCP Server org tools", () => {
 				globalToken: "refreshed-token",
 			});
 
-			// A new connection should pick up the refreshed token.
+			// A new connection (fresh org store) mints from the refreshed global token
+			// and works on the minted token.
+			const mint = vi.fn().mockResolvedValue("minted-from-warm");
 			const { server: server2 } = makeServer({
 				authMode: "oauth",
 				session: { orgsEnabled: false },
 				tokenStore,
+				fetchOrgBearerToken: mint,
 			});
 			await server2.init();
-			// getActiveToken must return the warm token, not the props token.
-			expect((server2 as any).getActiveToken()).toBe("refreshed-token");
+			expect(mint).toHaveBeenCalledWith({
+				accessToken: "refreshed-token",
+				orgId: "0",
+			});
+			expect((server2 as any).getActiveToken()).toBe("minted-from-warm");
 		});
 
-		it("sends the warm global token (not props token) to Aurora", async () => {
+		it("sends the minted token (not the global or props token) to Aurora", async () => {
 			const tokenStore = new Map<string, any>();
 			const { server } = makeServer({
 				authMode: "oauth",
@@ -591,7 +651,7 @@ describe("MCP Server org tools", () => {
 			await server2.init();
 			vi.spyOn(server2 as any, "getStorageService").mockResolvedValue({});
 			const spotterViz = await (server2 as any).getSpotterVizService();
-			expect(spotterViz.client.bearerToken).toBe("refreshed-token");
+			expect(spotterViz.client.bearerToken).toBe("org-scoped-token");
 		});
 	});
 
@@ -1384,15 +1444,23 @@ describe("MCP Server org tools", () => {
 			expect(() => s.getActiveToken()).toThrow(/status 401/);
 		});
 
-		it("getActiveToken returns the grant token when it is NOT expired", async () => {
+		it("uses the grant token to mint the working token when it is NOT expired", async () => {
+			const mint = vi.fn().mockResolvedValue("minted-token");
 			const { server } = makeServer({
 				authMode: "oauth",
 				session: { orgsEnabled: false, currentOrgId: "0" },
+				fetchOrgBearerToken: mint,
 				// default far-future expiry
 			});
 			await server.init();
 			const s = server as any;
-			expect(s.getActiveToken()).toBe("global-token");
+			// The still-valid grant token authorises the mint; calls then use the
+			// minted token rather than the grant token itself.
+			expect(mint).toHaveBeenCalledWith({
+				accessToken: "global-token",
+				orgId: "0",
+			});
+			expect(s.getActiveToken()).toBe("minted-token");
 		});
 
 		it("bearer sessions (no expiry tracked) are never expiry-gated", async () => {
@@ -1428,35 +1496,223 @@ describe("MCP Server org tools", () => {
 	// org preamble (which would refresh it) doesn't run for them, so the global
 	// token is reconciled from the DO per call — an instance must pick up the
 	// keep-warm alarm's refreshed token rather than a stale in-memory copy.
-	describe("non-orgs OAuth: per-call global token reconcile", () => {
-		it("picks up a newer DO global token on the next tool call", async () => {
+	describe("non-orgs OAuth: per-call minted token reload", () => {
+		it("picks up a re-minted DO token on the next tool call", async () => {
+			const store = new Map<
+				string,
+				{ activeOrgId?: string; orgToken?: string }
+			>();
+			const { server } = makeServer({
+				authMode: "oauth",
+				session: { orgsEnabled: false, currentOrgId: "0" }, // non-orgs
+				store,
+			});
+			await server.init();
+			const s = server as any;
+			// Connect-time minted token.
+			expect(s.getActiveToken()).toBe("org-scoped-token");
+
+			// Simulate the keep-warm alarm re-minting the token in the shared DO
+			// after a global refresh.
+			const key = [...store.keys()][0];
+			store.set(key, { activeOrgId: "0", orgToken: "re-minted-token" });
+
+			// A subsequent tool call must reload from the DO and adopt the newer
+			// token (not keep serving the stale connect-time one).
+			await connect(server).callTool("check_connectivity", {});
+			expect(s.getActiveToken()).toBe("re-minted-token");
+		});
+	});
+
+	describe("org tools when the global token is dead but the org token is still valid", () => {
+		// The keep-warm chain can die (two failed refreshes in a row, or a cluster
+		// outage) while the 30-day org token is still live. Every data tool keeps
+		// working on the org token; only list_orgs (cluster-scoped) and switch_org
+		// (mints from the global token) need the dead global token. They must say
+		// so rather than claim the whole session expired, and must not mislabel the
+		// 401 as "no access to that org".
+		const goodSession = {
+			clusterId: "test-cluster-123",
+			clusterName: "test-cluster",
+			releaseVersion: "10.13.0.cl-110",
+			userGUID: "test-user-123",
+			userName: "test-user",
+			currentOrgId: "101",
+			privileges: [],
+			configInfo: {
+				mixpanelConfig: { devSdkKey: "k", prodSdkKey: "k", production: false },
+				selfClusterName: "test-cluster",
+				selfClusterId: "test-cluster-123",
+				enableSpotterDataSourceDiscovery: false,
+				orgsConfiguration: { enabled: true },
+			},
+		};
+
+		async function serverWithLiveOrgTokenOnly(
+			opts: { orgToken?: boolean; warmGlobal?: boolean } = {},
+		) {
 			const store = new Map<
 				string,
 				{ activeOrgId?: string; orgToken?: string }
 			>();
 			const tokenStore = new Map<string, any>();
-			const { server } = makeServer({
+			const namespace = makeStorageNamespace(store, tokenStore);
+			const listOrgs = vi.fn().mockResolvedValue([
+				{ id: 0, name: "Primary", status: "ACTIVE" },
+				{ id: 101, name: "Sales", status: "ACTIVE" },
+			]);
+			const mint = vi.fn().mockResolvedValue("minted-token");
+			const sessionInfoTokens: string[] = [];
+			// Only the live org token is accepted upstream; the frozen props token is
+			// expired on the cluster and there is no keep-warm global token at all.
+			vi.spyOn(thoughtspotClient, "ThoughtSpotClient").mockImplementation(
+				({ token: bearerToken }: { token: string }) =>
+					({
+						getSessionInfo: vi.fn(async () => {
+							sessionInfoTokens.push(bearerToken);
+							if (bearerToken === "org-0-token") {
+								return { ...goodSession, currentOrgId: "0" };
+							}
+							const accepted = ["org-101-token"];
+							if (opts.warmGlobal) accepted.push("warm-do-token");
+							if (!accepted.includes(bearerToken)) {
+								throw new ThoughtSpotApiError(401, "getSessionInfo", "expired");
+							}
+							return goodSession;
+						}),
+						searchOrgs: vi.fn().mockResolvedValue([]),
+						listOrgs,
+						fetchOrgBearerToken: mint,
+						validateConnection: vi.fn(
+							async () => bearerToken === "org-101-token",
+						),
+						instanceUrl: "https://test.thoughtspot.cloud",
+					}) as any,
+			);
+			const keyHash = Buffer.from(
+				await crypto.subtle.digest(
+					"SHA-256",
+					new TextEncoder().encode("refresh-token"),
+				),
+			).toString("base64url");
+			if (opts.orgToken !== false) {
+				store.set(`${keyHash}:__active_org__`, {
+					activeOrgId: "101",
+					orgToken: "org-101-token",
+				});
+			}
+			if (opts.warmGlobal) {
+				tokenStore.set(`${keyHash}:__active_org__`, {
+					globalToken: "warm-do-token",
+					globalRefreshToken: "refresh-token",
+					instanceUrl: "https://test.thoughtspot.cloud",
+					globalTokenExpiresAt: 1893456000000,
+				});
+			}
+			const props = {
+				instanceUrl: "https://test.thoughtspot.cloud",
+				accessToken: "expired-props-token",
+				globalRefreshToken: "refresh-token",
+				globalTokenExpiresAt: 1, // frozen login token long expired
 				authMode: "oauth",
-				session: { orgsEnabled: false, currentOrgId: "0" }, // non-orgs
-				store,
-				tokenStore,
-			});
+				apiVersion: "latest",
+				clientName: { clientId: "c", clientName: "c", registrationDate: 0 },
+			};
+			const env = {
+				CONVERSATION_STORAGE_OBJECT: namespace,
+				USER_TOKEN_OBJECT: namespace,
+			} as any;
+			const server = new MCPServer({ props, env });
 			await server.init();
-			const s = server as any;
-			// Connect-time global token.
-			expect(s.getActiveToken()).toBe("global-token");
+			return { server, store, listOrgs, mint, sessionInfoTokens, keyHash };
+		}
 
-			// Simulate the keep-warm alarm rotating the DO's global token.
-			const key = [...tokenStore.keys()][0];
-			tokenStore.set(key, {
-				globalToken: "rotated-global",
-				globalTokenExpiresAt: 1893456000000,
+		it("fetches session info under the ORG token at init, never the global token, when an org is stored", async () => {
+			// Both a warm global token and a stored org token exist: privileges and
+			// flags are per-org, so even a healthy session must read them under the
+			// org token. preInit loads the stored org before the init-time fetch.
+			const { server, sessionInfoTokens } = await serverWithLiveOrgTokenOnly({
+				warmGlobal: true,
 			});
+			expect(sessionInfoTokens).toEqual(["org-101-token"]);
+			expect((server as any).getActiveToken()).toBe("org-101-token");
+		});
 
-			// A subsequent tool call must reconcile from the DO and adopt the newer
-			// token (not keep serving the stale connect-time one).
-			await connect(server).callTool("check_connectivity", {});
-			expect(s.getActiveToken()).toBe("rotated-global");
+		it("refetches session info under the new org token when a sibling session switched org", async () => {
+			const { server, store, sessionInfoTokens, keyHash } =
+				await serverWithLiveOrgTokenOnly();
+			expect(sessionInfoTokens).toEqual(["org-101-token"]);
+			// Call the server directly: the test kit's connect() can only await the
+			// first response per connection, and this test needs several calls.
+			const ping = () =>
+				(server as any).callTool(
+					{ method: "tools/call", params: { name: "ping", arguments: {} } },
+					NOOP_METRICS_RECORDER,
+				);
+			// Same org: no refetch. ping's own connectivity probe is the only fetch.
+			await ping();
+			expect(sessionInfoTokens).toEqual(["org-101-token", "org-101-token"]);
+			// Another fanned-out session switches to org 0 (shared store).
+			store.set(`${keyHash}:__active_org__`, {
+				activeOrgId: "0",
+				orgToken: "org-0-token",
+			});
+			const res = await ping();
+			expect(res.isError).toBeFalsy();
+			// Session info was refetched under org 0's token before the tool ran
+			// (then ping's probe), so the gates now describe org 0, not org 101.
+			expect(sessionInfoTokens).toEqual([
+				"org-101-token",
+				"org-101-token",
+				"org-0-token",
+				"org-0-token",
+			]);
+			expect((server as any).sessionInfoToken).toBe("org-0-token");
+			expect((server as any).sessionInfo.currentOrgId).toBe("0");
+			// Same org again: no refetch.
+			await ping();
+			expect(sessionInfoTokens).toHaveLength(5);
+		});
+
+		it("data tools keep working on the live org token", async () => {
+			const { server, sessionInfoTokens } = await serverWithLiveOrgTokenOnly();
+			const res = await connect(server).callTool("ping", {});
+			expect(res.isError).toBeFalsy();
+			expect(res.content[0].text).toMatch(/pong/i);
+			// Session info was (re)fetched under the org token after the dead-global
+			// init attempt, so the privilege/flag gates are real.
+			expect(sessionInfoTokens).toContain("org-101-token");
+		});
+
+		it("list_orgs says org listing is unavailable, not that authentication expired", async () => {
+			const { server, listOrgs } = await serverWithLiveOrgTokenOnly();
+			const res = await connect(server).callTool("list_orgs", {});
+			expect(res.isError).toBe(true);
+			expect(res.content[0].text).toMatch(/current org "101" is still active/);
+			expect(res.content[0].text).toMatch(/all other tools keep working/);
+			expect(res.content[0].text).not.toMatch(/authentication has expired/i);
+			expect(listOrgs).not.toHaveBeenCalled();
+		});
+
+		it("switch_org says the same, does not mint, and leaves the active org unchanged", async () => {
+			const { server, store, mint } = await serverWithLiveOrgTokenOnly();
+			const res = await connect(server).callTool("switch_org", { org_id: 0 });
+			expect(res.isError).toBe(true);
+			expect(res.content[0].text).toMatch(/current org "101" is still active/);
+			// Must not be mislabelled as "no access to org 0" (the pre-existing 4xx
+			// mapping only applies to the mint itself).
+			expect(res.content[0].text).not.toMatch(/do not have access/i);
+			expect(mint).not.toHaveBeenCalled();
+			const rec = [...store.values()][0];
+			expect(rec.activeOrgId).toBe("101");
+			expect(rec.orgToken).toBe("org-101-token");
+		});
+
+		it("without a live org token the session gets the normal reauthenticate message", async () => {
+			const { server } = await serverWithLiveOrgTokenOnly({ orgToken: false });
+			const res = await connect(server).callTool("list_orgs", {});
+			expect(res.isError).toBe(true);
+			expect(res.content[0].text).toMatch(/reauthenticate/i);
 		});
 	});
 });
