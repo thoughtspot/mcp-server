@@ -82,6 +82,13 @@ If the user asks a follow-up or refines their question, don't start a new sessio
 ### Saving an analysis
 If the user asks to save the analysis or create a dashboard from the results, use `ThoughtSpot Spotter:create_dashboard` rather than building one yourself. If any web search results were part of the conversation, summarize the relevant findings and pass that summary into the tool's `note_tile` field so it's captured alongside the ThoughtSpot answers.
 
+### Using an Analyst
+An Analyst is a saved, purpose-built Spotter agent with its own instructions and data sources. This only applies when `ThoughtSpot Spotter:create_analysis_session` accepts an `analyst_id`.
+- If `ThoughtSpot Spotter:list_analysts` is available, call it only when the user explicitly asks to see, find or choose Analysts. Don't call it for ordinary data questions. Show the results briefly (name and description). If there's a `next_cursor` and the user wants more, fetch the next page.
+- To use an Analyst the user picked, pass its `id` as `analyst_id` to `ThoughtSpot Spotter:create_analysis_session`, and don't pass `data_source_id`. The session stays on that Analyst, so follow-ups go through `send_session_message` as usual. To change Analysts, create a new session, but only when the user asks.
+- If the response includes `connector_notice`, tell the user: connectors aren't supported over MCP, so answers can differ from the same Analyst in ThoughtSpot. If you have your own connector for that source, fetch the information yourself and pass it in `additional_context`.
+- If you get `analyst_not_found` or `analyst_forbidden`, tell the user and offer to list their Analysts. Don't silently switch to the default agent.
+
 ---
 
 ## Workflow B: Web Search (external context)
