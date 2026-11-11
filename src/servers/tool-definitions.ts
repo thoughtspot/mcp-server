@@ -357,6 +357,65 @@ export const CreateAnalysisSessionWithAnalystOutputSchema =
 				"Present when the Analyst has Spotter connectors, which were skipped because connectors are not supported over the MCP server. Tell the user about it.",
 			),
 	});
+export const LIST_ANALYSTS_DEFAULT_PAGE_SIZE = 20;
+export const LIST_ANALYSTS_MAX_PAGE_SIZE = 50;
+
+export const ListAnalystsInputSchema = z.object({
+	query: z
+		.string()
+		.trim()
+		.min(1)
+		.optional()
+		.describe(
+			"Optional case-insensitive substring to match against Analyst names.",
+		),
+	type: z
+		.enum(["ALL", "CREATED_BY_ME", "SHARED_TO_ME"])
+		.optional()
+		.describe(
+			"Optional ownership filter: ALL (default; created by or shared with the user), CREATED_BY_ME, or SHARED_TO_ME.",
+		),
+	page_size: z
+		.number()
+		.int()
+		.min(1)
+		.max(LIST_ANALYSTS_MAX_PAGE_SIZE)
+		.optional()
+		.describe(
+			`Number of Analysts to return (default ${LIST_ANALYSTS_DEFAULT_PAGE_SIZE}, max ${LIST_ANALYSTS_MAX_PAGE_SIZE}).`,
+		),
+	cursor: z
+		.string()
+		.optional()
+		.describe(
+			"Opaque cursor from a previous `list_analysts` response's `next_cursor`, to fetch the next page. Pass the same `query` and `type` as before.",
+		),
+});
+
+export const ListAnalystsOutputSchema = z.object({
+	analysts: z
+		.array(
+			z.object({
+				id: z
+					.string()
+					.describe(
+						"Analyst ID. Pass it as `analyst_id` to `create_analysis_session` to use this Analyst.",
+					),
+				name: z.string().describe("Display name of the Analyst."),
+				description: z.string().describe("What the Analyst is for."),
+			}),
+		)
+		.describe("Analysts the user can access, in this page."),
+	next_cursor: z
+		.string()
+		.optional()
+		.describe(
+			"Present when more Analysts are available; pass it as `cursor` to get the next page.",
+		),
+	total_size: z
+		.number()
+		.describe("Total number of Analysts matching the request."),
+});
 
 export const SendSessionMessageInputSchema = z.object({
 	analytical_session_id: z
@@ -703,6 +762,8 @@ export enum ToolName {
 	GetDashboardStatus = "get_dashboard_status",
 	ListOrgs = "list_orgs",
 	SwitchOrg = "switch_org",
+	// Beta (Analysts)
+	ListAnalysts = "list_analysts",
 	// V3 (Spotter Model — agentic model creation)
 	CreateModelSession = "create_model_session",
 	SendModelMessage = "send_model_message",
@@ -1345,3 +1406,22 @@ export const createAnalysisSessionToolDefinitionSpotterX = {
 		openWorldHint: false,
 	},
 };
+
+// Beta — Analysts: list_analysts is added. Spotter 3 only: on SpotterX clusters the server drops it.
+export const listAnalystsToolDefinition = {
+	name: ToolName.ListAnalysts,
+	description: `List the Analysts the user can access, with each Analyst's ID, name and description. An Analyst is a saved, purpose-built Spotter agent with its own instructions and data sources. Only call this when the user explicitly asks to see, find or choose Analysts; do not call it for ordinary data questions. Results are paginated: if \`next_cursor\` is returned and the user wants more, call again with it as \`cursor\`. To use an Analyst the user picks, call \`create_analysis_session\` with its \`id\` as \`analyst_id\`. ${MCP_CONNECTORS_UNSUPPORTED_NOTICE}`,
+	inputSchema: z.toJSONSchema(ListAnalystsInputSchema),
+	outputSchema: z.toJSONSchema(ListAnalystsOutputSchema),
+	annotations: {
+		title: "List Analysts",
+		readOnlyHint: true,
+		destructiveHint: false,
+		openWorldHint: false,
+	},
+};
+
+export const toolDefinitionsBeta = [
+	...toolDefinitionsV5,
+	listAnalystsToolDefinition,
+];
