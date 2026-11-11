@@ -12,15 +12,23 @@ export async function createSpotter3Conversation(
 		isSpotterDataSourceDiscoveryEnabled,
 		isSpotterChatHistoryEnabled,
 		dataSourceId,
+		analystId,
 	}: {
 		isSpotterDataSourceDiscoveryEnabled: boolean;
 		isSpotterChatHistoryEnabled: boolean;
 		dataSourceId?: string;
+		// When set, the conversation runs on this Analyst ("spot" in convex) for its whole life. A
+		// bound Analyst's worksheets take precedence over discovery; an Analyst without worksheet
+		// sources still relies on discovery, so the discovery flags are left as-is.
+		analystId?: string;
 	},
 ): Promise<AgentConversation> {
 	const endpoint = "/conversation/v2/";
+	const enableDatasetDiscovery =
+		isSpotterDataSourceDiscoveryEnabled && !dataSourceId;
 	const response = await fetchApi(ctx, endpoint, {
 		json: {
+			...(analystId && { spot_ids: [analystId] }),
 			context: dataSourceId
 				? {
 						type: "worksheet",
@@ -37,10 +45,8 @@ export async function createSpotter3Conversation(
 				enable_spotql: false,
 				save_chat_enabled: isSpotterChatHistoryEnabled,
 				enable_tool_permissions: false,
-				enable_search_datasets:
-					isSpotterDataSourceDiscoveryEnabled && !dataSourceId,
-				enable_auto_select_dataset:
-					isSpotterDataSourceDiscoveryEnabled && !dataSourceId,
+				enable_search_datasets: enableDatasetDiscovery,
+				enable_auto_select_dataset: enableDatasetDiscovery,
 				tags: ["mcp-server"],
 			},
 		},

@@ -359,16 +359,32 @@ describe("MCP Server", () => {
 		});
 
 		it.each([
-			{ apiVersion: "beta", isSpotterXEnabled: true, expectSpotterX: true },
-			{ apiVersion: "beta", isSpotterXEnabled: false, expectSpotterX: false },
+			{
+				apiVersion: "beta",
+				isSpotterXEnabled: true,
+				expectSpotterX: true,
+				expectAnalysts: false,
+			},
+			{
+				apiVersion: "beta",
+				isSpotterXEnabled: false,
+				expectSpotterX: false,
+				expectAnalysts: true,
+			},
 			{
 				apiVersion: undefined,
 				isSpotterXEnabled: true,
 				expectSpotterX: false,
+				expectAnalysts: false,
 			},
 		])(
-			"uses SpotterX send_session_message=$expectSpotterX for apiVersion=$apiVersion, isSpotterXEnabled=$isSpotterXEnabled",
-			async ({ apiVersion, isSpotterXEnabled, expectSpotterX }) => {
+			"uses SpotterX send_session_message=$expectSpotterX, analysts=$expectAnalysts for apiVersion=$apiVersion, isSpotterXEnabled=$isSpotterXEnabled",
+			async ({
+				apiVersion,
+				isSpotterXEnabled,
+				expectSpotterX,
+				expectAnalysts,
+			}) => {
 				const testServer = new MCPServer({
 					props: { ...mockProps, apiVersion },
 					env: {} as any,
@@ -405,13 +421,13 @@ describe("MCP Server", () => {
 					);
 				}
 
-				// create_analysis_session never takes a dashboard
+				// create_analysis_session never takes a dashboard; analyst_id is beta and Spotter 3 only
 				const sessionTool = tools.find(
 					(t) => t.name === "create_analysis_session",
 				);
-				expect((sessionTool?.inputSchema as any).properties).not.toHaveProperty(
-					"dashboard_id",
-				);
+				const sessionProperties = (sessionTool?.inputSchema as any).properties;
+				expect(sessionProperties).not.toHaveProperty("dashboard_id");
+				expect("analyst_id" in sessionProperties).toBe(expectAnalysts);
 			},
 		);
 
@@ -2022,6 +2038,213 @@ describe("MCP Server", () => {
 			expect(suggestionsData).toHaveLength(1);
 			expect(suggestionsData[0].header.guid).toBe("ds-789");
 			expect(suggestionsData[0].confidence).toBe(0.95);
+		});
+	});
+
+	describe("Analysts (beta)", () => {
+		const ANALYST_ID = "550e8400-e29b-41d4-a716-446655440000";
+
+		function setup({
+			apiVersion = "beta",
+			isSpotterXEnabled = false,
+			getAnalyst = vi.fn().mockResolvedValue({
+				id: ANALYST_ID,
+				name: "Revenue Analyst",
+				description: "Answers revenue questions",
+				connectors: [],
+			}),
+			createSpotter3 = vi
+				.fn()
+				.mockResolvedValue({ conversation_id: "conv-analyst-1" }),
+		}: {
+			apiVersion?: string;
+			isSpotterXEnabled?: boolean;
+			getAnalyst?: ReturnType<typeof vi.fn>;
+			createSpotter3?: ReturnType<typeof vi.fn>;
+		} = {}) {
+			vi.spyOn(thoughtspotClient, "ThoughtSpotClient").mockReturnValue({
+				getSessionInfo: vi.fn().mockResolvedValue({
+					clusterId: "test-cluster-123",
+					clusterName: "test-cluster",
+					releaseVersion: "10.13.0.cl-110",
+					userGUID: "test-user-123",
+					configInfo: {
+						mixpanelConfig: {
+							devSdkKey: "test-dev-token",
+							prodSdkKey: "test-prod-token",
+							production: false,
+						},
+						selfClusterName: "test-cluster",
+						selfClusterId: "test-cluster-123",
+						enableSpotterDataSourceDiscovery: true,
+						isSpotterXEnabled,
+					},
+					userName: "test-user",
+					currentOrgId: "test-org",
+					privileges: [],
+				}),
+				getAnalyst,
+				createSpotter3Conversation: createSpotter3,
+				createSpotterXConversation: vi
+					.fn()
+					.mockResolvedValue({ conversation_id: "conv-x-1" }),
+				tenantId: "test-cluster-123",
+				orgId: "test-org",
+				userId: "test-user-123",
+				instanceUrl: "https://test.thoughtspot.cloud",
+			} as any);
+			const testServer = new MCPServer({
+				props: { ...mockProps, apiVersion },
+				env: {} as any,
+			});
+			return { testServer, getAnalyst, createSpotter3 };
+		}
+
+		const errorText = (result: any) => (result.content as any)[0].text;
+
+		describe("create_analysis_session with analyst_id", () => {
+			it("binds the Spotter 3 conversation to the Analyst after checking access", async () => {
+				const { testServer, getAnalyst, createSpotter3 } = setup();
+				await testServer.init();
+
+				const result = await connect(testServer).callTool(
+					"create_analysis_session",
+					{ analyst_id: ANALYST_ID },
+				);
+
+				expect(result.isError).toBeUndefined();
+				expect(result.structuredContent).toEqual({
+					analytical_session_id: "conv-analyst-1",
+					analyst: { id: ANALYST_ID, name: "Revenue Analyst" },
+				});
+				expect(getAnalyst).toHaveBeenCalledWith({ analystId: ANALYST_ID });
+				expect(createSpotter3).toHaveBeenCalledWith({
+					isSpotterDataSourceDiscoveryEnabled: true,
+					isSpotterChatHistoryEnabled: false,
+					dataSourceId: undefined,
+					analystId: ANALYST_ID,
+				});
+			});
+
+			it("lists the Analyst's skipped connectors in connector_notice", async () => {
+				const { testServer } = setup({
+					getAnalyst: vi.fn().mockResolvedValue({
+						id: ANALYST_ID,
+						name: "Revenue Analyst",
+						description: "",
+						connectors: [{ id: "c-1", name: "Jira" }, { id: "c-2" }],
+					}),
+				});
+				await testServer.init();
+
+				const result = await connect(testServer).callTool(
+					"create_analysis_session",
+					{ analyst_id: ANALYST_ID },
+				);
+
+				const notice = (result.structuredContent as any).connector_notice;
+				expect(notice).toContain("connectors were skipped: Jira, c-2");
+				expect(notice).toContain("not supported over the MCP server");
+				expect(notice).toContain(
+					"check if the host agent has access to the connector",
+				);
+			});
+
+			it.each([
+				[404, "analyst_not_found"],
+				[403, "analyst_forbidden"],
+			])(
+				"returns a coded error and never falls back to default Spotter when the lookup fails with %i",
+				async (status, code) => {
+					const { testServer, createSpotter3 } = setup({
+						getAnalyst: vi
+							.fn()
+							.mockRejectedValue(
+								new ThoughtSpotApiError(status, "getAnalyst", "{}"),
+							),
+					});
+					await testServer.init();
+
+					const result = await connect(testServer).callTool(
+						"create_analysis_session",
+						{ analyst_id: ANALYST_ID },
+					);
+
+					expect(result.isError).toBe(true);
+					expect(errorText(result)).toContain(code);
+					expect(createSpotter3).not.toHaveBeenCalled();
+				},
+			);
+
+			it.each([
+				[
+					400,
+					'{"message":"Spot abc not found","error_code":"BAD_REQUEST"}',
+					"analyst_not_found",
+				],
+				[
+					403,
+					'{"detail":{"error_code":"SPOT_ACCESS_DENIED"}}',
+					"analyst_forbidden",
+				],
+			])(
+				"maps a Spotter 3 create failure (%i) to a coded error",
+				async (status, body, code) => {
+					const { testServer } = setup({
+						createSpotter3: vi
+							.fn()
+							.mockRejectedValue(
+								new ThoughtSpotApiError(
+									status,
+									"createSpotter3Conversation",
+									body,
+								),
+							),
+					});
+					await testServer.init();
+
+					const result = await connect(testServer).callTool(
+						"create_analysis_session",
+						{ analyst_id: ANALYST_ID },
+					);
+
+					expect(result.isError).toBe(true);
+					expect(errorText(result)).toContain(code);
+				},
+			);
+
+			it("rejects analyst_id combined with data_source_id", async () => {
+				const { testServer, getAnalyst, createSpotter3 } = setup();
+				await testServer.init();
+
+				const result = await connect(testServer).callTool(
+					"create_analysis_session",
+					{ analyst_id: ANALYST_ID, data_source_id: "ds-123" },
+				);
+
+				expect(result.isError).toBe(true);
+				expect(errorText(result)).toContain("cannot be combined");
+				expect(getAnalyst).not.toHaveBeenCalled();
+				expect(createSpotter3).not.toHaveBeenCalled();
+			});
+
+			it("ignores analyst_id outside beta (the parameter is not offered there)", async () => {
+				const { testServer, getAnalyst, createSpotter3 } = setup({
+					apiVersion: "latest",
+				});
+				await testServer.init();
+
+				const result = await connect(testServer).callTool(
+					"create_analysis_session",
+					{ analyst_id: ANALYST_ID },
+				);
+
+				expect(result.isError).toBeUndefined();
+				expect(getAnalyst).not.toHaveBeenCalled();
+				expect(createSpotter3).toHaveBeenCalledWith(
+					expect.objectContaining({ analystId: undefined }),
+				);
+			});
 		});
 	});
 

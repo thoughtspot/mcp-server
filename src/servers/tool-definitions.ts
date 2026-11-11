@@ -314,6 +314,40 @@ export const CreateAnalysisSessionOutputSchema = z.object({
 		),
 });
 
+// Shared wording so the host agent can explain why an Analyst over MCP may answer differently.
+export const MCP_CONNECTORS_UNSUPPORTED_NOTICE =
+	"Connectors are not supported over the MCP server, so an Analyst used here runs without its Spotter connectors and its answers can differ from the same Analyst in ThoughtSpot. If you are unable to access a connector, check if the host agent has access to the connector, then send the info from that connector back to Spotter (for example in the `additional_context` field of `send_session_message`).";
+
+// Beta: create a session on a saved Analyst. Spotter 3 only; the SpotterX variant is unchanged.
+export const CreateAnalysisSessionBetaInputSchema =
+	CreateAnalysisSessionSpotter3InputSchema.extend({
+		analyst_id: z
+			.string()
+			.trim()
+			.min(1)
+			.optional()
+			.describe(
+				`The ID of a saved Analyst to run this session on. Only pass it when the user explicitly asks to use a specific Analyst; omit it to use the default Analytics Agent. The session stays on this Analyst for its whole life, so follow-up messages do not need it again; to use a different Analyst, create a new session. Find Analyst IDs with \`list_analysts\` (or from the Analyst's URL in ThoughtSpot). Cannot be combined with \`data_source_id\`, because the Analyst brings its own data sources. If the ID is unknown or the user cannot access it, the tool returns an error (\`analyst_not_found\` or \`analyst_forbidden\`) instead of falling back to the default agent. ${MCP_CONNECTORS_UNSUPPORTED_NOTICE}`,
+			),
+	});
+
+export const CreateAnalysisSessionBetaOutputSchema =
+	CreateAnalysisSessionOutputSchema.extend({
+		analyst: z
+			.object({
+				id: z.string().describe("ID of the Analyst the session runs on."),
+				name: z.string().describe("Display name of the Analyst."),
+			})
+			.optional()
+			.describe("Present when the session was created with `analyst_id`."),
+		connector_notice: z
+			.string()
+			.optional()
+			.describe(
+				"Present when the Analyst has Spotter connectors, which were skipped because connectors are not supported over the MCP server. Tell the user about it.",
+			),
+	});
+
 export const SendSessionMessageInputSchema = z.object({
 	analytical_session_id: z
 		.string()
@@ -892,6 +926,22 @@ export const FinalizeModelOutputSchema = z.object({
 		.describe("Link to open the saved model (when saved)."),
 });
 
+// Spotter 3 create_analysis_session (no analyst_id). Also used on SpotterX clusters, where
+// Analysts are not supported.
+export const createAnalysisSessionToolDefinitionSpotter3 = {
+	name: ToolName.CreateAnalysisSession,
+	description:
+		"Start an analytical session with the Analytics Agent. This is the first step in a three-step workflow: create a session, send a message, then poll for updates. Once created, you can use the returned `analytical_session_id` to send analytical questions via `send_session_message` and retrieve answers via `get_session_updates`. Sessions are conversational, so you can ask follow-up questions in the same session without creating a new one. Using a single analytical session is preferable, because it reuses the same data source selection. When the user's intent is to create a dashboard, use the first message in this session to plan: ask the Analytics Agent what data and metrics are available for the topic, what trends or breakdowns would be most meaningful, and what chart types best fit the data. Use the Agent's response to form a dashboard plan before requesting any specific charts.",
+	inputSchema: z.toJSONSchema(CreateAnalysisSessionSpotter3InputSchema),
+	outputSchema: z.toJSONSchema(CreateAnalysisSessionOutputSchema),
+	annotations: {
+		title: "Create Analysis Session",
+		readOnlyHint: true,
+		destructiveHint: false,
+		openWorldHint: false,
+	},
+};
+
 export const toolDefinitionsV1 = [
 	{
 		name: ToolName.Ping,
@@ -1006,19 +1056,7 @@ export const toolDefinitionsV2 = [
 			openWorldHint: false,
 		},
 	},
-	{
-		name: ToolName.CreateAnalysisSession,
-		description:
-			"Start an analytical session with the Analytics Agent. This is the first step in a three-step workflow: create a session, send a message, then poll for updates. Once created, you can use the returned `analytical_session_id` to send analytical questions via `send_session_message` and retrieve answers via `get_session_updates`. Sessions are conversational, so you can ask follow-up questions in the same session without creating a new one. Using a single analytical session is preferable, because it reuses the same data source selection. When the user's intent is to create a dashboard, use the first message in this session to plan: ask the Analytics Agent what data and metrics are available for the topic, what trends or breakdowns would be most meaningful, and what chart types best fit the data. Use the Agent's response to form a dashboard plan before requesting any specific charts.",
-		inputSchema: z.toJSONSchema(CreateAnalysisSessionSpotter3InputSchema),
-		outputSchema: z.toJSONSchema(CreateAnalysisSessionOutputSchema),
-		annotations: {
-			title: "Create Analysis Session",
-			readOnlyHint: true,
-			destructiveHint: false,
-			openWorldHint: false,
-		},
-	},
+	createAnalysisSessionToolDefinitionSpotter3,
 	{
 		name: ToolName.SendSessionMessage,
 		description:
@@ -1310,3 +1348,27 @@ export const sendSessionMessageToolDefinitionSpotterX = {
 		openWorldHint: false,
 	},
 };
+
+// Beta — Analysts: create_analysis_session gains `analyst_id`. Spotter 3 only: on SpotterX clusters
+// the server swaps in the SpotterX create_analysis_session, which has no `analyst_id`.
+const createAnalysisSessionToolDefinitionBeta = {
+	name: ToolName.CreateAnalysisSession,
+	description:
+		"Start an analytical session with the Analytics Agent. This is the first step in a three-step workflow: create a session, send a message, then poll for updates. Once created, you can use the returned `analytical_session_id` to send analytical questions via `send_session_message` and retrieve answers via `get_session_updates`. Sessions are conversational, so you can ask follow-up questions in the same session without creating a new one. Using a single analytical session is preferable, because it reuses the same data source selection. If the user asks to use a specific Analyst (a saved, purpose-built Spotter agent), pass its `analyst_id`; otherwise omit it. If the response includes `connector_notice`, relay it to the user. When the user's intent is to create a dashboard, use the first message in this session to plan: ask the Analytics Agent what data and metrics are available for the topic, what trends or breakdowns would be most meaningful, and what chart types best fit the data. Use the Agent's response to form a dashboard plan before requesting any specific charts.",
+	inputSchema: z.toJSONSchema(CreateAnalysisSessionBetaInputSchema),
+	outputSchema: z.toJSONSchema(CreateAnalysisSessionBetaOutputSchema),
+	annotations: {
+		title: "Create Analysis Session",
+		readOnlyHint: true,
+		destructiveHint: false,
+		openWorldHint: false,
+	},
+};
+
+export const toolDefinitionsBeta = [
+	...toolDefinitionsV5.map((tool) =>
+		tool.name === ToolName.CreateAnalysisSession
+			? createAnalysisSessionToolDefinitionBeta
+			: tool,
+	),
+];

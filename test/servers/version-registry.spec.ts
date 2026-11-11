@@ -28,6 +28,16 @@ describe("Version Registry", () => {
 			expect(result.version).toContain("latest");
 		});
 
+		it("should expose analyst_id on create_analysis_session only on beta", () => {
+			const sessionProps = (version: string) =>
+				resolveApiVersion(version).tools.find(
+					(t) => t.name === "create_analysis_session",
+				)?.inputSchema.properties;
+
+			expect(sessionProps("beta")).toHaveProperty("analyst_id");
+			expect(sessionProps("latest")).not.toHaveProperty("analyst_id");
+		});
+
 		it("should return beta version when 'beta' is specified", () => {
 			const result = resolveApiVersion("beta");
 			expect(result.version).toContain("beta");
