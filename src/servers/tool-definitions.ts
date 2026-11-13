@@ -964,13 +964,13 @@ export const toolDefinitionsV2 = [
 	{
 		name: ToolName.SearchObjects,
 		description: [
-			"Search for objects (Answers, Liveboards, Worksheets) in ThoughtSpot matching a given search term. Supports optional filters (types, owner, tag, modified_since, verified_only) and pagination (limit, cursor). Returns `results` (ranked), plus `next_cursor`. Each result carries: object_id, title, type (LIVEBOARD | ANSWER | LIVEBOARD_VIZ | WORKSHEET; LIVEBOARD_VIZ is a viz pinned on a Liveboard — render it as 'Liveboard viz'), author_name, description, tags, last_modified (ISO-8601), verified, external_link, query (Answer/viz sage tokens; null for Liveboards) and confidence. Returns identifiers and metadata only — never the object's data or contents, and it does not run queries.",
+			"Search for objects (Answers, Liveboards, Worksheets) matching a given search term. Supports optional filters (types, owner, tag, modified_since, verified_only) and pagination (limit, cursor). Returns `results` (ranked), plus `next_cursor`. Each result carries: object_id, title, type (LIVEBOARD | ANSWER | LIVEBOARD_VIZ | WORKSHEET; LIVEBOARD_VIZ is a viz pinned on a Liveboard — render it as 'Liveboard viz'), author_name, description, tags, last_modified (ISO-8601), verified, external_link, query (the saved question text for Answers/vizzes; null for Liveboards) and confidence. Returns identifiers and metadata only — never the object's data or contents, and it does not run queries.",
 			"",
-			"Explaining an object is best grounded in its actual DATA, not this metadata: the fields here (title, description, `query` tokens, tags) describe an object, not its contents. `description` and `query` tokens are authoring metadata — they can be stale and are often copied verbatim across sibling vizzes, so two objects can share a byte-identical description while their data differs, which makes them unreliable for telling objects apart or explaining them.",
+			"Explaining an object is best grounded in its actual DATA, not this metadata: the fields here (title, description, `query` text, tags) describe an object, not its contents. `description` and `query` text are authoring metadata — they can be stale and are often copied verbatim across sibling vizzes, so two objects can share a byte-identical description while their data differs, which makes them unreliable for telling objects apart or explaining them.",
 			"",
 			"How to present the results:",
 			"• Render as a table with fixed columns in this order: Object (the name, linked to `external_link`) · Type · Owner · Verified (✓ or —) · Last Modified.",
-			"• Put the description and, for an Answer/viz, the `query` tokens as sub-lines under the name (e.g. '↳ sales by region, last 3 months') — never as their own columns.",
+			"• Put the description and, for an Answer/viz, the `query` text as sub-lines under the name (e.g. '↳ sales by region, last 3 months') — never as their own columns.",
 			"• Render `last_modified` as a plain date (2026-05-15), never the raw timestamp.",
 			"• Lead with the top match; if the top 2–3 are close, present them as ranked candidates.",
 			"• Never surface `next_cursor` or the numeric `confidence` in your prose.",
