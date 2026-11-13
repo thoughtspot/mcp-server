@@ -356,6 +356,30 @@ describe("MCP Server Base", () => {
 		});
 	});
 
+	describe("cachedSessionInfo", () => {
+		it("is undefined before init and the fetched session after", async () => {
+			expect(server.cachedSessionInfo()).toBeUndefined();
+			await server.init();
+			expect(server.cachedSessionInfo()?.userGUID).toBe("test-user-123");
+		});
+
+		it("never fetches when init's fetch failed", async () => {
+			const getSessionInfo = vi.fn().mockRejectedValue(new Error("down"));
+			vi.spyOn(thoughtspotClient, "ThoughtSpotClient").mockReturnValue({
+				getSessionInfo,
+				searchMetadata: vi.fn().mockResolvedValue([]),
+				instanceUrl: "https://test.thoughtspot.cloud",
+			} as any);
+			vi.spyOn(console, "error").mockImplementation(() => {});
+			const testServer = new TestMCPServer({ props: mockProps, env: mockEnv });
+			await testServer.init();
+			const fetches = getSessionInfo.mock.calls.length;
+
+			expect(testServer.cachedSessionInfo()).toBeUndefined();
+			expect(getSessionInfo).toHaveBeenCalledTimes(fetches);
+		});
+	});
+
 	describe("init — TrackEvent.Init", () => {
 		it("should track the Init event after initialization", async () => {
 			await server.init();
