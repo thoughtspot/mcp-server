@@ -12,7 +12,7 @@ import {
 	NOOP_METRICS_RECORDER,
 } from "../metrics/runtime/metrics-recorder";
 import type { ToolMetricApiSurface } from "../metrics/runtime/tool-metrics";
-import { WithSpan, getActiveSpan } from "../metrics/tracing/tracing-utils";
+import { WithSpan } from "../metrics/tracing/tracing-utils";
 import { ANALYTICS_AGENT_ANSWER_TYPE } from "../services/clients/get-data/get-data-constants";
 import type { GetDataResult } from "../services/clients/get-data/get-data-types";
 import { SpotterAnswerCsvError } from "../services/clients/get-data/spotter-answer-data";
@@ -86,57 +86,12 @@ import {
 	ToolName,
 	createAnalysisSessionToolDefinitionSpotterX,
 } from "./tool-definitions";
+import { recordGetDataFailure } from "./upstream-error-utils";
 import {
 	type VersionConfig,
 	resolveApiVersion,
 	resolveApiVersionMetrics,
 } from "./version-registry";
-
-// Condense a verbose upstream error into one user-facing line: ThoughtSpot's
-// external message when present, else a generic status line — dropping the
-// internal debug/stacktrace blob that a raw 500 body carries.
-function summarizeUpstreamError(error: unknown): string {
-	const raw = error instanceof Error ? error.message : String(error);
-	const status = raw.match(/status (\d{3})/)?.[1];
-	const generic = status
-		? `ThoughtSpot returned an error (status ${status})`
-		: raw;
-	const jsonAt = raw.indexOf("{");
-	if (jsonAt === -1) {
-		return generic;
-	}
-	try {
-		const msg = JSON.parse(raw.slice(jsonAt))?.error?.message;
-		const external =
-			msg && typeof msg === "object" ? msg.errorMessageExternal : msg;
-		return typeof external === "string" && external.trim()
-			? external.trim().replace(/\s+/g, " ")
-			: generic;
-	} catch {
-		return generic;
-	}
-}
-
-// Tag the span with the condensed upstream error; returns it plus a
-// low-cardinality status so Honeycomb splits upstream vs our own failures.
-function recordGetDataFailure(
-	error: unknown,
-	status: number | undefined,
-	label = "get_data",
-): { summary: string; statusMessage: string } {
-	const summary = summarizeUpstreamError(error);
-	getActiveSpan()?.setAttributes({
-		...(status ? { upstream_status: status } : {}),
-		upstream_error: summary,
-	});
-	let kind = "internal error";
-	if (status) {
-		kind = `upstream error (status ${status})`;
-	} else if (/timed out/i.test(summary)) {
-		kind = "upstream timeout";
-	}
-	return { summary, statusMessage: `${label} ${kind}` };
-}
 
 export class MCPServer extends BaseMCPServer {
 	private activeOrgId: string | undefined;
