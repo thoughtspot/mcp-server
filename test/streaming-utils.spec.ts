@@ -1283,6 +1283,43 @@ describe("processSpotterXEventStream", () => {
 			);
 		});
 
+		it("sets is_thinking on the metric only for events with parts and no response text", async () => {
+			const storage = makeMockStorage();
+			const recorder: MetricsRecorder = {
+				...NOOP_METRICS_RECORDER,
+				count: vi.fn(),
+			};
+			const withParts = (parts: unknown[]) => ({
+				result: { event: { content: { parts } } },
+			});
+			const items = [
+				// Thinking: thought text and a tool call
+				withParts([
+					{ text: "Thinking", thought: true },
+					{ function_call: { id: "call-1", name: "fetch_data" } },
+				]),
+				// Thinking: tool response only
+				withParts([{ function_response: { id: "call-1" } }]),
+				// Not thinking: response text
+				withParts([{ text: "Response" }]),
+				// Not thinking: mixed thought and response text
+				withParts([{ text: "Thinking", thought: true }, { text: "Response" }]),
+				// Not thinking: no parts
+				{ result: { raw_event: { actions: { end_of_agent: true } } } },
+			];
+			const reader = makeReader([
+				items.map((item) => `data: ${JSON.stringify(item)}\n`).join(""),
+			]);
+
+			await process(reader, storage, SpotterResponseFormat.RAW, recorder);
+
+			expect(
+				(recorder.count as ReturnType<typeof vi.fn>).mock.calls.map(
+					(call) => call[2].is_thinking,
+				),
+			).toEqual([true, true, false, false, false]);
+		});
+
 		it("sets span attributes and an OK status on success", async () => {
 			const storage = makeMockStorage();
 			const reader = makeReader([
@@ -1342,34 +1379,718 @@ describe("processSpotterXEventStream", () => {
 	});
 
 	describe("simplified format", () => {
-		it("stores a not-available message, marks the conversation done, and stops reading", async () => {
-			const storage = makeMockStorage();
-			const reader = makeReader([
-				`data: ${JSON.stringify({ a: 1 })}\n`,
-				`data: ${JSON.stringify({ b: 2 })}\n`,
-			]);
+		const NLS_ANSWER = {
+			title: "Top 10 products",
+			session_id: "session-1",
+			gen_no: 1,
+			transaction_id: "transaction-1",
+			generation_number: 2,
+			worksheet_id: "worksheet-1",
+			sage_query: "top 10 [product] [sales]",
+		};
+		const EXPECTED_ANSWER = {
+			type: "answer",
+			answer_id: JSON.stringify({
+				session_id: "session-1",
+				gen_no: 1,
+				conversation_id: CONV_ID,
+			}),
+			answer_title: "Top 10 products",
+			answer_data_source_id: "worksheet-1",
+			answer_query: "top 10 [product] [sales]",
+			iframe_url: `${INSTANCE_URL}/?tsmcp=true#/embed/conv-assist-answer?sessionId=session-1&genNo=1&acSessionId=transaction-1&acGenNo=2`,
+		};
 
-			await process(reader, storage, SpotterResponseFormat.SIMPLIFIED);
+		// Builds an SSE stream body from stream items, in the SpotterX envelope format
+		const sse = (...items: unknown[]) =>
+			items.map((item) => `data: ${JSON.stringify(item)}\n\n`).join("");
+		const withEvent = (event: Record<string, unknown>) => ({
+			result: { event, raw_event: event },
+		});
+		const withRawEventOnly = (rawEvent: Record<string, unknown>) => ({
+			result: { raw_event: rawEvent },
+		});
+		const withParts = (parts: unknown[], partial?: boolean) =>
+			withEvent({
+				author: "spotterx__spotter",
+				content: { role: "model", parts },
+				...(partial !== undefined && { partial }),
+			});
+		const nlsResponsePart = (callId: string, nlsAnswerText: string) => ({
+			function_response: {
+				id: callId,
+				name: "spotter_tools_fetch_and_visualize_data",
+				response: {
+					content: [
+						{ type: "text", text: "Answer summary" },
+						{
+							type: "resource",
+							annotations: { name: "nls_answer" },
+							resource: { mimeType: "application/json", text: nlsAnswerText },
+						},
+					],
+				},
+			},
+		});
+		const inlineRefMarker = (callId: string) =>
+			withRawEventOnly({
+				author: "spotterx__spotter",
+				custom_metadata: {
+					ts_inline_tool_ref: {
+						function_call_id: callId,
+						ref_id: "r1",
+						tool_name: "spotter_tools_fetch_and_visualize_data",
+					},
+				},
+			});
 
-			expect(storage.appendMessages).toHaveBeenCalledOnce();
-			expect(storage.appendMessages).toHaveBeenCalledWith(
+		const processSimplified = (
+			body: string,
+			storage: ReturnType<typeof makeMockStorage>,
+			recorder?: MetricsRecorder,
+			suppressIframes = false,
+		) =>
+			processSpotterXEventStream(
+				INSTANCE_URL,
+				SpotterResponseFormat.SIMPLIFIED,
 				CONV_ID,
-				[
+				makeReader([body]),
+				storage.appendMessages,
+				recorder,
+				suppressIframes,
+			);
+
+		// All messages stored across append calls, in order
+		const storedMessages = (storage: ReturnType<typeof makeMockStorage>) =>
+			storage.appendMessages.mock.calls.flatMap(
+				(call) => (call as unknown[])[1] as unknown[],
+			);
+
+		const makeRecorder = (): MetricsRecorder => ({
+			...NOOP_METRICS_RECORDER,
+			count: vi.fn(),
+		});
+		const metricLabels = (recorder: MetricsRecorder) =>
+			(recorder.count as ReturnType<typeof vi.fn>).mock.calls.map(
+				(call) => call[2],
+			);
+
+		describe("text", () => {
+			it("stores partial text as text_chunk messages", async () => {
+				const storage = makeMockStorage();
+
+				await processSimplified(
+					sse(
+						withParts([{ text: "Hello" }], true),
+						withParts([{ text: " world" }], true),
+					),
+					storage,
+				);
+
+				expect(storedMessages(storage)).toEqual([
+					{ is_thinking: false, type: "text_chunk", text: "Hello" },
+					{ is_thinking: false, type: "text_chunk", text: " world" },
+				]);
+			});
+
+			it("sets is_thinking=true on thought text", async () => {
+				const storage = makeMockStorage();
+
+				await processSimplified(
+					sse(withParts([{ text: "Let me think", thought: true }], true)),
+					storage,
+				);
+
+				expect(storedMessages(storage)).toEqual([
+					{ is_thinking: true, type: "text_chunk", text: "Let me think" },
+				]);
+			});
+
+			it("skips the aggregated text in a final event after partial chunks", async () => {
+				const storage = makeMockStorage();
+
+				await processSimplified(
+					sse(
+						withParts([{ text: "I'll hand" }], true),
+						withParts([{ text: " this off." }], true),
+						withParts([{ text: "I'll hand this off." }], false),
+					),
+					storage,
+				);
+
+				expect(storedMessages(storage)).toEqual([
+					{ is_thinking: false, type: "text_chunk", text: "I'll hand" },
+					{ is_thinking: false, type: "text_chunk", text: " this off." },
+				]);
+			});
+
+			it("stores final text as a text message when no partial chunks preceded it", async () => {
+				const storage = makeMockStorage();
+
+				await processSimplified(
+					sse(withParts([{ text: "Complete response" }])),
+					storage,
+				);
+
+				expect(storedMessages(storage)).toEqual([
+					{ is_thinking: false, type: "text", text: "Complete response" },
+				]);
+			});
+
+			it("resets after a final event, so a later final event without chunks is stored", async () => {
+				const storage = makeMockStorage();
+
+				await processSimplified(
+					sse(
+						withParts([{ text: "First" }], true),
+						withParts([{ text: "First" }], false),
+						withParts([{ text: "Second" }], false),
+					),
+					storage,
+				);
+
+				expect(storedMessages(storage)).toEqual([
+					{ is_thinking: false, type: "text_chunk", text: "First" },
+					{ is_thinking: false, type: "text", text: "Second" },
+				]);
+			});
+
+			it("ignores empty text chunks", async () => {
+				const storage = makeMockStorage();
+
+				await processSimplified(sse(withParts([{ text: "" }], true)), storage);
+
+				expect(storage.appendMessages).toHaveBeenCalledOnce();
+				expect(storage.appendMessages).toHaveBeenCalledWith(CONV_ID, [], true);
+			});
+		});
+
+		describe("tool calls", () => {
+			it("stores a step_notification for a named tool call", async () => {
+				const storage = makeMockStorage();
+
+				await processSimplified(
+					sse(
+						withParts([
+							{
+								function_call: {
+									id: "call-1",
+									name: "get_memory",
+									args: { query: "x" },
+								},
+							},
+						]),
+					),
+					storage,
+				);
+
+				expect(storedMessages(storage)).toEqual([
+					{ is_thinking: true, type: "step_notification", text: "get_memory" },
+				]);
+			});
+
+			it("stores one step_notification per tool call ID, ignoring repeats and progress updates", async () => {
+				const storage = makeMockStorage();
+
+				await processSimplified(
+					sse(
+						withParts(
+							[{ function_call: { id: "call-1", name: "fetch_data" } }],
+							true,
+						),
+						withParts([
+							{ function_call: { id: "call-1", name: "fetch_data", args: {} } },
+						]),
+						withParts(
+							[
+								{
+									text: '[fetch_data] {"code":"nls_start"}',
+									thought: true,
+									function_call: { id: "call-1" },
+								},
+							],
+							true,
+						),
+						withParts([
+							{ function_call: { id: "call-2", name: "get_memory" } },
+						]),
+					),
+					storage,
+				);
+
+				expect(storedMessages(storage)).toEqual([
+					{ is_thinking: true, type: "step_notification", text: "fetch_data" },
+					{ is_thinking: true, type: "step_notification", text: "get_memory" },
+				]);
+			});
+
+			it("ignores a tool call with no ID", async () => {
+				const storage = makeMockStorage();
+
+				await processSimplified(
+					sse(withParts([{ function_call: { name: "get_memory" } }])),
+					storage,
+				);
+
+				expect(storedMessages(storage)).toEqual([]);
+			});
+
+			it("stores the step_notification of a final event that also repeats streamed thought text", async () => {
+				const storage = makeMockStorage();
+
+				await processSimplified(
+					sse(
+						withParts([{ text: "Fetching data.", thought: true }], true),
+						withParts([
+							{ text: "Fetching data.", thought: true },
+							{ function_call: { id: "call-1", name: "fetch_data" } },
+						]),
+					),
+					storage,
+				);
+
+				expect(storedMessages(storage)).toEqual([
+					{ is_thinking: true, type: "text_chunk", text: "Fetching data." },
+					{ is_thinking: true, type: "step_notification", text: "fetch_data" },
+				]);
+			});
+		});
+
+		describe("answers", () => {
+			it("stores a thinking answer from a tool response's nls_answer resource", async () => {
+				const storage = makeMockStorage();
+
+				await processSimplified(
+					sse(
+						withParts([nlsResponsePart("call-1", JSON.stringify(NLS_ANSWER))]),
+					),
+					storage,
+				);
+
+				expect(storedMessages(storage)).toEqual([
+					{ is_thinking: true, ...EXPECTED_ANSWER },
+				]);
+			});
+
+			it("re-emits a thinking answer as a final answer when a raw_event marker references it", async () => {
+				const storage = makeMockStorage();
+
+				await processSimplified(
+					sse(
+						withParts([nlsResponsePart("call-1", JSON.stringify(NLS_ANSWER))]),
+						withParts([{ text: "Here are the results." }], true),
+						inlineRefMarker("call-1"),
+					),
+					storage,
+				);
+
+				expect(storedMessages(storage)).toEqual([
+					{ is_thinking: true, ...EXPECTED_ANSWER },
 					{
 						is_thinking: false,
-						type: "text",
-						text: expect.stringContaining(
-							"Simplified response format is not available",
-						),
+						type: "text_chunk",
+						text: "Here are the results.",
 					},
-				],
+					{ is_thinking: false, ...EXPECTED_ANSWER },
+				]);
+			});
+
+			it("reads a marker from the typed event's custom_metadata", async () => {
+				const storage = makeMockStorage();
+
+				await processSimplified(
+					sse(
+						withParts([nlsResponsePart("call-1", JSON.stringify(NLS_ANSWER))]),
+						{
+							result: {
+								event: {
+									custom_metadata: {
+										ts_inline_tool_ref: { function_call_id: "call-1" },
+									},
+								},
+							},
+						},
+					),
+					storage,
+				);
+
+				expect(storedMessages(storage)).toEqual([
+					{ is_thinking: true, ...EXPECTED_ANSWER },
+					{ is_thinking: false, ...EXPECTED_ANSWER },
+				]);
+			});
+
+			it("keeps an unreferenced answer as thinking only, and ignores a marker for an unknown call", async () => {
+				const storage = makeMockStorage();
+				const discarded = { ...NLS_ANSWER, session_id: "discarded" };
+
+				await processSimplified(
+					sse(
+						withParts([nlsResponsePart("call-1", JSON.stringify(discarded))]),
+						withParts([nlsResponsePart("call-2", JSON.stringify(NLS_ANSWER))]),
+						inlineRefMarker("call-2"),
+						inlineRefMarker("call-unknown"),
+					),
+					storage,
+				);
+
+				const answers = storedMessages(storage) as {
+					is_thinking: boolean;
+					answer_id: string;
+				}[];
+				expect(
+					answers.map((answer) => [
+						answer.is_thinking,
+						JSON.parse(answer.answer_id).session_id,
+					]),
+				).toEqual([
+					[true, "discarded"],
+					[true, "session-1"],
+					[false, "session-1"],
+				]);
+			});
+
+			it("ignores tool responses without an nls_answer resource", async () => {
+				const storage = makeMockStorage();
+
+				await processSimplified(
+					sse(
+						withParts([
+							{
+								function_response: {
+									id: "call-1",
+									name: "get_memory",
+									response: { content: [{ type: "text", text: "{}" }] },
+								},
+							},
+						]),
+					),
+					storage,
+				);
+
+				expect(storedMessages(storage)).toEqual([]);
+			});
+
+			it("ignores an nls_answer that is not valid JSON and logs an error", async () => {
+				const storage = makeMockStorage();
+
+				await processSimplified(
+					sse(withParts([nlsResponsePart("call-1", "{not json")])),
+					storage,
+				);
+
+				expect(storedMessages(storage)).toEqual([]);
+				expect(consoleErrorSpy).toHaveBeenCalledWith(
+					"Failed to parse SpotterX NLS answer:",
+					expect.any(String),
+					expect.any(SyntaxError),
+				);
+			});
+
+			it("builds no iframe_url when iframes are suppressed", async () => {
+				const storage = makeMockStorage();
+
+				await processSimplified(
+					sse(
+						withParts([nlsResponsePart("call-1", JSON.stringify(NLS_ANSWER))]),
+						inlineRefMarker("call-1"),
+					),
+					storage,
+					undefined,
+					true,
+				);
+
+				const messages = storedMessages(storage);
+				expect(messages).toHaveLength(2);
+				for (const message of messages) {
+					expect(message).not.toHaveProperty("iframe_url");
+					expect(message).toMatchObject({ type: "answer" });
+				}
+			});
+		});
+
+		describe("errors", () => {
+			it("stores a stream-level error's message and flags the span", async () => {
+				const storage = makeMockStorage();
+				const recorder = makeRecorder();
+				const item = {
+					result: { error: { code: 409, message: "Session busy" } },
+				};
+
+				await processSimplified(sse(item), storage, recorder);
+
+				expect(storedMessages(storage)).toEqual([
+					{ is_thinking: false, type: "text", text: "Session busy" },
+				]);
+				expect(tracingState.span!.setStatus).toHaveBeenCalledWith({
+					code: SpanStatusCode.ERROR,
+					message: `Error event in event stream: ${JSON.stringify(item)}`,
+				});
+				expect(tracingState.span!.setStatus).not.toHaveBeenCalledWith(
+					expect.objectContaining({ code: SpanStatusCode.OK }),
+				);
+				expect(metricLabels(recorder)).toEqual([
+					expect.objectContaining({
+						message_type: "error",
+						is_thinking: false,
+					}),
+				]);
+				expect(consoleErrorSpy).toHaveBeenCalled();
+			});
+
+			it("stores an agent error's error_message", async () => {
+				const storage = makeMockStorage();
+
+				await processSimplified(
+					sse(
+						withEvent({
+							error_code: "MODEL_ERROR",
+							error_message: "Model failed",
+							custom_metadata: { __ba_error: { display_message: "Ignored" } },
+						}),
+					),
+					storage,
+				);
+
+				expect(storedMessages(storage)).toEqual([
+					{ is_thinking: false, type: "text", text: "Model failed" },
+				]);
+			});
+
+			it("falls back to the __ba_error display_message on the typed event", async () => {
+				const storage = makeMockStorage();
+
+				await processSimplified(
+					sse({
+						result: {
+							event: {
+								error_code: "MODEL_ERROR",
+								custom_metadata: {
+									__ba_error: { display_message: "From event" },
+								},
+							},
+						},
+					}),
+					storage,
+				);
+
+				expect(storedMessages(storage)).toEqual([
+					{ is_thinking: false, type: "text", text: "From event" },
+				]);
+			});
+
+			it("falls back to the __ba_error display_message on the raw_event", async () => {
+				const storage = makeMockStorage();
+
+				await processSimplified(
+					sse({
+						result: {
+							event: { error_code: "MODEL_ERROR" },
+							raw_event: {
+								error_code: "MODEL_ERROR",
+								custom_metadata: {
+									__ba_error: { display_message: "From raw event" },
+								},
+							},
+						},
+					}),
+					storage,
+				);
+
+				expect(storedMessages(storage)).toEqual([
+					{ is_thinking: false, type: "text", text: "From raw event" },
+				]);
+			});
+
+			it("falls back to 'Something went wrong' when the error has no message", async () => {
+				const storage = makeMockStorage();
+
+				await processSimplified(
+					sse(withEvent({ error_code: "MODEL_ERROR" })),
+					storage,
+				);
+
+				expect(storedMessages(storage)).toEqual([
+					{ is_thinking: false, type: "text", text: "Something went wrong" },
+				]);
+			});
+
+			it("keeps processing events after an error", async () => {
+				const storage = makeMockStorage();
+
+				await processSimplified(
+					sse(
+						withEvent({ error_code: "MODEL_ERROR", error_message: "Failed" }),
+						withParts([{ text: "Continuing" }]),
+					),
+					storage,
+				);
+
+				expect(storedMessages(storage)).toEqual([
+					{ is_thinking: false, type: "text", text: "Failed" },
+					{ is_thinking: false, type: "text", text: "Continuing" },
+				]);
+			});
+		});
+
+		describe("ignored events", () => {
+			it("ignores events with only state changes", async () => {
+				const storage = makeMockStorage();
+
+				await processSimplified(
+					sse(
+						withRawEventOnly({
+							author: "TitleGenerator",
+							actions: { state_delta: { __title: "Top 10 Products" } },
+						}),
+						withRawEventOnly({
+							author: "spotterx",
+							actions: { end_of_agent: true },
+						}),
+					),
+					storage,
+				);
+
+				expect(storage.appendMessages).toHaveBeenCalledOnce();
+				expect(storage.appendMessages).toHaveBeenCalledWith(CONV_ID, [], true);
+			});
+
+			it("warns about and ignores an item with no event", async () => {
+				const storage = makeMockStorage();
+				const item = { unexpected: true };
+
+				await processSimplified(sse(item), storage);
+
+				expect(storedMessages(storage)).toEqual([]);
+				expect(consoleWarnSpy).toHaveBeenCalledWith(
+					"Unknown event in event stream:",
+					JSON.stringify(item),
+				);
+			});
+		});
+
+		it("records metrics and span counters for each message type", async () => {
+			const storage = makeMockStorage();
+			const recorder = makeRecorder();
+
+			await processSimplified(
+				sse(
+					// Parsed: text chunk
+					withParts([{ text: "Thinking", thought: true }], true),
+					// Parsed: step notification
+					withParts([{ function_call: { id: "call-1", name: "fetch_data" } }]),
+					// Ignored: progress update
+					withParts(
+						[
+							{
+								text: "[fetch_data] {}",
+								thought: true,
+								function_call: { id: "call-1" },
+							},
+						],
+						true,
+					),
+					// Parsed: thinking answer
+					withParts([nlsResponsePart("call-1", JSON.stringify(NLS_ANSWER))]),
+					// Parsed: final answer
+					inlineRefMarker("call-1"),
+					// Ignored: state-only event
+					withRawEventOnly({ actions: { end_of_agent: true } }),
+				),
+				storage,
+				recorder,
+			);
+
+			const operation = "send_agent_conversation_message_streaming";
+			expect(metricLabels(recorder)).toEqual([
+				{
+					upstream_operation: operation,
+					message_type: "text_chunk",
+					is_thinking: true,
+				},
+				{
+					upstream_operation: operation,
+					message_type: "step_notification",
+					is_thinking: true,
+				},
+				{
+					upstream_operation: operation,
+					message_type: "answer",
+					is_thinking: true,
+				},
+				{
+					upstream_operation: operation,
+					message_type: "answer",
+					is_thinking: false,
+				},
+			]);
+			expect(tracingState.span!.setAttributes).toHaveBeenCalledWith({
+				spotter_response_format: SpotterResponseFormat.SIMPLIFIED,
+				total_messages_parsed: 4,
+				total_text_messages_parsed: 2,
+				total_answer_messages_parsed: 2,
+				total_messages_ignored: 2,
+			});
+			expect(tracingState.span!.setStatus).toHaveBeenCalledWith({
+				code: SpanStatusCode.OK,
+				message: "Streaming response concluded successfully",
+			});
+		});
+
+		it("converts a full turn in stream order", async () => {
+			const storage = makeMockStorage();
+
+			await processSimplified(
+				sse(
+					withRawEventOnly({
+						author: "TitleGenerator",
+						actions: { state_delta: { __title: "Top 10 Products" } },
+					}),
+					withParts([{ text: "I'll hand this" }], true),
+					withParts([{ text: " to the data agent." }], true),
+					withParts([{ text: "I'll hand this to the data agent." }], false),
+					withParts([{ text: "Let me fetch that.", thought: true }], true),
+					withParts([
+						{ text: "Let me fetch that.", thought: true },
+						{ function_call: { id: "call-1", name: "fetch_data", args: {} } },
+					]),
+					withParts(
+						[
+							{
+								text: '[fetch_data] {"code":"nls_start"}',
+								thought: true,
+								function_call: { id: "call-1" },
+							},
+						],
+						true,
+					),
+					withParts([nlsResponsePart("call-1", JSON.stringify(NLS_ANSWER))]),
+					withParts([{ text: "Here are the top products." }], true),
+					withParts([{ text: "Here are the top products." }], false),
+					inlineRefMarker("call-1"),
+					withRawEventOnly({ actions: { end_of_agent: true } }),
+				),
+				storage,
+			);
+
+			expect(storedMessages(storage)).toEqual([
+				{ is_thinking: false, type: "text_chunk", text: "I'll hand this" },
+				{ is_thinking: false, type: "text_chunk", text: " to the data agent." },
+				{ is_thinking: true, type: "text_chunk", text: "Let me fetch that." },
+				{ is_thinking: true, type: "step_notification", text: "fetch_data" },
+				{ is_thinking: true, ...EXPECTED_ANSWER },
+				{
+					is_thinking: false,
+					type: "text_chunk",
+					text: "Here are the top products.",
+				},
+				{ is_thinking: false, ...EXPECTED_ANSWER },
+			]);
+			expect(storage.appendMessages).toHaveBeenLastCalledWith(
+				CONV_ID,
+				[],
 				true,
 			);
-			expect(reader.read).toHaveBeenCalledOnce();
-			expect(tracingState.span!.setStatus).toHaveBeenCalledWith({
-				code: SpanStatusCode.ERROR,
-				message: "Simplified response format for SpotterX not yet implemented",
-			});
 		});
 
 		it("still marks the conversation done when the stream has no events", async () => {
