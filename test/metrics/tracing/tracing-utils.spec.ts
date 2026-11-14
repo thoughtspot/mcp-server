@@ -137,6 +137,52 @@ describe("tracing-utils", () => {
 			expect(mockSpan.end).toHaveBeenCalled();
 		});
 
+		it("should keep an error status already set before the throw", async () => {
+			const mockSpan = {
+				status: { code: SpanStatusCode.ERROR, message: "specific failure" },
+				recordException: vi.fn(),
+				setStatus: vi.fn(),
+				end: vi.fn(),
+			};
+			vi.mocked(trace.getTracer).mockReturnValue({
+				startActiveSpan: vi.fn((name, fn) => fn(mockSpan)),
+			} as any);
+
+			await expect(
+				withSpan(
+					"test-operation",
+					vi.fn().mockRejectedValue(new Error("boom")),
+				),
+			).rejects.toThrow("boom");
+
+			expect(mockSpan.recordException).toHaveBeenCalled();
+			expect(mockSpan.setStatus).not.toHaveBeenCalled();
+		});
+
+		it("should overwrite an OK status when the function then throws", async () => {
+			const mockSpan = {
+				status: { code: SpanStatusCode.OK, message: "step done" },
+				recordException: vi.fn(),
+				setStatus: vi.fn(),
+				end: vi.fn(),
+			};
+			vi.mocked(trace.getTracer).mockReturnValue({
+				startActiveSpan: vi.fn((name, fn) => fn(mockSpan)),
+			} as any);
+
+			await expect(
+				withSpan(
+					"test-operation",
+					vi.fn().mockRejectedValue(new Error("boom")),
+				),
+			).rejects.toThrow("boom");
+
+			expect(mockSpan.setStatus).toHaveBeenCalledWith({
+				code: SpanStatusCode.ERROR,
+				message: "boom",
+			});
+		});
+
 		it("should ignore parentSpan parameter for backward compatibility", async () => {
 			const mockSpan = {
 				setAttribute: vi.fn(),

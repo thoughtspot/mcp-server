@@ -10,6 +10,10 @@ function recordSpanError(span: Span, err: unknown): void {
 	const message = err instanceof Error ? err.message : String(err);
 	// Non-Error throws (null, objects) are passed as a string to keep the SDK safe.
 	span.recordException(err instanceof Error ? err : message);
+	// Keep an error status the code already set before throwing; SDK spans expose `status`.
+	const existing = (span as { status?: { code?: number; message?: string } })
+		.status;
+	if (existing?.code === SpanStatusCode.ERROR && existing.message) return;
 	span.setStatus({ code: SpanStatusCode.ERROR, message });
 }
 
