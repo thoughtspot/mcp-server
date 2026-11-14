@@ -1,8 +1,20 @@
 // tracing-utils.ts
-import { type Span, context, trace } from "@opentelemetry/api";
+import { type Span, SpanStatusCode, context, trace } from "@opentelemetry/api";
 
 export function getActiveSpan(spanOverride?: Span): Span | undefined {
 	return spanOverride ?? trace.getSpan(context.active());
+}
+
+// Thrown errors otherwise leave the span with no status message in Honeycomb.
+function recordSpanError(span: Span, err: unknown): void {
+	const message = err instanceof Error ? err.message : String(err);
+	// Non-Error throws (null, objects) are passed as a string to keep the SDK safe.
+	span.recordException(err instanceof Error ? err : message);
+	// Keep an error status the code already set before throwing; SDK spans expose `status`.
+	const existing = (span as { status?: { code?: number; message?: string } })
+		.status;
+	if (existing?.code === SpanStatusCode.ERROR && existing.message) return;
+	span.setStatus({ code: SpanStatusCode.ERROR, message });
 }
 
 export async function withSpan<T>(
@@ -18,7 +30,7 @@ export async function withSpan<T>(
 		try {
 			return await fn(span);
 		} catch (err) {
-			span.recordException(err as Error);
+			recordSpanError(span, err);
 			throw err;
 		} finally {
 			span.end();
@@ -47,7 +59,7 @@ export function WithSpan(name: string) {
 				try {
 					return await originalMethod.apply(this, args);
 				} catch (err) {
-					span.recordException(err as Error);
+					recordSpanError(span, err);
 					throw err;
 				} finally {
 					span.end();

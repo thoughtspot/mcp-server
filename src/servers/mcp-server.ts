@@ -86,36 +86,13 @@ import {
 	ToolName,
 	createAnalysisSessionToolDefinitionSpotterX,
 } from "./tool-definitions";
+import { recordGetDataFailure } from "./upstream-error-utils";
 import {
 	type VersionConfig,
 	resolveApiVersion,
 	resolveApiVersionMetrics,
 } from "./version-registry";
 
-// Condense a verbose upstream error into one user-facing line: ThoughtSpot's
-// external message when present, else a generic status line — dropping the
-// internal debug/stacktrace blob that a raw 500 body carries.
-function summarizeUpstreamError(error: unknown): string {
-	const raw = error instanceof Error ? error.message : String(error);
-	const status = raw.match(/status (\d{3})/)?.[1];
-	const generic = status
-		? `ThoughtSpot returned an error (status ${status})`
-		: raw;
-	const jsonAt = raw.indexOf("{");
-	if (jsonAt === -1) {
-		return generic;
-	}
-	try {
-		const msg = JSON.parse(raw.slice(jsonAt))?.error?.message;
-		const external =
-			msg && typeof msg === "object" ? msg.errorMessageExternal : msg;
-		return typeof external === "string" && external.trim()
-			? external.trim().replace(/\s+/g, " ")
-			: generic;
-	} catch {
-		return generic;
-	}
-}
 export class MCPServer extends BaseMCPServer {
 	private activeOrgId: string | undefined;
 	private activeOrgToken: string | undefined;
@@ -1710,9 +1687,14 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 				status === 403
 					? "You may not have permission to download this answer's data."
 					: "The answer's conversation may have expired; ask the Analytics Agent the question again and pass the new answer's `answer_id`.";
+			const { summary, statusMessage } = recordGetDataFailure(
+				error,
+				status,
+				"get_data (ANALYTICS_AGENT_ANSWER)",
+			);
 			return this.createErrorResponse(
-				`Failed to fetch answer data: ${summarizeUpstreamError(error)}. ${hint}`,
-				"get_data (ANALYTICS_AGENT_ANSWER) failed",
+				`Failed to fetch answer data: ${summary}. ${hint}`,
+				statusMessage,
 			);
 		}
 	}
@@ -1764,14 +1746,16 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		} catch (error) {
 			// Let a 401 propagate to the central reauth handler in callTool, which
 			// returns an explicit "reauthenticate" message.
-			if (this.apiErrorStatus(error) === 401) {
+			const status = this.apiErrorStatus(error);
+			if (status === 401) {
 				throw error;
 			}
 			// Surface a condensed upstream message (external text + status), not the
 			// raw debug/stacktrace blob a 500 body carries.
+			const { summary, statusMessage } = recordGetDataFailure(error, status);
 			return this.createErrorResponse(
-				`Failed to fetch object data: ${summarizeUpstreamError(error)}`,
-				"get_data failed",
+				`Failed to fetch object data: ${summary}`,
+				statusMessage,
 			);
 		}
 	}

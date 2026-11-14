@@ -17,6 +17,7 @@
  * mcp-server-v2.integration.spec.ts) rather than a transport.
  */
 
+import { SpanStatusCode, context, trace } from "@opentelemetry/api";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MCPServer } from "../../src/servers/mcp-server";
 import { LIVEBOARD_RECORD_SIZE } from "../../src/services/clients/get-data/get-data-client";
@@ -116,6 +117,11 @@ function callTo(needle: string): [string, any] | undefined {
 	return fetchMock.mock.calls.find(([u]) => String(u).includes(needle)) as
 		| [string, any]
 		| undefined;
+}
+
+// The shared OTEL mock span (test/setup.ts) that tool handlers write to.
+function activeSpan(): any {
+	return trace.getSpan(context.active());
 }
 
 async function newServer(): Promise<MCPServer> {
@@ -650,6 +656,41 @@ describe("get_data tool — real handler + mocked network", () => {
 		expect((result.content as any[])[0].text).toMatch(
 			/Failed to fetch object data: .*status 500/,
 		);
+		const span = activeSpan();
+		expect(span.setAttributes).toHaveBeenCalledWith({
+			upstream_status: 500,
+			upstream_error: "ThoughtSpot returned an error (status 500)",
+		});
+		expect(span.setStatus).toHaveBeenCalledWith({
+			code: SpanStatusCode.ERROR,
+			message: "get_data upstream error (status 500)",
+		});
+		expect(span.setAttribute).toHaveBeenCalledWith(
+			"upstream_request_id",
+			expect.any(String),
+		);
+	});
+
+	it("marks a failure with no upstream status as an internal error", async () => {
+		handlers.answerData = () => {
+			throw new Error("network down");
+		};
+
+		const server = await newServer();
+		const result = await callTool(server, "get_data", {
+			object_id: "answer-1",
+			object_type: "ANSWER",
+		});
+
+		expect(result.isError).toBe(true);
+		const span = activeSpan();
+		expect(span.setAttributes).toHaveBeenCalledWith({
+			upstream_error: "network down",
+		});
+		expect(span.setStatus).toHaveBeenCalledWith({
+			code: SpanStatusCode.ERROR,
+			message: "get_data internal error",
+		});
 	});
 
 	it("condenses a verbose upstream 500 to the external message, dropping the debug blob", async () => {
@@ -683,5 +724,10 @@ describe("get_data tool — real handler + mocked network", () => {
 		expect(text).toContain("query failed");
 		expect(text).not.toContain("stacktrace");
 		expect(text).not.toContain('"debug"');
+		expect(activeSpan().setAttributes).toHaveBeenCalledWith({
+			upstream_status: 500,
+			upstream_error:
+				"Error Code: FALCON_QUERY_EXECUTION_ERROR Error Message: query failed",
+		});
 	});
 });
