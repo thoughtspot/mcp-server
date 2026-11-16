@@ -302,7 +302,7 @@ export const CreateAnalysisSessionSpotter3InputSchema = z.object({
 		.string()
 		.optional()
 		.describe(
-			'The ID of the data source to query. Omit it by default: the Analytics Agent automatically selects the most relevant source based on the question. Set it only when the user has specified or confirmed a data source, or after this tool returns an error saying a data source is required. If the user names a data source but you do not have its ID, look it up with `search_objects` (type `WORKSHEET`); if that finds no match, pass the name in the `additional_context` field of `send_session_message` instead. Do not call `search_objects` up front just to find a data source. A valid ID follows the following format: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" (for example, "de1b3cfd-1725-400a-b6c7-0cd0f2b70bf1").',
+			'The ID of the data source to query. Omit it by default: the Analytics Agent automatically selects the most relevant source based on the question. Set it only when the user has specified or confirmed a data source, or after this tool returns an error saying a data source is required. If the user names a data source but you do not have its ID, look it up with `search_objects` with `types: ["WORKSHEET"]`; if that finds no match, pass the name in the `additional_context` field of `send_session_message` instead. Do not call `search_objects` up front just to find a data source. A valid ID follows the following format: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" (for example, "de1b3cfd-1725-400a-b6c7-0cd0f2b70bf1").',
 		),
 });
 

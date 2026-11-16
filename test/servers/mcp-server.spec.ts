@@ -298,6 +298,7 @@ describe("MCP Server", () => {
 				.description;
 			expect(dataSource).toMatch(/Omit it by default/);
 			expect(dataSource).toMatch(/look it up with `search_objects`/);
+			expect(dataSource).toContain('types: ["WORKSHEET"]');
 
 			const getData = byName("get_data");
 			expect(getData?.description).toMatch(
