@@ -277,6 +277,35 @@ describe("MCP Server", () => {
 			expect(modifyTool?.description).not.toMatch(/spotterviz/i);
 		});
 
+		it("steers agents off search_objects/get_data for data source discovery", async () => {
+			await server.init();
+			const { listTools } = connect(server);
+
+			const tools = (await listTools()).tools ?? [];
+			const byName = (name: string) => tools.find((t) => t.name === name);
+
+			const search = byName("search_objects");
+			expect(search?.description).toMatch(
+				/Do not call this to pick a data source/,
+			);
+			expect(search?.description).toMatch(/when the user names one/);
+
+			const session = byName("create_analysis_session");
+			expect(session?.description).toMatch(
+				/selects one automatically from the question/,
+			);
+			const dataSource = (session?.inputSchema as any).properties.data_source_id
+				.description;
+			expect(dataSource).toMatch(/Omit it by default/);
+			expect(dataSource).toMatch(/look it up with `search_objects`/);
+
+			const getData = byName("get_data");
+			expect(getData?.description).toMatch(
+				/Do not use it, or `search_objects`, to answer a new analytical question/,
+			);
+			expect(getData?.description).toMatch(/Worksheets are not supported/);
+		});
+
 		it("keeps dashboard tool descriptions free of imperatives and stale tool names", async () => {
 			await server.init();
 			const { listTools } = connect(server);
