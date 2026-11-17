@@ -15,7 +15,7 @@ describe("analysts-client", () => {
 			ok: status < 400,
 			status,
 			json: vi.fn().mockResolvedValue(body),
-			text: vi.fn().mockResolvedValue(body),
+			text: vi.fn().mockResolvedValue(JSON.stringify(body)),
 		});
 
 	beforeEach(() => {
@@ -34,20 +34,17 @@ describe("analysts-client", () => {
 
 	it.each([
 		[
-			"searchAnalysts",
 			{ recordSize: 2, recordOffset: 4, query: "q", type: "SHARED_TO_ME" },
 			{ record_size: 2, record_offset: 4, query: "q", type: "SHARED_TO_ME" },
 		],
 		[
-			"searchAnalysts",
 			{ recordSize: 20, recordOffset: 0 },
 			{ record_size: 20, record_offset: 0 },
 		],
-		["getAnalyst", { analystId: "a-1" }, { analyst_identifier: "a-1" }],
-	])("%s posts %o as %o", async (op, args, body) => {
+	])("searchAnalysts posts %o as %o", async (args, body) => {
 		respond({ analysts: [{ id: "a-1" }] });
 
-		await client[op](args);
+		await client.searchAnalysts(args);
 
 		const [url, init] = (global.fetch as any).mock.calls[0];
 		expect(url).toBe("https://ts.test/convex/spots/public/search");
@@ -55,7 +52,7 @@ describe("analysts-client", () => {
 		expect(JSON.parse(init.body)).toEqual(body);
 	});
 
-	it("maps analysts and their connectors, dropping unusable connectors", async () => {
+	it("maps analysts to id, name and description only", async () => {
 		respond({
 			analysts: [
 				{
@@ -63,12 +60,7 @@ describe("analysts-client", () => {
 					name: "Revenue",
 					description: "d",
 					instructions: "not exposed",
-					mcp_connectors: [
-						{ id: "c-1", name: "Jira", icon_url: "x" },
-						{ id: "" },
-						"c-2",
-						"",
-					],
+					mcp_connectors: [{ id: "c-1", name: "Jira" }],
 				},
 				{ id: "a-2", name: null, description: null },
 			],
@@ -79,33 +71,29 @@ describe("analysts-client", () => {
 			await client.searchAnalysts({ recordSize: 2, recordOffset: 0 }),
 		).toEqual({
 			analysts: [
-				{
-					id: "a-1",
-					name: "Revenue",
-					description: "d",
-					connectors: [{ id: "c-1", name: "Jira" }, { id: "c-2" }],
-				},
-				{ id: "a-2", name: "", description: "", connectors: [] },
+				{ id: "a-1", name: "Revenue", description: "d" },
+				{ id: "a-2", name: "", description: "" },
 			],
 			totalSize: 7,
 		});
 	});
 
-	it.each([
-		{ op: "searchAnalysts", status: 500, body: "boom", http: 500 },
-		{ op: "getAnalyst", status: 403, body: "", http: 403 },
-		// An empty fetch-mode result means the id is unknown.
-		{ op: "getAnalyst", status: 404, body: { analysts: [] }, http: 200 },
-	])(
-		"$op rejects with ThoughtSpotApiError($status) on HTTP $http",
-		async ({ op, status, body, http }) => {
-			respond(body, http);
+	it("defaults a missing analysts list and total_size", async () => {
+		respond({});
 
-			const error = await client[op]({
-				recordSize: 20,
-				recordOffset: 0,
-				analystId: "a-1",
-			}).catch((e: unknown) => e);
+		expect(
+			await client.searchAnalysts({ recordSize: 2, recordOffset: 0 }),
+		).toEqual({ analysts: [], totalSize: 0 });
+	});
+
+	it.each([500, 403])(
+		"rejects with ThoughtSpotApiError(%d) on a failed response",
+		async (status) => {
+			respond({ message: "boom" }, status);
+
+			const error = await client
+				.searchAnalysts({ recordSize: 20, recordOffset: 0 })
+				.catch((e: unknown) => e);
 
 			expect(error).toBeInstanceOf(ThoughtSpotApiError);
 			expect(error.status).toBe(status);

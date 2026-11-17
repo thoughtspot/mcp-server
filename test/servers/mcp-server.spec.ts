@@ -1914,21 +1914,15 @@ describe("MCP Server", () => {
 
 	describe("create_analysis_session with analyst_id", () => {
 		const ANALYST_ID = "550e8400-e29b-41d4-a716-446655440000";
-		const ANALYST = {
-			id: ANALYST_ID,
-			name: "Revenue Analyst",
-			description: "",
-		};
 		const apiError = (status: number, op: string, body = "{}") =>
 			vi.fn().mockRejectedValue(new ThoughtSpotApiError(status, op, body));
 
-		// Calls the handler on the default mocked client, with the Analyst/conversation calls swapped in
+		// Calls the handler on the default mocked client, with the conversation calls swapped in
 		async function call(
 			args: Record<string, unknown>,
 			{
 				apiVersion = "latest",
 				isSpotterXEnabled = false,
-				getAnalyst = vi.fn().mockResolvedValue({ ...ANALYST, connectors: [] }),
 				createSpotter3 = vi
 					.fn()
 					.mockResolvedValue({ conversation_id: "conv-analyst-1" }),
@@ -1938,7 +1932,6 @@ describe("MCP Server", () => {
 				.fn()
 				.mockResolvedValue({ conversation_id: "conv-x-1" });
 			Object.assign(new (thoughtspotClient.ThoughtSpotClient as any)(), {
-				getAnalyst,
 				createSpotter3Conversation: createSpotter3,
 				createSpotterXConversation: createSpotterX,
 			});
@@ -1956,39 +1949,22 @@ describe("MCP Server", () => {
 				},
 				NOOP_METRICS_RECORDER,
 			)) as any;
-			return { result, getAnalyst, createSpotter3, createSpotterX };
+			return { result, createSpotter3, createSpotterX };
 		}
 
-		it.each([
-			{ apiVersion: "latest", connectors: [], notice: undefined },
-			{
-				apiVersion: "beta",
-				connectors: [{ id: "c-1", name: "Jira" }, { id: "c-2" }],
-				notice: "connectors were skipped: Jira, c-2",
-			},
-		])(
-			"binds the conversation to the Analyst on $apiVersion (connector_notice: $notice)",
-			async ({ apiVersion, connectors, notice }) => {
-				const { result, getAnalyst, createSpotter3 } = await call(
+		it.each(["latest", "beta"])(
+			"binds the conversation to the Analyst on %s without a lookup",
+			async (apiVersion) => {
+				const { result, createSpotter3 } = await call(
 					{ analyst_id: ANALYST_ID },
-					{
-						apiVersion,
-						getAnalyst: vi.fn().mockResolvedValue({ ...ANALYST, connectors }),
-					},
+					{ apiVersion },
 				);
 
-				const { connector_notice, ...rest } = result.structuredContent;
-				expect(rest).toEqual({
+				expect(result.structuredContent).toEqual({
 					analytical_session_id: "conv-analyst-1",
-					analyst: { id: ANALYST_ID, name: "Revenue Analyst" },
+					analyst: { id: ANALYST_ID },
 				});
-				if (notice) {
-					expect(connector_notice).toContain(notice);
-					expect(connector_notice).toContain("not supported over the MCP");
-				} else {
-					expect(connector_notice).toBeUndefined();
-				}
-				expect(getAnalyst).toHaveBeenCalledWith({ analystId: ANALYST_ID });
+				expect(createSpotter3).toHaveBeenCalledTimes(1);
 				expect(createSpotter3).toHaveBeenCalledWith({
 					isSpotterDataSourceDiscoveryEnabled: true,
 					isSpotterChatHistoryEnabled: false,
@@ -2001,45 +1977,55 @@ describe("MCP Server", () => {
 		const notFound = '{"message":"Spot abc not found"}';
 		const denied = '{"detail":{"error_code":"SPOT_ACCESS_DENIED"}}';
 		it.each([
-			{ step: "lookup", status: 404, body: "", code: "analyst_not_found" },
-			{ step: "lookup", status: 403, body: "", code: "analyst_forbidden" },
-			{
-				step: "create",
-				status: 400,
-				body: notFound,
-				code: "analyst_not_found",
-			},
-			{ step: "create", status: 403, body: denied, code: "analyst_forbidden" },
+			{ status: 400, body: notFound, code: "analyst_not_found" },
+			{ status: 403, body: denied, code: "analyst_forbidden" },
 		])(
-			"maps a $status $step failure to $code without falling back",
-			async ({ step, status, body, code }) => {
-				const createSpotter3 =
-					step === "create"
-						? apiError(status, "createSpotter3Conversation", body)
-						: vi.fn();
-				const getAnalyst =
-					step === "lookup" ? apiError(status, "getAnalyst") : undefined;
+			"maps a $status create failure to $code without falling back",
+			async ({ status, body, code }) => {
+				const createSpotter3 = apiError(
+					status,
+					"createSpotter3Conversation",
+					body,
+				);
 				const { result } = await call(
 					{ analyst_id: ANALYST_ID },
-					{ createSpotter3, ...(getAnalyst && { getAnalyst }) },
+					{ createSpotter3 },
 				);
 
 				expect(result.isError).toBe(true);
 				expect(result.content[0].text).toContain(code);
-				expect(createSpotter3).not.toHaveBeenCalledWith(
-					expect.objectContaining({ analystId: undefined }),
-				);
+				expect(createSpotter3).toHaveBeenCalledTimes(1);
+			},
+		);
+
+		it.each([
+			{ status: 400, body: '{"message":"Failed to load spot abc"}' },
+			{ status: 500, body: "boom" },
+		])(
+			"rethrows a $status create failure that is not about the Analyst",
+			async ({ status, body }) => {
+				await expect(
+					call(
+						{ analyst_id: ANALYST_ID },
+						{
+							createSpotter3: apiError(
+								status,
+								"createSpotter3Conversation",
+								body,
+							),
+						},
+					),
+				).rejects.toBeInstanceOf(ThoughtSpotApiError);
 			},
 		);
 
 		it("rejects analyst_id combined with data_source_id", async () => {
-			const { result, getAnalyst, createSpotter3 } = await call({
+			const { result, createSpotter3 } = await call({
 				analyst_id: ANALYST_ID,
 				data_source_id: "ds-123",
 			});
 
 			expect(result.content[0].text).toContain("cannot be combined");
-			expect(getAnalyst).not.toHaveBeenCalled();
 			expect(createSpotter3).not.toHaveBeenCalled();
 		});
 
@@ -2049,11 +2035,12 @@ describe("MCP Server", () => {
 		])(
 			"ignores analyst_id where it is not offered (apiVersion=$apiVersion, SpotterX=$isSpotterXEnabled)",
 			async (options) => {
-				const { result, getAnalyst, createSpotter3, createSpotterX } =
-					await call({ analyst_id: ANALYST_ID }, options);
+				const { result, createSpotter3, createSpotterX } = await call(
+					{ analyst_id: ANALYST_ID },
+					options,
+				);
 
 				expect(result.isError).toBeUndefined();
-				expect(getAnalyst).not.toHaveBeenCalled();
 				const created = options.isSpotterXEnabled
 					? createSpotterX
 					: createSpotter3;
@@ -2070,7 +2057,6 @@ describe("MCP Server", () => {
 				id: `a-${start + i}`,
 				name: `Analyst ${start + i}`,
 				description: `Desc ${start + i}`,
-				connectors: [{ id: "c-1", name: "Jira" }],
 			}));
 
 		// Adds searchAnalysts to the shared client mock behind `server` (apiVersion: latest).
@@ -2108,20 +2094,22 @@ describe("MCP Server", () => {
 			});
 			expect(first.total_size).toBe(25);
 
+			expect(first.next_cursor).toBe("20");
+
 			const second = (
 				await call({
 					cursor: first.next_cursor,
-					page_size: 5,
+					page_size: 10,
 					type: "SHARED_TO_ME",
 				})
 			).structuredContent as any;
 			expect(second.analysts).toHaveLength(5);
 			expect(second).not.toHaveProperty("next_cursor");
 			expect(searchAnalysts.mock.calls).toEqual([
-				[{ recordSize: 20, recordOffset: 0, query: "rev", type: undefined }],
+				[{ recordSize: 50, recordOffset: 0, query: "rev", type: undefined }],
 				[
 					{
-						recordSize: 5,
+						recordSize: 10,
 						recordOffset: 20,
 						query: undefined,
 						type: "SHARED_TO_ME",
@@ -2130,7 +2118,23 @@ describe("MCP Server", () => {
 			]);
 		});
 
-		it.each(["not-a-cursor", "-1", "1.5", "", "99999999999999999999"])(
+		it("emits next_cursor for a full page even when total_size is missing", async () => {
+			await setup(
+				vi.fn().mockResolvedValue({ analysts: analysts(3), totalSize: 0 }),
+			);
+
+			const result = (
+				await server.callListAnalysts(
+					makeRequest("list_analysts", { page_size: 3 }),
+					NOOP_METRICS_RECORDER,
+				)
+			).structuredContent as any;
+
+			expect(result.analysts).toHaveLength(3);
+			expect(result.next_cursor).toBe("3");
+		});
+
+		it.each(["not-a-cursor", "-1", "1.5", "", "10001", "99999999999999999999"])(
 			"rejects an invalid cursor %s",
 			async (cursor) => {
 				const searchAnalysts = await setup();

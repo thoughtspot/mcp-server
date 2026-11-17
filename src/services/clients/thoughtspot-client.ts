@@ -13,7 +13,7 @@ import {
 	type SessionInfo,
 	ThoughtSpotApiError,
 } from "../types";
-import { getAnalyst, searchAnalysts } from "./analysts/analysts-client";
+import { searchAnalysts } from "./analysts/analysts-client";
 import {
 	exportUnsavedAnswerTML,
 	getAnswerSession,
@@ -160,10 +160,6 @@ export class ThoughtSpotClient extends ThoughtSpotRestApi {
 
 	searchAnalysts(params: Params<typeof searchAnalysts>) {
 		return searchAnalysts(this.ctx, params);
-	}
-
-	getAnalyst(params: Params<typeof getAnalyst>) {
-		return getAnalyst(this.ctx, params);
 	}
 
 	getData(params: Params<typeof getData>) {
