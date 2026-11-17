@@ -218,29 +218,32 @@ describe("MCP Server", () => {
 	});
 
 	describe("List Tools", () => {
+		const LATEST_TOOL_NAMES = [
+			"check_connectivity",
+			"search_objects",
+			"create_analysis_session",
+			"send_session_message",
+			"get_session_updates",
+			"create_dashboard",
+			"create_model_session",
+			"send_model_message",
+			"get_model_updates",
+			"finalize_model",
+			"get_data",
+			"modify_dashboard",
+			"get_dashboard_status",
+			"list_analysts",
+		];
+
 		it("should return all available tools", async () => {
 			await server.init();
 			const { listTools } = connect(server);
 
 			const result = await listTools();
 
-			// Latest version: 13 tools (6 non-OAuth base + 4 model tools + get_data + 2 dashboard tools)
-			expect(result.tools).toHaveLength(13);
-			expect(result.tools?.map((t) => t.name)).toEqual([
-				"check_connectivity",
-				"search_objects",
-				"create_analysis_session",
-				"send_session_message",
-				"get_session_updates",
-				"create_dashboard",
-				"create_model_session",
-				"send_model_message",
-				"get_model_updates",
-				"finalize_model",
-				"get_data",
-				"modify_dashboard",
-				"get_dashboard_status",
-			]);
+			// Latest version: 14 tools (6 non-OAuth base + 4 model tools + get_data + 2 dashboard
+			// tools + list_analysts)
+			expect(result.tools?.map((t) => t.name)).toEqual(LATEST_TOOL_NAMES);
 		});
 
 		it("should include correct tool descriptions", async () => {
@@ -298,7 +301,7 @@ describe("MCP Server", () => {
 			}
 		});
 
-		it("should return 13 tools regardless of enableSpotterDataSourceDiscovery when using latest", async () => {
+		it("should return 14 tools regardless of enableSpotterDataSourceDiscovery when using latest", async () => {
 			// Mock the ThoughtSpotClient constructor with enableSpotterDataSourceDiscovery set to false
 			vi.spyOn(thoughtspotClient, "ThoughtSpotClient").mockReturnValue({
 				getSessionInfo: vi.fn().mockResolvedValue({
@@ -332,51 +335,20 @@ describe("MCP Server", () => {
 			const result = await listTools();
 
 			// No tool in this set is a datasource discovery tool, so filtering has no effect
-			expect(result.tools).toHaveLength(13);
-			expect(result.tools?.map((t) => t.name)).toEqual([
-				"check_connectivity",
-				"search_objects",
-				"create_analysis_session",
-				"send_session_message",
-				"get_session_updates",
-				"create_dashboard",
-				"create_model_session",
-				"send_model_message",
-				"get_model_updates",
-				"finalize_model",
-				"get_data",
-				"modify_dashboard",
-				"get_dashboard_status",
-			]);
+			expect(result.tools?.map((t) => t.name)).toEqual(LATEST_TOOL_NAMES);
 		});
 
 		it.each([
-			{
-				apiVersion: "beta",
-				isSpotterXEnabled: true,
-				expectSpotterX: true,
-				expectAnalysts: false,
-			},
-			{
-				apiVersion: "beta",
-				isSpotterXEnabled: false,
-				expectSpotterX: false,
-				expectAnalysts: true,
-			},
+			{ apiVersion: "beta", isSpotterXEnabled: true, expectSpotterX: true },
+			{ apiVersion: "beta", isSpotterXEnabled: false, expectSpotterX: false },
 			{
 				apiVersion: undefined,
 				isSpotterXEnabled: true,
 				expectSpotterX: false,
-				expectAnalysts: false,
 			},
 		])(
-			"uses SpotterX create_analysis_session=$expectSpotterX, analysts=$expectAnalysts for apiVersion=$apiVersion, isSpotterXEnabled=$isSpotterXEnabled",
-			async ({
-				apiVersion,
-				isSpotterXEnabled,
-				expectSpotterX,
-				expectAnalysts,
-			}) => {
+			"uses SpotterX create_analysis_session=$expectSpotterX for apiVersion=$apiVersion, isSpotterXEnabled=$isSpotterXEnabled",
+			async ({ apiVersion, isSpotterXEnabled, expectSpotterX }) => {
 				const testServer = new MCPServer({
 					props: { ...mockProps, apiVersion },
 					env: {} as any,
@@ -395,11 +367,11 @@ describe("MCP Server", () => {
 				expect(
 					tools.map((t) => t.name).indexOf("create_analysis_session"),
 				).toBe(2);
-				// list_analysts is beta and Spotter 3 only
-				expect(tools).toHaveLength(expectAnalysts ? 14 : 13);
+				// list_analysts is Spotter 3 only: hidden when the SpotterX swap is active
 				expect(tools.some((t) => t.name === "list_analysts")).toBe(
-					expectAnalysts,
+					!expectSpotterX,
 				);
+				expect(tools).toHaveLength(expectSpotterX ? 13 : 14);
 
 				const [sessionTool] = sessionTools;
 				const properties = (sessionTool.inputSchema as any).properties;
@@ -458,10 +430,12 @@ describe("MCP Server", () => {
 			"get_session_updates",
 			"create_dashboard",
 		];
-		// The dashboard designer tools are appended after everything else in the latest version.
+		// The dashboard designer tools, then list_analysts, are appended after everything else in
+		// the latest version.
 		const DASHBOARD_DESIGNER_TOOLS = [
 			"modify_dashboard",
 			"get_dashboard_status",
+			"list_analysts",
 		];
 		const V2_TOOLS = [...BASE_TOOLS, ...DASHBOARD_DESIGNER_TOOLS];
 		// Base tools plus get_data, i.e. what a user with the data-download privilege
@@ -2090,178 +2064,107 @@ describe("MCP Server", () => {
 		);
 	});
 
-	describe("Analysts (beta)", () => {
-		function setup({
-			apiVersion = "beta",
-			isSpotterXEnabled = false,
-			searchAnalysts = vi.fn().mockResolvedValue({
-				analysts: [],
-				totalSize: 0,
-			}),
-		}: {
-			apiVersion?: string;
-			isSpotterXEnabled?: boolean;
-			searchAnalysts?: ReturnType<typeof vi.fn>;
-		} = {}) {
-			vi.spyOn(thoughtspotClient, "ThoughtSpotClient").mockReturnValue({
-				getSessionInfo: vi.fn().mockResolvedValue({
-					clusterId: "test-cluster-123",
-					clusterName: "test-cluster",
-					releaseVersion: "10.13.0.cl-110",
-					userGUID: "test-user-123",
-					configInfo: {
-						mixpanelConfig: {
-							devSdkKey: "test-dev-token",
-							prodSdkKey: "test-prod-token",
-							production: false,
-						},
-						selfClusterName: "test-cluster",
-						selfClusterId: "test-cluster-123",
-						enableSpotterDataSourceDiscovery: true,
-						isSpotterXEnabled,
-					},
-					userName: "test-user",
-					currentOrgId: "test-org",
-					privileges: [],
-				}),
-				searchAnalysts,
-				tenantId: "test-cluster-123",
-				orgId: "test-org",
-				userId: "test-user-123",
-				instanceUrl: "https://test.thoughtspot.cloud",
-			} as any);
-			const testServer = new MCPServer({
-				props: { ...mockProps, apiVersion },
-				env: {} as any,
-			});
-			return { testServer, searchAnalysts };
+	describe("list_analysts", () => {
+		const analysts = (n: number, start = 0) =>
+			Array.from({ length: n }, (_, i) => ({
+				id: `a-${start + i}`,
+				name: `Analyst ${start + i}`,
+				description: `Desc ${start + i}`,
+				connectors: [{ id: "c-1", name: "Jira" }],
+			}));
+
+		// Adds searchAnalysts to the shared client mock behind `server` (apiVersion: latest).
+		async function setup(
+			searchAnalysts = vi
+				.fn()
+				.mockResolvedValue({ analysts: [], totalSize: 0 }),
+		) {
+			const client = new (thoughtspotClient.ThoughtSpotClient as any)();
+			client.searchAnalysts = searchAnalysts;
+			await server.init();
+			return searchAnalysts;
 		}
 
-		const errorText = (result: any) => (result.content as any)[0].text;
-
-		describe("list_analysts", () => {
-			const analysts = (n: number, start = 0) =>
-				Array.from({ length: n }, (_, i) => ({
-					id: `a-${start + i}`,
-					name: `Analyst ${start + i}`,
-					description: `Desc ${start + i}`,
-					connectors: [{ id: "c-1", name: "Jira" }],
-				}));
-
-			it("returns id, name and description with a cursor that fetches the next page", async () => {
-				const searchAnalysts = vi
+		it("pages with a cursor that round-trips into the next request", async () => {
+			const searchAnalysts = await setup(
+				vi
 					.fn()
 					.mockResolvedValueOnce({ analysts: analysts(20), totalSize: 25 })
-					.mockResolvedValueOnce({ analysts: analysts(5, 20), totalSize: 25 });
-				const { testServer } = setup({ searchAnalysts });
-				await testServer.init();
-
-				// mcp-testing-kit resolves only one response per connection, so the paging round-trip
-				// calls the handler directly.
-				const first = await testServer.callListAnalysts(
-					makeRequest("list_analysts", { query: "rev" }),
-					NOOP_METRICS_RECORDER,
-				);
-				const firstContent = first.structuredContent as any;
-				expect(first.isError).toBeUndefined();
-				expect(firstContent.analysts).toHaveLength(20);
-				expect(firstContent.analysts[0]).toEqual({
-					id: "a-0",
-					name: "Analyst 0",
-					description: "Desc 0",
-				});
-				expect(firstContent.total_size).toBe(25);
-				expect(firstContent.next_cursor).toEqual(expect.any(String));
-				expect(searchAnalysts).toHaveBeenNthCalledWith(1, {
-					recordSize: 20,
-					recordOffset: 0,
-					query: "rev",
-					type: undefined,
-				});
-
-				const second = await testServer.callListAnalysts(
-					makeRequest("list_analysts", {
-						query: "rev",
-						cursor: firstContent.next_cursor,
-					}),
-					NOOP_METRICS_RECORDER,
-				);
-				const secondContent = second.structuredContent as any;
-				expect(searchAnalysts).toHaveBeenNthCalledWith(2, {
-					recordSize: 20,
-					recordOffset: 20,
-					query: "rev",
-					type: undefined,
-				});
-				expect(secondContent.analysts).toHaveLength(5);
-				expect(secondContent).not.toHaveProperty("next_cursor");
-			});
-
-			it("honours page_size and type", async () => {
-				const { testServer, searchAnalysts } = setup();
-				await testServer.init();
-
-				await connect(testServer).callTool("list_analysts", {
-					page_size: 5,
-					type: "SHARED_TO_ME",
-				});
-
-				expect(searchAnalysts).toHaveBeenCalledWith({
-					recordSize: 5,
-					recordOffset: 0,
-					query: undefined,
-					type: "SHARED_TO_ME",
-				});
-			});
-
-			it.each(["not-a-cursor", btoa("analysts:-1"), btoa("other:5")])(
-				"rejects an invalid cursor %s",
-				async (cursor) => {
-					const { testServer, searchAnalysts } = setup();
-					await testServer.init();
-
-					const result = await connect(testServer).callTool("list_analysts", {
-						cursor,
-					});
-
-					expect(result.isError).toBe(true);
-					expect(errorText(result)).toContain("Invalid `cursor`");
-					expect(searchAnalysts).not.toHaveBeenCalled();
-				},
+					.mockResolvedValueOnce({ analysts: analysts(5, 20), totalSize: 25 }),
 			);
 
-			it("returns a clear error when the upstream search fails", async () => {
-				const { testServer } = setup({
-					searchAnalysts: vi
-						.fn()
-						.mockRejectedValue(
-							new ThoughtSpotApiError(500, "searchAnalysts", "boom"),
-						),
-				});
-				await testServer.init();
-
-				const result = await connect(testServer).callTool("list_analysts", {});
-
-				expect(result.isError).toBe(true);
-				expect(errorText(result)).toContain("Failed to list Analysts");
+			// mcp-testing-kit resolves only one response per connection, so call the handler directly.
+			const call = (args: Record<string, unknown>) =>
+				server.callListAnalysts(
+					makeRequest("list_analysts", args),
+					NOOP_METRICS_RECORDER,
+				);
+			const first = (await call({ query: "rev" })).structuredContent as any;
+			expect(first.analysts).toHaveLength(20);
+			expect(first.analysts[0]).toEqual({
+				id: "a-0",
+				name: "Analyst 0",
+				description: "Desc 0",
 			});
+			expect(first.total_size).toBe(25);
 
-			it("prompts reauthentication on 401", async () => {
-				const { testServer } = setup({
-					searchAnalysts: vi
-						.fn()
-						.mockRejectedValue(
-							new ThoughtSpotApiError(401, "searchAnalysts", ""),
-						),
-				});
-				await testServer.init();
-
-				const result = await connect(testServer).callTool("list_analysts", {});
-
-				expect(result.isError).toBe(true);
-				expect(errorText(result)).toContain("reauthenticate");
-			});
+			const second = (
+				await call({
+					cursor: first.next_cursor,
+					page_size: 5,
+					type: "SHARED_TO_ME",
+				})
+			).structuredContent as any;
+			expect(second.analysts).toHaveLength(5);
+			expect(second).not.toHaveProperty("next_cursor");
+			expect(searchAnalysts.mock.calls).toEqual([
+				[{ recordSize: 20, recordOffset: 0, query: "rev", type: undefined }],
+				[
+					{
+						recordSize: 5,
+						recordOffset: 20,
+						query: undefined,
+						type: "SHARED_TO_ME",
+					},
+				],
+			]);
 		});
+
+		it.each(["not-a-cursor", btoa("analysts:-1"), btoa("other:5")])(
+			"rejects an invalid cursor %s",
+			async (cursor) => {
+				const searchAnalysts = await setup();
+
+				const result = await connect(server).callTool("list_analysts", {
+					cursor,
+				});
+
+				expect(result.isError).toBe(true);
+				expect((result.content as any)[0].text).toContain("Invalid `cursor`");
+				expect(searchAnalysts).not.toHaveBeenCalled();
+			},
+		);
+
+		it.each([
+			{ status: 500, message: "Failed to list Analysts" },
+			{ status: 401, message: "reauthenticate" },
+		])(
+			"maps an upstream $status to an error mentioning '$message'",
+			async ({ status, message }) => {
+				await setup(
+					vi
+						.fn()
+						.mockRejectedValue(
+							new ThoughtSpotApiError(status, "searchAnalysts", "boom"),
+						),
+				);
+
+				const result = await connect(server).callTool("list_analysts", {});
+
+				expect(result.isError).toBe(true);
+				expect((result.content as any)[0].text).toContain(message);
+			},
+		);
 	});
 
 	describe("Create Analysis Session Tool", () => {

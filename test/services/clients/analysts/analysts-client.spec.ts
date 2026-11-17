@@ -1,5 +1,5 @@
 import { createBearerAuthenticationConfig } from "@thoughtspot/rest-api-sdk";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ThoughtSpotClient } from "../../../../src/services/clients/thoughtspot-client";
 import { ThoughtSpotApiError } from "../../../../src/services/types";
 
@@ -8,164 +8,107 @@ vi.mock("@thoughtspot/rest-api-sdk", () => ({
 	ThoughtSpotRestApi: vi.fn(),
 }));
 
-global.fetch = vi.fn();
-
 describe("analysts-client", () => {
-	const instanceUrl = "https://test.thoughtspot.com";
 	let client: any;
-
-	const okResponse = (body: unknown) => ({
-		ok: true,
-		json: vi.fn().mockResolvedValue(body),
-	});
-	const errorResponse = (status: number, body = "") => ({
-		ok: false,
-		status,
-		text: vi.fn().mockResolvedValue(body),
-	});
-	const sentBody = () => JSON.parse((fetch as any).mock.calls[0][1].body);
+	const respond = (body: unknown, status = 200) =>
+		(global.fetch as any).mockResolvedValue({
+			ok: status < 400,
+			status,
+			json: vi.fn().mockResolvedValue(body),
+			text: vi.fn().mockResolvedValue(body),
+		});
 
 	beforeEach(() => {
-		vi.clearAllMocks();
 		global.fetch = vi.fn();
 		(createBearerAuthenticationConfig as any).mockReturnValue({
 			middleware: [],
 		});
 		client = new ThoughtSpotClient({
-			instanceUrl,
-			token: "test-token",
+			instanceUrl: "https://ts.test",
+			token: "t",
 			tenantId: "",
 			orgId: "",
 			userId: "",
-		}) as any;
+		});
 	});
 
-	afterEach(() => {
-		vi.restoreAllMocks();
+	it.each([
+		[
+			"searchAnalysts",
+			{ recordSize: 2, recordOffset: 4, query: "q", type: "SHARED_TO_ME" },
+			{ record_size: 2, record_offset: 4, query: "q", type: "SHARED_TO_ME" },
+		],
+		[
+			"searchAnalysts",
+			{ recordSize: 20, recordOffset: 0 },
+			{ record_size: 20, record_offset: 0 },
+		],
+		["getAnalyst", { analystId: "a-1" }, { analyst_identifier: "a-1" }],
+	])("%s posts %o as %o", async (op, args, body) => {
+		respond({ analysts: [{ id: "a-1" }] });
+
+		await client[op](args);
+
+		const [url, init] = (global.fetch as any).mock.calls[0];
+		expect(url).toBe("https://ts.test/convex/spots/public/search");
+		expect(init.method).toBe("POST");
+		expect(JSON.parse(init.body)).toEqual(body);
 	});
 
-	describe("searchAnalysts", () => {
-		it("posts list-mode paging and filters, and maps the response", async () => {
-			(fetch as any).mockResolvedValue(
-				okResponse({
-					analysts: [
-						{
-							id: "a-1",
-							name: "Revenue",
-							description: "Revenue questions",
-							instructions: "secret instructions",
-							mcp_connectors: [
-								{ id: "c-1", name: "Jira", icon_url: "x" },
-								{ id: "", name: "broken" },
-							],
-						},
-						{ id: "a-2", name: null, description: null },
+	it("maps analysts and their connectors, dropping unusable connectors", async () => {
+		respond({
+			analysts: [
+				{
+					id: "a-1",
+					name: "Revenue",
+					description: "d",
+					instructions: "not exposed",
+					mcp_connectors: [
+						{ id: "c-1", name: "Jira", icon_url: "x" },
+						{ id: "" },
+						"c-2",
+						"",
 					],
-					total_size: 7,
-				}),
-			);
-
-			const result = await client.searchAnalysts({
-				recordSize: 2,
-				recordOffset: 4,
-				query: "rev",
-				type: "SHARED_TO_ME",
-			});
-
-			expect((fetch as any).mock.calls[0][0]).toBe(
-				`${instanceUrl}/convex/spots/public/search`,
-			);
-			expect((fetch as any).mock.calls[0][1].method).toBe("POST");
-			expect(sentBody()).toEqual({
-				record_size: 2,
-				record_offset: 4,
-				query: "rev",
-				type: "SHARED_TO_ME",
-			});
-			expect(result).toEqual({
-				analysts: [
-					{
-						id: "a-1",
-						name: "Revenue",
-						description: "Revenue questions",
-						connectors: [{ id: "c-1", name: "Jira" }],
-					},
-					{ id: "a-2", name: "", description: "", connectors: [] },
-				],
-				totalSize: 7,
-			});
+				},
+				{ id: "a-2", name: null, description: null },
+			],
+			total_size: 7,
 		});
 
-		it("omits optional filters when not given", async () => {
-			(fetch as any).mockResolvedValue(okResponse({}));
+		expect(
+			await client.searchAnalysts({ recordSize: 2, recordOffset: 0 }),
+		).toEqual({
+			analysts: [
+				{
+					id: "a-1",
+					name: "Revenue",
+					description: "d",
+					connectors: [{ id: "c-1", name: "Jira" }, { id: "c-2" }],
+				},
+				{ id: "a-2", name: "", description: "", connectors: [] },
+			],
+			totalSize: 7,
+		});
+	});
 
-			const result = await client.searchAnalysts({
+	it.each([
+		{ op: "searchAnalysts", status: 500, body: "boom", http: 500 },
+		{ op: "getAnalyst", status: 403, body: "", http: 403 },
+		// An empty fetch-mode result means the id is unknown.
+		{ op: "getAnalyst", status: 404, body: { analysts: [] }, http: 200 },
+	])(
+		"$op rejects with ThoughtSpotApiError($status) on HTTP $http",
+		async ({ op, status, body, http }) => {
+			respond(body, http);
+
+			const error = await client[op]({
 				recordSize: 20,
 				recordOffset: 0,
-			});
+				analystId: "a-1",
+			}).catch((e: unknown) => e);
 
-			expect(sentBody()).toEqual({ record_size: 20, record_offset: 0 });
-			expect(result).toEqual({ analysts: [], totalSize: 0 });
-		});
-
-		it("throws ThoughtSpotApiError with the upstream status", async () => {
-			(fetch as any).mockResolvedValue(errorResponse(500, "boom"));
-
-			await expect(
-				client.searchAnalysts({ recordSize: 20, recordOffset: 0 }),
-			).rejects.toMatchObject({ status: 500, body: "boom" });
-		});
-	});
-
-	describe("getAnalyst", () => {
-		it("uses fetch mode and returns the single Analyst", async () => {
-			(fetch as any).mockResolvedValue(
-				okResponse({
-					analysts: [
-						{
-							id: "a-1",
-							name: "Revenue",
-							description: "d",
-							mcp_connectors: ["c-legacy"],
-						},
-					],
-					total_size: 1,
-				}),
-			);
-
-			const analyst = await client.getAnalyst({ analystId: "a-1" });
-
-			expect(sentBody()).toEqual({ analyst_identifier: "a-1" });
-			expect(analyst).toEqual({
-				id: "a-1",
-				name: "Revenue",
-				description: "d",
-				connectors: [{ id: "c-legacy" }],
-			});
-		});
-
-		it.each([403, 404])(
-			"propagates a %i as ThoughtSpotApiError",
-			async (status) => {
-				(fetch as any).mockResolvedValue(errorResponse(status));
-
-				const error = await client
-					.getAnalyst({ analystId: "a-1" })
-					.catch((e: unknown) => e);
-
-				expect(error).toBeInstanceOf(ThoughtSpotApiError);
-				expect(error.status).toBe(status);
-			},
-		);
-
-		it("treats an empty fetch-mode result as not found", async () => {
-			(fetch as any).mockResolvedValue(
-				okResponse({ analysts: [], total_size: 0 }),
-			);
-
-			await expect(
-				client.getAnalyst({ analystId: "a-1" }),
-			).rejects.toMatchObject({ status: 404 });
-		});
-	});
+			expect(error).toBeInstanceOf(ThoughtSpotApiError);
+			expect(error.status).toBe(status);
+		},
+	);
 });
