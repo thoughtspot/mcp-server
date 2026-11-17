@@ -780,7 +780,7 @@ export enum ToolName {
 	GetDashboardStatus = "get_dashboard_status",
 	ListOrgs = "list_orgs",
 	SwitchOrg = "switch_org",
-	// Beta (Analysts)
+	// Analysts
 	ListAnalysts = "list_analysts",
 	// V3 (Spotter Model — agentic model creation)
 	CreateModelSession = "create_model_session",
@@ -1395,10 +1395,25 @@ export const createAnalysisSessionToolDefinitionWithAnalyst = {
 	},
 };
 
+// list_analysts is Spotter 3 only: on SpotterX clusters the server drops it.
+export const listAnalystsToolDefinition = {
+	name: ToolName.ListAnalysts,
+	description: `List the Analysts the user can access, with each Analyst's ID, name and description. An Analyst is a saved, purpose-built Spotter agent with its own instructions and data sources. Only call this when the user explicitly asks to see, find or choose Analysts; do not call it for ordinary data questions. Results are paginated: if \`next_cursor\` is returned and the user wants more, call again with it as \`cursor\`. To use an Analyst the user picks, call \`create_analysis_session\` with its \`id\` as \`analyst_id\`. ${MCP_CONNECTORS_UNSUPPORTED_NOTICE}`,
+	inputSchema: z.toJSONSchema(ListAnalystsInputSchema),
+	outputSchema: z.toJSONSchema(ListAnalystsOutputSchema),
+	annotations: {
+		title: "List Analysts",
+		readOnlyHint: true,
+		destructiveHint: false,
+		openWorldHint: false,
+	},
+};
+
 /**
  * Adds the dashboard designer: `create_dashboard` gains a design pass and a description-only mode,
  * and `modify_dashboard` / `get_dashboard_status` are new. Earlier versions keep the original
- * `create_dashboard` contract. `create_analysis_session` also accepts `analyst_id`.
+ * `create_dashboard` contract. `create_analysis_session` also accepts `analyst_id`, and
+ * `list_analysts` is added.
  */
 export const toolDefinitionsV5 = [
 	...toolDefinitionsV4.map((tool) => {
@@ -1412,6 +1427,7 @@ export const toolDefinitionsV5 = [
 	}),
 	modifyDashboardToolDefinition,
 	getDashboardStatusToolDefinition,
+	listAnalystsToolDefinition,
 ];
 
 // SendSessionMessage has a slightly different contract for SpotterX
@@ -1428,22 +1444,3 @@ export const sendSessionMessageToolDefinitionSpotterX = {
 		openWorldHint: false,
 	},
 };
-
-// Beta — Analysts: list_analysts is added. Spotter 3 only: on SpotterX clusters the server drops it.
-export const listAnalystsToolDefinition = {
-	name: ToolName.ListAnalysts,
-	description: `List the Analysts the user can access, with each Analyst's ID, name and description. An Analyst is a saved, purpose-built Spotter agent with its own instructions and data sources. Only call this when the user explicitly asks to see, find or choose Analysts; do not call it for ordinary data questions. Results are paginated: if \`next_cursor\` is returned and the user wants more, call again with it as \`cursor\`. To use an Analyst the user picks, call \`create_analysis_session\` with its \`id\` as \`analyst_id\`. ${MCP_CONNECTORS_UNSUPPORTED_NOTICE}`,
-	inputSchema: z.toJSONSchema(ListAnalystsInputSchema),
-	outputSchema: z.toJSONSchema(ListAnalystsOutputSchema),
-	annotations: {
-		title: "List Analysts",
-		readOnlyHint: true,
-		destructiveHint: false,
-		openWorldHint: false,
-	},
-};
-
-export const toolDefinitionsBeta = [
-	...toolDefinitionsV5,
-	listAnalystsToolDefinition,
-];

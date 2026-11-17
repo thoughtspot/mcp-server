@@ -1,5 +1,4 @@
 import {
-	toolDefinitionsBeta,
 	toolDefinitionsV1,
 	toolDefinitionsV2,
 	toolDefinitionsV3,
@@ -63,8 +62,8 @@ export function getReleaseDateIdentifier(
 export const VERSION_REGISTRY: VersionConfig[] = [
 	{
 		version: ["beta"],
-		tools: [...toolDefinitionsBeta],
-		description: "Beta version: list_analysts added",
+		tools: [...toolDefinitionsV5],
+		description: "Beta version",
 	},
 	{
 		// Dashboard designer tools. Release date is a placeholder until the release is scheduled.
