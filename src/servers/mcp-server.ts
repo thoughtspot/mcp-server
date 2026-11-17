@@ -13,6 +13,10 @@ import {
 } from "../metrics/runtime/metrics-recorder";
 import type { ToolMetricApiSurface } from "../metrics/runtime/tool-metrics";
 import { WithSpan } from "../metrics/tracing/tracing-utils";
+import {
+	decodeAnalystsCursor,
+	encodeAnalystsCursor,
+} from "../services/clients/analysts/analysts-cursor";
 import type {
 	Analyst,
 	SearchAnalystsResult,
@@ -104,33 +108,6 @@ import {
 	resolveApiVersion,
 	resolveApiVersionMetrics,
 } from "./version-registry";
-
-// list_analysts cursors are opaque to the client; they encode the next record offset.
-const ANALYSTS_CURSOR_PREFIX = "analysts:";
-
-function encodeAnalystsCursor(offset: number): string {
-	return btoa(`${ANALYSTS_CURSOR_PREFIX}${offset}`)
-		.replace(/\+/g, "-")
-		.replace(/\//g, "_")
-		.replace(/=+$/, "");
-}
-
-function decodeAnalystsCursor(cursor: string): number | undefined {
-	try {
-		const padded = cursor.replace(/-/g, "+").replace(/_/g, "/");
-		const decoded = atob(padded + "=".repeat((4 - (padded.length % 4)) % 4));
-		if (!decoded.startsWith(ANALYSTS_CURSOR_PREFIX)) {
-			return undefined;
-		}
-		const raw = decoded.slice(ANALYSTS_CURSOR_PREFIX.length);
-		const offset = Number(raw);
-		return /^\d+$/.test(raw) && Number.isSafeInteger(offset)
-			? offset
-			: undefined;
-	} catch {
-		return undefined;
-	}
-}
 
 export class MCPServer extends BaseMCPServer {
 	private activeOrgId: string | undefined;
