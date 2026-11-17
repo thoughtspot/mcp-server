@@ -18,14 +18,14 @@ export async function createSpotter3Conversation(
 		isSpotterChatHistoryEnabled: boolean;
 		dataSourceId?: string;
 		// When set, the conversation runs on this Analyst ("spot" in convex) for its whole life. A
-		// bound Analyst's worksheets take precedence over discovery; an Analyst without worksheet
-		// sources still relies on discovery, so the discovery flags are left as-is.
+		// bound Analyst is scoped to its own data sources, so discovery is off (matches the in-app
+		// Analyst chat).
 		analystId?: string;
 	},
 ): Promise<AgentConversation> {
 	const endpoint = "/conversation/v2/";
 	const enableDatasetDiscovery =
-		isSpotterDataSourceDiscoveryEnabled && !dataSourceId;
+		isSpotterDataSourceDiscoveryEnabled && !dataSourceId && !analystId;
 	const response = await fetchApi(ctx, endpoint, {
 		json: {
 			...(analystId && { spot_ids: [analystId] }),
