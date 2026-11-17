@@ -62,9 +62,9 @@ import type { StorageServiceClient } from "../storage-service/storage-service";
 import { McpServerError } from "../utils";
 import { BaseMCPServer, type Context } from "./mcp-server-base";
 import {
-	CreateAnalysisSessionBetaInputSchema,
 	CreateAnalysisSessionSpotter3InputSchema,
 	CreateAnalysisSessionSpotterXInputSchema,
+	CreateAnalysisSessionWithAnalystInputSchema,
 	CreateDashboardInputSchema,
 	CreateDashboardLegacyInputSchema,
 	CreateLiveboardSchema,
@@ -88,6 +88,7 @@ import {
 	SwitchOrgInputSchema,
 	ToolName,
 	createAnalysisSessionToolDefinitionSpotterX,
+	createAnalysisSessionToolDefinitionWithAnalyst,
 } from "./tool-definitions";
 import {
 	type VersionConfig,
@@ -1091,13 +1092,15 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		}
 
 		const span = trace.getSpan(context.active());
-		// analyst_id is only offered on beta; elsewhere the plain Spotter 3 schema applies (and strips
-		// any analyst_id a client sends without seeing it in the tool list).
-		const isBeta = resolveApiVersion(
+		// analyst_id is only accepted on versions that list it; older versions use the plain Spotter 3
+		// schema, which strips any analyst_id a client sends without seeing it.
+		const acceptsAnalystId = resolveApiVersion(
 			this.ctx.props.apiVersion,
-		).version.includes("beta");
-		const { data_source_id, analyst_id } = isBeta
-			? CreateAnalysisSessionBetaInputSchema.parse(request.params.arguments)
+		).tools.includes(createAnalysisSessionToolDefinitionWithAnalyst);
+		const { data_source_id, analyst_id } = acceptsAnalystId
+			? CreateAnalysisSessionWithAnalystInputSchema.parse(
+					request.params.arguments,
+				)
 			: {
 					...CreateAnalysisSessionSpotter3InputSchema.parse(
 						request.params.arguments,
