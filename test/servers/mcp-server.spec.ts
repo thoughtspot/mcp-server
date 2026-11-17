@@ -2237,7 +2237,7 @@ describe("MCP Server", () => {
 			]);
 		});
 
-		it.each(["not-a-cursor", btoa("analysts:-1"), btoa("other:5")])(
+		it.each(["not-a-cursor", "-1", "1.5", "", "99999999999999999999"])(
 			"rejects an invalid cursor %s",
 			async (cursor) => {
 				const searchAnalysts = await setup();
