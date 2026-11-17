@@ -1,3 +1,4 @@
+import { SpanStatusCode, context, trace } from "@opentelemetry/api";
 import { connect } from "mcp-testing-kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MixpanelTracker } from "../../src/metrics/mixpanel/mixpanel";
@@ -1093,6 +1094,15 @@ describe("MCP Server", () => {
 				expect((result.content as any[])[0].text).toMatch(
 					/conversation may have expired.*ask the Analytics Agent the question again/s,
 				);
+				const span = trace.getSpan(context.active()) as any;
+				expect(span.setAttributes).toHaveBeenCalledWith(
+					expect.objectContaining({ upstream_status: 404 }),
+				);
+				expect(span.setStatus).toHaveBeenCalledWith({
+					code: SpanStatusCode.ERROR,
+					message:
+						"get_data (ANALYTICS_AGENT_ANSWER) upstream error (status 404)",
+				});
 			});
 		});
 

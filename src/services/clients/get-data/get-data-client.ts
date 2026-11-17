@@ -1,3 +1,4 @@
+import { getActiveSpan } from "../../../metrics/tracing/tracing-utils";
 import {
 	type ApiRequestOptions,
 	generateRequestId,
@@ -242,10 +243,9 @@ export async function getData(
 	}: GetDataParams,
 ): Promise<GetDataResult> {
 	// x-request-id ties the upstream call to tracing.
-	const opts: ApiRequestOptions = {
-		requestId: generateRequestId(),
-		scopeToOrg: false,
-	};
+	const requestId = generateRequestId();
+	getActiveSpan()?.setAttribute("upstream_request_id", requestId);
+	const opts: ApiRequestOptions = { requestId, scopeToOrg: false };
 
 	// The caller-supplied type (from search_objects) picks the data endpoint.
 	const body: Record<string, unknown> = {
