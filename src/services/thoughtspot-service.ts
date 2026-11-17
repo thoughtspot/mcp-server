@@ -36,7 +36,6 @@ import type {
 	SendModelMessageParams,
 } from "./clients/spotter-model/spotter-model-types";
 import type {
-	Analyst,
 	GetDataParams,
 	GetDataResult,
 	SearchAnalystsParams,
@@ -1025,17 +1024,6 @@ export class ThoughtSpotService {
 		span?.setAttribute("results_count", result.analysts.length);
 		span?.setAttribute("total_size", result.totalSize);
 		return result;
-	}
-
-	/**
-	 * Fetch one Analyst by id, enforcing the caller's access to it
-	 */
-	@WithSpan("get-analyst")
-	async getAnalyst(analystId: string): Promise<Analyst> {
-		getActiveSpan()?.setAttribute("analyst_id", analystId);
-		return this.observeUpstreamCall(UPSTREAM_OPERATION_NAMES.getAnalyst, () =>
-			this.client.getAnalyst({ analystId }),
-		);
 	}
 
 	/**
