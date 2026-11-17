@@ -28,12 +28,9 @@ describe("Version Registry", () => {
 			expect(result.version).toContain("latest");
 		});
 
-		it("should expose list_analysts only on beta", () => {
-			const toolNames = (version: string) =>
-				resolveApiVersion(version).tools.map((t) => t.name);
-
-			expect(toolNames("beta")).toContain("list_analysts");
-			expect(toolNames("latest")).not.toContain("list_analysts");
+		it("should expose list_analysts on latest", () => {
+			const toolNames = resolveApiVersion("latest").tools.map((t) => t.name);
+			expect(toolNames).toContain("list_analysts");
 		});
 
 		it("should return beta version when 'beta' is specified", () => {
