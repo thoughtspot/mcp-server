@@ -119,10 +119,25 @@ export type ApiRelayResponse = {
 	body_base64: string;
 };
 
-// Endpoints that mint, exchange or revoke credentials. Relaying them would hand
-// a token to the page or end the user's session.
+// Endpoints that mint, exchange or revoke credentials or change passwords.
+// Relaying them would hand a token to the page, end the user's session (or
+// other users' sessions, as with /users/force-logout) or change a password.
 const DENIED_PATH =
-	/\/(login|logout)(\/|$)|\/auth\/token(\/|$)|\/session\/token(\/|$)|\/auth\/session\/token(\/|$)/i;
+	/\/login(\/|$)|logout(\/|$)|\/auth\/token(\/|$)|\/session\/token(\/|$)|\/auth\/session\/token(\/|$)|password/i;
+
+// The only paths the embedded app may reach: its API roots, plus the root page
+// and static HTML pages (such as /503.html) that nested frames load.
+const ALLOWED_API_PREFIXES = ["/prism/", "/callosum/v1/", "/api/rest/2.0/"];
+const ALLOWED_STATIC_PAGE = /^\/(?:[A-Za-z0-9_-][A-Za-z0-9._-]*\.html)?$/;
+
+function isAllowedRelayPath(pathname: string): boolean {
+	const p = pathname.toLowerCase();
+	return (
+		p === "/prism" ||
+		ALLOWED_API_PREFIXES.some((prefix) => p.startsWith(prefix)) ||
+		ALLOWED_STATIC_PAGE.test(pathname)
+	);
+}
 
 // Largest response body relayed back to the page.
 export const MAX_RELAY_RESPONSE_BYTES = 10 * 1024 * 1024;
@@ -130,8 +145,46 @@ export const MAX_RELAY_RESPONSE_BYTES = 10 * 1024 * 1024;
 export class ApiRelayRejectedError extends Error {}
 
 /**
- * The cluster URL a relayed request targets. Only paths on the connected
- * instance are allowed, and never the credential endpoints.
+ * The fully percent-decoded form of a URL path, as a server behind one or more
+ * decoding proxies could see it. Rejects anything a server might normalise into
+ * a different path than the one checked here: encoded slashes that form empty
+ * or dot segments, backslashes, `;` path parameters (stripped by Java servers),
+ * control characters and malformed escapes.
+ */
+function decodedRelayPath(pathname: string): string {
+	let decoded = pathname;
+	for (let i = 0; ; i++) {
+		let next: string;
+		try {
+			next = decodeURIComponent(decoded);
+		} catch {
+			throw new ApiRelayRejectedError("path has a malformed escape");
+		}
+		if (next === decoded) {
+			break;
+		}
+		if (i >= 3) {
+			throw new ApiRelayRejectedError("path is encoded too many times");
+		}
+		decoded = next;
+	}
+	const hasControlChar = Array.from(decoded).some((c) => {
+		const code = c.charCodeAt(0);
+		return code < 0x20 || code === 0x7f;
+	});
+	if (hasControlChar || /[\\;?#]/.test(decoded)) {
+		throw new ApiRelayRejectedError("path has disallowed characters");
+	}
+	if (/\/\/|\/\.\.?(\/|$)/.test(decoded)) {
+		throw new ApiRelayRejectedError("path must be normalised");
+	}
+	return decoded;
+}
+
+/**
+ * The cluster URL a relayed request targets. Only the ThoughtSpot app's own
+ * API and page paths on the connected instance are allowed, and never the
+ * credential endpoints.
  */
 export function resolveRelayUrl(instanceUrl: string, path: string): URL {
 	if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\")) {
@@ -141,22 +194,42 @@ export function resolveRelayUrl(instanceUrl: string, path: string): URL {
 	if (url.origin !== new URL(instanceUrl).origin) {
 		throw new ApiRelayRejectedError("path must stay on the instance");
 	}
-	if (DENIED_PATH.test(decodeURIComponent(url.pathname))) {
+	const decoded = decodedRelayPath(url.pathname);
+	if (!isAllowedRelayPath(decoded)) {
+		throw new ApiRelayRejectedError("path is not a ThoughtSpot app endpoint");
+	}
+	if (DENIED_PATH.test(decoded)) {
 		throw new ApiRelayRejectedError("credential endpoints are not relayed");
 	}
 	return url;
 }
 
+// Request headers that can rewrite the method, path or client identity on a
+// proxy or framework; never forwarded.
+const OVERRIDE_HEADER =
+	/^x-(http-method-override|http-method|method-override|original-url|original-uri|rewrite-url|original-method|host|real-ip|client-ip|forwarded-.*)$/;
+
 // Request headers the page may set. Credentials (Authorization, Cookie) and
-// hop-by-hop or proxy headers are never forwarded from the page.
+// anything not listed here are never forwarded from the page.
+const FORWARDABLE_HEADERS = new Set([
+	"content-type",
+	"accept",
+	"accept-language",
+	"x-requested-by",
+	"x-requested-with",
+	// Apollo Server's CSRF prevention and client identification (prism).
+	"x-apollo-operation-name",
+	"apollo-require-preflight",
+	"apollographql-client-name",
+	"apollographql-client-version",
+]);
+
 function isForwardableRequestHeader(name: string): boolean {
 	const n = name.toLowerCase();
-	if (n === "content-type" || n === "accept" || n === "accept-language") {
-		return true;
+	if (OVERRIDE_HEADER.test(n)) {
+		return false;
 	}
-	return (
-		n.startsWith("x-") && !n.startsWith("x-forwarded-") && n !== "x-real-ip"
-	);
+	return FORWARDABLE_HEADERS.has(n) || n.startsWith("x-callosum-");
 }
 
 // Response headers returned to the page. Never Set-Cookie.
@@ -168,6 +241,51 @@ function isReturnableResponseHeader(name: string): boolean {
 		n === "location" ||
 		(n.startsWith("x-") && n !== "x-frame-options")
 	);
+}
+
+// Read a response body, giving up once it passes MAX_RELAY_RESPONSE_BYTES so a
+// huge response is never buffered whole.
+async function readCappedBody(
+	response: Response,
+	method: string,
+): Promise<Uint8Array> {
+	const tooLarge = () =>
+		new ApiRelayRejectedError("response too large to relay");
+	if (method === "HEAD") {
+		// Content-Length describes the GET body; a HEAD response has none.
+		await response.body?.cancel().catch(() => {});
+		return new Uint8Array(0);
+	}
+	const declared = Number(response.headers.get("content-length"));
+	if (Number.isFinite(declared) && declared > MAX_RELAY_RESPONSE_BYTES) {
+		await response.body?.cancel().catch(() => {});
+		throw tooLarge();
+	}
+	if (!response.body) {
+		return new Uint8Array(0);
+	}
+	const reader = response.body.getReader();
+	const chunks: Uint8Array[] = [];
+	let total = 0;
+	for (;;) {
+		const { done, value } = await reader.read();
+		if (done) {
+			break;
+		}
+		total += value.byteLength;
+		if (total > MAX_RELAY_RESPONSE_BYTES) {
+			await reader.cancel().catch(() => {});
+			throw tooLarge();
+		}
+		chunks.push(value);
+	}
+	const body = new Uint8Array(total);
+	let offset = 0;
+	for (const chunk of chunks) {
+		body.set(chunk, offset);
+		offset += chunk.byteLength;
+	}
+	return body;
 }
 
 /**
@@ -202,10 +320,7 @@ export async function relayThoughtSpotApiRequest(
 		redirect: "manual",
 	});
 
-	const body = new Uint8Array(await response.arrayBuffer());
-	if (body.byteLength > MAX_RELAY_RESPONSE_BYTES) {
-		throw new ApiRelayRejectedError("response too large to relay");
-	}
+	const body = await readCappedBody(response, request.method);
 	const returned: Record<string, string> = {};
 	response.headers.forEach((value, name) => {
 		if (isReturnableResponseHeader(name)) {
@@ -217,6 +332,66 @@ export async function relayThoughtSpotApiRequest(
 		headers: returned,
 		body_base64: Buffer.from(body).toString("base64"),
 	};
+}
+
+// ── Per-render relay nonces ────────────────────────────────────────────────
+
+/**
+ * Server-issued secrets that authorise thoughtspot_api_request. Each
+ * get_thoughtspot_page render gets one; the widget holds it (never the
+ * sandboxed page) and sends it with every relay call. Kept in memory for the
+ * MCP session, bounded in count and age.
+ */
+export class RelayNonceStore {
+	private readonly nonces = new Map<string, number>();
+
+	constructor(
+		private readonly maxEntries = 16,
+		private readonly ttlMs = 12 * 60 * 60 * 1000,
+		private readonly now: () => number = Date.now,
+	) {}
+
+	issue(): string {
+		const bytes = new Uint8Array(16);
+		crypto.getRandomValues(bytes);
+		const nonce = Array.from(bytes, (b) =>
+			b.toString(16).padStart(2, "0"),
+		).join("");
+		this.prune();
+		while (this.nonces.size >= this.maxEntries) {
+			const oldest = this.nonces.keys().next().value;
+			if (oldest === undefined) {
+				break;
+			}
+			this.nonces.delete(oldest);
+		}
+		this.nonces.set(nonce, this.now() + this.ttlMs);
+		return nonce;
+	}
+
+	isValid(nonce: string | undefined): boolean {
+		if (!nonce) {
+			return false;
+		}
+		const expiresAt = this.nonces.get(nonce);
+		if (expiresAt === undefined) {
+			return false;
+		}
+		if (expiresAt <= this.now()) {
+			this.nonces.delete(nonce);
+			return false;
+		}
+		return true;
+	}
+
+	private prune() {
+		const now = this.now();
+		for (const [nonce, expiresAt] of this.nonces) {
+			if (expiresAt <= now) {
+				this.nonces.delete(nonce);
+			}
+		}
+	}
 }
 
 // ── Page proxy script ──────────────────────────────────────────────────────
@@ -382,6 +557,9 @@ function proxyScript(apiHost: string) {
 	}
 
 	var pending = new Map();
+	// Ids carry a per-document prefix: if this frame reloads, its parent's late
+	// answers to the previous document's requests must not match new requests.
+	var idPrefix = Math.random().toString(36).slice(2) + Date.now().toString(36) + ":";
 	var nextId = 1;
 
 	// Is this window one of our own child frames? Reading .parent is allowed on
@@ -414,7 +592,7 @@ function proxyScript(apiHost: string) {
 	// Send one relay request to the parent frame (ultimately the widget).
 	// Resolves with { status, headers, body_base64 }.
 	function sendUp(request) {
-		var id = nextId++;
+		var id = idPrefix + nextId++;
 		return new Promise(function (resolve, reject) {
 			pending.set(id, { resolve: resolve, reject: reject });
 			parentWin.postMessage({ __tsProxy: 1, kind: "request", id: id, request: request }, "*");
@@ -465,16 +643,31 @@ function proxyScript(apiHost: string) {
 				return Promise.reject(e);
 			}
 			var method = req.method.toUpperCase();
+			var signal = req.signal;
+			function abortError() {
+				return signal && signal.reason !== undefined
+					? signal.reason
+					: new DOMException("The operation was aborted.", "AbortError");
+			}
+			if (signal && signal.aborted) return Promise.reject(abortError());
 			var bodyPromise = method === "GET" || method === "HEAD" ? Promise.resolve(null) : req.arrayBuffer();
-			return bodyPromise
+			var result = bodyPromise
 				.then(function (body) { return relay(method, url, req.headers, body); })
 				.then(function (r) {
+					if (signal && signal.aborted) throw abortError();
 					var status = r.status >= 200 && r.status <= 599 ? r.status : 502;
 					return new Response(hasNoBody(status) ? null : fromBase64(r.body_base64), {
 						status: status,
 						headers: r.headers || {},
 					});
 				});
+			if (!signal) return result;
+			// The relayed call can't be cancelled, but the caller's promise rejects
+			// as soon as it is aborted, as with a native fetch.
+			return new Promise(function (resolve, reject) {
+				signal.addEventListener("abort", function () { reject(abortError()); }, { once: true });
+				result.then(resolve, reject);
+			});
 		};
 	}
 
@@ -496,7 +689,15 @@ function proxyScript(apiHost: string) {
 		try { xhr.dispatchEvent(new Event(type)); } catch (e) {}
 	}
 
+	// Fields send() defines on a relayed XHR; cleared when it is opened again.
+	var RELAYED_FIELDS = ["readyState", "status", "statusText", "responseURL", "response",
+		"responseText", "getResponseHeader", "getAllResponseHeaders"];
+
 	xhrProto.open = function (method, url) {
+		var xhr = this;
+		RELAYED_FIELDS.forEach(function (name) {
+			if (Object.prototype.hasOwnProperty.call(xhr, name)) delete xhr[name];
+		});
 		url = fixNullOrigin(url == null ? url : String(url));
 		if (shouldRewrite(url)) {
 			relayed.set(this, {
@@ -544,7 +745,7 @@ function proxyScript(apiHost: string) {
 		encodeBody(state.method, body, state.headers)
 			.then(function (bytes) { return relay(state.method, state.url, state.headers, bytes); })
 			.then(function (r) {
-				if (state.aborted) return;
+				if (state.aborted || relayed.get(xhr) !== state) return;
 				var bytes = fromBase64(r.body_base64);
 				var headers = r.headers || {};
 				var text = new TextDecoder().decode(bytes);
@@ -574,7 +775,7 @@ function proxyScript(apiHost: string) {
 				fire(xhr, "loadend");
 			})
 			.catch(function () {
-				if (state.aborted) return;
+				if (state.aborted || relayed.get(xhr) !== state) return;
 				define(xhr, "status", 0);
 				define(xhr, "readyState", 4);
 				fire(xhr, "readystatechange");
@@ -815,6 +1016,9 @@ export const THOUGHTSPOT_UI_WIDGET_HTML = `<!doctype html>
 	let nextId = 1;
 	let currentPath;
 	let pageFrame;
+	// Server-issued secret for this render that authorises relay calls. Kept
+	// here, never handed to the sandboxed page.
+	let relayNonce;
 
 	const frameEl = document.getElementById("frame");
 	const expandEl = document.getElementById("expand");
@@ -843,6 +1047,7 @@ export const THOUGHTSPOT_UI_WIDGET_HTML = `<!doctype html>
 
 	function showStatus(text, isError) {
 		pageFrame = undefined;
+		relayNonce = undefined;
 		const el = document.createElement("div");
 		el.className = isError ? "status error" : "status";
 		el.textContent = text;
@@ -861,7 +1066,7 @@ export const THOUGHTSPOT_UI_WIDGET_HTML = `<!doctype html>
 			if (currentPath !== path) return;
 			const text = (result.content || []).find((c) => c.type === "text");
 			const page = result.structuredContent;
-			if (result.isError || !page || !page.html) {
+			if (result.isError || !page || !page.html || !page.relay_nonce) {
 				showStatus(text ? text.text : "Could not load ThoughtSpot.", true);
 				return;
 			}
@@ -871,6 +1076,7 @@ export const THOUGHTSPOT_UI_WIDGET_HTML = `<!doctype html>
 			iframe.srcdoc = page.html;
 			frameEl.replaceChildren(iframe);
 			pageFrame = iframe;
+			relayNonce = page.relay_nonce;
 			reportSize();
 		} catch (error) {
 			if (currentPath !== path) return;
@@ -888,6 +1094,10 @@ export const THOUGHTSPOT_UI_WIDGET_HTML = `<!doctype html>
 			reply({ error: "invalid request" });
 			return;
 		}
+		if (!relayNonce) {
+			reply({ error: "page is not loaded" });
+			return;
+		}
 		try {
 			const result = await request("tools/call", {
 				name: "thoughtspot_api_request",
@@ -896,6 +1106,7 @@ export const THOUGHTSPOT_UI_WIDGET_HTML = `<!doctype html>
 					path: req.path,
 					headers: req.headers || {},
 					...(typeof req.body_base64 === "string" && { body_base64: req.body_base64 }),
+					relay_nonce: relayNonce,
 				},
 			});
 			if (result.isError || !result.structuredContent) {
@@ -909,15 +1120,16 @@ export const THOUGHTSPOT_UI_WIDGET_HTML = `<!doctype html>
 		}
 	}
 
+	function applyDisplayMode(mode) {
+		document.body.classList.toggle("fullscreen", mode === "fullscreen");
+		expandEl.textContent = mode === "fullscreen" ? "Collapse" : "Expand";
+		reportSize();
+	}
+
 	expandEl.addEventListener("click", () => {
 		const fullscreen = !document.body.classList.contains("fullscreen");
 		request("ui/request-display-mode", { mode: fullscreen ? "fullscreen" : "inline" })
-			.then((result) => {
-				const mode = result && result.mode;
-				document.body.classList.toggle("fullscreen", mode === "fullscreen");
-				expandEl.textContent = mode === "fullscreen" ? "Collapse" : "Expand";
-				reportSize();
-			})
+			.then((result) => applyDisplayMode(result && result.mode))
 			.catch(() => {});
 	});
 
@@ -956,6 +1168,10 @@ export const THOUGHTSPOT_UI_WIDGET_HTML = `<!doctype html>
 				}
 				break;
 			}
+			case "ui/notifications/host-context-changed":
+				// The host can leave fullscreen on its own (Escape, its own controls).
+				if (msg.params && msg.params.displayMode) applyDisplayMode(msg.params.displayMode);
+				break;
 			case "ping":
 			case "ui/resource-teardown":
 				if (msg.id !== undefined) send({ id: msg.id, result: {} });

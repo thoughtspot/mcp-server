@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import {
 	ApiRelayRejectedError,
+	MAX_RELAY_RESPONSE_BYTES,
+	RelayNonceStore,
 	THOUGHTSPOT_FRAME_SANDBOX,
 	THOUGHTSPOT_UI_WIDGET_HTML,
 	clientSupportsMcpApps,
@@ -86,6 +88,17 @@ describe("resolveRelayUrl", () => {
 	});
 
 	it.each([
+		"/prism",
+		"/callosum/v1/session/info",
+		"/api/rest/2.0/metadata/search",
+		"/",
+		"/503.html",
+		"/?x=1",
+	])("accepts the app path %s", (path) => {
+		expect(() => resolveRelayUrl(instanceUrl, path)).not.toThrow();
+	});
+
+	it.each([
 		["a protocol-relative URL", "//evil.example.com/x"],
 		["an absolute URL", "https://evil.example.com/x"],
 		["a backslash path", "/\\evil.example.com/x"],
@@ -94,6 +107,19 @@ describe("resolveRelayUrl", () => {
 		["session login", "/callosum/v1/session/login"],
 		["session logout", "/api/rest/2.0/auth/session/logout"],
 		["an encoded token endpoint", "/api/rest/2.0/auth/%74oken/full"],
+		["a double-encoded token endpoint", "/api/rest/2.0/auth/%2574oken/full"],
+		["a path parameter", "/api/rest/2.0/auth/token;x=1/full"],
+		["an encoded empty segment", "/api/rest/2.0/auth/%2Ftoken/full"],
+		["an encoded dot segment", "/prism/..%2Fapi/rest/2.0/auth/token/full"],
+		["an encoded backslash", "/prism/%5C..%5Cx"],
+		["a malformed escape", "/prism/%E0%A4%A"],
+		["force-logout", "/api/rest/2.0/users/force-logout"],
+		["a password change", "/api/rest/2.0/users/change-password"],
+		["an encoded control character", "/prism/%0Ax"],
+		["a path outside the app's APIs", "/admin/secrets"],
+		["a v1 public API outside callosum", "/tspublic/v1/user/list"],
+		["a non-HTML root file", "/robots.txt"],
+		["a nested HTML page", "/x/y.html"],
 	])("rejects %s", (_label, path) => {
 		expect(() => resolveRelayUrl(instanceUrl, path)).toThrow(
 			ApiRelayRejectedError,
@@ -152,13 +178,104 @@ describe("relayThoughtSpotApiRequest", () => {
 		);
 	});
 
+	it("never forwards override or unlisted headers", async () => {
+		const fetchImpl = vi.fn().mockResolvedValue(new Response("x"));
+
+		await relayThoughtSpotApiRequest(
+			instanceUrl,
+			"t",
+			{
+				method: "GET",
+				path: "/prism/",
+				headers: {
+					"x-http-method-override": "DELETE",
+					"x-method-override": "DELETE",
+					"x-original-url": "/api/rest/2.0/auth/token/full",
+					"x-rewrite-url": "/api/rest/2.0/auth/token/full",
+					"x-original-method": "DELETE",
+					"x-host": "evil.example.com",
+					"x-real-ip": "1.2.3.4",
+					"x-custom": "1",
+					"x-callosum-incident-id": "i1",
+					"x-apollo-operation-name": "GetHome",
+				},
+			},
+			fetchImpl,
+		);
+
+		const headers: Headers = fetchImpl.mock.calls[0][1].headers;
+		expect([...headers.keys()].sort()).toEqual([
+			"authorization",
+			"x-apollo-operation-name",
+			"x-callosum-incident-id",
+		]);
+	});
+
+	it("rejects a response whose Content-Length is over the cap without reading it", async () => {
+		const response = new Response("small", {
+			headers: { "content-length": String(MAX_RELAY_RESPONSE_BYTES + 1) },
+		});
+		const arrayBuffer = vi.spyOn(response, "arrayBuffer");
+
+		await expect(
+			relayThoughtSpotApiRequest(
+				instanceUrl,
+				"t",
+				{ method: "GET", path: "/prism/" },
+				vi.fn().mockResolvedValue(response),
+			),
+		).rejects.toThrow(/too large/);
+		expect(arrayBuffer).not.toHaveBeenCalled();
+	});
+
+	it("stops reading a streamed response once it passes the cap", async () => {
+		const chunk = new Uint8Array(1024 * 1024);
+		let pulled = 0;
+		let cancelled = false;
+		const body = new ReadableStream<Uint8Array>({
+			pull(controller) {
+				pulled++;
+				controller.enqueue(chunk);
+			},
+			cancel() {
+				cancelled = true;
+			},
+		});
+
+		await expect(
+			relayThoughtSpotApiRequest(
+				instanceUrl,
+				"t",
+				{ method: "GET", path: "/prism/" },
+				vi.fn().mockResolvedValue(new Response(body)),
+			),
+		).rejects.toThrow(/too large/);
+		expect(cancelled).toBe(true);
+		expect(pulled).toBeLessThan(20);
+	});
+
+	it("returns an empty body for HEAD, whatever its Content-Length", async () => {
+		const response = new Response(null, {
+			headers: { "content-length": String(MAX_RELAY_RESPONSE_BYTES + 1) },
+		});
+
+		const result = await relayThoughtSpotApiRequest(
+			instanceUrl,
+			"t",
+			{ method: "HEAD", path: "/prism/" },
+			vi.fn().mockResolvedValue(response),
+		);
+
+		expect(result.body_base64).toBe("");
+	});
+
 	it("sends no body for GET", async () => {
 		const fetchImpl = vi.fn().mockResolvedValue(new Response("x"));
 
 		await relayThoughtSpotApiRequest(
 			instanceUrl,
 			"t",
-			{ method: "GET", path: "/x", body_base64: "eA==" },
+			{ method: "GET", path: "/prism/", body_base64: "eA==" },
 			fetchImpl,
 		);
 
@@ -177,6 +294,37 @@ describe("relayThoughtSpotApiRequest", () => {
 			),
 		).rejects.toThrow(ApiRelayRejectedError);
 		expect(fetchImpl).not.toHaveBeenCalled();
+	});
+});
+
+describe("RelayNonceStore", () => {
+	it("issues unguessable nonces and accepts only those", () => {
+		const store = new RelayNonceStore();
+		const a = store.issue();
+		const b = store.issue();
+
+		expect(a).toMatch(/^[0-9a-f]{32}$/);
+		expect(a).not.toBe(b);
+		expect(store.isValid(a)).toBe(true);
+		expect(store.isValid(b)).toBe(true);
+		expect(store.isValid("0".repeat(32))).toBe(false);
+		expect(store.isValid(undefined)).toBe(false);
+		expect(store.isValid("")).toBe(false);
+	});
+
+	it("expires nonces and keeps only the newest ones", () => {
+		let now = 0;
+		const store = new RelayNonceStore(2, 1000, () => now);
+		const first = store.issue();
+		const second = store.issue();
+		const third = store.issue();
+
+		expect(store.isValid(first)).toBe(false);
+		expect(store.isValid(second)).toBe(true);
+		expect(store.isValid(third)).toBe(true);
+
+		now = 1000;
+		expect(store.isValid(third)).toBe(false);
 	});
 });
 
@@ -357,7 +505,7 @@ function bootProxy() {
 		for (const fn of listeners) fn({ source, data });
 		await settle();
 	};
-	const respond = (id: number, response: any) =>
+	const respond = (id: string, response: any) =>
 		deliver({ __tsProxy: 1, kind: "response", id, response });
 
 	return {
@@ -480,6 +628,46 @@ describe("proxy script in the sandboxed srcdoc frame", () => {
 		});
 
 		await expect(pending).rejects.toThrow("nope");
+	});
+
+	it("rejects an aborted fetch with an AbortError", async () => {
+		const { windowStub, toParent, respond } = bootProxy();
+		const controller = new AbortController();
+
+		const pending = windowStub.fetch("/prism/", { signal: controller.signal });
+		await settle();
+		controller.abort();
+
+		await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+		await respond(toParent[0].id, okResponse("{}"));
+		await expect(
+			windowStub.fetch("/prism/", { signal: controller.signal }),
+		).rejects.toMatchObject({ name: "AbortError" });
+	});
+
+	it("gives each document its own request ids, so a reloaded frame can't get stale answers", async () => {
+		const first = bootProxy();
+		const second = bootProxy();
+
+		first.windowStub.fetch("/prism/");
+		second.windowStub.fetch("/prism/");
+		await settle();
+
+		expect(first.toParent[0].id).not.toBe(second.toParent[0].id);
+	});
+
+	it("ignores a late relay answer after the XHR was opened again", async () => {
+		const { toParent, respond, FakeXhr } = bootProxy();
+		const xhr: any = new FakeXhr();
+
+		xhr.open("GET", "/prism/first");
+		xhr.send();
+		await settle();
+		xhr.open("GET", "/prism/second");
+
+		await respond(toParent[0].id, okResponse('{"stale":true}'));
+		expect(xhr.readyState).toBe(1);
+		expect(xhr.status).toBeUndefined();
 	});
 
 	it("relays XHRs and fires load with the response", async () => {
@@ -670,7 +858,12 @@ describe("ThoughtSpot UI widget", () => {
 		await widget.deliver({
 			jsonrpc: "2.0",
 			id: pageCall.id,
-			result: { structuredContent: { html: "<html>page</html>" } },
+			result: {
+				structuredContent: {
+					html: "<html>page</html>",
+					relay_nonce: "nonce-1",
+				},
+			},
 		});
 		const [iframe] = widget.elements.frame.children;
 		return { ...widget, iframe };
@@ -710,10 +903,12 @@ describe("ThoughtSpot UI widget", () => {
 					method: "GET",
 					path: "/prism/",
 					headers: { accept: "*/*" },
+					relay_nonce: "nonce-1",
 				},
 			},
 		});
 		expect(call.params.arguments).not.toHaveProperty("name");
+		expect(iframe.srcdoc).not.toContain("nonce-1");
 
 		const response = okResponse("{}");
 		await deliver({

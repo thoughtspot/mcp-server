@@ -1431,6 +1431,9 @@ export const ThoughtSpotApiRequestInputSchema = z.object({
 		.describe("Path and query on the ThoughtSpot instance, starting with /."),
 	headers: z.record(z.string(), z.string()).optional(),
 	body_base64: z.string().optional(),
+	relay_nonce: z
+		.string()
+		.describe("The relay_nonce returned by get_thoughtspot_page."),
 });
 
 export const ThoughtSpotApiRequestOutputSchema = z.object({

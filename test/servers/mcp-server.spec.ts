@@ -1647,9 +1647,54 @@ describe("MCP Server", () => {
 			expect((result.content as any[])[0].text).toMatch(/not enabled/);
 		});
 
+		describe("with the flag but a client without MCP Apps support", () => {
+			beforeEach(() => {
+				mockProps.enableAnswerWidget = true;
+			});
+
+			it("hides the widget tools", async () => {
+				await server.init();
+				const { listTools } = connect(server);
+
+				const names = (await listTools()).tools.map((t) => t.name);
+				expect(names).not.toContain("show_answer");
+				expect(names).not.toContain("get_answer_image");
+			});
+
+			it("rejects widget tool calls", async () => {
+				await server.init();
+				const { callTool } = connect(server);
+
+				const result = await callTool("get_answer_image", {
+					answer_id: answerId,
+				});
+
+				expect(result.isError).toBe(true);
+				expect((result.content as any[])[0].text).toMatch(/not enabled/);
+			});
+
+			it("does not serve the widget resource", async () => {
+				await server.init();
+
+				const read = server.readResource({
+					method: "resources/read",
+					params: { uri: "ui://thoughtspot/answer.html" },
+				});
+
+				await expect(read).rejects.toThrow();
+			});
+		});
+
 		describe("with the flag", () => {
 			beforeEach(() => {
 				mockProps.enableAnswerWidget = true;
+				vi.spyOn(server, "getClientCapabilities").mockReturnValue({
+					extensions: {
+						"io.modelcontextprotocol/ui": {
+							mimeTypes: ["text/html;profile=mcp-app"],
+						},
+					},
+				} as any);
 			});
 
 			it("lists show_answer linked to the widget and get_answer_image as app-only", async () => {
@@ -1992,13 +2037,34 @@ describe("MCP Server", () => {
 					expect(fetchSpy.mock.calls[0][0]).toBe(
 						"https://test.thoughtspot.cloud/",
 					);
-					const { html, path } = result.structuredContent as any;
+					const { html, path, relay_nonce } = result.structuredContent as any;
 					expect(path).toBe("#/pinboard/abc");
+					// The nonce goes to the widget, never into the sandboxed page.
+					expect(relay_nonce).toMatch(/^[0-9a-f]{32}$/);
+					expect(html).not.toContain(relay_nonce);
+					expect((server as any).relayNonces.isValid(relay_nonce)).toBe(true);
 					expect(html).toContain("[api-relay]");
 					expect(html.indexOf("[api-relay]")).toBeLessThan(
 						html.indexOf("var blink"),
 					);
 					expect(JSON.stringify(result)).not.toContain("test-access-token");
+				});
+
+				it("get_thoughtspot_page refuses an index.html redirected off the instance", async () => {
+					const redirected = new Response(indexHtml, { status: 200 });
+					Object.defineProperty(redirected, "url", {
+						value: "https://idp.example.com/login",
+					});
+					vi.stubGlobal("fetch", vi.fn().mockResolvedValue(redirected));
+					await server.init();
+					const { callTool } = connect(server);
+
+					const result = await callTool("get_thoughtspot_page", {
+						path: "#/home",
+					});
+
+					expect(result.isError).toBe(true);
+					expect(JSON.stringify(result)).not.toContain("[api-relay]");
 				});
 
 				it("get_thoughtspot_page reports a failed index.html fetch", async () => {
@@ -2028,12 +2094,14 @@ describe("MCP Server", () => {
 					);
 					vi.stubGlobal("fetch", fetchSpy);
 					await server.init();
+					const relayNonce = (server as any).relayNonces.issue();
 					const { callTool } = connect(server);
 
 					const result = await callTool("thoughtspot_api_request", {
 						method: "GET",
 						path: "/callosum/v1/session/info",
 						headers: { authorization: "Bearer from-page" },
+						relay_nonce: relayNonce,
 					});
 
 					expect(result.isError).toBeUndefined();
@@ -2055,17 +2123,43 @@ describe("MCP Server", () => {
 					const fetchSpy = vi.fn();
 					vi.stubGlobal("fetch", fetchSpy);
 					await server.init();
+					const relayNonce = (server as any).relayNonces.issue();
 					const { callTool } = connect(server);
 
 					const result = await callTool("thoughtspot_api_request", {
 						method: "POST",
 						path: "/api/rest/2.0/auth/token/full",
+						relay_nonce: relayNonce,
 					});
 
 					expect(result.isError).toBe(true);
 					expect((result.content as any[])[0].text).toMatch(/not allowed/);
 					expect(fetchSpy).not.toHaveBeenCalled();
 				});
+
+				it.each([
+					["without a relay nonce", undefined],
+					["with a nonce the server did not issue", "0".repeat(32)],
+				])(
+					"thoughtspot_api_request refuses calls %s",
+					async (_label, nonce) => {
+						const fetchSpy = vi.fn();
+						vi.stubGlobal("fetch", fetchSpy);
+						await server.init();
+						(server as any).relayNonces.issue();
+						const { callTool } = connect(server);
+
+						const result = await callTool("thoughtspot_api_request", {
+							method: "GET",
+							path: "/prism/",
+							...(nonce && { relay_nonce: nonce }),
+						});
+
+						expect(result.isError).toBe(true);
+						expect((result.content as any[])[0].text).toMatch(/not allowed/);
+						expect(fetchSpy).not.toHaveBeenCalled();
+					},
+				);
 			});
 		});
 	});

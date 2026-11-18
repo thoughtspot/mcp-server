@@ -13,6 +13,7 @@ import {
 } from "../apps/answer-widget";
 import {
 	ApiRelayRejectedError,
+	RelayNonceStore,
 	THOUGHTSPOT_UI_WIDGET_HTML,
 	THOUGHTSPOT_UI_WIDGET_URI,
 	clientSupportsMcpApps,
@@ -125,6 +126,8 @@ export class MCPServer extends BaseMCPServer {
 	private globalToken: string | undefined;
 	// False for pre-multi-org grants (no refresh token) — keeps old behavior until re-auth.
 	private grantHasRefreshToken = false;
+	// Per-render secrets that authorise thoughtspot_api_request (thoughtspot-ui).
+	private readonly relayNonces = new RelayNonceStore();
 
 	constructor(ctx: Context) {
 		super(ctx, "ThoughtSpot", "2.0.0");
@@ -570,11 +573,13 @@ export class MCPServer extends BaseMCPServer {
 	/**
 	 * The show_answer MCP Apps widget is opt-in (`answer-widget` URL flag), needs the
 	 * Analytics Agent tools that produce `answer_id`s, and exports the answer, so it
-	 * shares get_data's data-download gate.
+	 * shares get_data's data-download gate. Like show_thoughtspot it is only offered
+	 * to clients that render MCP Apps: elsewhere show_answer would show nothing,
+	 * and the app-only get_answer_image would be exposed to the model.
 	 */
 	private isAnswerWidgetAvailable(tools: { name: string }[]): boolean {
 		return (
-			!!this.ctx.props.enableAnswerWidget &&
+			this.isAnswerWidgetEnabledForClient() &&
 			this.canDownloadData() &&
 			tools.some((tool) => tool.name === ToolName.GetSessionUpdates)
 		);
@@ -596,7 +601,7 @@ export class MCPServer extends BaseMCPServer {
 				mimeType: MCP_APP_MIME_TYPE,
 			});
 		}
-		if (this.ctx.props.enableAnswerWidget) {
+		if (this.isAnswerWidgetEnabledForClient()) {
 			resources.push({
 				uri: ANSWER_WIDGET_URI,
 				name: "ThoughtSpot Answer",
@@ -611,7 +616,7 @@ export class MCPServer extends BaseMCPServer {
 		request: z.infer<typeof ReadResourceRequestSchema>,
 	) {
 		const { uri } = request.params;
-		if (uri === ANSWER_WIDGET_URI) {
+		if (uri === ANSWER_WIDGET_URI && this.isAnswerWidgetEnabledForClient()) {
 			return {
 				contents: [
 					{
@@ -1923,7 +1928,7 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 	 * re-check the widget gates here. Undefined when the call may proceed.
 	 */
 	private async answerWidgetGateError() {
-		if (!this.ctx.props.enableAnswerWidget) {
+		if (!this.isAnswerWidgetEnabledForClient()) {
 			return this.createErrorResponse(
 				"The answer widget is not enabled for this connection.",
 				"answer widget tool called without the answer-widget flag",
@@ -1937,6 +1942,13 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			);
 		}
 		return undefined;
+	}
+
+	private isAnswerWidgetEnabledForClient(): boolean {
+		return (
+			!!this.ctx.props.enableAnswerWidget &&
+			clientSupportsMcpApps(this.getClientCapabilities())
+		);
 	}
 
 	/**
@@ -2000,6 +2012,14 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			if (!response.ok) {
 				throw new Error(`status ${response.status}`);
 			}
+			// A followed redirect (an SSO login page, say) must not get the proxy
+			// injected into someone else's HTML.
+			if (
+				response.url &&
+				new URL(response.url).origin !== new URL(instanceUrl).origin
+			) {
+				throw new Error(`redirected off the instance to ${response.url}`);
+			}
 			indexHtml = await response.text();
 		} catch (error) {
 			return this.createErrorResponse(
@@ -2015,9 +2035,15 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			message: "Built ThoughtSpot page",
 		});
 		// The widget reads structuredContent; keep the bulky HTML out of the text.
+		// relay_nonce stays with the widget: it authorises this render's relay
+		// calls and is never put into the page.
 		return {
 			content: [{ type: "text" as const, text: "ThoughtSpot page ready." }],
-			structuredContent: { html, path: route },
+			structuredContent: {
+				html,
+				path: route,
+				relay_nonce: this.relayNonces.issue(),
+			},
 		};
 	}
 
@@ -2033,9 +2059,16 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		if (!this.isThoughtSpotUiAvailable()) {
 			return this.thoughtSpotUiDisabledError();
 		}
-		const relayRequest = ThoughtSpotApiRequestInputSchema.parse(
-			request.params.arguments,
-		);
+		// Check the nonce before anything else about the call.
+		const nonce = request.params.arguments?.relay_nonce;
+		if (typeof nonce !== "string" || !this.relayNonces.isValid(nonce)) {
+			return this.createErrorResponse(
+				"Request not allowed: the ThoughtSpot page is not loaded; reopen it.",
+				"thoughtspot_api_request rejected: missing or unknown relay nonce",
+			);
+		}
+		const { relay_nonce: _nonce, ...relayRequest } =
+			ThoughtSpotApiRequestInputSchema.parse(request.params.arguments);
 		const span = this.initSpanWithCommonAttributes();
 		span?.setAttributes({
 			relay_method: relayRequest.method,
