@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { answerWidgetToolMeta } from "../apps/answer-widget";
 import { GET_DATA_SUPPORTED_TYPES } from "../services/clients/get-data/get-data-constants";
 
 export const PingSchema = z.object({});
@@ -674,6 +675,9 @@ export enum ToolName {
 	SendModelMessage = "send_model_message",
 	GetModelUpdates = "get_model_updates",
 	FinalizeModel = "finalize_model",
+	// MCP Apps answer widget (behind the `answer-widget` URL flag)
+	ShowAnswer = "show_answer",
+	GetAnswerImage = "get_answer_image",
 }
 
 /**
@@ -1291,4 +1295,71 @@ export const createAnalysisSessionToolDefinitionSpotterX = {
 		destructiveHint: false,
 		openWorldHint: false,
 	},
+};
+
+// ── MCP Apps answer widget ─────────────────────────────────────────────────
+export const ShowAnswerInputSchema = z.object({
+	answer_id: z
+		.string()
+		.describe(
+			'The `answer_id` of an answer returned by the "get_session_updates" tool. Pass it verbatim.',
+		),
+	title: z
+		.string()
+		.optional()
+		.describe("A short title for the answer, shown above the visualization."),
+	iframe_url: z
+		.string()
+		.optional()
+		.describe(
+			"The answer's `iframe_url` from get_session_updates, passed verbatim. Used for the widget's \"Open in ThoughtSpot\" button.",
+		),
+});
+
+export const ShowAnswerOutputSchema = z.object({
+	answer_id: z.string(),
+	title: z.string(),
+	open_url: z
+		.string()
+		.optional()
+		.describe("Link that opens the answer in ThoughtSpot in a browser tab."),
+});
+
+export const GetAnswerImageInputSchema = z.object({
+	answer_id: z
+		.string()
+		.describe(
+			'The `answer_id` of an answer returned by the "get_session_updates" tool.',
+		),
+});
+
+export const showAnswerToolDefinition = {
+	name: ToolName.ShowAnswer,
+	description:
+		"Show an Analytics Agent answer to the user as an interactive card with its chart or table rendered inline, plus a button to open it in ThoughtSpot. Call this with an `answer_id` from get_session_updates whenever an answer would be clearer as a visual than as text, instead of telling the user to open the `iframe_url` themselves. Pass the answer's `iframe_url` too, so the user can open it in ThoughtSpot. The result only confirms the card was shown; use get_data if you need the answer's rows to reason about.",
+	inputSchema: z.toJSONSchema(ShowAnswerInputSchema),
+	outputSchema: z.toJSONSchema(ShowAnswerOutputSchema),
+	annotations: {
+		title: "Show Answer",
+		readOnlyHint: true,
+		destructiveHint: false,
+		openWorldHint: false,
+	},
+	_meta: answerWidgetToolMeta(),
+};
+
+// Widget-only helper: the answer widget calls it to fetch the PNG, so the image
+// never lands in the model's context. Hidden from the model by `visibility`.
+export const getAnswerImageToolDefinition = {
+	name: ToolName.GetAnswerImage,
+	description:
+		"Fetch a PNG image of an Analytics Agent answer for the show_answer widget. Not for direct use.",
+	inputSchema: z.toJSONSchema(GetAnswerImageInputSchema),
+	annotations: {
+		title: "Get Answer Image",
+		readOnlyHint: true,
+		destructiveHint: false,
+		openWorldHint: false,
+	},
+	_meta: { ui: { visibility: ["app"] } },
 };

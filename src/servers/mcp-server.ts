@@ -5,6 +5,12 @@ import type {
 import { SpanStatusCode, context, trace } from "@opentelemetry/api";
 import type { AgentConversation } from "@thoughtspot/rest-api-sdk";
 import type { z } from "zod";
+import {
+	ANSWER_WIDGET_HTML,
+	ANSWER_WIDGET_URI,
+	MCP_APP_MIME_TYPE,
+	buildAnswerOpenUrl,
+} from "../apps/answer-widget";
 import { TrackEvent } from "../metrics";
 import type { ApiVersionMode } from "../metrics/runtime/metric-types";
 import {
@@ -70,6 +76,7 @@ import {
 	FinalizeModelInputSchema,
 	GET_DATA_ANALYTICS_AGENT_ANSWER_DESCRIPTION,
 	GET_DATA_ANALYTICS_AGENT_ANSWER_SUPPRESSED_IFRAMES_DESCRIPTION,
+	GetAnswerImageInputSchema,
 	GetAnswerSchema,
 	GetDashboardStatusInputSchema,
 	GetDataInputSchema,
@@ -82,9 +89,12 @@ import {
 	SearchObjectsInputSchema,
 	SendModelMessageInputSchema,
 	SendSessionMessageInputSchema,
+	ShowAnswerInputSchema,
 	SwitchOrgInputSchema,
 	ToolName,
 	createAnalysisSessionToolDefinitionSpotterX,
+	getAnswerImageToolDefinition,
+	showAnswerToolDefinition,
 } from "./tool-definitions";
 import { recordGetDataFailure } from "./upstream-error-utils";
 import {
@@ -526,25 +536,63 @@ export class MCPServer extends BaseMCPServer {
 			tools = tools.filter((tool) => !MODEL_TOOL_NAMES.includes(tool.name));
 		}
 
+		if (this.isAnswerWidgetAvailable(tools)) {
+			tools.push(showAnswerToolDefinition, getAnswerImageToolDefinition);
+		}
+
 		return { tools };
+	}
+
+	/**
+	 * The show_answer MCP Apps widget is opt-in (`answer-widget` URL flag), needs the
+	 * Analytics Agent tools that produce `answer_id`s, and exports the answer, so it
+	 * shares get_data's data-download gate.
+	 */
+	private isAnswerWidgetAvailable(tools: { name: string }[]): boolean {
+		return (
+			!!this.ctx.props.enableAnswerWidget &&
+			this.canDownloadData() &&
+			tools.some((tool) => tool.name === ToolName.GetSessionUpdates)
+		);
 	}
 
 	protected async listResources() {
 		const sources = await this.getDatasources();
-		return {
-			resources: sources.list.map((s) => ({
-				uri: `datasource:///${s.id}`,
-				name: s.name,
-				description: s.description,
-				mimeType: "text/plain",
-			})),
-		};
+		const resources = sources.list.map((s) => ({
+			uri: `datasource:///${s.id}`,
+			name: s.name,
+			description: s.description,
+			mimeType: "text/plain",
+		}));
+		if (this.ctx.props.enableAnswerWidget) {
+			resources.push({
+				uri: ANSWER_WIDGET_URI,
+				name: "ThoughtSpot Answer",
+				description: "Interactive card that shows an Analytics Agent answer.",
+				mimeType: MCP_APP_MIME_TYPE,
+			});
+		}
+		return { resources };
 	}
 
 	protected async readResource(
 		request: z.infer<typeof ReadResourceRequestSchema>,
 	) {
 		const { uri } = request.params;
+		if (uri === ANSWER_WIDGET_URI) {
+			return {
+				contents: [
+					{
+						uri,
+						mimeType: MCP_APP_MIME_TYPE,
+						text: ANSWER_WIDGET_HTML,
+						// The widget needs no external origins: the image arrives as a data: URL
+						// and the open-in-ThoughtSpot link goes through the host (ui/open-link).
+						_meta: { ui: { prefersBorder: true } },
+					},
+				],
+			};
+		}
 		const sourceId = uri.split("///").pop();
 		if (!sourceId) {
 			throw new McpServerError({ message: "Invalid datasource uri" }, 400);
@@ -765,6 +813,14 @@ export class MCPServer extends BaseMCPServer {
 
 			case ToolName.FinalizeModel: {
 				return this.callFinalizeModel(request, recorder);
+			}
+
+			case ToolName.ShowAnswer: {
+				return this.callShowAnswer(request);
+			}
+
+			case ToolName.GetAnswerImage: {
+				return this.callGetAnswerImage(request, recorder);
 			}
 
 			default:
@@ -1697,6 +1753,127 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 				statusMessage,
 			);
 		}
+	}
+
+	/**
+	 * show_answer: hand the answer to the MCP Apps widget. The widget fetches the
+	 * image itself through get_answer_image, so this result stays small and the PNG
+	 * never enters the model's context.
+	 */
+	@WithSpan("call-show-answer")
+	async callShowAnswer(request: z.infer<typeof CallToolRequestSchema>) {
+		const gateError = await this.answerWidgetGateError();
+		if (gateError) {
+			return gateError;
+		}
+		const { answer_id, title, iframe_url } = ShowAnswerInputSchema.parse(
+			request.params.arguments,
+		);
+		if (!parseAnswerIds([{ answer_id, title: "" }])) {
+			return this.createErrorResponse(
+				'Invalid answer_id. Pass the `answer_id` returned from the "get_session_updates" tool verbatim.',
+				`show_answer: invalid answer_id ${answer_id}`,
+			);
+		}
+		return this.createStructuredContentSuccessResponse(
+			{
+				answer_id,
+				title: title || "ThoughtSpot answer",
+				open_url: buildAnswerOpenUrl(this.ctx.props.instanceUrl, iframe_url),
+			},
+			"Showed answer widget",
+		);
+	}
+
+	/** get_answer_image: PNG export of an answer, for the show_answer widget. */
+	@WithSpan("call-get-answer-image")
+	async callGetAnswerImage(
+		request: z.infer<typeof CallToolRequestSchema>,
+		recorder: MetricsRecorder,
+	) {
+		const gateError = await this.answerWidgetGateError();
+		if (gateError) {
+			return gateError;
+		}
+		const { answer_id } = GetAnswerImageInputSchema.parse(
+			request.params.arguments,
+		);
+		const [answer] = parseAnswerIds([{ answer_id, title: "" }]) ?? [];
+		if (!answer) {
+			return this.createErrorResponse(
+				"Invalid answer_id.",
+				`get_answer_image: invalid answer_id ${answer_id}`,
+			);
+		}
+
+		const service = this.getThoughtSpotService(recorder);
+		try {
+			let image: { data: string; mimeType: string };
+			try {
+				image = await service.getSpotterAnswerImage({
+					sessionIdentifier: answer.session_identifier,
+					generationNumber: answer.generation_number,
+				});
+			} catch (error) {
+				// Session ids expire after about 8 hours; reload the answer through its
+				// conversation for fresh ones, as get_data does. Not for auth failures.
+				const reload = parseAnswerReloadIds(answer_id);
+				const status = this.apiErrorStatus(error);
+				if (!reload || status === 401 || status === 403) {
+					throw error;
+				}
+				const fresh = await service.reloadSpotterAnswer(reload);
+				image = await service.getSpotterAnswerImage(fresh);
+			}
+			const span = this.initSpanWithCommonAttributes();
+			span?.setStatus({
+				code: SpanStatusCode.OK,
+				message: "Exported answer image",
+			});
+			return {
+				content: [
+					{
+						type: "image" as const,
+						data: image.data,
+						mimeType: image.mimeType,
+					},
+				],
+			};
+		} catch (error) {
+			const status = this.apiErrorStatus(error);
+			if (status === 401) {
+				throw error;
+			}
+			const hint =
+				status === 403
+					? "You may not have permission to export this answer."
+					: "The answer may have expired; ask the question again.";
+			return this.createErrorResponse(
+				`Could not load the visualization. ${hint}`,
+				`get_answer_image failed (status ${status ?? "unknown"})`,
+			);
+		}
+	}
+
+	/**
+	 * Calls can arrive for tools listTools hid (cached tool lists, direct calls), so
+	 * re-check the widget gates here. Undefined when the call may proceed.
+	 */
+	private async answerWidgetGateError() {
+		if (!this.ctx.props.enableAnswerWidget) {
+			return this.createErrorResponse(
+				"The answer widget is not enabled for this connection.",
+				"answer widget tool called without the answer-widget flag",
+			);
+		}
+		await this.ensureSessionInfo();
+		if (!this.canDownloadData()) {
+			return this.createErrorResponse(
+				"You do not have permission to export answers (requires the data-download privilege).",
+				"answer widget forbidden",
+			);
+		}
+		return undefined;
 	}
 
 	@WithSpan("call-get-data")

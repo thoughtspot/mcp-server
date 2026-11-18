@@ -1592,6 +1592,241 @@ describe("MCP Server", () => {
 		});
 	});
 
+	describe("MCP Apps answer widget (answer-widget URL flag)", () => {
+		const answerId = JSON.stringify({ session_id: "session-9", gen_no: 3 });
+		const reloadableAnswerId = JSON.stringify({
+			session_id: "session-9",
+			gen_no: 3,
+			conversation_id: "conv-1",
+			message_id: "msg-1",
+		});
+		const embedUrl =
+			"https://test.thoughtspot.cloud/?tsmcp=true#/embed/conv-assist-answer?sessionId=session-9&genNo=3";
+		const pngBytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
+
+		const mockClient = () =>
+			new thoughtspotClient.ThoughtSpotClient({
+				instanceUrl: "https://test.thoughtspot.cloud",
+				token: "test-access-token",
+				tenantId: "",
+				orgId: "",
+				userId: "",
+			}) as any;
+
+		const pngFile = () => ({
+			arrayBuffer: vi.fn().mockResolvedValue(pngBytes.buffer),
+		});
+
+		it("hides the widget tools without the flag", async () => {
+			await server.init();
+			const { listTools } = connect(server);
+
+			const names = (await listTools()).tools.map((t) => t.name);
+			expect(names).not.toContain("show_answer");
+			expect(names).not.toContain("get_answer_image");
+		});
+
+		it("lists no widget resource without the flag", async () => {
+			await server.init();
+			const { listResources } = connect(server);
+
+			const { resources } = await listResources();
+			expect(resources.map((r) => r.uri)).toEqual([
+				"datasource:///ds-123",
+				"datasource:///ds-456",
+			]);
+		});
+
+		it("rejects widget tool calls without the flag", async () => {
+			await server.init();
+			const { callTool } = connect(server);
+
+			const result = await callTool("show_answer", { answer_id: answerId });
+
+			expect(result.isError).toBe(true);
+			expect((result.content as any[])[0].text).toMatch(/not enabled/);
+		});
+
+		describe("with the flag", () => {
+			beforeEach(() => {
+				mockProps.enableAnswerWidget = true;
+			});
+
+			it("lists show_answer linked to the widget and get_answer_image as app-only", async () => {
+				await server.init();
+				const { listTools } = connect(server);
+
+				const { tools } = await listTools();
+				const show = tools.find((t) => t.name === "show_answer") as any;
+				const image = tools.find((t) => t.name === "get_answer_image") as any;
+				expect(show._meta.ui.resourceUri).toBe("ui://thoughtspot/answer.html");
+				expect(show._meta["ui/resourceUri"]).toBe(
+					"ui://thoughtspot/answer.html",
+				);
+				expect(image._meta.ui).toEqual({ visibility: ["app"] });
+			});
+
+			it("hides the widget tools without the data-download privilege", async () => {
+				await server.init();
+				(server as any).sessionInfo.privileges = [];
+				const { listTools } = connect(server);
+
+				const names = (await listTools()).tools.map((t) => t.name);
+				expect(names).not.toContain("show_answer");
+				expect(names).not.toContain("get_answer_image");
+			});
+
+			it("hides the widget tools on versions without the Analytics Agent", async () => {
+				mockProps.apiVersion = "backwards-compatibility-default";
+				await server.init();
+				const { listTools } = connect(server);
+
+				const names = (await listTools()).tools.map((t) => t.name);
+				expect(names).not.toContain("show_answer");
+			});
+
+			it("serves the widget HTML as an MCP App resource", async () => {
+				await server.init();
+				const { listResources } = connect(server);
+
+				const uris = (await listResources()).resources.map((r) => r.uri);
+				expect(uris).toContain("ui://thoughtspot/answer.html");
+
+				const result = await server.readResource({
+					method: "resources/read",
+					params: { uri: "ui://thoughtspot/answer.html" },
+				});
+				const [content] = result.contents as any[];
+				expect(content.mimeType).toBe("text/html;profile=mcp-app");
+				expect(content.text).toContain("ui/initialize");
+				expect(content.text).toContain("get_answer_image");
+			});
+
+			it("show_answer returns the answer and a browser link on the instance", async () => {
+				await server.init();
+				const { callTool } = connect(server);
+
+				const result = await callTool("show_answer", {
+					answer_id: answerId,
+					title: "Revenue by region",
+					iframe_url: embedUrl,
+				});
+
+				expect(result.isError).toBeUndefined();
+				expect(result.structuredContent).toEqual({
+					answer_id: answerId,
+					title: "Revenue by region",
+					open_url:
+						"https://test.thoughtspot.cloud/#/embed/conv-assist-answer?sessionId=session-9&genNo=3",
+				});
+				expect(mockClient().exportAnswerReport).not.toHaveBeenCalled();
+			});
+
+			it("show_answer drops a link that is not on the instance", async () => {
+				await server.init();
+				const { callTool } = connect(server);
+
+				const result = await callTool("show_answer", {
+					answer_id: answerId,
+					iframe_url: "https://evil.example.com/phish",
+				});
+
+				expect(result.structuredContent).toEqual({
+					answer_id: answerId,
+					title: "ThoughtSpot answer",
+				});
+			});
+
+			it("show_answer rejects a malformed answer_id", async () => {
+				await server.init();
+				const { callTool } = connect(server);
+
+				const result = await callTool("show_answer", { answer_id: "nope" });
+
+				expect(result.isError).toBe(true);
+				expect((result.content as any[])[0].text).toMatch(/Invalid answer_id/);
+			});
+
+			it("get_answer_image returns the PNG export as image content", async () => {
+				mockClient().exportAnswerReport.mockResolvedValueOnce(pngFile());
+				await server.init();
+				const { callTool } = connect(server);
+
+				const result = await callTool("get_answer_image", {
+					answer_id: answerId,
+				});
+
+				expect(result.isError).toBeUndefined();
+				expect(mockClient().exportAnswerReport).toHaveBeenCalledWith({
+					session_identifier: "session-9",
+					generation_number: 3,
+					file_format: "PNG",
+				});
+				expect(result.content).toEqual([
+					{
+						type: "image",
+						data: Buffer.from(pngBytes).toString("base64"),
+						mimeType: "image/png",
+					},
+				]);
+			});
+
+			it("get_answer_image reloads an expired answer and retries", async () => {
+				mockClient()
+					.exportAnswerReport.mockRejectedValueOnce(
+						new ThoughtSpotApiError(400, "exportAnswerReport"),
+					)
+					.mockResolvedValueOnce(pngFile());
+				await server.init();
+				const { callTool } = connect(server);
+
+				const result = await callTool("get_answer_image", {
+					answer_id: reloadableAnswerId,
+				});
+
+				expect(result.isError).toBeUndefined();
+				expect(mockClient().loadSpotter3Answer).toHaveBeenCalledWith({
+					conversationId: "conv-1",
+					messageId: "msg-1",
+				});
+				expect(mockClient().exportAnswerReport).toHaveBeenLastCalledWith({
+					session_identifier: "session-fresh",
+					generation_number: 5,
+					file_format: "PNG",
+				});
+			});
+
+			it("get_answer_image does not reload on a permission error", async () => {
+				mockClient().exportAnswerReport.mockRejectedValueOnce(
+					new ThoughtSpotApiError(403, "exportAnswerReport"),
+				);
+				await server.init();
+				const { callTool } = connect(server);
+
+				const result = await callTool("get_answer_image", {
+					answer_id: reloadableAnswerId,
+				});
+
+				expect(result.isError).toBe(true);
+				expect((result.content as any[])[0].text).toMatch(/permission/);
+				expect(mockClient().loadSpotter3Answer).not.toHaveBeenCalled();
+			});
+
+			it("get_answer_image refuses without the data-download privilege", async () => {
+				await server.init();
+				(server as any).sessionInfo.privileges = [];
+				const { callTool } = connect(server);
+
+				const result = await callTool("get_answer_image", {
+					answer_id: answerId,
+				});
+
+				expect(result.isError).toBe(true);
+				expect(mockClient().exportAnswerReport).not.toHaveBeenCalled();
+			});
+		});
+	});
+
 	describe("List Resources", () => {
 		// Using real service with mocked client, no service method mocks needed
 

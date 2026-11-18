@@ -25,6 +25,9 @@ export type Props = {
 	// Undocumented URL flag (see index.ts): omit `iframe_url` from Analytics
 	// Agent answers.
 	suppressIframes?: boolean;
+	// Undocumented URL flag (see index.ts): expose the show_answer MCP Apps
+	// widget, which renders Analytics Agent answers inline in supporting hosts.
+	enableAnswerWidget?: boolean;
 };
 
 const DEFAULT_CLIENT_NAME = "Bearer Token client";
