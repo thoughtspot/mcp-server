@@ -241,6 +241,7 @@ describe("MCP Server", () => {
 			"modify_dashboard",
 			"get_dashboard_status",
 			"list_analysts",
+			"switch_analyst",
 		];
 
 		it("should return all available tools", async () => {
@@ -249,8 +250,8 @@ describe("MCP Server", () => {
 
 			const result = await listTools();
 
-			// Latest version: 14 tools (6 non-OAuth base + 4 model tools + get_data + 2 dashboard
-			// tools + list_analysts)
+			// Latest version: 15 tools (6 non-OAuth base + 4 model tools + get_data + 2 dashboard
+			// tools + list_analysts + switch_analyst)
 			expect(result.tools?.map((t) => t.name)).toEqual(LATEST_TOOL_NAMES);
 		});
 
@@ -309,7 +310,7 @@ describe("MCP Server", () => {
 			}
 		});
 
-		it("should return 14 tools regardless of enableSpotterDataSourceDiscovery when using latest", async () => {
+		it("should return 15 tools regardless of enableSpotterDataSourceDiscovery when using latest", async () => {
 			// Mock the ThoughtSpotClient constructor with enableSpotterDataSourceDiscovery set to false
 			vi.spyOn(thoughtspotClient, "ThoughtSpotClient").mockReturnValue({
 				getSessionInfo: vi.fn().mockResolvedValue({
@@ -375,11 +376,12 @@ describe("MCP Server", () => {
 				expect(tools.map((t) => t.name).indexOf("send_session_message")).toBe(
 					3,
 				);
-				// list_analysts is Spotter 3 only: hidden when the SpotterX swap is active
-				expect(tools.some((t) => t.name === "list_analysts")).toBe(
-					!expectSpotterX,
-				);
-				expect(tools).toHaveLength(expectSpotterX ? 13 : 14);
+				// list_analysts / switch_analyst are Spotter 3 only: hidden when the SpotterX swap is
+				// active
+				for (const name of ["list_analysts", "switch_analyst"]) {
+					expect(tools.some((t) => t.name === name)).toBe(!expectSpotterX);
+				}
+				expect(tools).toHaveLength(expectSpotterX ? 13 : 15);
 
 				const [messageTool] = messageTools;
 				const properties = (messageTool.inputSchema as any).properties;
@@ -445,12 +447,13 @@ describe("MCP Server", () => {
 			"get_session_updates",
 			"create_dashboard",
 		];
-		// The dashboard designer tools, then list_analysts, are appended after everything else in
-		// the latest version.
+		// The dashboard designer tools, then the Analyst tools, are appended after everything else
+		// in the latest version.
 		const DASHBOARD_DESIGNER_TOOLS = [
 			"modify_dashboard",
 			"get_dashboard_status",
 			"list_analysts",
+			"switch_analyst",
 		];
 		const V2_TOOLS = [...BASE_TOOLS, ...DASHBOARD_DESIGNER_TOOLS];
 		// Base tools plus get_data, i.e. what a user with the data-download privilege
@@ -2070,6 +2073,9 @@ describe("MCP Server", () => {
 				expect(result.structuredContent).toEqual({
 					analytical_session_id: "conv-analyst-1",
 					analyst: { id: ANALYST_ID },
+					connector_notice: expect.stringContaining(
+						"not supported over the MCP server",
+					),
 				});
 				expect(createSpotter3).toHaveBeenCalledTimes(1);
 				expect(createSpotter3).toHaveBeenCalledWith({
@@ -2156,6 +2162,101 @@ describe("MCP Server", () => {
 				);
 			},
 		);
+	});
+
+	describe("switch_analyst", () => {
+		const ANALYST_ID = "550e8400-e29b-41d4-a716-446655440000";
+
+		async function call(
+			args: Record<string, unknown>,
+			{
+				apiVersion = "latest",
+				isSpotterXEnabled = false,
+				createSpotter3 = vi
+					.fn()
+					.mockResolvedValue({ conversation_id: "conv-analyst-2" }),
+			} = {},
+		) {
+			Object.assign(new (thoughtspotClient.ThoughtSpotClient as any)(), {
+				createSpotter3Conversation: createSpotter3,
+			});
+			const testServer = new MCPServer({
+				props: { ...mockProps, apiVersion },
+				env: {} as any,
+			});
+			await testServer.init();
+			(testServer as any).sessionInfo.configInfo.isSpotterXEnabled =
+				isSpotterXEnabled;
+			const result = (await testServer.callSwitchAnalyst(
+				makeRequest("switch_analyst", args),
+				NOOP_METRICS_RECORDER,
+			)) as any;
+			return { result, createSpotter3 };
+		}
+
+		it("starts a new session on the Analyst and reports the replaced one", async () => {
+			const { result, createSpotter3 } = await call({
+				analyst_id: ANALYST_ID,
+				analytical_session_id: "conv-old",
+			});
+
+			expect(result.structuredContent).toEqual({
+				analytical_session_id: "conv-analyst-2",
+				analyst: { id: ANALYST_ID },
+				connector_notice: expect.stringContaining(
+					"not supported over the MCP server",
+				),
+				previous_analytical_session_id: "conv-old",
+			});
+			expect(createSpotter3).toHaveBeenCalledWith(
+				expect.objectContaining({
+					analystId: ANALYST_ID,
+					dataSourceId: undefined,
+				}),
+			);
+		});
+
+		it("omits previous_analytical_session_id when none was given", async () => {
+			const { result } = await call({ analyst_id: ANALYST_ID });
+
+			expect(result.structuredContent).not.toHaveProperty(
+				"previous_analytical_session_id",
+			);
+			expect(result.structuredContent.analytical_session_id).toBe(
+				"conv-analyst-2",
+			);
+		});
+
+		it("maps an unknown Analyst to analyst_not_found", async () => {
+			const { result } = await call(
+				{ analyst_id: ANALYST_ID },
+				{
+					createSpotter3: vi
+						.fn()
+						.mockRejectedValue(
+							new ThoughtSpotApiError(
+								400,
+								"createSpotter3Conversation",
+								'{"message":"Spot abc not found"}',
+							),
+						),
+				},
+			);
+
+			expect(result.isError).toBe(true);
+			expect(result.content[0].text).toContain("analyst_not_found");
+		});
+
+		it("rejects on a SpotterX cluster without creating a session", async () => {
+			const { result, createSpotter3 } = await call(
+				{ analyst_id: ANALYST_ID },
+				{ apiVersion: "beta", isSpotterXEnabled: true },
+			);
+
+			expect(result.isError).toBe(true);
+			expect(result.content[0].text).toContain("SpotterX");
+			expect(createSpotter3).not.toHaveBeenCalled();
+		});
 	});
 
 	describe("list_analysts", () => {

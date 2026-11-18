@@ -86,12 +86,14 @@ import {
 	GetSessionUpdatesInputSchema,
 	LIST_ANALYSTS_DEFAULT_PAGE_SIZE,
 	ListAnalystsInputSchema,
+	MCP_CONNECTORS_UNSUPPORTED_NOTICE,
 	MODEL_TOOL_NAMES,
 	ModifyDashboardInputSchema,
 	SearchObjectsInputSchema,
 	SendModelMessageInputSchema,
 	SendSessionMessageInputSchema,
 	SendSessionMessageSpotterXInputSchema,
+	SwitchAnalystInputSchema,
 	SwitchOrgInputSchema,
 	ToolName,
 	createAnalysisSessionToolDefinitionSpotter3,
@@ -486,10 +488,14 @@ export class MCPServer extends BaseMCPServer {
 				);
 			}
 			// Analysts are Spotter 3 only for now: SpotterX sessions cannot take an analyst_id, so
-			// offer the plain create_analysis_session there and drop list_analysts, which would offer
-			// something the user cannot use.
+			// offer the plain create_analysis_session there and drop list_analysts / switch_analyst,
+			// which would offer something the user cannot use.
 			tools = tools
-				.filter((tool) => tool.name !== ToolName.ListAnalysts)
+				.filter(
+					(tool) =>
+						tool.name !== ToolName.ListAnalysts &&
+						tool.name !== ToolName.SwitchAnalyst,
+				)
 				.map((tool) =>
 					tool.name === ToolName.CreateAnalysisSession
 						? createAnalysisSessionToolDefinitionSpotter3
@@ -706,6 +712,10 @@ export class MCPServer extends BaseMCPServer {
 
 			case ToolName.ListAnalysts: {
 				return this.callListAnalysts(request, recorder);
+			}
+
+			case ToolName.SwitchAnalyst: {
+				return this.callSwitchAnalyst(request, recorder);
 			}
 
 			case ToolName.GetData: {
@@ -1005,6 +1015,7 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		analystId: string,
 		dataSourceId: string | undefined,
 		recorder: MetricsRecorder,
+		previousSessionId?: string,
 	) {
 		const span = trace.getSpan(context.active());
 
@@ -1044,6 +1055,7 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			const storageService = await this.getStorageService();
 			await storageService.updateMetadata(response.conversation_id, {
 				analyst_id: analystId,
+				...(previousSessionId && { switched_from: previousSessionId }),
 			});
 		} catch (error) {
 			console.error("Error storing analyst metadata for session:", error);
@@ -1053,8 +1065,49 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			{
 				analytical_session_id: response.conversation_id,
 				analyst: { id: analystId },
+				connector_notice: MCP_CONNECTORS_UNSUPPORTED_NOTICE,
+				...(previousSessionId && {
+					previous_analytical_session_id: previousSessionId,
+				}),
 			},
 			"Analyst conversation created successfully",
+		);
+	}
+
+	/**
+	 * Switch to a different Analyst. A Spotter conversation is bound to one Analyst for its whole
+	 * life, so this starts a new session on the requested Analyst and returns its ID; the previous
+	 * session is left untouched.
+	 */
+	@WithSpan("call-switch-analyst")
+	async callSwitchAnalyst(
+		request: z.infer<typeof CallToolRequestSchema>,
+		recorder: MetricsRecorder,
+	) {
+		const { analyst_id, analytical_session_id } =
+			SwitchAnalystInputSchema.parse(request.params.arguments);
+		const span = trace.getSpan(context.active());
+		span?.setAttributes({
+			analyst_id,
+			previous_analytical_session_id: analytical_session_id ?? "(none)",
+		});
+
+		await this.ensureSessionInfo();
+		if (
+			resolveApiVersion(this.ctx.props.apiVersion).version.includes("beta") &&
+			this.isSpotterXEnabled()
+		) {
+			return this.createErrorResponse(
+				"Analysts are not supported on this ThoughtSpot instance's SpotterX sessions. Use `create_analysis_session` without an Analyst.",
+				"switch_analyst rejected: SpotterX cluster",
+			);
+		}
+
+		return this.callCreateAnalystSessionSpotter3(
+			analyst_id,
+			undefined,
+			recorder,
+			analytical_session_id,
 		);
 	}
 

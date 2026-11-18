@@ -38,10 +38,11 @@ describe("Version Registry", () => {
 			},
 		);
 		it.each(["latest", "beta"])(
-			"should expose list_analysts on %s",
+			"should expose list_analysts and switch_analyst on %s",
 			(version) => {
 				const toolNames = resolveApiVersion(version).tools.map((t) => t.name);
 				expect(toolNames).toContain("list_analysts");
+				expect(toolNames).toContain("switch_analyst");
 			},
 		);
 
