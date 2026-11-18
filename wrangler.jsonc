@@ -72,8 +72,8 @@
 		}
 	],
 	"kv_namespaces": [{
-		"binding": "OAUTH_KV",
-		"id": "05ca6fed380e4fe48dbfc5c3d03b4070"
+		"binding": "MCP_KV_Namespace",
+		"id": "bfaa1d5776734d25b888a0d360c5fee7"
 	}],
 	"observability": {
 		"enabled": true,
