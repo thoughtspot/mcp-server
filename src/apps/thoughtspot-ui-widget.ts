@@ -21,6 +21,9 @@ import { MCP_APP_MIME_TYPE } from "./answer-widget";
 
 export const THOUGHTSPOT_UI_WIDGET_URI = "ui://thoughtspot/app.html";
 
+// User-Agent for server-side calls to the cluster (same as the REST clients).
+export const THOUGHTSPOT_SERVER_USER_AGENT = "ThoughtSpot-ts-client";
+
 // MCP Apps extension id a client advertises under `capabilities.extensions`.
 export const MCP_APPS_EXTENSION_ID = "io.modelcontextprotocol/ui";
 
@@ -130,12 +133,19 @@ const DENIED_PATH =
 const ALLOWED_API_PREFIXES = ["/prism/", "/callosum/v1/", "/api/rest/2.0/"];
 const ALLOWED_STATIC_PAGE = /^\/(?:[A-Za-z0-9_-][A-Za-z0-9._-]*\.html)?$/;
 
-function isAllowedRelayPath(pathname: string): boolean {
+// The cluster's own static assets (icon sprites, images), which the app
+// fetches with fetch/XHR. Read-only.
+const ALLOWED_STATIC_ASSET_PREFIXES = ["/node_modules/", "/resources/"];
+
+function isAllowedRelayPath(pathname: string, method: string): boolean {
 	const p = pathname.toLowerCase();
+	const readOnly = method === "GET" || method === "HEAD";
 	return (
 		p === "/prism" ||
 		ALLOWED_API_PREFIXES.some((prefix) => p.startsWith(prefix)) ||
-		ALLOWED_STATIC_PAGE.test(pathname)
+		ALLOWED_STATIC_PAGE.test(pathname) ||
+		(readOnly &&
+			ALLOWED_STATIC_ASSET_PREFIXES.some((prefix) => p.startsWith(prefix)))
 	);
 }
 
@@ -186,7 +196,11 @@ function decodedRelayPath(pathname: string): string {
  * API and page paths on the connected instance are allowed, and never the
  * credential endpoints.
  */
-export function resolveRelayUrl(instanceUrl: string, path: string): URL {
+export function resolveRelayUrl(
+	instanceUrl: string,
+	path: string,
+	method = "GET",
+): URL {
 	if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\")) {
 		throw new ApiRelayRejectedError("path must be an absolute path");
 	}
@@ -195,7 +209,7 @@ export function resolveRelayUrl(instanceUrl: string, path: string): URL {
 		throw new ApiRelayRejectedError("path must stay on the instance");
 	}
 	const decoded = decodedRelayPath(url.pathname);
-	if (!isAllowedRelayPath(decoded)) {
+	if (!isAllowedRelayPath(decoded, method.toUpperCase())) {
 		throw new ApiRelayRejectedError("path is not a ThoughtSpot app endpoint");
 	}
 	if (DENIED_PATH.test(decoded)) {
@@ -298,7 +312,7 @@ export async function relayThoughtSpotApiRequest(
 	request: ApiRelayRequest,
 	fetchImpl: typeof fetch = fetch,
 ): Promise<ApiRelayResponse> {
-	const url = resolveRelayUrl(instanceUrl, request.path);
+	const url = resolveRelayUrl(instanceUrl, request.path, request.method);
 	const headers = new Headers();
 	for (const [name, value] of Object.entries(request.headers ?? {})) {
 		if (isForwardableRequestHeader(name)) {
@@ -306,6 +320,9 @@ export async function relayThoughtSpotApiRequest(
 		}
 	}
 	headers.set("Authorization", `Bearer ${token}`);
+	// ThoughtSpot clusters reject requests without a User-Agent (403), and the
+	// Workers runtime sends none by default.
+	headers.set("user-agent", THOUGHTSPOT_SERVER_USER_AGENT);
 
 	const hasBody =
 		request.method !== "GET" &&

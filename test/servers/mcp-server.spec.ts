@@ -2037,6 +2037,10 @@ describe("MCP Server", () => {
 					expect(fetchSpy.mock.calls[0][0]).toBe(
 						"https://test.thoughtspot.cloud/",
 					);
+					// Clusters return 403 to requests without a User-Agent.
+					expect(fetchSpy.mock.calls[0][1].headers["user-agent"]).toBe(
+						"ThoughtSpot-ts-client",
+					);
 					const { html, path, relay_nonce } = result.structuredContent as any;
 					expect(path).toBe("#/pinboard/abc");
 					// The nonce goes to the widget, never into the sandboxed page.

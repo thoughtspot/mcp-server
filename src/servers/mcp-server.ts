@@ -14,6 +14,7 @@ import {
 import {
 	ApiRelayRejectedError,
 	RelayNonceStore,
+	THOUGHTSPOT_SERVER_USER_AGENT,
 	THOUGHTSPOT_UI_WIDGET_HTML,
 	THOUGHTSPOT_UI_WIDGET_URI,
 	clientSupportsMcpApps,
@@ -2004,7 +2005,11 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		try {
 			const response = await withTimeout(
 				fetch(new URL("/", instanceUrl).toString(), {
-					headers: { Accept: "text/html" },
+					// Clusters answer 403 without a User-Agent; Workers sends none.
+					headers: {
+						Accept: "text/html",
+						"user-agent": THOUGHTSPOT_SERVER_USER_AGENT,
+					},
 				}),
 				UPSTREAM_CALL_TIMEOUT_MS,
 				"ThoughtSpot index.html",

@@ -81,6 +81,21 @@ describe("thoughtspotUiCsp", () => {
 });
 
 describe("resolveRelayUrl", () => {
+	it("allows reading the cluster's static assets, but not writing to them", () => {
+		const sprite =
+			"/node_modules/@thoughtspot/radiant-styles/public/img/rd-icons/rd-icons-sprite/rd-icons.svg?v=1";
+		expect(resolveRelayUrl(instanceUrl, sprite).pathname).toBe(
+			sprite.split("?")[0],
+		);
+		expect(
+			resolveRelayUrl(instanceUrl, "/resources/img/logo/x.svg", "HEAD")
+				.pathname,
+		).toBe("/resources/img/logo/x.svg");
+		expect(() => resolveRelayUrl(instanceUrl, sprite, "POST")).toThrow(
+			ApiRelayRejectedError,
+		);
+	});
+
 	it("accepts paths on the instance", () => {
 		expect(resolveRelayUrl(instanceUrl, "/prism/?op=GetHome").toString()).toBe(
 			`${instanceUrl}/prism/?op=GetHome`,
@@ -163,6 +178,7 @@ describe("relayThoughtSpotApiRequest", () => {
 		expect(init.method).toBe("POST");
 		expect(init.redirect).toBe("manual");
 		expect(init.headers.get("Authorization")).toBe("Bearer user-token");
+		expect(init.headers.get("user-agent")).toBe("ThoughtSpot-ts-client");
 		expect(init.headers.get("x-requested-by")).toBe("ThoughtSpot");
 		expect(init.headers.get("cookie")).toBeNull();
 		expect(init.headers.get("x-forwarded-for")).toBeNull();
@@ -206,6 +222,7 @@ describe("relayThoughtSpotApiRequest", () => {
 		const headers: Headers = fetchImpl.mock.calls[0][1].headers;
 		expect([...headers.keys()].sort()).toEqual([
 			"authorization",
+			"user-agent",
 			"x-apollo-operation-name",
 			"x-callosum-incident-id",
 		]);
