@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { answerWidgetToolMeta } from "../apps/answer-widget";
+import { THOUGHTSPOT_UI_WIDGET_URI } from "../apps/thoughtspot-ui-widget";
 import { GET_DATA_SUPPORTED_TYPES } from "../services/clients/get-data/get-data-constants";
 
 export const PingSchema = z.object({});
@@ -678,6 +679,9 @@ export enum ToolName {
 	// MCP Apps answer widget (behind the `answer-widget` URL flag)
 	ShowAnswer = "show_answer",
 	GetAnswerImage = "get_answer_image",
+	// MCP Apps full ThoughtSpot UI widget (behind the `thoughtspot-ui` URL flag)
+	ShowThoughtSpot = "show_thoughtspot",
+	GetThoughtSpotPage = "get_thoughtspot_page",
 }
 
 /**
@@ -1360,6 +1364,59 @@ export const getAnswerImageToolDefinition = {
 		readOnlyHint: true,
 		destructiveHint: false,
 		openWorldHint: false,
+	},
+	_meta: { ui: { visibility: ["app"] } },
+};
+
+// ── MCP Apps full ThoughtSpot UI widget ────────────────────────────────────
+export const ShowThoughtSpotInputSchema = z.object({
+	path: z
+		.string()
+		.optional()
+		.describe(
+			'What to open: a ThoughtSpot hash route such as "#/home" or "#/pinboard/<liveboard id>", or a ThoughtSpot URL on this instance (for example an answer\'s `iframe_url`). Defaults to the home page.',
+		),
+});
+
+export const ShowThoughtSpotOutputSchema = z.object({
+	path: z.string().describe("The ThoughtSpot route opened in the widget."),
+});
+
+export const GetThoughtSpotPageInputSchema = z.object({
+	path: z.string().describe("The ThoughtSpot route to open."),
+});
+
+export const showThoughtSpotToolDefinition = {
+	name: ToolName.ShowThoughtSpot,
+	description:
+		"Open the ThoughtSpot app inline for the user, as an interactive embedded view they can click around in. Use it when the user wants to see or browse ThoughtSpot itself (the home page, a Liveboard, an answer) rather than read results as text. Pages that embed other sites may not load. The result only confirms which page was opened.",
+	inputSchema: z.toJSONSchema(ShowThoughtSpotInputSchema),
+	outputSchema: z.toJSONSchema(ShowThoughtSpotOutputSchema),
+	annotations: {
+		title: "Show ThoughtSpot",
+		readOnlyHint: true,
+		destructiveHint: false,
+		openWorldHint: false,
+	},
+	_meta: {
+		ui: { resourceUri: THOUGHTSPOT_UI_WIDGET_URI },
+		"ui/resourceUri": THOUGHTSPOT_UI_WIDGET_URI,
+	},
+};
+
+// Widget-only helper: returns the cluster's index.html with the proxy script and
+// the user's token injected. Hidden from the model so the token stays out of its
+// context.
+export const getThoughtSpotPageToolDefinition = {
+	name: ToolName.GetThoughtSpotPage,
+	description:
+		"Fetch the ThoughtSpot page HTML for the show_thoughtspot widget. Not for direct use.",
+	inputSchema: z.toJSONSchema(GetThoughtSpotPageInputSchema),
+	annotations: {
+		title: "Get ThoughtSpot Page",
+		readOnlyHint: true,
+		destructiveHint: false,
+		openWorldHint: true,
 	},
 	_meta: { ui: { visibility: ["app"] } },
 };

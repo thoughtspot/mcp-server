@@ -28,6 +28,9 @@ export type Props = {
 	// Undocumented URL flag (see index.ts): expose the show_answer MCP Apps
 	// widget, which renders Analytics Agent answers inline in supporting hosts.
 	enableAnswerWidget?: boolean;
+	// Undocumented URL flag (see index.ts): expose the show_thoughtspot MCP Apps
+	// widget, which renders the full ThoughtSpot UI inline via iframe srcdoc.
+	enableThoughtSpotUiWidget?: boolean;
 };
 
 const DEFAULT_CLIENT_NAME = "Bearer Token client";

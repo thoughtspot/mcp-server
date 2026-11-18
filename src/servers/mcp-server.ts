@@ -11,6 +11,13 @@ import {
 	MCP_APP_MIME_TYPE,
 	buildAnswerOpenUrl,
 } from "../apps/answer-widget";
+import {
+	THOUGHTSPOT_UI_WIDGET_HTML,
+	THOUGHTSPOT_UI_WIDGET_URI,
+	injectProxyScript,
+	resolveThoughtSpotRoute,
+	thoughtspotUiCsp,
+} from "../apps/thoughtspot-ui-widget";
 import { TrackEvent } from "../metrics";
 import type { ApiVersionMode } from "../metrics/runtime/metric-types";
 import {
@@ -84,17 +91,21 @@ import {
 	GetModelUpdatesInputSchema,
 	GetRelevantQuestionsSchema,
 	GetSessionUpdatesInputSchema,
+	GetThoughtSpotPageInputSchema,
 	MODEL_TOOL_NAMES,
 	ModifyDashboardInputSchema,
 	SearchObjectsInputSchema,
 	SendModelMessageInputSchema,
 	SendSessionMessageInputSchema,
 	ShowAnswerInputSchema,
+	ShowThoughtSpotInputSchema,
 	SwitchOrgInputSchema,
 	ToolName,
 	createAnalysisSessionToolDefinitionSpotterX,
 	getAnswerImageToolDefinition,
+	getThoughtSpotPageToolDefinition,
 	showAnswerToolDefinition,
+	showThoughtSpotToolDefinition,
 } from "./tool-definitions";
 import { recordGetDataFailure } from "./upstream-error-utils";
 import {
@@ -540,6 +551,13 @@ export class MCPServer extends BaseMCPServer {
 			tools.push(showAnswerToolDefinition, getAnswerImageToolDefinition);
 		}
 
+		if (this.ctx.props.enableThoughtSpotUiWidget) {
+			tools.push(
+				showThoughtSpotToolDefinition,
+				getThoughtSpotPageToolDefinition,
+			);
+		}
+
 		return { tools };
 	}
 
@@ -564,6 +582,14 @@ export class MCPServer extends BaseMCPServer {
 			description: s.description,
 			mimeType: "text/plain",
 		}));
+		if (this.ctx.props.enableThoughtSpotUiWidget) {
+			resources.push({
+				uri: THOUGHTSPOT_UI_WIDGET_URI,
+				name: "ThoughtSpot",
+				description: "The ThoughtSpot app, rendered inline.",
+				mimeType: MCP_APP_MIME_TYPE,
+			});
+		}
 		if (this.ctx.props.enableAnswerWidget) {
 			resources.push({
 				uri: ANSWER_WIDGET_URI,
@@ -589,6 +615,28 @@ export class MCPServer extends BaseMCPServer {
 						// The widget needs no external origins: the image arrives as a data: URL
 						// and the open-in-ThoughtSpot link goes through the host (ui/open-link).
 						_meta: { ui: { prefersBorder: true } },
+					},
+				],
+			};
+		}
+		if (
+			uri === THOUGHTSPOT_UI_WIDGET_URI &&
+			this.ctx.props.enableThoughtSpotUiWidget
+		) {
+			return {
+				contents: [
+					{
+						uri,
+						mimeType: MCP_APP_MIME_TYPE,
+						text: THOUGHTSPOT_UI_WIDGET_HTML,
+						// The srcdoc frame inherits this CSP, so it must allow the
+						// ThoughtSpot CDNs and the cluster's API.
+						_meta: {
+							ui: {
+								csp: thoughtspotUiCsp(this.ctx.props.instanceUrl),
+								prefersBorder: false,
+							},
+						},
 					},
 				],
 			};
@@ -821,6 +869,14 @@ export class MCPServer extends BaseMCPServer {
 
 			case ToolName.GetAnswerImage: {
 				return this.callGetAnswerImage(request, recorder);
+			}
+
+			case ToolName.ShowThoughtSpot: {
+				return this.callShowThoughtSpot(request);
+			}
+
+			case ToolName.GetThoughtSpotPage: {
+				return this.callGetThoughtSpotPage(request);
 			}
 
 			default:
@@ -1874,6 +1930,81 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			);
 		}
 		return undefined;
+	}
+
+	private thoughtSpotUiDisabledError() {
+		return this.createErrorResponse(
+			"The ThoughtSpot app view is not enabled for this connection.",
+			"thoughtspot ui widget tool called without the thoughtspot-ui flag",
+		);
+	}
+
+	/** show_thoughtspot: tell the widget which ThoughtSpot route to open. */
+	@WithSpan("call-show-thoughtspot")
+	async callShowThoughtSpot(request: z.infer<typeof CallToolRequestSchema>) {
+		if (!this.ctx.props.enableThoughtSpotUiWidget) {
+			return this.thoughtSpotUiDisabledError();
+		}
+		const { path } = ShowThoughtSpotInputSchema.parse(
+			request.params.arguments ?? {},
+		);
+		return this.createStructuredContentSuccessResponse(
+			{ path: resolveThoughtSpotRoute(this.ctx.props.instanceUrl, path) },
+			"Opened ThoughtSpot widget",
+		);
+	}
+
+	/**
+	 * get_thoughtspot_page: the cluster's index.html with the proxy script and the
+	 * user's token injected, for the widget's srcdoc frame. App-only.
+	 */
+	@WithSpan("call-get-thoughtspot-page")
+	async callGetThoughtSpotPage(request: z.infer<typeof CallToolRequestSchema>) {
+		if (!this.ctx.props.enableThoughtSpotUiWidget) {
+			return this.thoughtSpotUiDisabledError();
+		}
+		const { path } = GetThoughtSpotPageInputSchema.parse(
+			request.params.arguments,
+		);
+		const instanceUrl = this.ctx.props.instanceUrl;
+		const route = resolveThoughtSpotRoute(instanceUrl, path);
+
+		let indexHtml: string;
+		try {
+			const response = await withTimeout(
+				fetch(new URL("/", instanceUrl).toString(), {
+					headers: { Accept: "text/html" },
+				}),
+				UPSTREAM_CALL_TIMEOUT_MS,
+				"ThoughtSpot index.html",
+			);
+			if (!response.ok) {
+				throw new Error(`status ${response.status}`);
+			}
+			indexHtml = await response.text();
+		} catch (error) {
+			return this.createErrorResponse(
+				"Could not load the ThoughtSpot app.",
+				`get_thoughtspot_page: index.html fetch failed: ${error}`,
+			);
+		}
+
+		const html = injectProxyScript(indexHtml, {
+			apiHost: instanceUrl,
+			authToken: this.getActiveToken(),
+			route,
+		});
+		const span = this.initSpanWithCommonAttributes();
+		span?.setStatus({
+			code: SpanStatusCode.OK,
+			message: "Built ThoughtSpot page",
+		});
+		// Kept out of the text content so a host that prints tool results never shows
+		// the HTML (which carries the token); the widget reads structuredContent.
+		return {
+			content: [{ type: "text" as const, text: "ThoughtSpot page ready." }],
+			structuredContent: { html, path: route },
+		};
 	}
 
 	@WithSpan("call-get-data")

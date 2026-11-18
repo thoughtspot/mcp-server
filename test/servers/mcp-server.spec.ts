@@ -1827,6 +1827,144 @@ describe("MCP Server", () => {
 		});
 	});
 
+	describe("MCP Apps ThoughtSpot UI widget (thoughtspot-ui URL flag)", () => {
+		const indexHtml =
+			"<!DOCTYPE html><html><head><script>var blink = {};</script></head><body></body></html>";
+
+		afterEach(() => {
+			vi.unstubAllGlobals();
+		});
+
+		it("hides the widget tools without the flag", async () => {
+			await server.init();
+			const { listTools } = connect(server);
+
+			const names = (await listTools()).tools.map((t) => t.name);
+			expect(names).not.toContain("show_thoughtspot");
+			expect(names).not.toContain("get_thoughtspot_page");
+		});
+
+		it("refuses to build the page without the flag", async () => {
+			const fetchSpy = vi.fn();
+			vi.stubGlobal("fetch", fetchSpy);
+			await server.init();
+			const { callTool } = connect(server);
+
+			const result = await callTool("get_thoughtspot_page", { path: "#/home" });
+
+			expect(result.isError).toBe(true);
+			expect(fetchSpy).not.toHaveBeenCalled();
+		});
+
+		describe("with the flag", () => {
+			beforeEach(() => {
+				mockProps.enableThoughtSpotUiWidget = true;
+			});
+
+			it("lists show_thoughtspot linked to the widget and the page tool as app-only", async () => {
+				await server.init();
+				const { listTools } = connect(server);
+
+				const { tools } = await listTools();
+				const show = tools.find((t) => t.name === "show_thoughtspot") as any;
+				const page = tools.find(
+					(t) => t.name === "get_thoughtspot_page",
+				) as any;
+				expect(show._meta.ui.resourceUri).toBe("ui://thoughtspot/app.html");
+				expect(page._meta.ui).toEqual({ visibility: ["app"] });
+			});
+
+			it("serves the widget with a CSP covering the cluster and CDNs", async () => {
+				await server.init();
+
+				const result = await server.readResource({
+					method: "resources/read",
+					params: { uri: "ui://thoughtspot/app.html" },
+				});
+				const [content] = result.contents as any[];
+				expect(content.mimeType).toBe("text/html;profile=mcp-app");
+				expect(content.text).toContain("get_thoughtspot_page");
+				expect(content._meta.ui.csp.connectDomains).toContain(
+					"https://test.thoughtspot.cloud",
+				);
+				expect(content._meta.ui.csp.resourceDomains).toContain(
+					"https://blink-v2-cdn.thoughtspotartifacts.cloud",
+				);
+			});
+
+			it("show_thoughtspot resolves an answer iframe_url to its route", async () => {
+				await server.init();
+				const { callTool } = connect(server);
+
+				const result = await callTool("show_thoughtspot", {
+					path: "https://test.thoughtspot.cloud/?tsmcp=true#/embed/conv-assist-answer?sessionId=s",
+				});
+
+				expect(result.structuredContent).toEqual({
+					path: "#/embed/conv-assist-answer?sessionId=s",
+				});
+			});
+
+			it("show_thoughtspot defaults to the home page", async () => {
+				await server.init();
+				const { callTool } = connect(server);
+
+				const result = await callTool("show_thoughtspot", {});
+
+				expect(result.structuredContent).toEqual({ path: "#/home" });
+			});
+
+			it("get_thoughtspot_page injects the proxy with the user's token", async () => {
+				const fetchSpy = vi
+					.fn()
+					.mockResolvedValue(new Response(indexHtml, { status: 200 }));
+				vi.stubGlobal("fetch", fetchSpy);
+				await server.init();
+				const { callTool } = connect(server);
+
+				const result = await callTool("get_thoughtspot_page", {
+					path: "#/pinboard/abc",
+				});
+
+				expect(result.isError).toBeUndefined();
+				expect(fetchSpy.mock.calls[0][0]).toBe(
+					"https://test.thoughtspot.cloud/",
+				);
+				const { html, path } = result.structuredContent as any;
+				expect(path).toBe("#/pinboard/abc");
+				expect(html).toContain('var AUTH_TOKEN = "test-access-token";');
+				expect(html).toContain(
+					'var API_HOST = "https://test.thoughtspot.cloud";',
+				);
+				expect(html.indexOf("[api-redirect]")).toBeLessThan(
+					html.indexOf("var blink"),
+				);
+				// The token-bearing HTML stays out of the text content.
+				expect(JSON.stringify(result.content)).not.toContain(
+					"test-access-token",
+				);
+			});
+
+			it("get_thoughtspot_page reports a failed index.html fetch", async () => {
+				vi.stubGlobal(
+					"fetch",
+					vi.fn().mockResolvedValue(new Response("nope", { status: 502 })),
+				);
+				await server.init();
+				const { callTool } = connect(server);
+
+				const result = await callTool("get_thoughtspot_page", {
+					path: "#/home",
+				});
+
+				expect(result.isError).toBe(true);
+				expect((result.content as any[])[0].text).toMatch(
+					/Could not load the ThoughtSpot app/,
+				);
+			});
+		});
+	});
+
 	describe("List Resources", () => {
 		// Using real service with mocked client, no service method mocks needed
 

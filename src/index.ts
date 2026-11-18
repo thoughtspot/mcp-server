@@ -138,6 +138,8 @@ const hooks: AuthHooks<Props> = {
 		const suppressIframes = url.searchParams.get("suppress-iframes") === "true";
 		props.suppressIframes = suppressIframes;
 		props.enableAnswerWidget = url.searchParams.get("answer-widget") === "true";
+		props.enableThoughtSpotUiWidget =
+			url.searchParams.get("thoughtspot-ui") === "true";
 
 		return props;
 	},
@@ -170,6 +172,8 @@ const oauthFetchHandler = createOAuthHandler<Props>({
 			url.searchParams.get("enable-raw-session-updates") === "true";
 		const suppressIframes = url.searchParams.get("suppress-iframes") === "true";
 		const enableAnswerWidget = url.searchParams.get("answer-widget") === "true";
+		const enableThoughtSpotUiWidget =
+			url.searchParams.get("thoughtspot-ui") === "true";
 
 		return {
 			...(baseProps as Props),
@@ -184,6 +188,7 @@ const oauthFetchHandler = createOAuthHandler<Props>({
 			enableRawSessionUpdates,
 			suppressIframes,
 			enableAnswerWidget,
+			enableThoughtSpotUiWidget,
 		};
 	},
 	// Extra routes mounted on the default handler app (consumer-specific).
