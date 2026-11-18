@@ -12,9 +12,12 @@ import {
 	buildAnswerOpenUrl,
 } from "../apps/answer-widget";
 import {
+	ApiRelayRejectedError,
 	THOUGHTSPOT_UI_WIDGET_HTML,
 	THOUGHTSPOT_UI_WIDGET_URI,
+	clientSupportsMcpApps,
 	injectProxyScript,
+	relayThoughtSpotApiRequest,
 	resolveThoughtSpotRoute,
 	thoughtspotUiCsp,
 } from "../apps/thoughtspot-ui-widget";
@@ -100,12 +103,14 @@ import {
 	ShowAnswerInputSchema,
 	ShowThoughtSpotInputSchema,
 	SwitchOrgInputSchema,
+	ThoughtSpotApiRequestInputSchema,
 	ToolName,
 	createAnalysisSessionToolDefinitionSpotterX,
 	getAnswerImageToolDefinition,
 	getThoughtSpotPageToolDefinition,
 	showAnswerToolDefinition,
 	showThoughtSpotToolDefinition,
+	thoughtSpotApiRequestToolDefinition,
 } from "./tool-definitions";
 import { recordGetDataFailure } from "./upstream-error-utils";
 import {
@@ -551,10 +556,11 @@ export class MCPServer extends BaseMCPServer {
 			tools.push(showAnswerToolDefinition, getAnswerImageToolDefinition);
 		}
 
-		if (this.ctx.props.enableThoughtSpotUiWidget) {
+		if (this.isThoughtSpotUiAvailable()) {
 			tools.push(
 				showThoughtSpotToolDefinition,
 				getThoughtSpotPageToolDefinition,
+				thoughtSpotApiRequestToolDefinition,
 			);
 		}
 
@@ -582,7 +588,7 @@ export class MCPServer extends BaseMCPServer {
 			description: s.description,
 			mimeType: "text/plain",
 		}));
-		if (this.ctx.props.enableThoughtSpotUiWidget) {
+		if (this.isThoughtSpotUiAvailable()) {
 			resources.push({
 				uri: THOUGHTSPOT_UI_WIDGET_URI,
 				name: "ThoughtSpot",
@@ -619,10 +625,7 @@ export class MCPServer extends BaseMCPServer {
 				],
 			};
 		}
-		if (
-			uri === THOUGHTSPOT_UI_WIDGET_URI &&
-			this.ctx.props.enableThoughtSpotUiWidget
-		) {
+		if (uri === THOUGHTSPOT_UI_WIDGET_URI && this.isThoughtSpotUiAvailable()) {
 			return {
 				contents: [
 					{
@@ -877,6 +880,10 @@ export class MCPServer extends BaseMCPServer {
 
 			case ToolName.GetThoughtSpotPage: {
 				return this.callGetThoughtSpotPage(request);
+			}
+
+			case ToolName.ThoughtSpotApiRequest: {
+				return this.callThoughtSpotApiRequest(request);
 			}
 
 			default:
@@ -1932,17 +1939,29 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		return undefined;
 	}
 
+	/**
+	 * The show_thoughtspot widget is opt-in (`thoughtspot-ui` URL flag) and only
+	 * offered to clients that render MCP Apps: other hosts ignore the app-only
+	 * `visibility` of its helper tools, which would expose them to the model.
+	 */
+	private isThoughtSpotUiAvailable(): boolean {
+		return (
+			!!this.ctx.props.enableThoughtSpotUiWidget &&
+			clientSupportsMcpApps(this.getClientCapabilities())
+		);
+	}
+
 	private thoughtSpotUiDisabledError() {
 		return this.createErrorResponse(
-			"The ThoughtSpot app view is not enabled for this connection.",
-			"thoughtspot ui widget tool called without the thoughtspot-ui flag",
+			"The ThoughtSpot app view is not available for this connection.",
+			"thoughtspot ui widget tool called without the flag or MCP Apps support",
 		);
 	}
 
 	/** show_thoughtspot: tell the widget which ThoughtSpot route to open. */
 	@WithSpan("call-show-thoughtspot")
 	async callShowThoughtSpot(request: z.infer<typeof CallToolRequestSchema>) {
-		if (!this.ctx.props.enableThoughtSpotUiWidget) {
+		if (!this.isThoughtSpotUiAvailable()) {
 			return this.thoughtSpotUiDisabledError();
 		}
 		const { path } = ShowThoughtSpotInputSchema.parse(
@@ -1955,12 +1974,12 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 	}
 
 	/**
-	 * get_thoughtspot_page: the cluster's index.html with the proxy script and the
-	 * user's token injected, for the widget's srcdoc frame. App-only.
+	 * get_thoughtspot_page: the cluster's index.html with the relay proxy script
+	 * injected, for the widget's srcdoc frame. Carries no credentials. App-only.
 	 */
 	@WithSpan("call-get-thoughtspot-page")
 	async callGetThoughtSpotPage(request: z.infer<typeof CallToolRequestSchema>) {
-		if (!this.ctx.props.enableThoughtSpotUiWidget) {
+		if (!this.isThoughtSpotUiAvailable()) {
 			return this.thoughtSpotUiDisabledError();
 		}
 		const { path } = GetThoughtSpotPageInputSchema.parse(
@@ -1989,22 +2008,66 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			);
 		}
 
-		const html = injectProxyScript(indexHtml, {
-			apiHost: instanceUrl,
-			authToken: this.getActiveToken(),
-			route,
-		});
+		const html = injectProxyScript(indexHtml, { apiHost: instanceUrl, route });
 		const span = this.initSpanWithCommonAttributes();
 		span?.setStatus({
 			code: SpanStatusCode.OK,
 			message: "Built ThoughtSpot page",
 		});
-		// Kept out of the text content so a host that prints tool results never shows
-		// the HTML (which carries the token); the widget reads structuredContent.
+		// The widget reads structuredContent; keep the bulky HTML out of the text.
 		return {
 			content: [{ type: "text" as const, text: "ThoughtSpot page ready." }],
 			structuredContent: { html, path: route },
 		};
+	}
+
+	/**
+	 * thoughtspot_api_request: one ThoughtSpot API call on behalf of the embedded
+	 * app, made here with the user's token so it never reaches the browser.
+	 * App-only.
+	 */
+	@WithSpan("call-thoughtspot-api-request")
+	async callThoughtSpotApiRequest(
+		request: z.infer<typeof CallToolRequestSchema>,
+	) {
+		if (!this.isThoughtSpotUiAvailable()) {
+			return this.thoughtSpotUiDisabledError();
+		}
+		const relayRequest = ThoughtSpotApiRequestInputSchema.parse(
+			request.params.arguments,
+		);
+		const span = this.initSpanWithCommonAttributes();
+		span?.setAttributes({
+			relay_method: relayRequest.method,
+			relay_path: relayRequest.path.split("?")[0],
+		});
+		try {
+			const response = await withTimeout(
+				relayThoughtSpotApiRequest(
+					this.ctx.props.instanceUrl,
+					this.getActiveToken(),
+					relayRequest,
+				),
+				UPSTREAM_CALL_TIMEOUT_MS,
+				"ThoughtSpot API relay",
+			);
+			span?.setAttribute("relay_status", response.status);
+			return {
+				content: [{ type: "text" as const, text: `Status ${response.status}` }],
+				structuredContent: response,
+			};
+		} catch (error) {
+			if (error instanceof ApiRelayRejectedError) {
+				return this.createErrorResponse(
+					`Request not allowed: ${error.message}.`,
+					`thoughtspot_api_request rejected: ${error.message}`,
+				);
+			}
+			return this.createErrorResponse(
+				"The ThoughtSpot request failed.",
+				`thoughtspot_api_request failed: ${error}`,
+			);
+		}
 	}
 
 	@WithSpan("call-get-data")

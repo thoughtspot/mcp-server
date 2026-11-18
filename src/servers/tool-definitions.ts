@@ -1,6 +1,9 @@
 import { z } from "zod";
 import { answerWidgetToolMeta } from "../apps/answer-widget";
-import { THOUGHTSPOT_UI_WIDGET_URI } from "../apps/thoughtspot-ui-widget";
+import {
+	API_RELAY_METHODS,
+	THOUGHTSPOT_UI_WIDGET_URI,
+} from "../apps/thoughtspot-ui-widget";
 import { GET_DATA_SUPPORTED_TYPES } from "../services/clients/get-data/get-data-constants";
 
 export const PingSchema = z.object({});
@@ -682,6 +685,7 @@ export enum ToolName {
 	// MCP Apps full ThoughtSpot UI widget (behind the `thoughtspot-ui` URL flag)
 	ShowThoughtSpot = "show_thoughtspot",
 	GetThoughtSpotPage = "get_thoughtspot_page",
+	ThoughtSpotApiRequest = "thoughtspot_api_request",
 }
 
 /**
@@ -1404,9 +1408,8 @@ export const showThoughtSpotToolDefinition = {
 	},
 };
 
-// Widget-only helper: returns the cluster's index.html with the proxy script and
-// the user's token injected. Hidden from the model so the token stays out of its
-// context.
+// Widget-only helper: returns the cluster's index.html with the relay proxy
+// script injected. Carries no credentials.
 export const getThoughtSpotPageToolDefinition = {
 	name: ToolName.GetThoughtSpotPage,
 	description:
@@ -1417,6 +1420,38 @@ export const getThoughtSpotPageToolDefinition = {
 		readOnlyHint: true,
 		destructiveHint: false,
 		openWorldHint: true,
+	},
+	_meta: { ui: { visibility: ["app"] } },
+};
+
+export const ThoughtSpotApiRequestInputSchema = z.object({
+	method: z.enum(API_RELAY_METHODS),
+	path: z
+		.string()
+		.describe("Path and query on the ThoughtSpot instance, starting with /."),
+	headers: z.record(z.string(), z.string()).optional(),
+	body_base64: z.string().optional(),
+});
+
+export const ThoughtSpotApiRequestOutputSchema = z.object({
+	status: z.number(),
+	headers: z.record(z.string(), z.string()),
+	body_base64: z.string(),
+});
+
+// Widget-only helper: makes one ThoughtSpot API call for the embedded app with
+// the user's token, so no credential ever reaches the browser.
+export const thoughtSpotApiRequestToolDefinition = {
+	name: ToolName.ThoughtSpotApiRequest,
+	description:
+		"Make a ThoughtSpot API request for the show_thoughtspot widget. Not for direct use.",
+	inputSchema: z.toJSONSchema(ThoughtSpotApiRequestInputSchema),
+	outputSchema: z.toJSONSchema(ThoughtSpotApiRequestOutputSchema),
+	annotations: {
+		title: "ThoughtSpot API Request",
+		readOnlyHint: false,
+		destructiveHint: true,
+		openWorldHint: false,
 	},
 	_meta: { ui: { visibility: ["app"] } },
 };

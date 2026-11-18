@@ -1,7 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+	ApiRelayRejectedError,
+	THOUGHTSPOT_FRAME_SANDBOX,
 	THOUGHTSPOT_UI_WIDGET_HTML,
+	clientSupportsMcpApps,
 	injectProxyScript,
+	relayThoughtSpotApiRequest,
+	resolveRelayUrl,
 	resolveThoughtSpotRoute,
 	thoughtspotUiCsp,
 } from "../../src/apps/thoughtspot-ui-widget";
@@ -9,6 +14,41 @@ import {
 const instanceUrl = "https://champagne.thoughtspotstaging.cloud";
 const indexHtml =
 	'<!DOCTYPE html>\n<html lang="en-US">\n    <head>\n        <meta charset="utf-8" />\n        <script nonce="n">var blink = {};</script>\n    </head><body></body></html>';
+
+const settle = async () => {
+	for (let i = 0; i < 10; i++) await Promise.resolve();
+	await new Promise((resolve) => setTimeout(resolve, 0));
+	for (let i = 0; i < 10; i++) await Promise.resolve();
+};
+
+describe("clientSupportsMcpApps", () => {
+	it.each([
+		[undefined, false],
+		[{}, false],
+		[{ extensions: {} }, false],
+		[{ extensions: { "io.modelcontextprotocol/ui": {} } }, false],
+		[
+			{
+				extensions: {
+					"io.modelcontextprotocol/ui": { mimeTypes: ["text/html"] },
+				},
+			},
+			false,
+		],
+		[
+			{
+				extensions: {
+					"io.modelcontextprotocol/ui": {
+						mimeTypes: ["text/html;profile=mcp-app"],
+					},
+				},
+			},
+			true,
+		],
+	])("%j → %s", (capabilities, expected) => {
+		expect(clientSupportsMcpApps(capabilities as any)).toBe(expected);
+	});
+});
 
 describe("resolveThoughtSpotRoute", () => {
 	it.each([
@@ -28,30 +68,130 @@ describe("resolveThoughtSpotRoute", () => {
 });
 
 describe("thoughtspotUiCsp", () => {
-	it("allows the cluster and the ThoughtSpot CDNs", () => {
+	it("allows cluster images and CDN assets, but no direct API calls to the cluster", () => {
 		const csp = thoughtspotUiCsp(`${instanceUrl}/`);
-		expect(csp.connectDomains).toContain(instanceUrl);
 		expect(csp.resourceDomains).toContain(instanceUrl);
 		expect(csp.resourceDomains).toContain(
 			"https://blink-v2-cdn.thoughtspotartifacts.cloud",
 		);
+		expect(csp.connectDomains).not.toContain(instanceUrl);
+	});
+});
+
+describe("resolveRelayUrl", () => {
+	it("accepts paths on the instance", () => {
+		expect(resolveRelayUrl(instanceUrl, "/prism/?op=GetHome").toString()).toBe(
+			`${instanceUrl}/prism/?op=GetHome`,
+		);
+	});
+
+	it.each([
+		["a protocol-relative URL", "//evil.example.com/x"],
+		["an absolute URL", "https://evil.example.com/x"],
+		["a backslash path", "/\\evil.example.com/x"],
+		["a relative path", "prism/"],
+		["the v2 token endpoint", "/api/rest/2.0/auth/token/full"],
+		["session login", "/callosum/v1/session/login"],
+		["session logout", "/api/rest/2.0/auth/session/logout"],
+		["an encoded token endpoint", "/api/rest/2.0/auth/%74oken/full"],
+	])("rejects %s", (_label, path) => {
+		expect(() => resolveRelayUrl(instanceUrl, path)).toThrow(
+			ApiRelayRejectedError,
+		);
+	});
+});
+
+describe("relayThoughtSpotApiRequest", () => {
+	it("calls the instance with the user's token and only safe page headers", async () => {
+		const fetchImpl = vi.fn().mockResolvedValue(
+			new Response('{"ok":true}', {
+				status: 200,
+				headers: {
+					"content-type": "application/json",
+					"set-cookie": "JSESSIONID=secret",
+					"x-callosum-trace-id": "t1",
+				},
+			}),
+		);
+
+		const result = await relayThoughtSpotApiRequest(
+			instanceUrl,
+			"user-token",
+			{
+				method: "POST",
+				path: "/prism/?op=GetHome",
+				headers: {
+					"content-type": "application/json",
+					"x-requested-by": "ThoughtSpot",
+					authorization: "Bearer page-supplied",
+					cookie: "a=b",
+					"x-forwarded-for": "1.2.3.4",
+				},
+				body_base64: Buffer.from('{"q":1}').toString("base64"),
+			},
+			fetchImpl,
+		);
+
+		const [url, init] = fetchImpl.mock.calls[0];
+		expect(url).toBe(`${instanceUrl}/prism/?op=GetHome`);
+		expect(init.method).toBe("POST");
+		expect(init.redirect).toBe("manual");
+		expect(init.headers.get("Authorization")).toBe("Bearer user-token");
+		expect(init.headers.get("x-requested-by")).toBe("ThoughtSpot");
+		expect(init.headers.get("cookie")).toBeNull();
+		expect(init.headers.get("x-forwarded-for")).toBeNull();
+		expect(Buffer.from(init.body).toString()).toBe('{"q":1}');
+
+		expect(result.status).toBe(200);
+		expect(result.headers).toEqual({
+			"content-type": "application/json",
+			"x-callosum-trace-id": "t1",
+		});
+		expect(Buffer.from(result.body_base64, "base64").toString()).toBe(
+			'{"ok":true}',
+		);
+	});
+
+	it("sends no body for GET", async () => {
+		const fetchImpl = vi.fn().mockResolvedValue(new Response("x"));
+
+		await relayThoughtSpotApiRequest(
+			instanceUrl,
+			"t",
+			{ method: "GET", path: "/x", body_base64: "eA==" },
+			fetchImpl,
+		);
+
+		expect(fetchImpl.mock.calls[0][1].body).toBeUndefined();
+	});
+
+	it("rejects credential endpoints without calling the instance", async () => {
+		const fetchImpl = vi.fn();
+
+		await expect(
+			relayThoughtSpotApiRequest(
+				instanceUrl,
+				"t",
+				{ method: "POST", path: "/api/rest/2.0/auth/token/full" },
+				fetchImpl,
+			),
+		).rejects.toThrow(ApiRelayRejectedError);
+		expect(fetchImpl).not.toHaveBeenCalled();
 	});
 });
 
 describe("injectProxyScript", () => {
-	const options = {
-		apiHost: `${instanceUrl}/`,
-		authToken: "token-123",
-		route: "#/home",
-	};
+	const options = { apiHost: `${instanceUrl}/`, route: "#/home" };
 
-	it("puts the proxy first in <head>, before any page script", () => {
+	it("puts the route and proxy scripts first in <head>, with no credentials", () => {
 		const html = injectProxyScript(indexHtml, options);
-		const proxyAt = html.indexOf("[api-redirect]");
-		expect(html.indexOf("<head>")).toBeLessThan(proxyAt);
+		const routeAt = html.indexOf('history.replaceState(null, "", "#/home")');
+		const proxyAt = html.indexOf("[api-relay]");
+		expect(html.indexOf("<head>")).toBeLessThan(routeAt);
+		expect(routeAt).toBeLessThan(proxyAt);
 		expect(proxyAt).toBeLessThan(html.indexOf("var blink"));
 		expect(html).toContain(`var API_HOST = "${instanceUrl}";`);
-		expect(html).toContain('var AUTH_TOKEN = "token-123";');
+		expect(html).not.toMatch(/AUTH_TOKEN|Bearer/);
 	});
 
 	it("handles a <head> with attributes, and prepends when there is none", () => {
@@ -66,164 +206,540 @@ describe("injectProxyScript", () => {
 		);
 	});
 
-	it("escapes injected values so they cannot break out of the script", () => {
+	it("escapes the route so it cannot break out of the script", () => {
 		const html = injectProxyScript(indexHtml, {
 			...options,
-			authToken: '"</script><script>alert(1)</script>',
-			route: "#/</script>",
+			route: '#/"</script><script>alert(1)</script>',
 		});
-		const proxy = html.slice(
-			html.indexOf("<script>"),
-			html.indexOf("var blink"),
+		const injected = html.slice(0, html.indexOf("var blink"));
+		// Only the two injected scripts' own closing tags.
+		expect(injected.match(/<\/script>/g)).toHaveLength(2);
+		expect(injected).toContain(
+			'"#/\\"\\u003c/script>\\u003cscript>alert(1)\\u003c/script>"',
 		);
-		// Only the proxy's own closing tag; the values stay inside string literals.
-		expect(proxy.match(/<\/script>/g)).toHaveLength(1);
-		expect(proxy).toContain(
-			'var AUTH_TOKEN = "\\"\\u003c/script>\\u003cscript>alert(1)\\u003c/script>";',
+	});
+
+	it("emits scripts that compile, with no closing tag inside the proxy source", () => {
+		const html = injectProxyScript(indexHtml, options);
+		const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(
+			(m) => m[1],
 		);
+		expect(scripts).toHaveLength(2);
+		for (const script of scripts) {
+			expect(() => new Function(script)).not.toThrow();
+		}
 	});
 });
 
-// Runs the injected proxy against a fake srcdoc window whose origin is "null",
-// as it is in an opaque <iframe srcdoc>.
-function bootProxy(origin: string) {
+// Runs the injected proxy against a fake sandboxed srcdoc window (origin "null")
+// whose parent is the widget.
+function bootProxy() {
 	const html = injectProxyScript(indexHtml, {
 		apiHost: instanceUrl,
-		authToken: "token-123",
-		route: "#/pinboard/abc",
+		route: "#/home",
 	});
-	const script = /<script>([\s\S]*?)<\/script>/.exec(html)?.[1] ?? "";
-	const fetchSpy = vi.fn().mockResolvedValue(new Response("{}"));
-	const windowStub = { location: { origin, hash: "" }, fetch: fetchSpy };
-	const historyStub = { replaceState: vi.fn() };
-	const xhrCalls: any[] = [];
-	class FakeXhr {
-		withCredentials = false;
-		headers: Record<string, string> = {};
-		open(method: string, url: string) {
-			xhrCalls.push({ method, url, xhr: this });
+	const proxySource = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)][1][1];
+
+	const toParent: any[] = [];
+	const parentWin = { postMessage: (m: any) => toParent.push(m) };
+	const listeners: ((event: any) => void)[] = [];
+	const nativeFetch = vi.fn().mockResolvedValue(new Response("cdn"));
+	const windowStub: any = {
+		location: { origin: "null", hash: "#/home" },
+		parent: parentWin,
+		fetch: nativeFetch,
+		URL,
+		addEventListener: (type: string, fn: (event: any) => void) => {
+			if (type === "message") listeners.push(fn);
+		},
+	};
+
+	class FakeEventTarget {
+		listeners: Record<string, (() => void)[]> = {};
+		addEventListener(type: string, fn: () => void) {
+			if (!this.listeners[type]) this.listeners[type] = [];
+			this.listeners[type].push(fn);
 		}
-		setRequestHeader(name: string, value: string) {
-			this.headers[name] = value;
+		dispatchEvent(event: Event) {
+			for (const fn of this.listeners[event.type] ?? []) fn();
+			const handler = (this as any)[`on${event.type}`];
+			if (handler) handler();
+			return true;
 		}
-		send() {}
 	}
+	class FakeXhr extends FakeEventTarget {
+		responseType = "";
+		open() {
+			throw new Error("native open should not run for relayed requests");
+		}
+		send() {
+			throw new Error("native send should not run for relayed requests");
+		}
+		setRequestHeader() {}
+		abort() {}
+	}
+	class FakeElement {
+		attributes: Record<string, string> = {};
+		setAttribute(name: string, value: string) {
+			this.attributes[name] = value;
+		}
+		getAttribute(name: string) {
+			return this.attributes[name] ?? null;
+		}
+		hasAttribute(name: string) {
+			return name in this.attributes;
+		}
+	}
+	class FakeIframe extends FakeElement {
+		srcdoc = "";
+		nativeSrc: string | undefined;
+	}
+	Object.defineProperty(FakeIframe.prototype, "src", {
+		configurable: true,
+		get(this: FakeIframe) {
+			return this.nativeSrc;
+		},
+		set(this: FakeIframe, value: string) {
+			this.nativeSrc = value;
+		},
+	});
+	class FakeImage extends FakeElement {}
 	class FakeObserver {
 		observe() {}
 	}
 	const documentStub = {
 		baseURI: "https://abc.claudemcpcontent.com/widget.html",
-		currentScript: null,
+		currentScript: { textContent: proxySource },
 		documentElement: null,
+		cookie: "",
 		addEventListener: () => {},
 	};
+	const storage = { getItem: () => null, setItem: () => {} };
+	// Reading serviceWorker throws in a sandboxed, opaque-origin frame.
+	const navigatorStub = {};
+	Object.defineProperty(navigatorStub, "serviceWorker", {
+		configurable: true,
+		get() {
+			throw new Error("SecurityError: sandboxed");
+		},
+	});
+
 	new Function(
 		"window",
 		"document",
 		"history",
 		"localStorage",
+		"sessionStorage",
+		"navigator",
 		"XMLHttpRequest",
 		"MutationObserver",
+		"HTMLImageElement",
+		"HTMLIFrameElement",
+		"Element",
 		"console",
-		script,
+		proxySource,
 	)(
 		windowStub,
 		documentStub,
-		historyStub,
-		{ setItem: () => {} },
+		{ replaceState: vi.fn() },
+		storage,
+		storage,
+		navigatorStub,
 		FakeXhr,
 		FakeObserver,
+		FakeImage,
+		FakeIframe,
+		FakeElement,
 		{ log: () => {}, error: () => {} },
 	);
-	return { windowStub, fetchSpy, historyStub, FakeXhr, xhrCalls };
+
+	const deliver = async (data: any, source: unknown = parentWin) => {
+		for (const fn of listeners) fn({ source, data });
+		await settle();
+	};
+	const respond = (id: number, response: any) =>
+		deliver({ __tsProxy: 1, kind: "response", id, response });
+
+	return {
+		windowStub,
+		navigatorStub,
+		toParent,
+		nativeFetch,
+		deliver,
+		respond,
+		FakeXhr,
+		FakeIframe,
+	};
 }
 
-describe("proxy script in a null-origin srcdoc frame", () => {
-	it("opens the requested route", () => {
-		const { historyStub } = bootProxy("null");
-		expect(historyStub.replaceState).toHaveBeenCalledWith(
-			null,
-			"",
-			"#/pinboard/abc",
+const okResponse = (body: string, headers: Record<string, string> = {}) => ({
+	status: 200,
+	headers: { "content-type": "application/json", ...headers },
+	body_base64: Buffer.from(body).toString("base64"),
+});
+
+describe("proxy script in the sandboxed srcdoc frame", () => {
+	it("relays a relative fetch to the widget and returns the response", async () => {
+		const { windowStub, toParent, nativeFetch, respond } = bootProxy();
+
+		const pending = windowStub.fetch("/prism/?op=GetHome", {
+			method: "POST",
+			headers: { "x-requested-by": "ThoughtSpot" },
+			body: '{"q":1}',
+		});
+		await settle();
+
+		expect(nativeFetch).not.toHaveBeenCalled();
+		const [msg] = toParent;
+		expect(msg).toMatchObject({
+			__tsProxy: 1,
+			kind: "request",
+			request: {
+				method: "POST",
+				path: "/prism/?op=GetHome",
+				headers: { "x-requested-by": "ThoughtSpot" },
+			},
+		});
+		expect(Buffer.from(msg.request.body_base64, "base64").toString()).toBe(
+			'{"q":1}',
 		);
+		expect(JSON.stringify(msg)).not.toMatch(/Bearer|authorization/i);
+
+		await respond(msg.id, okResponse('{"ok":true}'));
+		const response = await pending;
+		expect(response.status).toBe(200);
+		expect(await response.json()).toEqual({ ok: true });
 	});
 
-	it("sends relative fetches to the cluster with the bearer token, minus x-* headers", async () => {
-		const { windowStub, fetchSpy } = bootProxy("null");
+	it("relays URL objects and absolute URLs built from the parent's base URL", async () => {
+		const { windowStub, toParent } = bootProxy();
 
-		await (windowStub.fetch as any)("/prism/?op=GetHome", {
-			headers: { "x-requested-by": "ThoughtSpot", accept: "application/json" },
+		windowStub.fetch(new URL("/prism/a", "https://srcdoc.invalid"));
+		windowStub.fetch("https://abc.claudemcpcontent.com/prism/b?x=1");
+		await settle();
+
+		expect(toParent.map((m) => m.request.path)).toEqual([
+			"/prism/a",
+			"/prism/b?x=1",
+		]);
+	});
+
+	it("maps URLs built from the null origin back to the instance", async () => {
+		const { windowStub, toParent } = bootProxy();
+
+		windowStub.fetch("null/prism/preauth/info");
+		windowStub.fetch(new windowStub.URL("/prism/x", "null"));
+		await settle();
+
+		expect(toParent.map((m) => m.request.path)).toEqual([
+			"/prism/preauth/info",
+			"/prism/x",
+		]);
+	});
+
+	it("resolves router paths against about:srcdoc instead of throwing", () => {
+		const { windowStub } = bootProxy();
+
+		const url = new windowStub.URL("/home", "about:srcdoc#/home");
+
+		expect(url.pathname).toBe("/home");
+		expect(url).toBeInstanceOf(URL);
+		expect(() => new windowStub.URL("no base")).toThrow();
+	});
+
+	it("replaces navigator.serviceWorker with an inert stand-in", async () => {
+		const { navigatorStub } = bootProxy();
+		const sw = (navigatorStub as any).serviceWorker;
+
+		expect(sw.controller).toBeNull();
+		await expect(sw.register("/sw.js")).rejects.toThrow(/disabled/);
+		await expect(sw.getRegistrations()).resolves.toEqual([]);
+	});
+
+	it("leaves requests to other hosts on the native fetch", async () => {
+		const { windowStub, toParent, nativeFetch } = bootProxy();
+
+		await windowStub.fetch(
+			"https://blink-v2-cdn.thoughtspotartifacts.cloud/x.json",
+		);
+
+		expect(nativeFetch).toHaveBeenCalledTimes(1);
+		expect(toParent).toHaveLength(0);
+	});
+
+	it("turns a relay error into a fetch rejection", async () => {
+		const { windowStub, toParent, deliver } = bootProxy();
+
+		const pending = windowStub.fetch("/prism/");
+		await settle();
+		await deliver({
+			__tsProxy: 1,
+			kind: "response",
+			id: toParent[0].id,
+			error: "nope",
 		});
 
-		const [url, init] = fetchSpy.mock.calls[0];
-		expect(url).toBe(`${instanceUrl}/prism/?op=GetHome`);
-		expect(init.headers.get("Authorization")).toBe("Bearer token-123");
-		expect(init.headers.get("x-requested-by")).toBeNull();
-		expect(init.headers.get("accept")).toBe("application/json");
+		await expect(pending).rejects.toThrow("nope");
 	});
 
-	it("leaves absolute requests to other hosts alone", async () => {
-		const { windowStub, fetchSpy } = bootProxy("null");
-
-		await (windowStub.fetch as any)(
-			"https://blink-v2-cdn.thoughtspotartifacts.cloud/x.json",
-		);
-
-		expect(fetchSpy).toHaveBeenCalledWith(
-			"https://blink-v2-cdn.thoughtspotartifacts.cloud/x.json",
-			undefined,
-		);
-	});
-
-	it("rewrites relative XHRs and adds the token", () => {
-		const { FakeXhr, xhrCalls } = bootProxy("null");
+	it("relays XHRs and fires load with the response", async () => {
+		const { toParent, respond, FakeXhr } = bootProxy();
 		const xhr: any = new FakeXhr();
+		const onload = vi.fn();
+		xhr.onload = onload;
+		xhr.responseType = "json";
 
 		xhr.open("GET", "/callosum/v1/session/info");
 		xhr.setRequestHeader("X-Requested-By", "ThoughtSpot");
 		xhr.send();
+		await settle();
 
-		expect(xhrCalls[0].url).toBe(`${instanceUrl}/callosum/v1/session/info`);
-		expect(xhr.headers).toEqual({ Authorization: "Bearer token-123" });
-		expect(xhr.withCredentials).toBe(true);
+		expect(toParent[0].request).toMatchObject({
+			method: "GET",
+			path: "/callosum/v1/session/info",
+			headers: { "x-requested-by": "ThoughtSpot" },
+		});
+
+		await respond(toParent[0].id, okResponse('{"userGUID":"u1"}'));
+		expect(onload).toHaveBeenCalled();
+		expect(xhr.readyState).toBe(4);
+		expect(xhr.status).toBe(200);
+		expect(xhr.response).toEqual({ userGUID: "u1" });
+		expect(xhr.getResponseHeader("Content-Type")).toBe("application/json");
 	});
 
-	it("rewrites URL objects", async () => {
-		const { windowStub, fetchSpy } = bootProxy("null");
+	it("forwards a nested frame's request up and its response back down", async () => {
+		const { windowStub, toParent, deliver, respond } = bootProxy();
+		const toChild: any[] = [];
+		const child = {
+			parent: windowStub,
+			postMessage: (m: any) => toChild.push(m),
+		};
 
-		await (windowStub.fetch as any)(
-			new URL("/prism/preauth/info", "https://srcdoc.invalid"),
+		await deliver(
+			{
+				__tsProxy: 1,
+				kind: "request",
+				id: 7,
+				request: { method: "GET", path: "/prism/c", headers: {} },
+			},
+			child,
 		);
+		expect(toParent[0].request.path).toBe("/prism/c");
 
-		expect(fetchSpy.mock.calls[0][0]).toBe(`${instanceUrl}/prism/preauth/info`);
+		await respond(toParent[0].id, okResponse("{}"));
+		expect(toChild).toEqual([
+			{
+				__tsProxy: 1,
+				kind: "response",
+				id: 7,
+				response: okResponse("{}"),
+			},
+		]);
 	});
 
-	it("rewrites absolute URLs built from the parent's base URL", async () => {
-		const { windowStub, fetchSpy } = bootProxy("null");
+	it("ignores requests from windows that are not its child frames", async () => {
+		const { toParent, deliver } = bootProxy();
 
-		await (windowStub.fetch as any)(
-			"https://abc.claudemcpcontent.com/prism/preauth/info",
+		await deliver(
+			{
+				__tsProxy: 1,
+				kind: "request",
+				id: 1,
+				request: { method: "GET", path: "/x", headers: {} },
+			},
+			{ parent: {}, postMessage: () => {} },
 		);
 
-		expect(fetchSpy.mock.calls[0][0]).toBe(`${instanceUrl}/prism/preauth/info`);
+		expect(toParent).toHaveLength(0);
 	});
 
-	it("also works when the frame inherits a real origin", async () => {
-		const { windowStub, fetchSpy } = bootProxy(
-			"https://abc.claudemcpcontent.com",
+	it("loads a nested ThoughtSpot iframe through the relay as a sandboxed srcdoc", async () => {
+		const { toParent, respond, FakeIframe } = bootProxy();
+		const frame: any = new FakeIframe();
+
+		frame.src = "/?embedApp=true#/embed/viz/abc";
+		await settle();
+
+		expect(frame.nativeSrc).toBeUndefined();
+		expect(frame.attributes.sandbox).toBe("allow-scripts allow-forms");
+		expect(toParent[0].request).toMatchObject({
+			method: "GET",
+			path: "/?embedApp=true",
+		});
+
+		await respond(
+			toParent[0].id,
+			okResponse("<html><head></head><body>viz</body></html>", {
+				"content-type": "text/html",
+			}),
 		);
+		expect(frame.srcdoc).toMatch(
+			/^<html><head><script>try\{history\.replaceState\(null,'',"#\/embed\/viz\/abc"\)\}catch\(e\)\{\}<\/script><script>[\s\S]*\[api-relay\][\s\S]*<\/script><\/head><body>viz<\/body><\/html>$/,
+		);
+	});
 
-		await (windowStub.fetch as any)("https://abc.claudemcpcontent.com/prism/");
+	it("also catches nested frames set through setAttribute", async () => {
+		const { toParent, FakeIframe } = bootProxy();
+		const frame: any = new FakeIframe();
 
-		expect(fetchSpy.mock.calls[0][0]).toBe(`${instanceUrl}/prism/`);
+		frame.setAttribute("src", `${instanceUrl}/#/home`);
+		await settle();
+
+		expect(frame.attributes.src).toBeUndefined();
+		expect(toParent[0].request.path).toBe("/");
+	});
+
+	it("leaves iframes to other sites alone", async () => {
+		const { toParent, FakeIframe } = bootProxy();
+		const frame: any = new FakeIframe();
+
+		frame.src = "https://fast.wistia.net/embed/x";
+		await settle();
+
+		expect(frame.nativeSrc).toBe("https://fast.wistia.net/embed/x");
+		expect(toParent).toHaveLength(0);
 	});
 });
 
-describe("THOUGHTSPOT_UI_WIDGET_HTML", () => {
-	it("contains a syntactically valid inline script", () => {
-		const match = THOUGHTSPOT_UI_WIDGET_HTML.match(
-			/<script>([\s\S]*?)<\/script>/,
+// Runs the widget script against a fake host and DOM.
+function bootWidget() {
+	const script =
+		THOUGHTSPOT_UI_WIDGET_HTML.match(/<script>([\s\S]*?)<\/script>/)?.[1] ?? "";
+	const toHost: any[] = [];
+	const host = { postMessage: (m: any) => toHost.push(m) };
+	let onMessage: (event: any) => void = () => {};
+	const elements: Record<string, any> = {};
+	const element = () => {
+		const toPage: any[] = [];
+		return {
+			textContent: "",
+			className: "",
+			attributes: {} as Record<string, string>,
+			children: [] as any[],
+			toPage,
+			contentWindow: { postMessage: (m: any) => toPage.push(m) },
+			setAttribute(name: string, value: string) {
+				this.attributes[name] = value;
+			},
+			replaceChildren(...nodes: any[]) {
+				this.children = nodes;
+			},
+			addEventListener() {},
+		};
+	};
+	const documentStub = {
+		documentElement: { scrollHeight: 700 },
+		body: { classList: { contains: () => false, toggle: () => {} } },
+		getElementById: (id: string) => {
+			if (!elements[id]) elements[id] = element();
+			return elements[id];
+		},
+		createElement: () => element(),
+	};
+	new Function("window", "document", script)(
+		{
+			parent: host,
+			addEventListener: (_t: string, fn: (event: any) => void) => {
+				onMessage = fn;
+			},
+		},
+		documentStub,
+	);
+	const deliver = async (data: any, source: unknown = host) => {
+		onMessage({ source, data });
+		await settle();
+	};
+	return { toHost, elements, deliver };
+}
+
+describe("ThoughtSpot UI widget", () => {
+	async function openPage() {
+		const widget = bootWidget();
+		await widget.deliver({ jsonrpc: "2.0", id: 1, result: {} });
+		await widget.deliver({
+			jsonrpc: "2.0",
+			method: "ui/notifications/tool-result",
+			params: { structuredContent: { path: "#/home" } },
+		});
+		const pageCall = widget.toHost.at(-1);
+		expect(pageCall).toMatchObject({
+			method: "tools/call",
+			params: { name: "get_thoughtspot_page", arguments: { path: "#/home" } },
+		});
+		await widget.deliver({
+			jsonrpc: "2.0",
+			id: pageCall.id,
+			result: { structuredContent: { html: "<html>page</html>" } },
+		});
+		const [iframe] = widget.elements.frame.children;
+		return { ...widget, iframe };
+	}
+
+	it("loads the page into a sandboxed srcdoc frame", async () => {
+		const { iframe } = await openPage();
+
+		expect(iframe.srcdoc).toBe("<html>page</html>");
+		expect(iframe.attributes.sandbox).toBe(THOUGHTSPOT_FRAME_SANDBOX);
+		expect(THOUGHTSPOT_FRAME_SANDBOX).not.toMatch(/allow-same-origin/);
+	});
+
+	it("relays the page's API requests through thoughtspot_api_request only", async () => {
+		const { iframe, toHost, deliver } = await openPage();
+
+		await deliver(
+			{
+				__tsProxy: 1,
+				kind: "request",
+				id: 5,
+				request: {
+					method: "GET",
+					path: "/prism/",
+					headers: { accept: "*/*" },
+					name: "show_answer",
+				},
+			},
+			iframe.contentWindow,
 		);
-		expect(() => new Function(match?.[1] ?? "")).not.toThrow();
+		const call = toHost.at(-1);
+		expect(call).toMatchObject({
+			method: "tools/call",
+			params: {
+				name: "thoughtspot_api_request",
+				arguments: {
+					method: "GET",
+					path: "/prism/",
+					headers: { accept: "*/*" },
+				},
+			},
+		});
+		expect(call.params.arguments).not.toHaveProperty("name");
+
+		const response = okResponse("{}");
+		await deliver({
+			jsonrpc: "2.0",
+			id: call.id,
+			result: { structuredContent: response },
+		});
+		expect(iframe.toPage).toEqual([
+			{ __tsProxy: 1, kind: "response", id: 5, response },
+		]);
+	});
+
+	it("ignores relay requests from anything but its page frame", async () => {
+		const { toHost, deliver } = await openPage();
+		const before = toHost.length;
+
+		await deliver(
+			{
+				__tsProxy: 1,
+				kind: "request",
+				id: 1,
+				request: { method: "GET", path: "/x" },
+			},
+			{ postMessage: () => {} },
+		);
+
+		expect(toHost).toHaveLength(before);
 	});
 });

@@ -1830,27 +1830,43 @@ describe("MCP Server", () => {
 	describe("MCP Apps ThoughtSpot UI widget (thoughtspot-ui URL flag)", () => {
 		const indexHtml =
 			"<!DOCTYPE html><html><head><script>var blink = {};</script></head><body></body></html>";
+		const mcpAppsCapabilities = {
+			extensions: {
+				"io.modelcontextprotocol/ui": {
+					mimeTypes: ["text/html;profile=mcp-app"],
+				},
+			},
+		};
+		const supportMcpApps = () =>
+			vi
+				.spyOn(server, "getClientCapabilities")
+				.mockReturnValue(mcpAppsCapabilities as any);
 
 		afterEach(() => {
 			vi.unstubAllGlobals();
 		});
 
 		it("hides the widget tools without the flag", async () => {
+			supportMcpApps();
 			await server.init();
 			const { listTools } = connect(server);
 
 			const names = (await listTools()).tools.map((t) => t.name);
 			expect(names).not.toContain("show_thoughtspot");
-			expect(names).not.toContain("get_thoughtspot_page");
+			expect(names).not.toContain("thoughtspot_api_request");
 		});
 
-		it("refuses to build the page without the flag", async () => {
+		it("refuses relay calls without the flag", async () => {
+			supportMcpApps();
 			const fetchSpy = vi.fn();
 			vi.stubGlobal("fetch", fetchSpy);
 			await server.init();
 			const { callTool } = connect(server);
 
-			const result = await callTool("get_thoughtspot_page", { path: "#/home" });
+			const result = await callTool("thoughtspot_api_request", {
+				method: "GET",
+				path: "/prism/",
+			});
 
 			expect(result.isError).toBe(true);
 			expect(fetchSpy).not.toHaveBeenCalled();
@@ -1861,106 +1877,195 @@ describe("MCP Server", () => {
 				mockProps.enableThoughtSpotUiWidget = true;
 			});
 
-			it("lists show_thoughtspot linked to the widget and the page tool as app-only", async () => {
+			it("hides the widget tools from clients without MCP Apps support", async () => {
 				await server.init();
 				const { listTools } = connect(server);
 
-				const { tools } = await listTools();
-				const show = tools.find((t) => t.name === "show_thoughtspot") as any;
-				const page = tools.find(
-					(t) => t.name === "get_thoughtspot_page",
-				) as any;
-				expect(show._meta.ui.resourceUri).toBe("ui://thoughtspot/app.html");
-				expect(page._meta.ui).toEqual({ visibility: ["app"] });
+				const names = (await listTools()).tools.map((t) => t.name);
+				expect(names).not.toContain("show_thoughtspot");
+				expect(names).not.toContain("get_thoughtspot_page");
+				expect(names).not.toContain("thoughtspot_api_request");
 			});
 
-			it("serves the widget with a CSP covering the cluster and CDNs", async () => {
-				await server.init();
-
-				const result = await server.readResource({
-					method: "resources/read",
-					params: { uri: "ui://thoughtspot/app.html" },
-				});
-				const [content] = result.contents as any[];
-				expect(content.mimeType).toBe("text/html;profile=mcp-app");
-				expect(content.text).toContain("get_thoughtspot_page");
-				expect(content._meta.ui.csp.connectDomains).toContain(
-					"https://test.thoughtspot.cloud",
-				);
-				expect(content._meta.ui.csp.resourceDomains).toContain(
-					"https://blink-v2-cdn.thoughtspotartifacts.cloud",
-				);
-			});
-
-			it("show_thoughtspot resolves an answer iframe_url to its route", async () => {
-				await server.init();
-				const { callTool } = connect(server);
-
-				const result = await callTool("show_thoughtspot", {
-					path: "https://test.thoughtspot.cloud/?tsmcp=true#/embed/conv-assist-answer?sessionId=s",
-				});
-
-				expect(result.structuredContent).toEqual({
-					path: "#/embed/conv-assist-answer?sessionId=s",
-				});
-			});
-
-			it("show_thoughtspot defaults to the home page", async () => {
-				await server.init();
-				const { callTool } = connect(server);
-
-				const result = await callTool("show_thoughtspot", {});
-
-				expect(result.structuredContent).toEqual({ path: "#/home" });
-			});
-
-			it("get_thoughtspot_page injects the proxy with the user's token", async () => {
-				const fetchSpy = vi
-					.fn()
-					.mockResolvedValue(new Response(indexHtml, { status: 200 }));
+			it("refuses relay calls from clients without MCP Apps support", async () => {
+				const fetchSpy = vi.fn();
 				vi.stubGlobal("fetch", fetchSpy);
 				await server.init();
 				const { callTool } = connect(server);
 
-				const result = await callTool("get_thoughtspot_page", {
-					path: "#/pinboard/abc",
-				});
-
-				expect(result.isError).toBeUndefined();
-				expect(fetchSpy.mock.calls[0][0]).toBe(
-					"https://test.thoughtspot.cloud/",
-				);
-				const { html, path } = result.structuredContent as any;
-				expect(path).toBe("#/pinboard/abc");
-				expect(html).toContain('var AUTH_TOKEN = "test-access-token";');
-				expect(html).toContain(
-					'var API_HOST = "https://test.thoughtspot.cloud";',
-				);
-				expect(html.indexOf("[api-redirect]")).toBeLessThan(
-					html.indexOf("var blink"),
-				);
-				// The token-bearing HTML stays out of the text content.
-				expect(JSON.stringify(result.content)).not.toContain(
-					"test-access-token",
-				);
-			});
-
-			it("get_thoughtspot_page reports a failed index.html fetch", async () => {
-				vi.stubGlobal(
-					"fetch",
-					vi.fn().mockResolvedValue(new Response("nope", { status: 502 })),
-				);
-				await server.init();
-				const { callTool } = connect(server);
-
-				const result = await callTool("get_thoughtspot_page", {
-					path: "#/home",
+				const result = await callTool("thoughtspot_api_request", {
+					method: "GET",
+					path: "/prism/",
 				});
 
 				expect(result.isError).toBe(true);
-				expect((result.content as any[])[0].text).toMatch(
-					/Could not load the ThoughtSpot app/,
-				);
+				expect(fetchSpy).not.toHaveBeenCalled();
+			});
+
+			it("does not serve the widget to clients without MCP Apps support", async () => {
+				await server.init();
+
+				const read = server.readResource({
+					method: "resources/read",
+					params: { uri: "ui://thoughtspot/app.html" },
+				});
+
+				await expect(read).rejects.toThrow();
+			});
+
+			describe("for an MCP Apps client", () => {
+				beforeEach(() => {
+					supportMcpApps();
+				});
+
+				it("lists show_thoughtspot linked to the widget and the helpers as app-only", async () => {
+					await server.init();
+					const { listTools } = connect(server);
+
+					const { tools } = await listTools();
+					const byName = (name: string) =>
+						tools.find((t) => t.name === name) as any;
+					expect(byName("show_thoughtspot")._meta.ui.resourceUri).toBe(
+						"ui://thoughtspot/app.html",
+					);
+					expect(byName("get_thoughtspot_page")._meta.ui).toEqual({
+						visibility: ["app"],
+					});
+					expect(byName("thoughtspot_api_request")._meta.ui).toEqual({
+						visibility: ["app"],
+					});
+				});
+
+				it("serves the widget with a CSP covering the CDNs and cluster images", async () => {
+					await server.init();
+
+					const result = await server.readResource({
+						method: "resources/read",
+						params: { uri: "ui://thoughtspot/app.html" },
+					});
+					const [content] = result.contents as any[];
+					expect(content.mimeType).toBe("text/html;profile=mcp-app");
+					expect(content.text).toContain("thoughtspot_api_request");
+					expect(content._meta.ui.csp.resourceDomains).toContain(
+						"https://test.thoughtspot.cloud",
+					);
+					expect(content._meta.ui.csp.connectDomains).not.toContain(
+						"https://test.thoughtspot.cloud",
+					);
+				});
+
+				it("show_thoughtspot resolves an answer iframe_url to its route", async () => {
+					await server.init();
+					const { callTool } = connect(server);
+
+					const result = await callTool("show_thoughtspot", {
+						path: "https://test.thoughtspot.cloud/?tsmcp=true#/embed/conv-assist-answer?sessionId=s",
+					});
+
+					expect(result.structuredContent).toEqual({
+						path: "#/embed/conv-assist-answer?sessionId=s",
+					});
+				});
+
+				it("show_thoughtspot defaults to the home page", async () => {
+					await server.init();
+					const { callTool } = connect(server);
+
+					const result = await callTool("show_thoughtspot", {});
+
+					expect(result.structuredContent).toEqual({ path: "#/home" });
+				});
+
+				it("get_thoughtspot_page injects the relay proxy and no credentials", async () => {
+					const fetchSpy = vi
+						.fn()
+						.mockResolvedValue(new Response(indexHtml, { status: 200 }));
+					vi.stubGlobal("fetch", fetchSpy);
+					await server.init();
+					const { callTool } = connect(server);
+
+					const result = await callTool("get_thoughtspot_page", {
+						path: "#/pinboard/abc",
+					});
+
+					expect(result.isError).toBeUndefined();
+					expect(fetchSpy.mock.calls[0][0]).toBe(
+						"https://test.thoughtspot.cloud/",
+					);
+					const { html, path } = result.structuredContent as any;
+					expect(path).toBe("#/pinboard/abc");
+					expect(html).toContain("[api-relay]");
+					expect(html.indexOf("[api-relay]")).toBeLessThan(
+						html.indexOf("var blink"),
+					);
+					expect(JSON.stringify(result)).not.toContain("test-access-token");
+				});
+
+				it("get_thoughtspot_page reports a failed index.html fetch", async () => {
+					vi.stubGlobal(
+						"fetch",
+						vi.fn().mockResolvedValue(new Response("nope", { status: 502 })),
+					);
+					await server.init();
+					const { callTool } = connect(server);
+
+					const result = await callTool("get_thoughtspot_page", {
+						path: "#/home",
+					});
+
+					expect(result.isError).toBe(true);
+					expect((result.content as any[])[0].text).toMatch(
+						/Could not load the ThoughtSpot app/,
+					);
+				});
+
+				it("thoughtspot_api_request makes the call server side with the user's token", async () => {
+					const fetchSpy = vi.fn().mockResolvedValue(
+						new Response('{"ok":true}', {
+							status: 200,
+							headers: { "content-type": "application/json" },
+						}),
+					);
+					vi.stubGlobal("fetch", fetchSpy);
+					await server.init();
+					const { callTool } = connect(server);
+
+					const result = await callTool("thoughtspot_api_request", {
+						method: "GET",
+						path: "/callosum/v1/session/info",
+						headers: { authorization: "Bearer from-page" },
+					});
+
+					expect(result.isError).toBeUndefined();
+					const [url, init] = fetchSpy.mock.calls[0];
+					expect(url).toBe(
+						"https://test.thoughtspot.cloud/callosum/v1/session/info",
+					);
+					expect(init.headers.get("Authorization")).toBe(
+						"Bearer test-access-token",
+					);
+					expect(result.structuredContent).toEqual({
+						status: 200,
+						headers: { "content-type": "application/json" },
+						body_base64: Buffer.from('{"ok":true}').toString("base64"),
+					});
+				});
+
+				it("thoughtspot_api_request refuses credential endpoints", async () => {
+					const fetchSpy = vi.fn();
+					vi.stubGlobal("fetch", fetchSpy);
+					await server.init();
+					const { callTool } = connect(server);
+
+					const result = await callTool("thoughtspot_api_request", {
+						method: "POST",
+						path: "/api/rest/2.0/auth/token/full",
+					});
+
+					expect(result.isError).toBe(true);
+					expect((result.content as any[])[0].text).toMatch(/not allowed/);
+					expect(fetchSpy).not.toHaveBeenCalled();
+				});
 			});
 		});
 	});
