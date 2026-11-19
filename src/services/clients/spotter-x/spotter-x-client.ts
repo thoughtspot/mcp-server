@@ -127,3 +127,50 @@ export async function sendSpotterXMessageStreaming(
 
 	return response;
 }
+
+/*
+ * Download a file (an ADK artifact in the FILES namespace) that the agent
+ * produced in a SpotterX conversation. Artifacts are addressed by session id
+ * alone, not under the per-agent prefix the query stream uses. The gateway
+ * answers with the raw bytes or with a JSON envelope; see `readSpotterXFileBody`.
+ */
+export async function downloadSpotterXFile(
+	ctx: ClientContext,
+	{
+		tenantId,
+		orgId,
+		userId,
+		conversationId,
+		filename,
+		version,
+	}: {
+		tenantId: string;
+		orgId: string;
+		userId: string;
+		conversationId: string;
+		filename: string;
+		// Artifact revision. Omit for the latest.
+		version?: number;
+	},
+): Promise<Response> {
+	// The category is sent explicitly: the server takes the enum name, and an
+	// unset one is slated to stop defaulting to FILES.
+	const query = `category=FILES${version === undefined ? "" : `&version=${version}`}`;
+	const endpoint = `/agents/v1/sessions/${encodeURIComponent(conversationId)}/artifacts/${encodeURIComponent(filename)}?${query}`;
+	const response = await fetchApi(ctx, endpoint, {
+		...spotterXRequestOptions(tenantId, orgId, userId),
+		method: "GET",
+		accept: "*/*",
+	});
+
+	if (!response.ok) {
+		const errorText = await response.text();
+		throw new ThoughtSpotApiError(
+			response.status,
+			"downloadSpotterXFile",
+			errorText,
+		);
+	}
+
+	return response;
+}

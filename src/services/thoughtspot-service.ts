@@ -18,6 +18,7 @@ import {
 } from "../metrics/runtime/tool-metrics";
 import { WithSpan, getActiveSpan } from "../metrics/tracing/tracing-utils";
 import {
+	type FileRef,
 	fileExtension,
 	processSpotter3EventStream,
 	processSpotterXEventStream,
@@ -35,6 +36,7 @@ import {
 	bytesToBase64,
 	conversationFileFormat,
 	readBodyCapped,
+	readSpotterXFileBody,
 } from "./clients/get-file/conversation-file";
 import type {
 	CreateModelSessionResult,
@@ -529,6 +531,7 @@ export class ThoughtSpotService {
 		) => Promise<void>,
 		additionalContext?: string | undefined,
 		suppressIframes = false,
+		includeFiles = false,
 	): Promise<void> {
 		const span = trace.getSpan(context.active());
 		span?.setAttributes({
@@ -576,6 +579,7 @@ export class ThoughtSpotService {
 				appendStoredMessages,
 				streamRecorder,
 				suppressIframes,
+				includeFiles,
 			).finally(() => {
 				this.scheduleBackgroundMetricsFlush(streamRecorder);
 			});
@@ -1089,18 +1093,17 @@ export class ThoughtSpotService {
 	 */
 	@WithSpan("get-conversation-file")
 	async getConversationFile({
-		conversationId,
-		tsFileId,
+		file,
 		maxRows = GET_FILE_DEFAULT_MAX_ROWS,
 	}: {
-		conversationId: string;
-		tsFileId: string;
+		file: FileRef;
 		maxRows?: number;
 	}): Promise<ConversationFile> {
 		const span = getActiveSpan();
-		const extension = fileExtension(tsFileId);
+		const extension = fileExtension(file.tsFileId);
 		span?.setAttributes({
-			conversation_id: conversationId,
+			conversation_id: file.conversationId,
+			file_source: file.source,
 			file_type: extension,
 		});
 
@@ -1113,13 +1116,7 @@ export class ThoughtSpotService {
 		// broken stream is not counted as an upstream success.
 		const bytes = await this.observeUpstreamCall(
 			UPSTREAM_OPERATION_NAMES.downloadConversationFile,
-			async () => {
-				const response = await this.client.downloadSpotter3File({
-					conversationId,
-					tsFileId,
-				});
-				return readBodyCapped(response, format.maxBytes);
-			},
+			() => this.fetchFileBytes(file, format.maxBytes),
 		);
 		span?.setAttribute("file_bytes", bytes.byteLength);
 
@@ -1141,6 +1138,29 @@ export class ThoughtSpotService {
 		}
 		span?.setAttribute("total_row_count", viz.total_row_count ?? 0);
 		return { kind: "csv", ...viz };
+	}
+
+	// The one step of get_file that differs by agent backend.
+	private async fetchFileBytes(
+		file: FileRef,
+		maxBytes: number,
+	): Promise<Uint8Array> {
+		if (file.source === "spotterx") {
+			const response = await this.client.downloadSpotterXFile({
+				tenantId: this.client.tenantId,
+				orgId: this.client.orgId,
+				userId: this.client.userId,
+				conversationId: file.conversationId,
+				filename: file.tsFileId,
+				version: file.version,
+			});
+			return readSpotterXFileBody(response, maxBytes);
+		}
+		const response = await this.client.downloadSpotter3File({
+			conversationId: file.conversationId,
+			tsFileId: file.tsFileId,
+		});
+		return readBodyCapped(response, maxBytes);
 	}
 
 	/**

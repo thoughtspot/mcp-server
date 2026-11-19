@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ConversationStorageServerSQLite } from "../../src/servers/conversation-storage-server";
 import type { Message, StreamingMessagesState } from "../../src/services/types";
 
@@ -530,6 +530,112 @@ describe("ConversationStorageServerSQLite", () => {
 
 			const res = await server.fetch(makeRequest("POST", "initialize"));
 			expect(res.status).toBe(200);
+		});
+	});
+
+	describe("file record", () => {
+		const DAY_MS = 24 * 60 * 60 * 1000;
+		const fileMessage = (tsFileId: string, source = "spotterx") => ({
+			is_thinking: false,
+			type: "file",
+			file_id: JSON.stringify({
+				source,
+				conversation_id: "conv-1",
+				ts_file_id: tsFileId,
+			}),
+			file_name: tsFileId,
+			file_type: "csv",
+		});
+		const files = async () =>
+			(await server.fetch(makeRequest("GET", "files"))).json();
+
+		beforeEach(async () => {
+			vi.useFakeTimers({ now: 1_000_000 });
+			await server.fetch(makeRequest("POST", "initialize"));
+		});
+
+		afterEach(() => {
+			vi.useRealTimers();
+		});
+
+		it("is empty for a conversation with no files", async () => {
+			expect(await files()).toEqual([]);
+		});
+
+		it("records each file shown, once", async () => {
+			await server.fetch(
+				makeRequest("POST", "append", {
+					messages: [textMessage, fileMessage("a.csv"), fileMessage("b.pdf")],
+				}),
+			);
+			await server.fetch(
+				makeRequest("POST", "append", {
+					messages: [fileMessage("a.csv", "spotter3")],
+				}),
+			);
+
+			expect(await files()).toEqual(["a.csv", "b.pdf"]);
+		});
+
+		it("ignores a file message whose file_id cannot be parsed", async () => {
+			await server.fetch(
+				makeRequest("POST", "append", {
+					messages: [{ ...fileMessage("a.csv"), file_id: "not-json" }],
+				}),
+			);
+
+			expect(await files()).toEqual([]);
+		});
+
+		it("keeps the record when the messages expire, then drops it after 7 days", async () => {
+			await server.fetch(
+				makeRequest("POST", "append", {
+					messages: [fileMessage("a.csv")],
+					isDone: true,
+				}),
+			);
+
+			// Messages expire after 30 minutes of inactivity.
+			vi.advanceTimersByTime(30 * 60 * 1000);
+			await server.alarm();
+			expect(mock.store.has("message-0")).toBe(false);
+			expect(mock.store.has("is-done")).toBe(false);
+			expect(await files()).toEqual(["a.csv"]);
+			expect(mock.alarm).toBe(1_000_000 + 7 * DAY_MS);
+
+			// A follow-up in the same conversation still works.
+			const res = await server.fetch(makeRequest("POST", "initialize"));
+			expect(res.status).toBe(200);
+			expect(await files()).toEqual(["a.csv"]);
+
+			// The follow-up's 30-minute expiry keeps the record and its retention.
+			vi.advanceTimersByTime(30 * 60 * 1000);
+			await server.alarm();
+			expect(await files()).toEqual(["a.csv"]);
+			expect(mock.alarm).toBe(1_000_000 + 7 * DAY_MS);
+
+			vi.setSystemTime(1_000_000 + 7 * DAY_MS);
+			await server.alarm();
+			expect(await files()).toEqual([]);
+			expect(mock.store.size).toBe(0);
+		});
+
+		it("extends the retention when a file is shown again later", async () => {
+			await server.fetch(
+				makeRequest("POST", "append", { messages: [fileMessage("a.csv")] }),
+			);
+			vi.advanceTimersByTime(DAY_MS);
+			await server.fetch(
+				makeRequest("POST", "append", { messages: [fileMessage("b.csv")] }),
+			);
+
+			expect(mock.store.get("files-retain-until")).toBe(1_000_000 + 8 * DAY_MS);
+		});
+
+		it("deletes everything at once for a conversation with no files", async () => {
+			await server.alarm();
+
+			expect(mock.store.size).toBe(0);
 		});
 	});
 

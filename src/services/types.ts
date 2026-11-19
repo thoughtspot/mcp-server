@@ -105,7 +105,8 @@ export interface FileMessage extends BaseMessage {
 	file_name: string;
 	file_type: string;
 	// Opens the file in a browser signed in to ThoughtSpot, which saves it.
-	file_download_url: string;
+	// Spotter 3 only: the SpotterX artifact route needs headers a link cannot send.
+	file_download_url?: string;
 }
 
 export type Message = TextMessage | AnswerMessage | FileMessage;

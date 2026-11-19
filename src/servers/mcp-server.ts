@@ -1067,6 +1067,7 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 				storageService.appendMessages.bind(storageService),
 				additional_context,
 				!!this.ctx.props.suppressIframes,
+				this.isGetFileAvailable(),
 			);
 		} catch (error) {
 			console.error("Error sending message to SpotterX conversation:", error);
@@ -1780,7 +1781,6 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 	 * Whether this connection can use get_file. All of these must hold:
 	 * - the tool is in the client's API version;
 	 * - the user can download data;
-	 * - sessions run on Spotter 3: SpotterX has no file download yet;
 	 * - session updates are simplified: raw updates carry no `file_id`.
 	 * Session updates announce files only then, so a client is never offered a
 	 * file it cannot read.
@@ -1793,12 +1793,9 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			// listTools falls back to the latest version the same way.
 			versionConfig = resolveApiVersion();
 		}
-		const usesSpotterX =
-			versionConfig.version.includes("beta") && this.isSpotterXEnabled();
 		return (
 			versionConfig.tools.some((tool) => tool.name === ToolName.GetFile) &&
 			this.canDownloadData() &&
-			!usesSpotterX &&
 			!this.ctx.props.enableRawSessionUpdates
 		);
 	}
@@ -1836,16 +1833,25 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 				"get_file: invalid file_id",
 			);
 		}
+		// A SpotterX artifact is fetched by session id from the agents gateway, so
+		// confirm this user was shown the file rather than trust the id alone.
+		// (The Spotter 3 route checks the conversation against the caller itself.)
+		if (file.source === "spotterx") {
+			const storageService = await this.getStorageService();
+			const knownFiles = await storageService.getFiles(file.conversationId);
+			if (!knownFiles.includes(file.tsFileId)) {
+				return this.createErrorResponse(
+					"This file was not found in your analytical sessions, or it is more than 7 days old. Pass the `file_id` of a `file` update returned to you by `get_session_updates`, or ask the Analytics Agent to produce the file again.",
+					"get_file: file not shown to this user",
+				);
+			}
+		}
 		const fileType = fileExtension(file.tsFileId);
 
 		try {
 			const result = await this.getThoughtSpotService(recorder, {
 				analyticalSessionId: file.conversationId,
-			}).getConversationFile({
-				conversationId: file.conversationId,
-				tsFileId: file.tsFileId,
-				maxRows: max_rows,
-			});
+			}).getConversationFile({ file, maxRows: max_rows });
 
 			if (result.kind === "csv") {
 				const totalRowCount = result.total_row_count ?? result.data_rows.length;

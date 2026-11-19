@@ -4,6 +4,7 @@ import type {
 	RawMessage,
 	StreamingMessagesState,
 } from "../services/types";
+import { parseFileId } from "../streaming-utils";
 
 const DEFAULT_TTL_MS = 30 * 60 * 1000; // 30 minutes
 const STORAGE_BATCH_SIZE = 127; // Cloudflare DO bulk get/put limit is 128, we use 127 to be safe
@@ -18,6 +19,14 @@ const READ_BOOKMARK_KEY = "read-bookmark";
 // generation working set); the message stream itself is unaffected.
 const SESSION_STATE_KEY = "session-state";
 
+// The files this user was shown in this conversation (upstream file ids), and
+// when that record lapses. get_file accepts only a file named here, so a caller
+// cannot read a file from a conversation that is not theirs. The record
+// outlives the 30-minute message expiry, so a file stays readable later.
+const FILES_KEY = "files";
+const FILES_RETAIN_UNTIL_KEY = "files-retain-until";
+const FILE_RETENTION_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+
 /**
  * A Durable Object that stores streaming conversation messages and exposes them over HTTP.
  *
@@ -31,6 +40,7 @@ const SESSION_STATE_KEY = "session-state";
  *   GET   /storage/<conversation-id>/messages   —> getNewMessagesAndUpdateBookmark
  *   POST  /storage/<conversation-id>/state      —> putSessionState
  *   GET   /storage/<conversation-id>/state      —> getSessionState
+ *   GET   /storage/<conversation-id>/files      —> getFiles
  */
 export class ConversationStorageServerSQLite {
 	private conversationId = "";
@@ -76,6 +86,10 @@ export class ConversationStorageServerSQLite {
 				case "GET /state": {
 					const state = await this.getSessionState();
 					return Response.json(state);
+				}
+
+				case "GET /files": {
+					return Response.json(await this.getFiles());
 				}
 
 				default:
@@ -131,7 +145,7 @@ export class ConversationStorageServerSQLite {
 		let idx = (await this.state.storage.get<number>(WRITE_BOOKMARK_KEY)) ?? 0;
 		const entriesToStore = {} as Record<
 			string,
-			Message | RawMessage | number | boolean
+			Message | RawMessage | number | boolean | string[]
 		>;
 		for (const message of newMessages) {
 			entriesToStore[`${MESSAGE_KEY_PREFIX}${idx}`] = message;
@@ -141,6 +155,20 @@ export class ConversationStorageServerSQLite {
 
 		if (isDone) {
 			entriesToStore[IS_DONE_KEY] = true;
+		}
+
+		const newFiles = newMessages.flatMap((message) => {
+			const fileId =
+				(message as { type?: unknown }).type === "file"
+					? (message as { file_id?: unknown }).file_id
+					: undefined;
+			const file = typeof fileId === "string" ? parseFileId(fileId) : undefined;
+			return file ? [file.tsFileId] : [];
+		});
+		if (newFiles.length > 0) {
+			const files = await this.getFiles();
+			entriesToStore[FILES_KEY] = [...new Set([...files, ...newFiles])];
+			entriesToStore[FILES_RETAIN_UNTIL_KEY] = Date.now() + FILE_RETENTION_MS;
 		}
 
 		// Perform all writes in batches, then restart TTL
@@ -194,6 +222,11 @@ export class ConversationStorageServerSQLite {
 		await this.restartTtl();
 	}
 
+	// The upstream ids of the files shown to this user in this conversation.
+	private async getFiles(): Promise<string[]> {
+		return (await this.state.storage.get<string[]>(FILES_KEY)) ?? [];
+	}
+
 	// Retrieve the conversation's scalar state, or null if never stored / expired.
 	private async getSessionState(): Promise<unknown | null> {
 		const state = await this.state.storage.get<unknown>(SESSION_STATE_KEY);
@@ -236,9 +269,27 @@ export class ConversationStorageServerSQLite {
 	}
 
 	async alarm(): Promise<void> {
+		const [files, retainUntil] = await Promise.all([
+			this.getFiles(),
+			this.state.storage.get<number>(FILES_RETAIN_UNTIL_KEY),
+		]);
+		const keepFiles =
+			files.length > 0 &&
+			typeof retainUntil === "number" &&
+			Date.now() < retainUntil;
+
 		// Check for any abnormalities in the state prior to deleting
 		const [isDone, readBookmark, writeBookmark] =
 			await this.getIsDoneAndReadWriteBookmarks();
+		// Only the file record is left: its retention ended or this is its alarm.
+		if (!isBoolean(isDone) && files.length > 0) {
+			if (keepFiles) {
+				await this.state.storage.setAlarm(retainUntil);
+			} else {
+				await this.state.storage.deleteAll();
+			}
+			return;
+		}
 		if (!isBoolean(isDone) || !isDone) {
 			console.warn(
 				`Conversation ${this.conversationId} expired without being marked done`,
@@ -260,8 +311,15 @@ export class ConversationStorageServerSQLite {
 			);
 		}
 
-		// Delete everything in storage
+		// Delete everything in storage, except the file record while it is retained
 		await this.state.storage.deleteAll();
+		if (keepFiles) {
+			await this.state.storage.put({
+				[FILES_KEY]: files,
+				[FILES_RETAIN_UNTIL_KEY]: retainUntil,
+			});
+			await this.state.storage.setAlarm(retainUntil);
+		}
 	}
 
 	/*
