@@ -1592,7 +1592,7 @@ describe("MCP Server", () => {
 		});
 	});
 
-	describe("MCP Apps answer widget (answer-widget URL flag)", () => {
+	describe("MCP Apps answer image card (answer-widget URL flag)", () => {
 		const answerId = JSON.stringify({ session_id: "session-9", gen_no: 3 });
 		const reloadableAnswerId = JSON.stringify({
 			session_id: "session-9",
@@ -1617,16 +1617,16 @@ describe("MCP Server", () => {
 			arrayBuffer: vi.fn().mockResolvedValue(pngBytes.buffer),
 		});
 
-		it("hides the widget tools without the flag", async () => {
+		it("hides the widget tools when turned off", async () => {
 			await server.init();
 			const { listTools } = connect(server);
 
 			const names = (await listTools()).tools.map((t) => t.name);
-			expect(names).not.toContain("show_answer");
 			expect(names).not.toContain("get_answer_image");
+			expect(names).not.toContain("fetch_answer_image");
 		});
 
-		it("lists no widget resource without the flag", async () => {
+		it("lists no widget resource when turned off", async () => {
 			await server.init();
 			const { listResources } = connect(server);
 
@@ -1641,7 +1641,9 @@ describe("MCP Server", () => {
 			await server.init();
 			const { callTool } = connect(server);
 
-			const result = await callTool("show_answer", { answer_id: answerId });
+			const result = await callTool("get_answer_image", {
+				answer_id: answerId,
+			});
 
 			expect(result.isError).toBe(true);
 			expect((result.content as any[])[0].text).toMatch(/not enabled/);
@@ -1657,15 +1659,15 @@ describe("MCP Server", () => {
 				const { listTools } = connect(server);
 
 				const names = (await listTools()).tools.map((t) => t.name);
-				expect(names).not.toContain("show_answer");
 				expect(names).not.toContain("get_answer_image");
+				expect(names).not.toContain("fetch_answer_image");
 			});
 
 			it("rejects widget tool calls", async () => {
 				await server.init();
 				const { callTool } = connect(server);
 
-				const result = await callTool("get_answer_image", {
+				const result = await callTool("fetch_answer_image", {
 					answer_id: answerId,
 				});
 
@@ -1685,7 +1687,7 @@ describe("MCP Server", () => {
 			});
 		});
 
-		describe("with the flag", () => {
+		describe("when on (the default)", () => {
 			beforeEach(() => {
 				mockProps.enableAnswerWidget = true;
 				vi.spyOn(server, "getClientCapabilities").mockReturnValue({
@@ -1697,18 +1699,20 @@ describe("MCP Server", () => {
 				} as any);
 			});
 
-			it("lists show_answer linked to the widget and get_answer_image as app-only", async () => {
+			it("lists get_answer_image linked to the widget and fetch_answer_image as app-only", async () => {
 				await server.init();
 				const { listTools } = connect(server);
 
 				const { tools } = await listTools();
-				const show = tools.find((t) => t.name === "show_answer") as any;
-				const image = tools.find((t) => t.name === "get_answer_image") as any;
+				const show = tools.find((t) => t.name === "get_answer_image") as any;
+				const image = tools.find((t) => t.name === "fetch_answer_image") as any;
 				expect(show._meta.ui.resourceUri).toBe("ui://thoughtspot/answer.html");
 				expect(show._meta["ui/resourceUri"]).toBe(
 					"ui://thoughtspot/answer.html",
 				);
 				expect(image._meta.ui).toEqual({ visibility: ["app"] });
+				// The image card is only a fallback to show_answer.
+				expect(show.description).toMatch(/^Fallback for show_answer/);
 			});
 
 			it("hides the widget tools without the data-download privilege", async () => {
@@ -1717,8 +1721,8 @@ describe("MCP Server", () => {
 				const { listTools } = connect(server);
 
 				const names = (await listTools()).tools.map((t) => t.name);
-				expect(names).not.toContain("show_answer");
 				expect(names).not.toContain("get_answer_image");
+				expect(names).not.toContain("fetch_answer_image");
 			});
 
 			it("hides the widget tools on versions without the Analytics Agent", async () => {
@@ -1727,7 +1731,7 @@ describe("MCP Server", () => {
 				const { listTools } = connect(server);
 
 				const names = (await listTools()).tools.map((t) => t.name);
-				expect(names).not.toContain("show_answer");
+				expect(names).not.toContain("get_answer_image");
 			});
 
 			it("serves the widget HTML as an MCP App resource", async () => {
@@ -1744,14 +1748,14 @@ describe("MCP Server", () => {
 				const [content] = result.contents as any[];
 				expect(content.mimeType).toBe("text/html;profile=mcp-app");
 				expect(content.text).toContain("ui/initialize");
-				expect(content.text).toContain("get_answer_image");
+				expect(content.text).toContain("fetch_answer_image");
 			});
 
-			it("show_answer returns the answer and a browser link on the instance", async () => {
+			it("get_answer_image returns the answer and a browser link on the instance", async () => {
 				await server.init();
 				const { callTool } = connect(server);
 
-				const result = await callTool("show_answer", {
+				const result = await callTool("get_answer_image", {
 					answer_id: answerId,
 					title: "Revenue by region",
 					iframe_url: embedUrl,
@@ -1767,11 +1771,11 @@ describe("MCP Server", () => {
 				expect(mockClient().exportAnswerReport).not.toHaveBeenCalled();
 			});
 
-			it("show_answer drops a link that is not on the instance", async () => {
+			it("get_answer_image drops a link that is not on the instance", async () => {
 				await server.init();
 				const { callTool } = connect(server);
 
-				const result = await callTool("show_answer", {
+				const result = await callTool("get_answer_image", {
 					answer_id: answerId,
 					iframe_url: "https://evil.example.com/phish",
 				});
@@ -1782,22 +1786,24 @@ describe("MCP Server", () => {
 				});
 			});
 
-			it("show_answer rejects a malformed answer_id", async () => {
+			it("get_answer_image rejects a malformed answer_id", async () => {
 				await server.init();
 				const { callTool } = connect(server);
 
-				const result = await callTool("show_answer", { answer_id: "nope" });
+				const result = await callTool("get_answer_image", {
+					answer_id: "nope",
+				});
 
 				expect(result.isError).toBe(true);
 				expect((result.content as any[])[0].text).toMatch(/Invalid answer_id/);
 			});
 
-			it("get_answer_image returns the PNG export as image content", async () => {
+			it("fetch_answer_image returns the PNG export as image content", async () => {
 				mockClient().exportAnswerReport.mockResolvedValueOnce(pngFile());
 				await server.init();
 				const { callTool } = connect(server);
 
-				const result = await callTool("get_answer_image", {
+				const result = await callTool("fetch_answer_image", {
 					answer_id: answerId,
 				});
 
@@ -1816,7 +1822,7 @@ describe("MCP Server", () => {
 				]);
 			});
 
-			it("get_answer_image reloads an expired answer and retries", async () => {
+			it("fetch_answer_image reloads an expired answer and retries", async () => {
 				mockClient()
 					.exportAnswerReport.mockRejectedValueOnce(
 						new ThoughtSpotApiError(400, "exportAnswerReport"),
@@ -1825,7 +1831,7 @@ describe("MCP Server", () => {
 				await server.init();
 				const { callTool } = connect(server);
 
-				const result = await callTool("get_answer_image", {
+				const result = await callTool("fetch_answer_image", {
 					answer_id: reloadableAnswerId,
 				});
 
@@ -1841,14 +1847,14 @@ describe("MCP Server", () => {
 				});
 			});
 
-			it("get_answer_image does not reload on a permission error", async () => {
+			it("fetch_answer_image does not reload on a permission error", async () => {
 				mockClient().exportAnswerReport.mockRejectedValueOnce(
 					new ThoughtSpotApiError(403, "exportAnswerReport"),
 				);
 				await server.init();
 				const { callTool } = connect(server);
 
-				const result = await callTool("get_answer_image", {
+				const result = await callTool("fetch_answer_image", {
 					answer_id: reloadableAnswerId,
 				});
 
@@ -1857,12 +1863,12 @@ describe("MCP Server", () => {
 				expect(mockClient().loadSpotter3Answer).not.toHaveBeenCalled();
 			});
 
-			it("get_answer_image refuses without the data-download privilege", async () => {
+			it("fetch_answer_image refuses without the data-download privilege", async () => {
 				await server.init();
 				(server as any).sessionInfo.privileges = [];
 				const { callTool } = connect(server);
 
-				const result = await callTool("get_answer_image", {
+				const result = await callTool("fetch_answer_image", {
 					answer_id: answerId,
 				});
 
@@ -1891,17 +1897,17 @@ describe("MCP Server", () => {
 			vi.unstubAllGlobals();
 		});
 
-		it("hides the widget tools without the flag", async () => {
+		it("hides the widget tools when turned off", async () => {
 			supportMcpApps();
 			await server.init();
 			const { listTools } = connect(server);
 
 			const names = (await listTools()).tools.map((t) => t.name);
-			expect(names).not.toContain("show_thoughtspot");
+			expect(names).not.toContain("show_answer");
 			expect(names).not.toContain("thoughtspot_api_request");
 		});
 
-		it("refuses relay calls without the flag", async () => {
+		it("refuses relay calls when turned off", async () => {
 			supportMcpApps();
 			const fetchSpy = vi.fn();
 			vi.stubGlobal("fetch", fetchSpy);
@@ -1917,7 +1923,7 @@ describe("MCP Server", () => {
 			expect(fetchSpy).not.toHaveBeenCalled();
 		});
 
-		describe("with the flag", () => {
+		describe("when on (the default)", () => {
 			beforeEach(() => {
 				mockProps.enableThoughtSpotUiWidget = true;
 			});
@@ -1927,7 +1933,7 @@ describe("MCP Server", () => {
 				const { listTools } = connect(server);
 
 				const names = (await listTools()).tools.map((t) => t.name);
-				expect(names).not.toContain("show_thoughtspot");
+				expect(names).not.toContain("show_answer");
 				expect(names).not.toContain("get_thoughtspot_page");
 				expect(names).not.toContain("thoughtspot_api_request");
 			});
@@ -1963,15 +1969,19 @@ describe("MCP Server", () => {
 					supportMcpApps();
 				});
 
-				it("lists show_thoughtspot linked to the widget and the helpers as app-only", async () => {
+				it("lists show_answer linked to the widget and the helpers as app-only", async () => {
 					await server.init();
 					const { listTools } = connect(server);
 
 					const { tools } = await listTools();
 					const byName = (name: string) =>
 						tools.find((t) => t.name === name) as any;
-					expect(byName("show_thoughtspot")._meta.ui.resourceUri).toBe(
+					expect(byName("show_answer")._meta.ui.resourceUri).toBe(
 						"ui://thoughtspot/app.html",
+					);
+					// show_answer is the default way to show answers.
+					expect(byName("show_answer").description).toMatch(
+						/default way to show answers.*`iframe_url`/,
 					);
 					expect(byName("get_thoughtspot_page")._meta.ui).toEqual({
 						visibility: ["app"],
@@ -1999,11 +2009,11 @@ describe("MCP Server", () => {
 					);
 				});
 
-				it("show_thoughtspot resolves an answer iframe_url to its route", async () => {
+				it("show_answer resolves an answer iframe_url to its route", async () => {
 					await server.init();
 					const { callTool } = connect(server);
 
-					const result = await callTool("show_thoughtspot", {
+					const result = await callTool("show_answer", {
 						path: "https://test.thoughtspot.cloud/?tsmcp=true#/embed/conv-assist-answer?sessionId=s",
 					});
 
@@ -2012,13 +2022,55 @@ describe("MCP Server", () => {
 					});
 				});
 
-				it("show_thoughtspot defaults to the home page", async () => {
+				it("show_answer defaults to the home page", async () => {
 					await server.init();
 					const { callTool } = connect(server);
 
-					const result = await callTool("show_thoughtspot", {});
+					const result = await callTool("show_answer", {});
 
 					expect(result.structuredContent).toEqual({ path: "#/home" });
+				});
+
+				it("show_answer opens an answer from its iframe_url", async () => {
+					await server.init();
+					const { callTool } = connect(server);
+
+					const result = await callTool("show_answer", {
+						answer_id: '{"session_id":"s","gen_no":1}',
+						iframe_url:
+							"https://test.thoughtspot.cloud/?tsmcp=true#/embed/conv-assist-answer?sessionId=s&genNo=1",
+					});
+
+					expect(result.structuredContent).toEqual({
+						path: "#/embed/conv-assist-answer?sessionId=s&genNo=1",
+					});
+				});
+
+				it("show_answer asks for the iframe_url instead of opening home for an answer_id alone", async () => {
+					await server.init();
+					const { callTool } = connect(server);
+
+					const result = await callTool("show_answer", {
+						answer_id: '{"session_id":"s","gen_no":1}',
+					});
+
+					expect(result.isError).toBe(true);
+					expect(JSON.stringify(result.content)).toContain("iframe_url");
+				});
+
+				it("show_answer reports a target it cannot open instead of opening home", async () => {
+					await server.init();
+					const { callTool } = connect(server);
+
+					for (const target of [
+						"https://elsewhere.example.com/#/home",
+						"not a route",
+					]) {
+						const result = await callTool("show_answer", {
+							iframe_url: target,
+						});
+						expect(result.isError).toBe(true);
+					}
 				});
 
 				it("get_thoughtspot_page injects the relay proxy and no credentials", async () => {
@@ -2044,14 +2096,85 @@ describe("MCP Server", () => {
 					const { html, path, relay_nonce } = result.structuredContent as any;
 					expect(path).toBe("#/pinboard/abc");
 					// The nonce goes to the widget, never into the sandboxed page.
-					expect(relay_nonce).toMatch(/^[0-9a-f]{32}$/);
+					expect(relay_nonce).toMatch(/^v1\./);
 					expect(html).not.toContain(relay_nonce);
-					expect((server as any).relayNonces.isValid(relay_nonce)).toBe(true);
+					expect(await (server as any).relayNonces.isValid(relay_nonce)).toBe(
+						true,
+					);
 					expect(html).toContain("[api-relay]");
 					expect(html.indexOf("[api-relay]")).toBeLessThan(
 						html.indexOf("var blink"),
 					);
 					expect(JSON.stringify(result)).not.toContain("test-access-token");
+				});
+
+				it("keeps the page cross-origin and adds no chart frame domain by default", async () => {
+					vi.stubGlobal(
+						"fetch",
+						vi.fn().mockResolvedValue(new Response(indexHtml, { status: 200 })),
+					);
+					await server.init();
+					const { callTool } = connect(server);
+
+					const result = await callTool("get_thoughtspot_page", {
+						path: "#/home",
+					});
+					const resource = await server.readResource({
+						method: "resources/read",
+						params: { uri: "ui://thoughtspot/app.html" },
+					});
+
+					const { html, same_origin } = result.structuredContent as any;
+					expect(same_origin).toBe(false);
+					expect(html).not.toContain("enableHostedChartSameOriginSafari: true");
+					expect(
+						(resource.contents[0] as any)._meta.ui.csp.frameDomains,
+					).toBeUndefined();
+				});
+
+				it("inline-charts turns on same-origin charts and a same-origin page", async () => {
+					mockProps.enableInlineCharts = true;
+					vi.stubGlobal(
+						"fetch",
+						vi.fn().mockResolvedValue(new Response(indexHtml, { status: 200 })),
+					);
+					await server.init();
+					const { callTool } = connect(server);
+
+					const result = await callTool("get_thoughtspot_page", {
+						path: "#/home",
+					});
+
+					const { html, same_origin } = result.structuredContent as any;
+					expect(same_origin).toBe(true);
+					expect(html).toContain("var INLINE_CHARTS = true;");
+					expect(html).toContain("enableHostedChartSameOriginSafari: true");
+				});
+
+				it("direct-chart-iframe allows the hosted chart frame and a same-origin page", async () => {
+					mockProps.enableDirectChartIframe = true;
+					vi.stubGlobal(
+						"fetch",
+						vi.fn().mockResolvedValue(new Response(indexHtml, { status: 200 })),
+					);
+					await server.init();
+					const { callTool } = connect(server);
+
+					const result = await callTool("get_thoughtspot_page", {
+						path: "#/home",
+					});
+					const resource = await server.readResource({
+						method: "resources/read",
+						params: { uri: "ui://thoughtspot/app.html" },
+					});
+
+					const { html, same_origin } = result.structuredContent as any;
+					expect(same_origin).toBe(true);
+					expect(html).toContain("var DIRECT_CHART_IFRAME = true;");
+					expect(html).not.toContain("enableHostedChartSameOriginSafari: true");
+					expect(
+						(resource.contents[0] as any)._meta.ui.csp.frameDomains,
+					).toEqual(["https://*.pdom.thoughtspot.com"]);
 				});
 
 				it("get_thoughtspot_page refuses an index.html redirected off the instance", async () => {
@@ -2098,7 +2221,7 @@ describe("MCP Server", () => {
 					);
 					vi.stubGlobal("fetch", fetchSpy);
 					await server.init();
-					const relayNonce = (server as any).relayNonces.issue();
+					const relayNonce = await (server as any).relayNonces.issue();
 					const { callTool } = connect(server);
 
 					const result = await callTool("thoughtspot_api_request", {
@@ -2127,7 +2250,7 @@ describe("MCP Server", () => {
 					const fetchSpy = vi.fn();
 					vi.stubGlobal("fetch", fetchSpy);
 					await server.init();
-					const relayNonce = (server as any).relayNonces.issue();
+					const relayNonce = await (server as any).relayNonces.issue();
 					const { callTool } = connect(server);
 
 					const result = await callTool("thoughtspot_api_request", {
@@ -2150,7 +2273,7 @@ describe("MCP Server", () => {
 						const fetchSpy = vi.fn();
 						vi.stubGlobal("fetch", fetchSpy);
 						await server.init();
-						(server as any).relayNonces.issue();
+						await (server as any).relayNonces.issue();
 						const { callTool } = connect(server);
 
 						const result = await callTool("thoughtspot_api_request", {

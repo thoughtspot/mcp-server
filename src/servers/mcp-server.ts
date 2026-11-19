@@ -13,15 +13,18 @@ import {
 } from "../apps/answer-widget";
 import {
 	ApiRelayRejectedError,
-	RelayNonceStore,
+	DEFAULT_THOUGHTSPOT_ROUTE,
+	RelayNonceSigner,
 	THOUGHTSPOT_SERVER_USER_AGENT,
 	THOUGHTSPOT_UI_WIDGET_HTML,
 	THOUGHTSPOT_UI_WIDGET_URI,
 	clientSupportsMcpApps,
 	injectProxyScript,
+	needsSameOriginFrame,
 	relayThoughtSpotApiRequest,
 	resolveThoughtSpotRoute,
 	thoughtspotUiCsp,
+	tryResolveThoughtSpotRoute,
 } from "../apps/thoughtspot-ui-widget";
 import { TrackEvent } from "../metrics";
 import type { ApiVersionMode } from "../metrics/runtime/metric-types";
@@ -85,6 +88,7 @@ import {
 	CreateDashboardLegacyInputSchema,
 	CreateLiveboardSchema,
 	CreateModelSessionInputSchema,
+	FetchAnswerImageInputSchema,
 	FinalizeModelInputSchema,
 	GET_DATA_ANALYTICS_AGENT_ANSWER_DESCRIPTION,
 	GET_DATA_ANALYTICS_AGENT_ANSWER_SUPPRESSED_IFRAMES_DESCRIPTION,
@@ -103,15 +107,14 @@ import {
 	SendModelMessageInputSchema,
 	SendSessionMessageInputSchema,
 	ShowAnswerInputSchema,
-	ShowThoughtSpotInputSchema,
 	SwitchOrgInputSchema,
 	ThoughtSpotApiRequestInputSchema,
 	ToolName,
 	createAnalysisSessionToolDefinitionSpotterX,
+	fetchAnswerImageToolDefinition,
 	getAnswerImageToolDefinition,
 	getThoughtSpotPageToolDefinition,
 	showAnswerToolDefinition,
-	showThoughtSpotToolDefinition,
 	thoughtSpotApiRequestToolDefinition,
 } from "./tool-definitions";
 import { recordGetDataFailure } from "./upstream-error-utils";
@@ -128,7 +131,10 @@ export class MCPServer extends BaseMCPServer {
 	// False for pre-multi-org grants (no refresh token) — keeps old behavior until re-auth.
 	private grantHasRefreshToken = false;
 	// Per-render secrets that authorise thoughtspot_api_request (thoughtspot-ui).
-	private readonly relayNonces = new RelayNonceStore();
+	// Signed with a per-login secret so nonces survive Durable Object restarts.
+	private readonly relayNonces = new RelayNonceSigner(() =>
+		this.getStorageKeyHash(),
+	);
 
 	constructor(ctx: Context) {
 		super(ctx, "ThoughtSpot", "2.0.0");
@@ -557,12 +563,12 @@ export class MCPServer extends BaseMCPServer {
 		}
 
 		if (this.isAnswerWidgetAvailable(tools)) {
-			tools.push(showAnswerToolDefinition, getAnswerImageToolDefinition);
+			tools.push(getAnswerImageToolDefinition, fetchAnswerImageToolDefinition);
 		}
 
 		if (this.isThoughtSpotUiAvailable()) {
 			tools.push(
-				showThoughtSpotToolDefinition,
+				showAnswerToolDefinition,
 				getThoughtSpotPageToolDefinition,
 				thoughtSpotApiRequestToolDefinition,
 			);
@@ -572,11 +578,11 @@ export class MCPServer extends BaseMCPServer {
 	}
 
 	/**
-	 * The show_answer MCP Apps widget is opt-in (`answer-widget` URL flag), needs the
+	 * The get_answer_image MCP Apps widget (on unless `answer-widget=false`) needs the
 	 * Analytics Agent tools that produce `answer_id`s, and exports the answer, so it
-	 * shares get_data's data-download gate. Like show_thoughtspot it is only offered
-	 * to clients that render MCP Apps: elsewhere show_answer would show nothing,
-	 * and the app-only get_answer_image would be exposed to the model.
+	 * shares get_data's data-download gate. Like show_answer it is only offered
+	 * to clients that render MCP Apps: elsewhere get_answer_image would show nothing,
+	 * and the app-only fetch_answer_image would be exposed to the model.
 	 */
 	private isAnswerWidgetAvailable(tools: { name: string }[]): boolean {
 		return (
@@ -642,7 +648,9 @@ export class MCPServer extends BaseMCPServer {
 						// ThoughtSpot CDNs and the cluster's API.
 						_meta: {
 							ui: {
-								csp: thoughtspotUiCsp(this.ctx.props.instanceUrl),
+								csp: thoughtspotUiCsp(this.ctx.props.instanceUrl, {
+									directChartIframe: this.ctx.props.enableDirectChartIframe,
+								}),
 								prefersBorder: false,
 							},
 						},
@@ -872,16 +880,16 @@ export class MCPServer extends BaseMCPServer {
 				return this.callFinalizeModel(request, recorder);
 			}
 
+			case ToolName.GetAnswerImage: {
+				return this.callGetAnswerImage(request);
+			}
+
+			case ToolName.FetchAnswerImage: {
+				return this.callFetchAnswerImage(request, recorder);
+			}
+
 			case ToolName.ShowAnswer: {
 				return this.callShowAnswer(request);
-			}
-
-			case ToolName.GetAnswerImage: {
-				return this.callGetAnswerImage(request, recorder);
-			}
-
-			case ToolName.ShowThoughtSpot: {
-				return this.callShowThoughtSpot(request);
 			}
 
 			case ToolName.GetThoughtSpotPage: {
@@ -1825,23 +1833,23 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 	}
 
 	/**
-	 * show_answer: hand the answer to the MCP Apps widget. The widget fetches the
-	 * image itself through get_answer_image, so this result stays small and the PNG
+	 * get_answer_image: hand the answer to the MCP Apps widget. The widget fetches the
+	 * image itself through fetch_answer_image, so this result stays small and the PNG
 	 * never enters the model's context.
 	 */
 	@WithSpan("call-show-answer")
-	async callShowAnswer(request: z.infer<typeof CallToolRequestSchema>) {
+	async callGetAnswerImage(request: z.infer<typeof CallToolRequestSchema>) {
 		const gateError = await this.answerWidgetGateError();
 		if (gateError) {
 			return gateError;
 		}
-		const { answer_id, title, iframe_url } = ShowAnswerInputSchema.parse(
+		const { answer_id, title, iframe_url } = GetAnswerImageInputSchema.parse(
 			request.params.arguments,
 		);
 		if (!parseAnswerIds([{ answer_id, title: "" }])) {
 			return this.createErrorResponse(
 				'Invalid answer_id. Pass the `answer_id` returned from the "get_session_updates" tool verbatim.',
-				`show_answer: invalid answer_id ${answer_id}`,
+				`get_answer_image: invalid answer_id ${answer_id}`,
 			);
 		}
 		return this.createStructuredContentSuccessResponse(
@@ -1854,9 +1862,9 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		);
 	}
 
-	/** get_answer_image: PNG export of an answer, for the show_answer widget. */
+	/** fetch_answer_image: PNG export of an answer, for the get_answer_image widget. */
 	@WithSpan("call-get-answer-image")
-	async callGetAnswerImage(
+	async callFetchAnswerImage(
 		request: z.infer<typeof CallToolRequestSchema>,
 		recorder: MetricsRecorder,
 	) {
@@ -1864,14 +1872,14 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		if (gateError) {
 			return gateError;
 		}
-		const { answer_id } = GetAnswerImageInputSchema.parse(
+		const { answer_id } = FetchAnswerImageInputSchema.parse(
 			request.params.arguments,
 		);
 		const [answer] = parseAnswerIds([{ answer_id, title: "" }]) ?? [];
 		if (!answer) {
 			return this.createErrorResponse(
 				"Invalid answer_id.",
-				`get_answer_image: invalid answer_id ${answer_id}`,
+				`fetch_answer_image: invalid answer_id ${answer_id}`,
 			);
 		}
 
@@ -1919,7 +1927,7 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 					: "The answer may have expired; ask the question again.";
 			return this.createErrorResponse(
 				`Could not load the visualization. ${hint}`,
-				`get_answer_image failed (status ${status ?? "unknown"})`,
+				`fetch_answer_image failed (status ${status ?? "unknown"})`,
 			);
 		}
 	}
@@ -1953,7 +1961,7 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 	}
 
 	/**
-	 * The show_thoughtspot widget is opt-in (`thoughtspot-ui` URL flag) and only
+	 * The show_answer widget is on unless `thoughtspot-ui=false` is set, and only
 	 * offered to clients that render MCP Apps: other hosts ignore the app-only
 	 * `visibility` of its helper tools, which would expose them to the model.
 	 */
@@ -1971,17 +1979,40 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		);
 	}
 
-	/** show_thoughtspot: tell the widget which ThoughtSpot route to open. */
+	/** show_answer: tell the widget which ThoughtSpot route to open. */
 	@WithSpan("call-show-thoughtspot")
-	async callShowThoughtSpot(request: z.infer<typeof CallToolRequestSchema>) {
+	async callShowAnswer(request: z.infer<typeof CallToolRequestSchema>) {
 		if (!this.isThoughtSpotUiAvailable()) {
 			return this.thoughtSpotUiDisabledError();
 		}
-		const { path } = ShowThoughtSpotInputSchema.parse(
+		const { iframe_url, path, answer_id } = ShowAnswerInputSchema.parse(
 			request.params.arguments ?? {},
 		);
+		const target = iframe_url || path;
+		if (!target) {
+			if (answer_id) {
+				return this.createErrorResponse(
+					"To show an answer, pass its `iframe_url` from get_session_updates; `answer_id` alone is not enough.",
+					"show_answer called with answer_id but no iframe_url",
+				);
+			}
+			return this.createStructuredContentSuccessResponse(
+				{ path: DEFAULT_THOUGHTSPOT_ROUTE },
+				"Opened ThoughtSpot widget",
+			);
+		}
+		const route = tryResolveThoughtSpotRoute(
+			this.ctx.props.instanceUrl,
+			target,
+		);
+		if (!route) {
+			return this.createErrorResponse(
+				'Could not open that in ThoughtSpot. Pass the answer\'s `iframe_url` from get_session_updates verbatim, or a ThoughtSpot route such as "#/home".',
+				`show_answer: unresolvable target ${target.slice(0, 200)}`,
+			);
+		}
 		return this.createStructuredContentSuccessResponse(
-			{ path: resolveThoughtSpotRoute(this.ctx.props.instanceUrl, path) },
+			{ path: route },
 			"Opened ThoughtSpot widget",
 		);
 	}
@@ -2033,7 +2064,15 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			);
 		}
 
-		const html = injectProxyScript(indexHtml, { apiHost: instanceUrl, route });
+		const chartModes = {
+			inlineCharts: !!this.ctx.props.enableInlineCharts,
+			directChartIframe: !!this.ctx.props.enableDirectChartIframe,
+		};
+		const html = injectProxyScript(indexHtml, {
+			apiHost: instanceUrl,
+			route,
+			...chartModes,
+		});
 		const span = this.initSpanWithCommonAttributes();
 		span?.setStatus({
 			code: SpanStatusCode.OK,
@@ -2047,7 +2086,9 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			structuredContent: {
 				html,
 				path: route,
-				relay_nonce: this.relayNonces.issue(),
+				relay_nonce: await this.relayNonces.issue(),
+				// Tells the widget to sandbox the page with allow-same-origin.
+				same_origin: needsSameOriginFrame(chartModes),
 			},
 		};
 	}
@@ -2066,7 +2107,7 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		}
 		// Check the nonce before anything else about the call.
 		const nonce = request.params.arguments?.relay_nonce;
-		if (typeof nonce !== "string" || !this.relayNonces.isValid(nonce)) {
+		if (typeof nonce !== "string" || !(await this.relayNonces.isValid(nonce))) {
 			return this.createErrorResponse(
 				"Request not allowed: the ThoughtSpot page is not loaded; reopen it.",
 				"thoughtspot_api_request rejected: missing or unknown relay nonce",

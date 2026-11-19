@@ -405,7 +405,7 @@ export const ConversationUpdateSchema = z.object({
 		.string()
 		.optional()
 		.describe(
-			"An embeddable URL for displaying the answer as an interactive visualization. Only present when `type` is `answer`, and only if embedded visualizations are enabled for this connection. If your environment supports iframes, you can use this URL as-is (do not modify it) to display an interactive chart or table. If your environment does not support iframes, you can modify the link (remove `?tsmcp=true` if present) and share it with the user to let them view the interactive visualization in a browser.",
+			"An embeddable URL for displaying the answer as an interactive visualization. Only present when `type` is `answer`, and only if embedded visualizations are enabled for this connection. If the show_answer tool is available, pass this URL to it as `iframe_url` to display the answer inline; that is the preferred way to show an answer. Otherwise, if your environment supports iframes, you can use this URL as-is (do not modify it) to display an interactive chart or table. If your environment does not support iframes, you can modify the link (remove `?tsmcp=true` if present) and share it with the user to let them view the interactive visualization in a browser.",
 		),
 });
 
@@ -679,11 +679,13 @@ export enum ToolName {
 	SendModelMessage = "send_model_message",
 	GetModelUpdates = "get_model_updates",
 	FinalizeModel = "finalize_model",
-	// MCP Apps answer widget (behind the `answer-widget` URL flag)
-	ShowAnswer = "show_answer",
+	// MCP Apps answer image card, the fallback to show_answer (on unless the
+	// `answer-widget=false` URL flag is set)
 	GetAnswerImage = "get_answer_image",
-	// MCP Apps full ThoughtSpot UI widget (behind the `thoughtspot-ui` URL flag)
-	ShowThoughtSpot = "show_thoughtspot",
+	FetchAnswerImage = "fetch_answer_image",
+	// MCP Apps full ThoughtSpot UI widget, the default way to show answers (on
+	// unless the `thoughtspot-ui=false` URL flag is set)
+	ShowAnswer = "show_answer",
 	GetThoughtSpotPage = "get_thoughtspot_page",
 	ThoughtSpotApiRequest = "thoughtspot_api_request",
 }
@@ -1306,7 +1308,7 @@ export const createAnalysisSessionToolDefinitionSpotterX = {
 };
 
 // ── MCP Apps answer widget ─────────────────────────────────────────────────
-export const ShowAnswerInputSchema = z.object({
+export const GetAnswerImageInputSchema = z.object({
 	answer_id: z
 		.string()
 		.describe(
@@ -1324,7 +1326,7 @@ export const ShowAnswerInputSchema = z.object({
 		),
 });
 
-export const ShowAnswerOutputSchema = z.object({
+export const GetAnswerImageOutputSchema = z.object({
 	answer_id: z.string(),
 	title: z.string(),
 	open_url: z
@@ -1333,7 +1335,7 @@ export const ShowAnswerOutputSchema = z.object({
 		.describe("Link that opens the answer in ThoughtSpot in a browser tab."),
 });
 
-export const GetAnswerImageInputSchema = z.object({
+export const FetchAnswerImageInputSchema = z.object({
 	answer_id: z
 		.string()
 		.describe(
@@ -1341,12 +1343,12 @@ export const GetAnswerImageInputSchema = z.object({
 		),
 });
 
-export const showAnswerToolDefinition = {
-	name: ToolName.ShowAnswer,
+export const getAnswerImageToolDefinition = {
+	name: ToolName.GetAnswerImage,
 	description:
-		"Show an Analytics Agent answer to the user as an interactive card with its chart or table rendered inline, plus a button to open it in ThoughtSpot. Call this with an `answer_id` from get_session_updates whenever an answer would be clearer as a visual than as text, instead of telling the user to open the `iframe_url` themselves. Pass the answer's `iframe_url` too, so the user can open it in ThoughtSpot. The result only confirms the card was shown; use get_data if you need the answer's rows to reason about.",
-	inputSchema: z.toJSONSchema(ShowAnswerInputSchema),
-	outputSchema: z.toJSONSchema(ShowAnswerOutputSchema),
+		"Fallback for show_answer: show an Analytics Agent answer as a static image card with a button to open it in ThoughtSpot. Use show_answer instead; call this only if show_answer is unavailable or failed to display the answer. Pass an `answer_id` from get_session_updates and the answer's `iframe_url`. The result only confirms the card was shown; use get_data if you need the answer's rows to reason about.",
+	inputSchema: z.toJSONSchema(GetAnswerImageInputSchema),
+	outputSchema: z.toJSONSchema(GetAnswerImageOutputSchema),
 	annotations: {
 		title: "Show Answer",
 		readOnlyHint: true,
@@ -1358,11 +1360,11 @@ export const showAnswerToolDefinition = {
 
 // Widget-only helper: the answer widget calls it to fetch the PNG, so the image
 // never lands in the model's context. Hidden from the model by `visibility`.
-export const getAnswerImageToolDefinition = {
-	name: ToolName.GetAnswerImage,
+export const fetchAnswerImageToolDefinition = {
+	name: ToolName.FetchAnswerImage,
 	description:
-		"Fetch a PNG image of an Analytics Agent answer for the show_answer widget. Not for direct use.",
-	inputSchema: z.toJSONSchema(GetAnswerImageInputSchema),
+		"Fetch a PNG image of an Analytics Agent answer for the get_answer_image widget. Not for direct use.",
+	inputSchema: z.toJSONSchema(FetchAnswerImageInputSchema),
 	annotations: {
 		title: "Get Answer Image",
 		readOnlyHint: true,
@@ -1373,16 +1375,28 @@ export const getAnswerImageToolDefinition = {
 };
 
 // ── MCP Apps full ThoughtSpot UI widget ────────────────────────────────────
-export const ShowThoughtSpotInputSchema = z.object({
+export const ShowAnswerInputSchema = z.object({
+	iframe_url: z
+		.string()
+		.optional()
+		.describe(
+			"To show an Analytics Agent answer: the answer's `iframe_url` from get_session_updates, passed verbatim.",
+		),
 	path: z
 		.string()
 		.optional()
 		.describe(
-			'What to open: a ThoughtSpot hash route such as "#/home" or "#/pinboard/<liveboard id>", or a ThoughtSpot URL on this instance (for example an answer\'s `iframe_url`). Defaults to the home page.',
+			'To open another page: a ThoughtSpot hash route such as "#/home" or "#/pinboard/<liveboard id>", or a ThoughtSpot URL on this instance. With neither this nor `iframe_url`, opens the home page.',
+		),
+	answer_id: z
+		.string()
+		.optional()
+		.describe(
+			"Not enough on its own to show an answer; pass the answer's `iframe_url`.",
 		),
 });
 
-export const ShowThoughtSpotOutputSchema = z.object({
+export const ShowAnswerOutputSchema = z.object({
 	path: z.string().describe("The ThoughtSpot route opened in the widget."),
 });
 
@@ -1390,12 +1404,12 @@ export const GetThoughtSpotPageInputSchema = z.object({
 	path: z.string().describe("The ThoughtSpot route to open."),
 });
 
-export const showThoughtSpotToolDefinition = {
-	name: ToolName.ShowThoughtSpot,
+export const showAnswerToolDefinition = {
+	name: ToolName.ShowAnswer,
 	description:
-		"Open the ThoughtSpot app inline for the user, as an interactive embedded view they can click around in. Use it when the user wants to see or browse ThoughtSpot itself (the home page, a Liveboard, an answer) rather than read results as text. Pages that embed other sites may not load. The result only confirms which page was opened.",
-	inputSchema: z.toJSONSchema(ShowThoughtSpotInputSchema),
-	outputSchema: z.toJSONSchema(ShowThoughtSpotOutputSchema),
+		"Show an Analytics Agent answer, or any ThoughtSpot page, to the user inline as the live, interactive ThoughtSpot view. This is the default way to show answers: call it with the answer's `iframe_url` from get_session_updates whenever an answer would be clearer as a visual than as text, instead of telling the user to open the link. Also use it to open the home page or a Liveboard. If it fails to display, fall back to get_answer_image. Pages that embed other sites may not load. The result only confirms which page was opened.",
+	inputSchema: z.toJSONSchema(ShowAnswerInputSchema),
+	outputSchema: z.toJSONSchema(ShowAnswerOutputSchema),
 	annotations: {
 		title: "Show ThoughtSpot",
 		readOnlyHint: true,
@@ -1413,7 +1427,7 @@ export const showThoughtSpotToolDefinition = {
 export const getThoughtSpotPageToolDefinition = {
 	name: ToolName.GetThoughtSpotPage,
 	description:
-		"Fetch the ThoughtSpot page HTML for the show_thoughtspot widget. Not for direct use.",
+		"Fetch the ThoughtSpot page HTML for the show_answer widget. Not for direct use.",
 	inputSchema: z.toJSONSchema(GetThoughtSpotPageInputSchema),
 	annotations: {
 		title: "Get ThoughtSpot Page",
@@ -1447,7 +1461,7 @@ export const ThoughtSpotApiRequestOutputSchema = z.object({
 export const thoughtSpotApiRequestToolDefinition = {
 	name: ToolName.ThoughtSpotApiRequest,
 	description:
-		"Make a ThoughtSpot API request for the show_thoughtspot widget. Not for direct use.",
+		"Make a ThoughtSpot API request for the show_answer widget. Not for direct use.",
 	inputSchema: z.toJSONSchema(ThoughtSpotApiRequestInputSchema),
 	outputSchema: z.toJSONSchema(ThoughtSpotApiRequestOutputSchema),
 	annotations: {

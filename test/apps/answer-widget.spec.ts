@@ -140,7 +140,10 @@ describe("answer widget protocol", () => {
 		const call = sent.at(-1);
 		expect(call).toMatchObject({
 			method: "tools/call",
-			params: { name: "get_answer_image", arguments: { answer_id: answerId } },
+			params: {
+				name: "fetch_answer_image",
+				arguments: { answer_id: answerId },
+			},
 		});
 
 		await deliver({

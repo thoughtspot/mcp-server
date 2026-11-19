@@ -2,11 +2,13 @@ import { describe, expect, it, vi } from "vitest";
 import {
 	ApiRelayRejectedError,
 	MAX_RELAY_RESPONSE_BYTES,
-	RelayNonceStore,
+	RelayNonceSigner,
 	THOUGHTSPOT_FRAME_SANDBOX,
+	THOUGHTSPOT_FRAME_SANDBOX_SAME_ORIGIN,
 	THOUGHTSPOT_UI_WIDGET_HTML,
 	clientSupportsMcpApps,
 	injectProxyScript,
+	needsSameOriginFrame,
 	relayThoughtSpotApiRequest,
 	resolveRelayUrl,
 	resolveThoughtSpotRoute,
@@ -77,6 +79,16 @@ describe("thoughtspotUiCsp", () => {
 			"https://blink-v2-cdn.thoughtspotartifacts.cloud",
 		);
 		expect(csp.connectDomains).not.toContain(instanceUrl);
+		expect(csp).not.toHaveProperty("frameDomains");
+	});
+
+	it("allows the hosted chart frame only with direct-chart-iframe", () => {
+		expect(
+			thoughtspotUiCsp(instanceUrl, { directChartIframe: true }).frameDomains,
+		).toEqual(["https://*.pdom.thoughtspot.com"]);
+		expect(
+			thoughtspotUiCsp(instanceUrl, { inlineCharts: true }),
+		).not.toHaveProperty("frameDomains");
 	});
 });
 
@@ -314,34 +326,51 @@ describe("relayThoughtSpotApiRequest", () => {
 	});
 });
 
-describe("RelayNonceStore", () => {
-	it("issues unguessable nonces and accepts only those", () => {
-		const store = new RelayNonceStore();
-		const a = store.issue();
-		const b = store.issue();
+describe("RelayNonceSigner", () => {
+	const secret = () => Promise.resolve("login-secret");
 
-		expect(a).toMatch(/^[0-9a-f]{32}$/);
+	it("issues unguessable signed nonces and accepts only those", async () => {
+		const signer = new RelayNonceSigner(secret);
+		const a = await signer.issue();
+		const b = await signer.issue();
+
+		expect(a).toMatch(/^v1\.\d+\.[\w-]{22}\.[\w-]{43}$/);
 		expect(a).not.toBe(b);
-		expect(store.isValid(a)).toBe(true);
-		expect(store.isValid(b)).toBe(true);
-		expect(store.isValid("0".repeat(32))).toBe(false);
-		expect(store.isValid(undefined)).toBe(false);
-		expect(store.isValid("")).toBe(false);
+		await expect(signer.isValid(a)).resolves.toBe(true);
+		await expect(signer.isValid(b)).resolves.toBe(true);
+		await expect(signer.isValid(undefined)).resolves.toBe(false);
+		await expect(signer.isValid("")).resolves.toBe(false);
+		await expect(signer.isValid("0".repeat(32))).resolves.toBe(false);
 	});
 
-	it("expires nonces and keeps only the newest ones", () => {
-		let now = 0;
-		const store = new RelayNonceStore(2, 1000, () => now);
-		const first = store.issue();
-		const second = store.issue();
-		const third = store.issue();
+	it("stays valid across signer instances with the same secret (restarts)", async () => {
+		const nonce = await new RelayNonceSigner(secret).issue();
 
-		expect(store.isValid(first)).toBe(false);
-		expect(store.isValid(second)).toBe(true);
-		expect(store.isValid(third)).toBe(true);
+		await expect(new RelayNonceSigner(secret).isValid(nonce)).resolves.toBe(
+			true,
+		);
+		await expect(
+			new RelayNonceSigner(() => Promise.resolve("other-login")).isValid(nonce),
+		).resolves.toBe(false);
+	});
+
+	it("rejects tampered and expired nonces", async () => {
+		let now = 0;
+		const signer = new RelayNonceSigner(secret, 1000, () => now);
+		const nonce = await signer.issue();
+		const [v, expiry, random, sig] = nonce.split(".");
+
+		await expect(
+			signer.isValid(
+				[v, String(Number(expiry) + 10_000), random, sig].join("."),
+			),
+		).resolves.toBe(false);
+		await expect(
+			signer.isValid([v, expiry, random, `${sig.slice(0, -1)}A`].join(".")),
+		).resolves.toBe(sig.endsWith("A"));
 
 		now = 1000;
-		expect(store.isValid(third)).toBe(false);
+		await expect(signer.isValid(nonce)).resolves.toBe(false);
 	});
 });
 
@@ -357,6 +386,71 @@ describe("injectProxyScript", () => {
 		expect(proxyAt).toBeLessThan(html.indexOf("var blink"));
 		expect(html).toContain(`var API_HOST = "${instanceUrl}";`);
 		expect(html).not.toMatch(/AUTH_TOKEN|Bearer/);
+	});
+
+	it("leaves the chart modes off by default", () => {
+		const html = injectProxyScript(indexHtml, options);
+		expect(html).toContain("var INLINE_CHARTS = false;");
+		expect(html).toContain("var DIRECT_CHART_IFRAME = false;");
+		expect(html).not.toContain("enableHostedChartSameOriginSafari: true");
+		expect(needsSameOriginFrame({})).toBe(false);
+	});
+
+	it("hides the answer's More (three-dot) menu", () => {
+		const html = injectProxyScript(indexHtml, options);
+		const styleAt = html.indexOf("<style>");
+		expect(html.slice(styleAt)).toMatch(
+			/^<style>[^<]*\[data-testid="answer-header-menu-button"\][^<]*display: none !important;/,
+		);
+		expect(html.indexOf("[api-relay]")).toBeLessThan(styleAt);
+		expect(styleAt).toBeLessThan(html.indexOf("var blink"));
+	});
+
+	it("inline-charts also fixes the chart frame's messaging and asset lookup", () => {
+		const html = injectProxyScript(indexHtml, {
+			...options,
+			inlineCharts: true,
+		});
+		// Messages to the chart: "null" targets and null host/app URLs.
+		expect(html).toContain("var URL_KEYS = { hostUrl: 1, appUrl: 1 };");
+		expect(html).toContain("args[0] = fixNullUrls(message, 0);");
+		// The frame's window.parent keeps the transfer list and passes the
+		// SDK's window check, and the frame gets the page's asset resolver.
+		expect(html).toContain("if(k==='self'||k==='window')return px;");
+		expect(html).toContain("return pm.apply(t,a)");
+		expect(html).toContain(
+			"window.__resolveAssetUrl=P.__resolveAssetUrl.bind(P)",
+		);
+		// All of it sits behind the flag in the shipped script.
+		expect(html).toContain(
+			'if (INLINE_CHARTS && window.origin && window.origin !== "null")',
+		);
+	});
+
+	it("inline-charts sets the same-origin chart flag after blink.env, before </body>", () => {
+		const html = injectProxyScript(
+			"<html><head><script>var blink = {};</script></head><body><div></div></BODY></html>",
+			{ ...options, inlineCharts: true },
+		);
+		const flagAt = html.indexOf("enableHostedChartSameOriginSafari: true");
+		expect(html).toContain("var INLINE_CHARTS = true;");
+		expect(html.indexOf("var blink")).toBeLessThan(flagAt);
+		expect(flagAt).toBeLessThan(html.indexOf("</BODY>"));
+		expect(
+			injectProxyScript("<p>no body</p>", { ...options, inlineCharts: true }),
+		).toMatch(/enableHostedChartSameOriginSafari: true[\s\S]*<\/script>$/);
+		expect(needsSameOriginFrame({ inlineCharts: true })).toBe(true);
+	});
+
+	it("direct-chart-iframe turns on the hosted chart URL rewrite only", () => {
+		const html = injectProxyScript(indexHtml, {
+			...options,
+			directChartIframe: true,
+		});
+		expect(html).toContain("var DIRECT_CHART_IFRAME = true;");
+		expect(html).toContain("var INLINE_CHARTS = false;");
+		expect(html).not.toContain("enableHostedChartSameOriginSafari: true");
+		expect(needsSameOriginFrame({ directChartIframe: true })).toBe(true);
 	});
 
 	it("handles a <head> with attributes, and prepends when there is none", () => {
@@ -409,11 +503,17 @@ function bootProxy() {
 	const parentWin = { postMessage: (m: any) => toParent.push(m) };
 	const listeners: ((event: any) => void)[] = [];
 	const nativeFetch = vi.fn().mockResolvedValue(new Response("cdn"));
+	const selfPosted: any[] = [];
 	const windowStub: any = {
 		location: { origin: "null", hash: "#/home" },
 		parent: parentWin,
 		fetch: nativeFetch,
 		URL,
+		// Like the native one, posts to whichever window it is called on.
+		postMessage: function (this: any, ...args: any[]) {
+			if (this && this !== windowStub) return this.postMessage(...args);
+			selfPosted.push(args);
+		},
 		addEventListener: (type: string, fn: (event: any) => void) => {
 			if (type === "message") listeners.push(fn);
 		},
@@ -527,6 +627,7 @@ function bootProxy() {
 
 	return {
 		windowStub,
+		selfPosted,
 		navigatorStub,
 		toParent,
 		nativeFetch,
@@ -610,6 +711,20 @@ describe("proxy script in the sandboxed srcdoc frame", () => {
 		expect(url.pathname).toBe("/home");
 		expect(url).toBeInstanceOf(URL);
 		expect(() => new windowStub.URL("no base")).toThrow();
+	});
+
+	it("lets the page post to itself with its null origin as the target", () => {
+		const { windowStub, selfPosted } = bootProxy();
+
+		windowStub.postMessage({ a: 1 }, "null");
+		windowStub.postMessage({ b: 2 }, { targetOrigin: "null" });
+		windowStub.postMessage({ c: 3 }, "https://example.com");
+
+		expect(selfPosted).toEqual([
+			[{ a: 1 }, "*"],
+			[{ b: 2 }, { targetOrigin: "*" }],
+			[{ c: 3 }, "https://example.com"],
+		]);
 	});
 
 	it("replaces navigator.serviceWorker with an inert stand-in", async () => {
@@ -845,6 +960,10 @@ function bootWidget() {
 	new Function("window", "document", script)(
 		{
 			parent: host,
+			// Like the native one, posts to whichever window it is called on.
+			postMessage: function (this: any, ...args: any[]) {
+				return this.postMessage(...args);
+			},
 			addEventListener: (_t: string, fn: (event: any) => void) => {
 				onMessage = fn;
 			},
@@ -859,7 +978,7 @@ function bootWidget() {
 }
 
 describe("ThoughtSpot UI widget", () => {
-	async function openPage() {
+	async function openPage(page: Record<string, unknown> = {}) {
 		const widget = bootWidget();
 		await widget.deliver({ jsonrpc: "2.0", id: 1, result: {} });
 		await widget.deliver({
@@ -879,6 +998,7 @@ describe("ThoughtSpot UI widget", () => {
 				structuredContent: {
 					html: "<html>page</html>",
 					relay_nonce: "nonce-1",
+					...page,
 				},
 			},
 		});
@@ -894,6 +1014,15 @@ describe("ThoughtSpot UI widget", () => {
 		expect(THOUGHTSPOT_FRAME_SANDBOX).not.toMatch(/allow-same-origin/);
 	});
 
+	it("adds allow-same-origin only when the server asks for it", async () => {
+		const { iframe } = await openPage({ same_origin: true });
+
+		expect(iframe.attributes.sandbox).toBe(
+			THOUGHTSPOT_FRAME_SANDBOX_SAME_ORIGIN,
+		);
+		expect(THOUGHTSPOT_FRAME_SANDBOX_SAME_ORIGIN).toMatch(/allow-same-origin/);
+	});
+
 	it("relays the page's API requests through thoughtspot_api_request only", async () => {
 		const { iframe, toHost, deliver } = await openPage();
 
@@ -906,7 +1035,7 @@ describe("ThoughtSpot UI widget", () => {
 					method: "GET",
 					path: "/prism/",
 					headers: { accept: "*/*" },
-					name: "show_answer",
+					name: "get_answer_image",
 				},
 			},
 			iframe.contentWindow,

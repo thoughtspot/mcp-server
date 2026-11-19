@@ -246,9 +246,27 @@ describe("Spotter answer data and iframe suppression URL flags", () => {
 			expect(
 				buildProps("https://example.com/mcp?suppress-iframes=true"),
 			).toMatchObject({ suppressIframes: true });
+			// The ThoughtSpot UI widget, its inline charts and the image-card
+			// fallback are on by default.
 			expect(buildProps("https://example.com/mcp")).toMatchObject({
 				suppressIframes: false,
+				enableThoughtSpotUiWidget: true,
+				enableInlineCharts: true,
+				enableAnswerWidget: true,
+				enableDirectChartIframe: false,
 			});
+			expect(
+				buildProps(
+					"https://example.com/mcp?thoughtspot-ui=false&inline-charts=false&answer-widget=false",
+				),
+			).toMatchObject({
+				enableThoughtSpotUiWidget: false,
+				enableInlineCharts: false,
+				enableAnswerWidget: false,
+			});
+			expect(
+				buildProps("https://example.com/mcp?direct-chart-iframe=true"),
+			).toMatchObject({ enableDirectChartIframe: true });
 		},
 	);
 });

@@ -12,10 +12,13 @@
 // the user's token and returns the response. This also avoids CORS, since the
 // browser never calls the cluster's API directly.
 //
-// The srcdoc frame is sandboxed without allow-same-origin, so ThoughtSpot's
-// scripts (and any third-party scripts its index.html loads) get an opaque
-// origin and can't reach into the widget document or its channel to the host.
-// They can only ask the widget to relay ThoughtSpot API requests.
+// Charts need the page to have a real origin, so by default (inline charts)
+// the srcdoc frame is sandboxed with allow-same-origin: ThoughtSpot's scripts,
+// and any third-party scripts its index.html loads, share the widget's origin
+// and could reach into the widget document. The undocumented
+// `inline-charts=false` URL flag (with direct-chart-iframe off) drops
+// allow-same-origin, giving the page an opaque origin that can only ask the
+// widget to relay ThoughtSpot API requests; charts then don't render.
 
 import { MCP_APP_MIME_TYPE } from "./answer-widget";
 
@@ -59,13 +62,20 @@ const THOUGHTSPOT_ASSET_ORIGINS = [
  * the cluster. API calls go through the server, so the cluster needs no
  * connect-src entry.
  */
-export function thoughtspotUiCsp(instanceUrl: string) {
+export function thoughtspotUiCsp(
+	instanceUrl: string,
+	{ directChartIframe = false }: ChartModeOptions = {},
+) {
 	const cluster = new URL(instanceUrl).origin;
 	return {
 		connectDomains: [...THOUGHTSPOT_ASSET_ORIGINS],
 		resourceDomains: [cluster, ...THOUGHTSPOT_ASSET_ORIGINS],
+		// direct-chart-iframe flag: the hosted chart page (hc-*.pdom.thoughtspot.com).
+		...(directChartIframe ? { frameDomains: [HOSTED_CHART_FRAME_DOMAIN] } : {}),
 	};
 }
+
+export const HOSTED_CHART_FRAME_DOMAIN = "https://*.pdom.thoughtspot.com";
 
 export const DEFAULT_THOUGHTSPOT_ROUTE = "#/home";
 
@@ -78,9 +88,21 @@ export function resolveThoughtSpotRoute(
 	instanceUrl: string,
 	target: string | undefined,
 ): string {
-	if (!target) {
-		return DEFAULT_THOUGHTSPOT_ROUTE;
-	}
+	return (
+		(target && tryResolveThoughtSpotRoute(instanceUrl, target)) ||
+		DEFAULT_THOUGHTSPOT_ROUTE
+	);
+}
+
+/**
+ * Like resolveThoughtSpotRoute, but undefined when the target is not a hash
+ * route or a URL on the instance, so callers can report it instead of quietly
+ * opening the home page.
+ */
+export function tryResolveThoughtSpotRoute(
+	instanceUrl: string,
+	target: string,
+): string | undefined {
 	if (target.startsWith("#/")) {
 		return target;
 	}
@@ -93,9 +115,9 @@ export function resolveThoughtSpotRoute(
 			return url.hash;
 		}
 	} catch {
-		// Not a URL; fall through.
+		// Not a URL.
 	}
-	return DEFAULT_THOUGHTSPOT_ROUTE;
+	return undefined;
 }
 
 // ── Server-side API relay ──────────────────────────────────────────────────
@@ -353,60 +375,94 @@ export async function relayThoughtSpotApiRequest(
 
 // ── Per-render relay nonces ────────────────────────────────────────────────
 
+const RELAY_NONCE_VERSION = "v1";
+
+function toBase64Url(bytes: Uint8Array): string {
+	return Buffer.from(bytes).toString("base64url");
+}
+
 /**
  * Server-issued secrets that authorise thoughtspot_api_request. Each
  * get_thoughtspot_page render gets one; the widget holds it (never the
- * sandboxed page) and sends it with every relay call. Kept in memory for the
- * MCP session, bounded in count and age.
+ * sandboxed page) and sends it with every relay call.
+ *
+ * Nonces are signed rather than stored: `v1.<expiry>.<random>.<hmac>`, with an
+ * HMAC-SHA256 key derived from a per-login server-side secret. They stay valid
+ * across Durable Object restarts and evictions (which wiped an in-memory store
+ * and broke open widgets), can't be forged without the secret, and expire.
  */
-export class RelayNonceStore {
-	private readonly nonces = new Map<string, number>();
+export class RelayNonceSigner {
+	private keyPromise: Promise<CryptoKey> | undefined;
 
 	constructor(
-		private readonly maxEntries = 16,
+		private readonly secret: () => Promise<string>,
 		private readonly ttlMs = 12 * 60 * 60 * 1000,
 		private readonly now: () => number = Date.now,
 	) {}
 
-	issue(): string {
-		const bytes = new Uint8Array(16);
-		crypto.getRandomValues(bytes);
-		const nonce = Array.from(bytes, (b) =>
-			b.toString(16).padStart(2, "0"),
-		).join("");
-		this.prune();
-		while (this.nonces.size >= this.maxEntries) {
-			const oldest = this.nonces.keys().next().value;
-			if (oldest === undefined) {
-				break;
-			}
-			this.nonces.delete(oldest);
+	private key(): Promise<CryptoKey> {
+		if (!this.keyPromise) {
+			this.keyPromise = this.secret().then(async (secret) => {
+				const material = await crypto.subtle.digest(
+					"SHA-256",
+					new TextEncoder().encode(`thoughtspot-relay-nonce:${secret}`),
+				);
+				return crypto.subtle.importKey(
+					"raw",
+					material,
+					{ name: "HMAC", hash: "SHA-256" },
+					false,
+					["sign", "verify"],
+				);
+			});
+			// Don't cache a failure (e.g. no token yet).
+			this.keyPromise.catch(() => {
+				this.keyPromise = undefined;
+			});
 		}
-		this.nonces.set(nonce, this.now() + this.ttlMs);
-		return nonce;
+		return this.keyPromise;
 	}
 
-	isValid(nonce: string | undefined): boolean {
-		if (!nonce) {
-			return false;
-		}
-		const expiresAt = this.nonces.get(nonce);
-		if (expiresAt === undefined) {
-			return false;
-		}
-		if (expiresAt <= this.now()) {
-			this.nonces.delete(nonce);
-			return false;
-		}
-		return true;
+	async issue(): Promise<string> {
+		const random = new Uint8Array(16);
+		crypto.getRandomValues(random);
+		const payload = `${RELAY_NONCE_VERSION}.${this.now() + this.ttlMs}.${toBase64Url(random)}`;
+		const signature = await crypto.subtle.sign(
+			"HMAC",
+			await this.key(),
+			new TextEncoder().encode(payload),
+		);
+		return `${payload}.${toBase64Url(new Uint8Array(signature))}`;
 	}
 
-	private prune() {
-		const now = this.now();
-		for (const [nonce, expiresAt] of this.nonces) {
-			if (expiresAt <= now) {
-				this.nonces.delete(nonce);
-			}
+	async isValid(nonce: string | undefined): Promise<boolean> {
+		if (!nonce || nonce.length > 256) {
+			return false;
+		}
+		const parts = nonce.split(".");
+		if (parts.length !== 4 || parts[0] !== RELAY_NONCE_VERSION) {
+			return false;
+		}
+		const expiresAt = Number(parts[1]);
+		if (!Number.isFinite(expiresAt) || expiresAt <= this.now()) {
+			return false;
+		}
+		let signature: Uint8Array;
+		try {
+			signature = new Uint8Array(Buffer.from(parts[3], "base64url"));
+		} catch {
+			return false;
+		}
+		try {
+			// crypto.subtle.verify compares in constant time.
+			return await crypto.subtle.verify(
+				"HMAC",
+				await this.key(),
+				signature,
+				new TextEncoder().encode(parts.slice(0, 3).join(".")),
+			);
+		} catch {
+			return false;
 		}
 	}
 }
@@ -433,7 +489,20 @@ function routeScript(route: string) {
 </script>`;
 }
 
-function proxyScript(apiHost: string) {
+export interface ChartModeOptions {
+	// Render charts in the page (ThoughtSpot's same-origin chart mode) instead of
+	// the hosted chart iframe. Needs the page frame to be same-origin.
+	inlineCharts?: boolean;
+	// Load the hosted chart iframe directly (the resource CSP must allow it in
+	// frameDomains) and point its host/scheme params at the widget origin. Needs
+	// the page frame to be same-origin.
+	directChartIframe?: boolean;
+}
+
+function proxyScript(
+	apiHost: string,
+	{ inlineCharts = false, directChartIframe = false }: ChartModeOptions = {},
+) {
 	return `<script>
 // Relay the ThoughtSpot app's same-origin API calls (fetch, XHR) to the widget
 // by postMessage; the MCP server makes them with the user's token. No
@@ -443,7 +512,12 @@ function proxyScript(apiHost: string) {
 	// This script's own source, injected into nested frames.
 	var SELF_SOURCE = (document.currentScript && document.currentScript.textContent) || "";
 	var API_HOST = ${scriptLiteral(apiHost)};
+	var INLINE_CHARTS = ${inlineCharts ? "true" : "false"};
+	var DIRECT_CHART_IFRAME = ${directChartIframe ? "true" : "false"};
 	var parentWin = window.parent;
+	// Native postMessage, captured before the patch below; replies to nested
+	// frames go through it so this page stays the event source.
+	var nativePostMessage = window.postMessage;
 	// The sandboxed srcdoc frame has an opaque ("null") origin; new URL(x, "null")
 	// throws, so resolve relative URLs against a placeholder base instead.
 	var localOrigin =
@@ -542,6 +616,23 @@ function proxyScript(apiHost: string) {
 		window.URL = PatchedURL;
 	} catch (e) {}
 
+	// The app posts messages to its own window with targetOrigin set to
+	// window.location.origin, which is "null" here; postMessage rejects "null"
+	// as a target origin. A message to this same window may use "*" safely.
+	try {
+		var origPostMessage = window.postMessage;
+		var isOwnOrigin = function (o) { return o === "null" || o === localOrigin; };
+		window.postMessage = function (message, targetOrigin) {
+			var args = Array.prototype.slice.call(arguments);
+			if (typeof targetOrigin === "string" && isOwnOrigin(targetOrigin)) {
+				args[1] = "*";
+			} else if (targetOrigin && typeof targetOrigin === "object" && isOwnOrigin(targetOrigin.targetOrigin)) {
+				args[1] = Object.assign({}, targetOrigin, { targetOrigin: "*" });
+			}
+			return origPostMessage.apply(window, args);
+		};
+	} catch (e) {}
+
 	function shouldRewrite(url) {
 		if (!url) return false;
 		try {
@@ -600,8 +691,8 @@ function proxyScript(apiHost: string) {
 		if (msg.kind === "request" && isChildFrame(event.source)) {
 			var child = event.source;
 			sendUp(msg.request).then(
-				function (response) { child.postMessage({ __tsProxy: 1, kind: "response", id: msg.id, response: response }, "*"); },
-				function (error) { child.postMessage({ __tsProxy: 1, kind: "response", id: msg.id, error: String(error && error.message || error) }, "*"); }
+				function (response) { nativePostMessage.call(child, { __tsProxy: 1, kind: "response", id: msg.id, response: response }, "*"); },
+				function (error) { nativePostMessage.call(child, { __tsProxy: 1, kind: "response", id: msg.id, error: String(error && error.message || error) }, "*"); }
 			);
 		}
 	});
@@ -902,6 +993,26 @@ function proxyScript(apiHost: string) {
 		return html.slice(0, at) + scripts + html.slice(at);
 	}
 
+	// --- Hosted chart iframe (direct-chart-iframe flag) ---
+	// The chart page on hc-*.pdom.thoughtspot.com posts back to the origin named
+	// by its host/scheme params, which the chart library fills from
+	// window.location; a srcdoc page has none, so use the widget origin (this
+	// page's origin when it is same-origin with the widget).
+	var HOSTED_CHART_HOST = /^hc-[a-z0-9-]+\\.pdom\\.thoughtspot\\.com$/i;
+	function hostedChartUrl(url) {
+		if (!DIRECT_CHART_IFRAME || !window.origin || window.origin === "null") return url;
+		try {
+			var u = new URL(url, localOrigin);
+			if (u.protocol !== "https:" || !HOSTED_CHART_HOST.test(u.hostname)) return url;
+			var own = new URL(window.origin);
+			u.searchParams.set("host", own.host);
+			u.searchParams.set("scheme", own.protocol.replace(":", ""));
+			return u.toString();
+		} catch (e) {
+			return url;
+		}
+	}
+
 	function isThoughtSpotFrameUrl(url) {
 		if (!url || /^(about|javascript|data|blob):/i.test(String(url))) return false;
 		if (shouldRewrite(url)) return true;
@@ -929,6 +1040,11 @@ function proxyScript(apiHost: string) {
 		var src = frame.getAttribute("src");
 		if (src && !frame.hasAttribute("srcdoc") && isThoughtSpotFrameUrl(src)) {
 			loadNestedFrame(frame, src);
+			return;
+		}
+		if (src) {
+			var rewritten = hostedChartUrl(src);
+			if (rewritten !== src) frame.setAttribute("src", rewritten);
 		}
 	}
 
@@ -944,6 +1060,7 @@ function proxyScript(apiHost: string) {
 						loadNestedFrame(this, String(value));
 						return;
 					}
+					if (value != null) value = hostedChartUrl(String(value));
 					frameSrcDesc.set.call(this, value);
 				},
 			});
@@ -954,6 +1071,9 @@ function proxyScript(apiHost: string) {
 				isThoughtSpotFrameUrl(String(value))) {
 				loadNestedFrame(this, String(value));
 				return;
+			}
+			if (this instanceof HTMLIFrameElement && String(name).toLowerCase() === "src" && value != null) {
+				return origSetAttribute.call(this, name, hostedChartUrl(String(value)));
 			}
 			return origSetAttribute.apply(this, arguments);
 		};
@@ -972,6 +1092,140 @@ function proxyScript(apiHost: string) {
 		frameObserver.observe(document.documentElement, { subtree: true, childList: true });
 	}
 
+	// --- Inline charts (inline-charts flag) ---
+	// ThoughtSpot's same-origin chart mode (flag enableHostedChartSameOriginSafari,
+	// Safari only) writes the chart into an about:blank iframe instead of loading
+	// the hosted chart page, which the host's frame-src blocks. The server sets
+	// the flag; this reports a Safari user agent and fixes the frame's
+	// postMessage, which checks origins against location.origin ("null" in a
+	// srcdoc page).
+	if (INLINE_CHARTS && window.origin && window.origin !== "null") {
+		try {
+			var SAFARI_UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 " +
+				"(KHTML, like Gecko) Version/17.5 Safari/605.1.15";
+			Object.defineProperty(Navigator.prototype, "userAgent", {
+				configurable: true,
+				get: function () { return SAFARI_UA; },
+			});
+		} catch (e) {}
+
+		// Messages from this page or its chart frames carry the real origin, but
+		// the chart code compares event.origin with location.origin ("null").
+		// Registered before any app listener, so the app sees "null".
+		if (window.location.origin === "null") {
+			window.addEventListener("message", function (event) {
+				if (event.origin === window.origin) {
+					try { Object.defineProperty(event, "origin", { value: "null" }); } catch (e) {}
+				}
+			}, true);
+		}
+
+		// The chart frame posts to window.parent with targetOrigin
+		// location.origin or the host URL, both "null" here, which postMessage
+		// rejects. Give the frame a window.parent whose postMessage maps "null"
+		// targets to "*" and keeps the transfer list (the chart SDK replies
+		// over a MessagePort). It calls the frame's own postMessage so
+		// event.source stays the frame. The chart SDK checks that the target is
+		// a window (self === itself) and that messages come from window.parent,
+		// so self/window return the proxy and messages from the real parent are
+		// rewritten to come from it. The chart looks up asset URLs through
+		// __resolveAssetUrl on itself or window.top; window.top is the
+		// cross-origin host, so the frame gets this page's resolver.
+		var CHILD_SHIM = SCRIPT_OPEN + "(function(){try{var P=window.parent,pm=window.postMessage,px;" +
+			"px=new Proxy(P,{get:function(t,k){" +
+			"if(k==='self'||k==='window')return px;" +
+			"if(k==='postMessage')return function(m,o){var a=Array.prototype.slice.call(arguments);" +
+			"if(typeof o==='string'&&o.indexOf('null')===0)a[1]='*';" +
+			"else if(o&&typeof o==='object'&&typeof o.targetOrigin==='string'&&o.targetOrigin.indexOf('null')===0)a[1]=Object.assign({},o,{targetOrigin:'*'});" +
+			"return pm.apply(t,a)};" +
+			"var v=t[k];return typeof v==='function'?v.bind(t):v}});" +
+			"Object.defineProperty(window,'parent',{configurable:true,get:function(){return px}});" +
+			"if(!window.__resolveAssetUrl&&typeof P.__resolveAssetUrl==='function')window.__resolveAssetUrl=P.__resolveAssetUrl.bind(P);" +
+			"window.addEventListener('message',function(e){if(e.source===P){try{Object.defineProperty(e,'source',{value:px})}catch(x){}}},true)" +
+			"}catch(e){}})();" +
+			SCRIPT_CLOSE;
+		var shimmedDocs = new WeakSet();
+		// The page talks to the chart frame with targetOrigin built from
+		// location.origin ("null?chartType=..."), which postMessage rejects as
+		// invalid. Send those with "*" (the frame is this page's same-origin
+		// child). The wrapper is defined here, in the page's realm, so the
+		// chart sees this page as the event source.
+		// ThoughtSpot also hands the chart its own URL and the host's (appUrl,
+		// hostUrl), built from location.origin. The chart parses them to find
+		// its assets and to address the host, and new URL("null...") throws,
+		// so the chart never renders. Point them at this page's real origin.
+		var URL_KEYS = { hostUrl: 1, appUrl: 1 };
+		var fixNullUrls = function (value, depth) {
+			if (depth > 6 || !value || typeof value !== "object") return value;
+			var copy = null;
+			var keys = Object.keys(value);
+			for (var i = 0; i < keys.length; i++) {
+				var k = keys[i];
+				var v = value[k];
+				var fixed = v;
+				if (URL_KEYS[k] && typeof v === "string" && /^null(?=$|[?/#])/.test(v)) {
+					fixed = window.origin + v.slice(4);
+				} else if (v && typeof v === "object") {
+					fixed = fixNullUrls(v, depth + 1);
+				}
+				if (fixed !== v) {
+					if (!copy) copy = Array.isArray(value) ? value.slice() : Object.assign({}, value);
+					copy[k] = fixed;
+				}
+			}
+			return copy || value;
+		};
+		var fixChartFramePostMessage = function (win) {
+			try {
+				if (!win || win.__tsPostMessageFixed) return;
+				var native = win.postMessage;
+				var toStar = function (o) { return typeof o === "string" && o.indexOf("null") === 0; };
+				win.postMessage = function (message, targetOrigin) {
+					var args = Array.prototype.slice.call(arguments);
+					if (toStar(targetOrigin)) {
+						args[1] = "*";
+					} else if (targetOrigin && typeof targetOrigin === "object" && toStar(targetOrigin.targetOrigin)) {
+						args[1] = Object.assign({}, targetOrigin, { targetOrigin: "*" });
+					}
+					args[0] = fixNullUrls(message, 0);
+					return native.apply(win, args);
+				};
+				win.__tsPostMessageFixed = true;
+			} catch (e) {}
+		};
+		var addChildShim = function (html) {
+			var head = /<head(\\s[^>]*)?>/i.exec(html);
+			if (!head) return CHILD_SHIM + html;
+			var at = head.index + head[0].length;
+			return html.slice(0, at) + CHILD_SHIM + html.slice(at);
+		};
+		try {
+			var docDesc = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, "contentDocument");
+			if (docDesc && docDesc.get) {
+				Object.defineProperty(HTMLIFrameElement.prototype, "contentDocument", {
+					configurable: true,
+					enumerable: docDesc.enumerable,
+					get: function () {
+						var doc = docDesc.get.call(this);
+						if (doc && !shimmedDocs.has(doc)) {
+							shimmedDocs.add(doc);
+							var frame = this;
+							var write = doc.write;
+							doc.write = function () {
+								var args = Array.prototype.slice.call(arguments);
+								if (args.length) args[0] = addChildShim(String(args[0]));
+								var result = write.apply(doc, args);
+								fixChartFramePostMessage(frame.contentWindow);
+								return result;
+							};
+						}
+						return doc;
+					},
+				});
+			}
+		} catch (e) {}
+	}
+
 	console.log("[api-relay] Relaying same-origin API calls to " + API_HOST + " through the MCP server");
 })();
 </script>`;
@@ -982,17 +1236,60 @@ function proxyScript(apiHost: string) {
  * of <head>, so it patches fetch/XHR before any ThoughtSpot script runs. The
  * result carries no credentials.
  */
+// ThoughtSpot controls hidden in the widget. The answer's "More" (three-dot)
+// menu leads to actions (save, download, schedule, ...) that open dialogs or
+// new pages, which don't belong in an inline answer.
+const HIDDEN_CONTROLS_STYLE = `<style>
+#answer-header-menu-button,
+[data-testid="answer-header-menu-button"] { display: none !important; }
+</style>`;
+
 export function injectProxyScript(
 	indexHtml: string,
-	{ apiHost, route }: { apiHost: string; route: string },
+	{
+		apiHost,
+		route,
+		...chartModes
+	}: { apiHost: string; route: string } & ChartModeOptions,
 ): string {
-	const script = routeScript(route) + proxyScript(new URL(apiHost).origin);
+	const script =
+		routeScript(route) +
+		proxyScript(new URL(apiHost).origin, chartModes) +
+		HIDDEN_CONTROLS_STYLE;
 	const head = /<head(\s[^>]*)?>/i.exec(indexHtml);
+	let html: string;
 	if (!head) {
-		return script + indexHtml;
+		html = script + indexHtml;
+	} else {
+		const at = head.index + head[0].length;
+		html = `${indexHtml.slice(0, at)}\n${script}${indexHtml.slice(at)}`;
 	}
-	const at = head.index + head[0].length;
-	return `${indexHtml.slice(0, at)}\n${script}${indexHtml.slice(at)}`;
+	return chartModes.inlineCharts
+		? injectBeforeBodyEnd(html, INLINE_CHARTS_FLAG_SCRIPT)
+		: html;
+}
+
+// Turns on ThoughtSpot's same-origin chart mode. index.html sets blink.env in
+// <head>; the app's main module is deferred, so a script at the end of <body>
+// runs after the first and before the second.
+const INLINE_CHARTS_FLAG_SCRIPT = `<script>
+window.blink = window.blink || {};
+window.blink.env = Object.assign({}, window.blink.env, { enableHostedChartSameOriginSafari: true });
+</script>`;
+
+function injectBeforeBodyEnd(html: string, script: string): string {
+	const at = html.toLowerCase().lastIndexOf("</body>");
+	return at < 0
+		? html + script
+		: `${html.slice(0, at)}${script}\n${html.slice(at)}`;
+}
+
+/** Whether the chart modes need the page frame to be same-origin with the widget. */
+export function needsSameOriginFrame({
+	inlineCharts,
+	directChartIframe,
+}: ChartModeOptions): boolean {
+	return !!(inlineCharts || directChartIframe);
 }
 
 // ── Widget ─────────────────────────────────────────────────────────────────
@@ -1003,6 +1300,10 @@ const MCP_APPS_PROTOCOL_VERSION = "2026-01-26";
 // Sandbox for the srcdoc frame: scripts run, but without allow-same-origin the
 // page gets an opaque origin and can't touch the widget.
 export const THOUGHTSPOT_FRAME_SANDBOX = "allow-scripts allow-forms";
+// Used with inline charts (the default) or direct-chart-iframe: chart rendering
+// needs a real origin, so the page can reach into the widget document.
+export const THOUGHTSPOT_FRAME_SANDBOX_SAME_ORIGIN =
+	"allow-scripts allow-forms allow-same-origin";
 
 export const THOUGHTSPOT_UI_WIDGET_HTML = `<!doctype html>
 <html>
@@ -1039,6 +1340,13 @@ export const THOUGHTSPOT_UI_WIDGET_HTML = `<!doctype html>
 
 	const frameEl = document.getElementById("frame");
 	const expandEl = document.getElementById("expand");
+
+	// The widget's own postMessage. With a same-origin page frame (chart flags),
+	// source.postMessage would find the page's patched postMessage, which runs
+	// in the page's realm and makes the page itself the event source; the proxy
+	// would then drop the reply. Calling the widget's native one keeps the
+	// widget as the source.
+	const nativePostMessage = window.postMessage;
 
 	function send(message) {
 		parent.postMessage({ jsonrpc: "2.0", ...message }, "*");
@@ -1089,7 +1397,9 @@ export const THOUGHTSPOT_UI_WIDGET_HTML = `<!doctype html>
 			}
 			const iframe = document.createElement("iframe");
 			iframe.title = "ThoughtSpot";
-			iframe.setAttribute("sandbox", "${THOUGHTSPOT_FRAME_SANDBOX}");
+			iframe.setAttribute("sandbox", page.same_origin
+				? "${THOUGHTSPOT_FRAME_SANDBOX_SAME_ORIGIN}"
+				: "${THOUGHTSPOT_FRAME_SANDBOX}");
 			iframe.srcdoc = page.html;
 			frameEl.replaceChildren(iframe);
 			pageFrame = iframe;
@@ -1105,7 +1415,7 @@ export const THOUGHTSPOT_UI_WIDGET_HTML = `<!doctype html>
 	// only reach thoughtspot_api_request; it never gets any other tool.
 	async function relayPageRequest(source, msg) {
 		const reply = (body) =>
-			source.postMessage({ __tsProxy: 1, kind: "response", id: msg.id, ...body }, "*");
+			nativePostMessage.call(source, { __tsProxy: 1, kind: "response", id: msg.id, ...body }, "*");
 		const req = msg.request;
 		if (!req || typeof req.method !== "string" || typeof req.path !== "string") {
 			reply({ error: "invalid request" });

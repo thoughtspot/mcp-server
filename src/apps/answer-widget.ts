@@ -152,7 +152,7 @@ export const ANSWER_WIDGET_HTML = `<!doctype html>
 		reportSize();
 	}
 
-	async function showAnswer(answer) {
+	async function getAnswerImage(answer) {
 		if (!answer || !answer.answer_id) {
 			showStatus("No answer to show.", true);
 			return;
@@ -165,7 +165,7 @@ export const ANSWER_WIDGET_HTML = `<!doctype html>
 
 		try {
 			const result = await request("tools/call", {
-				name: "get_answer_image",
+				name: "fetch_answer_image",
 				arguments: { answer_id: answer.answer_id },
 			});
 			// A newer tool result replaced this answer while the export ran.
@@ -222,7 +222,7 @@ export const ANSWER_WIDGET_HTML = `<!doctype html>
 					const text = (msg.params.content || []).find((c) => c.type === "text");
 					showStatus(text ? text.text : "The answer could not be shown.", true);
 				} else {
-					showAnswer(answerFromToolResult(msg.params));
+					getAnswerImage(answerFromToolResult(msg.params));
 				}
 				break;
 			case "ui/notifications/host-context-changed":
