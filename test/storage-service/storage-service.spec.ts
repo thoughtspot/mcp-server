@@ -504,6 +504,30 @@ describe("StorageServiceClient", () => {
 	// getSessionState
 	// -------------------------------------------------------------------------
 
+	describe("getFiles", () => {
+		it("sends GET to /storage/<id>/files and returns the file ids", async () => {
+			namespaceMock = makeNamespaceMock(["a.csv", "b.pdf"]);
+			client = new StorageServiceClient(namespaceMock, TOKEN_HASH);
+
+			const result = await client.getFiles(CONVERSATION_ID);
+
+			expect(lastRequest().url).toBe(
+				`https://internal/storage/${CONVERSATION_ID}/files`,
+			);
+			expect(lastRequest().method).toBe("GET");
+			expect(result).toEqual(["a.csv", "b.pdf"]);
+		});
+
+		it("throws with the status and body on a failure response", async () => {
+			namespaceMock = makeNamespaceMock("nope", 500);
+			client = new StorageServiceClient(namespaceMock, TOKEN_HASH);
+
+			await expect(client.getFiles(CONVERSATION_ID)).rejects.toThrow(
+				"Failed to get files (500): nope",
+			);
+		});
+	});
+
 	describe("getSessionState", () => {
 		it("sends GET to /storage/<id>/state and returns the parsed state", async () => {
 			const state = { transactionId: "txn-1", genNoWorkingSet: [2, 3] };

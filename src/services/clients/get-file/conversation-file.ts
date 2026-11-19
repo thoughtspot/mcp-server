@@ -128,6 +128,90 @@ export async function readBodyCapped(
 	return bytes;
 }
 
+// Room for the envelope's other fields (file name, MIME type, version).
+const ENVELOPE_OVERHEAD_BYTES = 4096;
+
+/*
+ * Read a SpotterX artifact download. The gateway answers with the raw bytes, or
+ * with ADK's JSON envelope ({ filename, mime_type, version, data }, `data`
+ * base64), told apart by the Content-Type. The cap applies to the file itself.
+ */
+export async function readSpotterXFileBody(
+	response: Response,
+	maxBytes: number,
+): Promise<Uint8Array> {
+	const isEnvelope = (response.headers.get("content-type") ?? "").includes(
+		"application/json",
+	);
+	if (!isEnvelope) {
+		return readBodyCapped(response, maxBytes);
+	}
+
+	const base64 = await readEnvelopeBase64(response, maxBytes);
+	// Refuse on the length alone, before any decoding.
+	if (base64DecodedLength(base64) > maxBytes) {
+		throw new FileTooLargeError(maxBytes);
+	}
+	return base64ToBytes(base64);
+}
+
+// Reads the envelope and returns only its base64 content, so the envelope's
+// bytes and text can be freed before the content is decoded.
+async function readEnvelopeBase64(
+	response: Response,
+	maxBytes: number,
+): Promise<string> {
+	let envelopeBytes: Uint8Array;
+	try {
+		// Base64 is 4/3 the size of the file, a little more with line breaks.
+		envelopeBytes = await readBodyCapped(
+			response,
+			Math.ceil(maxBytes * 1.4) + ENVELOPE_OVERHEAD_BYTES,
+		);
+	} catch (error) {
+		// Report the cap on the file, not on its envelope.
+		throw error instanceof FileTooLargeError
+			? new FileTooLargeError(maxBytes)
+			: error;
+	}
+	const envelope = JSON.parse(new TextDecoder().decode(envelopeBytes)) as {
+		data?: unknown;
+		data_b64?: unknown;
+	};
+	const base64 = envelope.data_b64 ?? envelope.data;
+	if (typeof base64 !== "string" || base64 === "") {
+		throw new Error("The artifact download returned no content");
+	}
+	// Line breaks would put a slice boundary inside a 4-character group.
+	return /\s/.test(base64) ? base64.replace(/\s+/g, "") : base64;
+}
+
+function base64DecodedLength(base64: string): number {
+	let padding = 0;
+	if (base64.endsWith("==")) {
+		padding = 2;
+	} else if (base64.endsWith("=")) {
+		padding = 1;
+	}
+	return Math.floor((base64.length * 3) / 4) - padding;
+}
+
+// Decodes in slices into one preallocated array: atob on the whole string
+// would hold a second copy of the file as a binary string.
+function base64ToBytes(base64: string): Uint8Array {
+	// A multiple of 4, so every slice is whole base64 groups.
+	const SLICE = 0x10000;
+	const bytes = new Uint8Array(base64DecodedLength(base64));
+	let offset = 0;
+	for (let i = 0; i < base64.length; i += SLICE) {
+		const binary = atob(base64.slice(i, i + SLICE));
+		for (let j = 0; j < binary.length; j++) {
+			bytes[offset++] = binary.charCodeAt(j);
+		}
+	}
+	return bytes;
+}
+
 // Base64 in slices: String.fromCharCode(...bytes) overflows the stack on a large file.
 export function bytesToBase64(bytes: Uint8Array): string {
 	const SLICE = 0x8000;

@@ -33,6 +33,7 @@ import {
 } from "./spotter-viz/spotter-viz-client";
 import {
 	createSpotterXConversation,
+	downloadSpotterXFile,
 	sendSpotterXMessageStreaming,
 } from "./spotter-x/spotter-x-client";
 
@@ -130,6 +131,10 @@ export class ThoughtSpotClient extends ThoughtSpotRestApi {
 		params: Params<typeof sendSpotter3MessageStreaming>,
 	) {
 		return sendSpotter3MessageStreaming(this.ctx, params);
+	}
+
+	downloadSpotterXFile(params: Params<typeof downloadSpotterXFile>) {
+		return downloadSpotterXFile(this.ctx, params);
 	}
 
 	downloadSpotter3File(params: Params<typeof downloadSpotter3File>) {

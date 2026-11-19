@@ -5,6 +5,7 @@ import {
 	conversationFileFormat,
 	downloadSpotter3File,
 	readBodyCapped,
+	readSpotterXFileBody,
 } from "../../../../src/services/clients/get-file/conversation-file";
 import { ThoughtSpotApiError } from "../../../../src/services/types";
 
@@ -117,6 +118,91 @@ describe("readBodyCapped", () => {
 		expect(error.maxBytes).toBe(10);
 		// An endless stream is not drained.
 		expect(pulls).toBeLessThan(10);
+	});
+});
+
+describe("readSpotterXFileBody", () => {
+	const envelope = (body: unknown) =>
+		new Response(JSON.stringify(body), {
+			headers: { "content-type": "application/json; charset=utf-8" },
+		});
+	const text = (bytes: Uint8Array) => new TextDecoder().decode(bytes);
+
+	it("returns raw bytes as they are", async () => {
+		const response = new Response("a,b\n1,2\n", {
+			headers: { "content-type": "application/octet-stream" },
+		});
+		expect(text(await readSpotterXFileBody(response, 100))).toBe("a,b\n1,2\n");
+	});
+
+	it.each(["data", "data_b64"])(
+		"decodes the JSON envelope's base64 %s",
+		async (field) => {
+			const response = envelope({
+				filename: "q3.csv",
+				mime_type: "text/csv",
+				version: 0,
+				[field]: btoa("a,b\n1,2\n"),
+			});
+			expect(text(await readSpotterXFileBody(response, 100))).toBe(
+				"a,b\n1,2\n",
+			);
+		},
+	);
+
+	it("fails on an envelope with no content", async () => {
+		await expect(
+			readSpotterXFileBody(envelope({ filename: "q3.csv" }), 100),
+		).rejects.toThrow(/no content/);
+	});
+
+	it("applies the cap to the decoded file, not to its envelope", async () => {
+		// 9 bytes: fits a 9-byte cap although its base64 is 12 characters.
+		const nine = envelope({ data: btoa("123456789") });
+		expect((await readSpotterXFileBody(nine, 9)).byteLength).toBe(9);
+
+		const ten = envelope({ data: btoa("1234567890") });
+		const error = await readSpotterXFileBody(ten, 9).catch((e) => e);
+		expect(error).toBeInstanceOf(FileTooLargeError);
+		expect(error.maxBytes).toBe(9);
+	});
+
+	it("decodes a file larger than one slice, with line breaks and every padding", async () => {
+		for (const length of [0x30000, 0x30001, 0x30002]) {
+			const content = Array.from({ length }, (_, i) =>
+				String.fromCharCode(i % 256),
+			).join("");
+			const wrapped = btoa(content).replace(/(.{76})/g, "$1\r\n");
+
+			const bytes = await readSpotterXFileBody(
+				envelope({ data: wrapped }),
+				length,
+			);
+
+			expect(bytes.byteLength).toBe(length);
+			expect(bytes[length - 1]).toBe((length - 1) % 256);
+			expect(bytes[0x10000]).toBe(0);
+			expect(bytes[0x10001]).toBe(1);
+		}
+	});
+
+	it("refuses an oversized file from its length, before decoding", async () => {
+		const decode = vi.spyOn(globalThis, "atob");
+		const error = await readSpotterXFileBody(
+			envelope({ data: "QUJD".repeat(4) }),
+			11,
+		).catch((e) => e);
+
+		expect(error).toBeInstanceOf(FileTooLargeError);
+		expect(decode).not.toHaveBeenCalled();
+		decode.mockRestore();
+	});
+
+	it("reports the file cap when the envelope itself is too large to read", async () => {
+		const huge = envelope({ data: "A".repeat(20000) });
+		const error = await readSpotterXFileBody(huge, 9).catch((e) => e);
+		expect(error).toBeInstanceOf(FileTooLargeError);
+		expect(error.maxBytes).toBe(9);
 	});
 });
 

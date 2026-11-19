@@ -68,7 +68,7 @@ describe("file ids", () => {
 		// No source, or one this server cannot fetch from.
 		JSON.stringify({ conversation_id: "conv-1", ts_file_id: "report.csv" }),
 		JSON.stringify({
-			source: "spotterx",
+			source: "other",
 			conversation_id: "c",
 			ts_file_id: "f",
 		}),
@@ -97,6 +97,35 @@ describe("file ids", () => {
 		).toBe(
 			"https://ts.example.com/conversation/v2/conv%2F1/download/q3%20revenue%231.csv",
 		);
+	});
+
+	it("round-trips a SpotterX file with its artifact version", () => {
+		const fileId = buildFileId("session-1", "q3-revenue.csv", "spotterx", 2);
+		expect(parseFileId(fileId)).toEqual({
+			source: "spotterx",
+			conversationId: "session-1",
+			tsFileId: "q3-revenue.csv",
+			version: 2,
+		});
+	});
+
+	it.each([undefined, -1, 1.5])(
+		"leaves out an artifact version of %s",
+		(version) => {
+			const fileId = buildFileId("session-1", "a.csv", "spotterx", version);
+			expect(JSON.parse(fileId)).not.toHaveProperty("version");
+			expect(parseFileId(fileId)).not.toHaveProperty("version");
+		},
+	);
+
+	it("ignores a version that is not a revision number when parsing", () => {
+		const fileId = JSON.stringify({
+			source: "spotterx",
+			conversation_id: "session-1",
+			ts_file_id: "a.csv",
+			version: "2&category=ASSETS",
+		});
+		expect(parseFileId(fileId)).not.toHaveProperty("version");
 	});
 
 	it.each([
@@ -1303,6 +1332,143 @@ describe("suppress-iframes", () => {
 			type: "answer",
 			answer_title: "Headcount",
 		});
+	});
+});
+
+describe("processSpotterXEventStream file markers", () => {
+	const sse = (...items: unknown[]) =>
+		items.map((item) => `data: ${JSON.stringify(item)}\n\n`).join("");
+	// The marker rides an event with no content, so only the raw event has it.
+	const fileMarker = (fileRef: Record<string, unknown>) => ({
+		result: { raw_event: { custom_metadata: { ts_file_ref: fileRef } } },
+	});
+	const run = (
+		body: string,
+		storage: ReturnType<typeof makeMockStorage>,
+		includeFiles: boolean,
+		format = SpotterResponseFormat.SIMPLIFIED,
+		recorder?: MetricsRecorder,
+	) =>
+		processSpotterXEventStream(
+			INSTANCE_URL,
+			format,
+			CONV_ID,
+			makeReader([body]),
+			storage.appendMessages,
+			recorder,
+			false,
+			includeFiles,
+		);
+
+	beforeEach(() => {
+		vi.clearAllMocks();
+		tracingState.span = undefined;
+	});
+
+	it("drops a file marker when files are not included", async () => {
+		const storage = makeMockStorage();
+
+		await run(
+			sse(fileMarker({ filename: "q3.csv", ref_id: "f1", version: 0 })),
+			storage,
+			false,
+		);
+
+		expect(storage.appendMessages).toHaveBeenCalledOnce();
+		expect(storage.appendMessages).toHaveBeenCalledWith(CONV_ID, [], true);
+		expect(tracingState.span?.setAttributes).toHaveBeenCalledWith({
+			spotter_response_format: SpotterResponseFormat.SIMPLIFIED,
+			total_messages_parsed: 0,
+			total_text_messages_parsed: 0,
+			total_answer_messages_parsed: 0,
+			total_messages_ignored: 1,
+		});
+	});
+
+	it("stores a file message for each file, once, with the namespace stripped", async () => {
+		const storage = makeMockStorage();
+		const recorder: MetricsRecorder = {
+			...NOOP_METRICS_RECORDER,
+			count: vi.fn(),
+		};
+
+		await run(
+			sse(
+				fileMarker({
+					filename: "files/q3-revenue.csv",
+					ref_id: "f1",
+					version: 0,
+				}),
+				// The same marker again in the turn.
+				fileMarker({
+					filename: "files/q3-revenue.csv",
+					ref_id: "f1",
+					version: 0,
+				}),
+				// A later revision of the same file is a different download.
+				fileMarker({
+					filename: "files/q3-revenue.csv",
+					ref_id: "f1",
+					version: 1,
+				}),
+				// -1 means "unresolved": ask for the latest.
+				fileMarker({ filename: "Chart.PDF", ref_id: "f2", version: -1 }),
+				fileMarker({ ref_id: "f3" }),
+			),
+			storage,
+			true,
+			SpotterResponseFormat.SIMPLIFIED,
+			recorder,
+		);
+
+		const stored = storage.appendMessages.mock.calls
+			.flatMap((call: unknown[]) => call[1] as unknown[])
+			.filter(Boolean);
+		expect(stored).toEqual([
+			{
+				is_thinking: false,
+				type: "file",
+				file_id: buildFileId(CONV_ID, "q3-revenue.csv", "spotterx", 0),
+				file_name: "q3-revenue.csv",
+				file_type: "csv",
+			},
+			{
+				is_thinking: false,
+				type: "file",
+				file_id: buildFileId(CONV_ID, "q3-revenue.csv", "spotterx", 1),
+				file_name: "q3-revenue.csv",
+				file_type: "csv",
+			},
+			{
+				is_thinking: false,
+				type: "file",
+				file_id: buildFileId(CONV_ID, "Chart.PDF", "spotterx"),
+				file_name: "Chart.PDF",
+				file_type: "pdf",
+			},
+		]);
+		expect(recorder.count).toHaveBeenCalledWith(
+			METRIC_NAMES.upstreamStreamMessagesTotal,
+			1,
+			expect.objectContaining({ message_type: "file" }),
+		);
+		expect(tracingState.span?.setAttributes).toHaveBeenCalledWith(
+			expect.objectContaining({
+				total_messages_parsed: 3,
+				total_file_messages_parsed: 3,
+				// The repeated marker and the one with no file name.
+				total_messages_ignored: 2,
+			}),
+		);
+	});
+
+	it("passes a file marker through unchanged in the raw format", async () => {
+		const storage = makeMockStorage();
+		const marker = fileMarker({ filename: "q3.csv", ref_id: "f1" });
+
+		await run(sse(marker), storage, true, SpotterResponseFormat.RAW);
+
+		expect(storage.appendMessages).toHaveBeenCalledWith(CONV_ID, [marker]);
 	});
 });
 

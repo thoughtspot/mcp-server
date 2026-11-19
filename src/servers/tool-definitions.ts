@@ -474,7 +474,7 @@ export const ConversationUpdateSchema = z.object({
 		.string()
 		.optional()
 		.describe(
-			"A link that downloads the file to the user's computer when opened in a browser where they are signed in to ThoughtSpot. Only present when `type` is `file`. When the user asks to download, save, or export the file, give them this link as is; do not call `get_file` for that. Tell the user about each file the Agent produced and offer this link.",
+			"A link that downloads the file to the user's computer when opened in a browser where they are signed in to ThoughtSpot. Present for most updates of `type` `file`. When the user asks to download, save, or export the file, give them this link as is; do not call `get_file` for that. Tell the user about each file the Agent produced and offer this link. If an update has no link, tell the user they can download the file from the conversation in ThoughtSpot.",
 		),
 });
 

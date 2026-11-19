@@ -379,10 +379,8 @@ describe("MCP Server", () => {
 				expect(
 					tools.map((t) => t.name).indexOf("create_analysis_session"),
 				).toBe(2);
-				// The beta version adds get_file, for Spotter 3 sessions only.
-				expect(tools).toHaveLength(
-					apiVersion === "beta" && !isSpotterXEnabled ? 14 : 13,
-				);
+				// The beta version adds get_file.
+				expect(tools).toHaveLength(apiVersion === "beta" ? 14 : 13);
 
 				const [sessionTool] = sessionTools;
 				const properties = (sessionTool.inputSchema as any).properties;
@@ -983,12 +981,6 @@ describe("MCP Server", () => {
 		// The tool cannot work in these cases, so it is neither listed nor callable.
 		it.each([
 			{
-				name: "SpotterX sessions",
-				setup: () => {
-					(server as any).sessionInfo.configInfo.isSpotterXEnabled = true;
-				},
-			},
-			{
 				name: "raw session updates",
 				setup: () => {
 					mockProps.enableRawSessionUpdates = true;
@@ -1074,6 +1066,168 @@ describe("MCP Server", () => {
 				data_rows: [["A"]],
 				total_row_count: 1,
 				truncated: false,
+			});
+		});
+
+		describe("SpotterX files", () => {
+			const spotterXFileId = (tsFileId: string, version?: number) =>
+				JSON.stringify({
+					source: "spotterx",
+					conversation_id: "session-1",
+					ts_file_id: tsFileId,
+					...(version !== undefined && { version }),
+				});
+
+			// Files this user was shown, as the conversation storage records them.
+			let knownFiles: string[];
+			let getFiles: ReturnType<typeof vi.fn>;
+
+			beforeEach(() => {
+				const client = mockClient();
+				client.downloadSpotterXFile = vi.fn();
+				client.tenantId = "tenant-1";
+				client.orgId = "42";
+				client.userId = "user-1";
+				knownFiles = ["q3-revenue.csv", "chart.png"];
+				getFiles = vi.fn(async () => knownFiles);
+				vi.spyOn(server as any, "getStorageService").mockResolvedValue({
+					getFiles,
+				});
+			});
+
+			it("refuses a file this user was not shown, without downloading it", async () => {
+				await server.init();
+				const { callTool } = connect(server);
+
+				const result = await callTool("get_file", {
+					file_id: spotterXFileId("someone-elses.csv"),
+				});
+
+				expect(getFiles).toHaveBeenCalledWith("session-1");
+				expect(result.isError).toBe(true);
+				expect((result.content as any[])[0].text).toMatch(
+					/not found in your analytical sessions/,
+				);
+				expect(mockClient().downloadSpotterXFile).not.toHaveBeenCalled();
+			});
+
+			it("refuses a file from a session with no record", async () => {
+				knownFiles = [];
+				await server.init();
+				const { callTool } = connect(server);
+
+				const result = await callTool("get_file", {
+					file_id: spotterXFileId("q3-revenue.csv"),
+				});
+
+				expect(result.isError).toBe(true);
+				expect(mockClient().downloadSpotterXFile).not.toHaveBeenCalled();
+			});
+
+			it("send_session_message announces files on a SpotterX session", async () => {
+				vi.spyOn(server as any, "getStorageService").mockReturnValue({
+					initializeConversation: vi.fn().mockResolvedValue(undefined),
+					appendMessages: vi.fn().mockResolvedValue(undefined),
+				});
+				const send = vi
+					.spyOn(ThoughtSpotService.prototype, "sendSpotterXMessageStreaming")
+					.mockResolvedValue(undefined);
+				await server.init();
+				(server as any).sessionInfo.configInfo.isSpotterXEnabled = true;
+				const { callTool } = connect(server);
+
+				await callTool("send_session_message", {
+					analytical_session_id: "session-1",
+					message: "Export revenue as a CSV",
+				});
+
+				expect(send).toHaveBeenCalledWith(
+					"session-1",
+					"Export revenue as a CSV",
+					SpotterResponseFormat.SIMPLIFIED,
+					expect.any(Function),
+					undefined,
+					false,
+					true,
+				);
+			});
+
+			it("is listed for SpotterX sessions", async () => {
+				await server.init();
+				(server as any).sessionInfo.configInfo.isSpotterXEnabled = true;
+				expect(await toolNames()).toContain("get_file");
+			});
+
+			it("fetches the artifact from SpotterX, pinned to its version", async () => {
+				mockClient().downloadSpotterXFile.mockResolvedValueOnce(
+					new Response("Region,Revenue\nEast,100\n"),
+				);
+				await server.init();
+				const { callTool } = connect(server);
+				const id = spotterXFileId("q3-revenue.csv", 2);
+
+				const result = await callTool("get_file", { file_id: id });
+
+				expect(mockClient().downloadSpotterXFile).toHaveBeenCalledWith({
+					tenantId: "tenant-1",
+					orgId: "42",
+					userId: "user-1",
+					conversationId: "session-1",
+					filename: "q3-revenue.csv",
+					version: 2,
+				});
+				expect(mockClient().downloadSpotter3File).not.toHaveBeenCalled();
+				expect(result.structuredContent).toEqual({
+					file_id: id,
+					file_type: "csv",
+					columns: ["Region", "Revenue"],
+					data_rows: [["East", "100"]],
+					total_row_count: 1,
+					truncated: false,
+				});
+			});
+
+			it("reads a file the gateway returns in a JSON envelope", async () => {
+				mockClient().downloadSpotterXFile.mockResolvedValueOnce(
+					new Response(
+						JSON.stringify({
+							filename: "chart.png",
+							mime_type: "image/png",
+							data: btoa("png-bytes"),
+						}),
+						{ headers: { "content-type": "application/json" } },
+					),
+				);
+				await server.init();
+				const { callTool } = connect(server);
+
+				const result = await callTool("get_file", {
+					file_id: spotterXFileId("chart.png"),
+				});
+
+				expect(mockClient().downloadSpotterXFile).toHaveBeenCalledWith(
+					expect.objectContaining({ version: undefined }),
+				);
+				expect((result.content as any[])[1]).toEqual({
+					type: "image",
+					mimeType: "image/png",
+					data: btoa("png-bytes"),
+				});
+			});
+
+			it("maps an upstream 404 to a clear error", async () => {
+				mockClient().downloadSpotterXFile.mockRejectedValueOnce(
+					new ThoughtSpotApiError(404, "downloadSpotterXFile", "Not Found"),
+				);
+				await server.init();
+				const { callTool } = connect(server);
+
+				const result = await callTool("get_file", {
+					file_id: spotterXFileId("q3-revenue.csv"),
+				});
+
+				expect(result.isError).toBe(true);
+				expect((result.content as any[])[0].text).toMatch(/was not found/);
 			});
 		});
 
@@ -2945,6 +3099,8 @@ describe("MCP Server", () => {
 					expect.any(Function),
 					"Focus on North America",
 					false,
+					// Raw updates carry no file_id, so files are not announced.
+					false,
 				);
 				expect(
 					mockSendAgentConversationMessageStreaming,
@@ -2969,6 +3125,8 @@ describe("MCP Server", () => {
 					expect.any(Function),
 					undefined,
 					true,
+					// This user has no data-download privilege, so files are not announced.
+					false,
 				);
 			});
 

@@ -393,4 +393,61 @@ describe("spotter-x-client", () => {
 			expect(id1).not.toBe(id2);
 		});
 	});
+
+	describe("downloadSpotterXFile", () => {
+		const client = () =>
+			new ThoughtSpotClient({
+				instanceUrl: mockInstanceUrl,
+				token: mockBearerToken,
+				...identity,
+			});
+
+		it("GETs the session's artifact in the FILES category, pinned to a version", async () => {
+			(global.fetch as any).mockResolvedValue(new Response("a,b\n"));
+
+			const response = await client().downloadSpotterXFile({
+				...identity,
+				conversationId: "session/1",
+				filename: "q3 revenue.csv",
+				version: 2,
+			});
+
+			expect(await response.text()).toBe("a,b\n");
+			const [url, init] = (global.fetch as any).mock.calls[0];
+			expect(url).toBe(
+				`${mockInstanceUrl}/agents/v1/sessions/session%2F1/artifacts/q3%20revenue.csv?category=FILES&version=2`,
+			);
+			expect(init.method).toBe("GET");
+			expect(init.headers["x-thoughtspot-fuid"]).toBe(expectedFuid);
+			expect(init.headers.Authorization).toBe(`Bearer ${mockBearerToken}`);
+		});
+
+		it("asks for the latest revision when no version is given", async () => {
+			(global.fetch as any).mockResolvedValue(new Response(""));
+
+			await client().downloadSpotterXFile({
+				...identity,
+				conversationId: "session-1",
+				filename: "q3.csv",
+			});
+
+			expect((global.fetch as any).mock.calls[0][0]).toBe(
+				`${mockInstanceUrl}/agents/v1/sessions/session-1/artifacts/q3.csv?category=FILES`,
+			);
+		});
+
+		it("throws a ThoughtSpotApiError with the status on failure", async () => {
+			(global.fetch as any).mockResolvedValue(
+				new Response('{"code":5,"message":"Not Found"}', { status: 404 }),
+			);
+
+			await expect(
+				client().downloadSpotterXFile({
+					...identity,
+					conversationId: "session-1",
+					filename: "q3.csv",
+				}),
+			).rejects.toMatchObject({ status: 404 });
+		});
+	});
 });

@@ -22,6 +22,7 @@ import { STORAGE_CALL_TIMEOUT_MS, withTimeout } from "../spotterviz/timeouts";
  *   GET   /storage/<storageId>/messages   —> getNewMessagesAndUpdateBookmark
  *   POST  /storage/<storageId>/state      —> putSessionState
  *   GET   /storage/<storageId>/state      —> getSessionState
+ *   GET   /storage/<storageId>/files      —> getFiles
  *
  * The storageId is derived by taking a hash of the user's access token and combining it with the
  * conversationId, to ensure no users can access each other's conversations.
@@ -170,6 +171,24 @@ export class StorageServiceClient {
 		}
 
 		return response.json() as Promise<StreamingMessagesState>;
+	}
+
+	/**
+	 * The upstream ids of the files this user was shown in a conversation. Kept
+	 * for days after the conversation's messages expire.
+	 */
+	async getFiles(conversationId: string): Promise<string[]> {
+		const response = await this.fetchStorage(conversationId, "files", {
+			method: "GET",
+			headers: this.headers(),
+		});
+
+		if (!response.ok) {
+			const text = await response.text();
+			throw new Error(`Failed to get files (${response.status}): ${text}`);
+		}
+
+		return response.json() as Promise<string[]>;
 	}
 
 	/**

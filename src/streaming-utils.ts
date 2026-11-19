@@ -28,17 +28,40 @@ function buildAnswerId(
 
 // Which agent backend holds a file. get_file routes on it, so a file id stays
 // valid if the connection later moves to another backend.
-export type FileSource = "spotter3";
-const FILE_SOURCES: readonly string[] = ["spotter3"] satisfies FileSource[];
+export type FileSource = "spotter3" | "spotterx";
+const FILE_SOURCES: readonly string[] = [
+	"spotter3",
+	"spotterx",
+] satisfies FileSource[];
+
+// What a file id names. `version` pins a SpotterX artifact revision; Spotter 3
+// files have none.
+export interface FileRef {
+	source: FileSource;
+	conversationId: string;
+	tsFileId: string;
+	version?: number;
+}
 
 // Names a file by its backend, conversation and upstream file id, so get_file
 // needs one value and the parts cannot be mismatched. Parsed by `parseFileId`.
-export function buildFileId(conversationId: string, tsFileId: string): string {
+export function buildFileId(
+	conversationId: string,
+	tsFileId: string,
+	source: FileSource = "spotter3",
+	version?: number,
+): string {
 	return JSON.stringify({
-		source: "spotter3" satisfies FileSource,
+		source,
 		conversation_id: conversationId,
 		ts_file_id: tsFileId,
+		...(isArtifactVersion(version) && { version }),
 	});
+}
+
+// SpotterX sends -1 for "unresolved", which is not a revision to ask for.
+function isArtifactVersion(value: unknown): value is number {
+	return typeof value === "number" && Number.isInteger(value) && value >= 0;
 }
 
 // One URL path segment: not empty, no separator, and not a dot segment, which
@@ -53,11 +76,7 @@ function isPathSegment(value: unknown): value is string {
 	);
 }
 
-export function parseFileId(
-	fileId: string,
-):
-	| { source: FileSource; conversationId: string; tsFileId: string }
-	| undefined {
+export function parseFileId(fileId: string): FileRef | undefined {
 	try {
 		const parsed = JSON.parse(fileId);
 		if (
@@ -69,6 +88,7 @@ export function parseFileId(
 				source: parsed.source,
 				conversationId: parsed.conversation_id,
 				tsFileId: parsed.ts_file_id,
+				...(isArtifactVersion(parsed.version) && { version: parsed.version }),
 			};
 		}
 	} catch {
@@ -397,6 +417,9 @@ export const processSpotter3EventStream = async (
 	});
 };
 
+// The namespace ADK stores user-visible artifacts under.
+const SPOTTERX_FILES_NAMESPACE = /^files\//;
+
 // Parsed JSON contents from SpotterXFunctionResponse for an NLS answer
 interface SpotterXNlsAnswerResponse {
 	title?: string;
@@ -438,6 +461,9 @@ interface SpotterXEvent {
 		// Marks where the agent presents a tool call's result (e.g. an answer) in its
 		// final response
 		ts_inline_tool_ref?: { function_call_id?: string };
+		// Announces a file the agent produced this turn for the user to download.
+		// `ref_id` identifies the file; `version` is the artifact revision.
+		ts_file_ref?: { filename?: string; ref_id?: string; version?: number };
 	};
 }
 
@@ -497,6 +523,8 @@ export const processSpotterXEventStream = async (
 	) => Promise<void>,
 	recorder?: MetricsRecorder,
 	suppressIframes = false,
+	// Emit `file` messages (simplified format), as the Spotter 3 processor does.
+	includeFiles = false,
 ) => {
 	return await withSpan("process-spotterx-event-stream", async (span: Span) => {
 		// Include the operation on every stream-message metric so future streamed
@@ -519,6 +547,9 @@ export const processSpotterXEventStream = async (
 		const seenThinkingAnswers = new Map<string, RawMessage>();
 		// Keep track of tool call IDs we already sent a step notification for
 		const seenToolCallIds = new Set<string>();
+		// Keep track of files already announced: the marker can repeat in a turn
+		const seenFileRefs = new Set<string>();
+		let nFileMessagesParsed = 0;
 
 		try {
 			const decoder = new TextDecoder();
@@ -635,6 +666,43 @@ export const processSpotterXEventStream = async (
 						continue;
 					}
 
+					// A file the agent produced. The marker rides an event with no content,
+					// so it is read from the raw event too.
+					const fileRef =
+						item?.result?.event?.custom_metadata?.ts_file_ref ??
+						item?.result?.raw_event?.custom_metadata?.ts_file_ref;
+					// ADK keeps user-visible artifacts under `files/`; the download route
+					// takes the bare name.
+					const fileName = fileRef?.filename?.replace(
+						SPOTTERX_FILES_NAMESPACE,
+						"",
+					);
+					const fileKey = `${fileRef?.ref_id ?? fileName}@${fileRef?.version}`;
+					const announcesFile =
+						includeFiles && !!fileName && !seenFileRefs.has(fileKey);
+					if (announcesFile) {
+						seenFileRefs.add(fileKey);
+						nFileMessagesParsed++;
+						recordUpstreamStreamMessageMetric(
+							recorder,
+							upstreamOperation,
+							"file",
+							false,
+						);
+						newMessages.push({
+							is_thinking: false,
+							type: "file",
+							file_id: buildFileId(
+								conversationId,
+								fileName,
+								"spotterx",
+								fileRef?.version,
+							),
+							file_name: fileName,
+							file_type: fileExtension(fileName),
+						});
+					}
+
 					// Answers in the final response are created by referencing an answer by ID
 					// which was produced during thinking steps. In that scenario, look up the
 					// referenced answer in the thinkingAnswers map and re-emit it as a final
@@ -659,7 +727,7 @@ export const processSpotterXEventStream = async (
 					// Ignore events with only state changes (title, end of agent, etc)
 					const parts = event.content?.parts;
 					if (!parts || parts.length === 0) {
-						if (!referencedAnswer) {
+						if (!referencedAnswer && !announcesFile) {
 							nMessagesIgnored++;
 						}
 						continue;
@@ -790,9 +858,13 @@ export const processSpotterXEventStream = async (
 
 		span.setAttributes({
 			spotter_response_format: spotterResponseFormat,
-			total_messages_parsed: nTextMessagesParsed + nAnswerMessagesParsed,
+			total_messages_parsed:
+				nTextMessagesParsed + nAnswerMessagesParsed + nFileMessagesParsed,
 			total_text_messages_parsed: nTextMessagesParsed,
 			total_answer_messages_parsed: nAnswerMessagesParsed,
+			...(includeFiles && {
+				total_file_messages_parsed: nFileMessagesParsed,
+			}),
 			total_messages_ignored: nMessagesIgnored,
 		});
 		if (!spanHasError) {
