@@ -1938,6 +1938,18 @@ describe("MCP Server", () => {
 				expect(names).not.toContain("thoughtspot_api_request");
 			});
 
+			it("does not point other clients' get_session_updates at show_answer", async () => {
+				await server.init();
+				const { listTools } = connect(server);
+
+				const { tools } = await listTools();
+				const updates = JSON.stringify(
+					tools.find((t) => t.name === "get_session_updates"),
+				);
+				expect(updates).toContain("iframe_url");
+				expect(updates).not.toContain("show_answer");
+			});
+
 			it("refuses relay calls from clients without MCP Apps support", async () => {
 				const fetchSpy = vi.fn();
 				vi.stubGlobal("fetch", fetchSpy);
@@ -1989,6 +2001,34 @@ describe("MCP Server", () => {
 					expect(byName("thoughtspot_api_request")._meta.ui).toEqual({
 						visibility: ["app"],
 					});
+				});
+
+				it("points get_session_updates' iframe_url at show_answer", async () => {
+					await server.init();
+					const { listTools } = connect(server);
+
+					const { tools } = await listTools();
+					const updates = tools.find(
+						(t) => t.name === "get_session_updates",
+					) as any;
+					const iframeUrl =
+						updates.outputSchema.properties.session_updates.items.properties
+							.iframe_url;
+					expect(iframeUrl.description).toMatch(
+						/show_answer tool as `iframe_url`/,
+					);
+				});
+
+				it("keeps the plain iframe_url description when thoughtspot-ui is off", async () => {
+					mockProps.enableThoughtSpotUiWidget = false;
+					await server.init();
+					const { listTools } = connect(server);
+
+					const { tools } = await listTools();
+					const updates = JSON.stringify(
+						tools.find((t) => t.name === "get_session_updates"),
+					);
+					expect(updates).not.toContain("show_answer");
 				});
 
 				it("serves the widget with a CSP covering the CDNs and cluster images", async () => {

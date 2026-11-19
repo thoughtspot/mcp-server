@@ -101,6 +101,8 @@ import {
 	GetRelevantQuestionsSchema,
 	GetSessionUpdatesInputSchema,
 	GetThoughtSpotPageInputSchema,
+	IFRAME_URL_DESCRIPTION,
+	IFRAME_URL_SHOW_ANSWER_DESCRIPTION,
 	MODEL_TOOL_NAMES,
 	ModifyDashboardInputSchema,
 	SearchObjectsInputSchema,
@@ -567,6 +569,13 @@ export class MCPServer extends BaseMCPServer {
 		}
 
 		if (this.isThoughtSpotUiAvailable()) {
+			// show_answer is the default way to show answers only on MCP Apps hosts, so
+			// only their get_session_updates points answers' iframe_url at it.
+			tools = tools.map((tool) =>
+				tool.name === ToolName.GetSessionUpdates
+					? withShowAnswerIframeUrlDescription(tool)
+					: tool,
+			);
 			tools.push(
 				showAnswerToolDefinition,
 				getThoughtSpotPageToolDefinition,
@@ -2609,4 +2618,17 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			);
 		}
 	}
+}
+
+/** Swap get_session_updates' iframe_url description for the show_answer one. */
+function withShowAnswerIframeUrlDescription<
+	T extends { outputSchema?: unknown },
+>(tool: T): T {
+	if (!tool.outputSchema) return tool;
+	const jsonEscape = (text: string) => JSON.stringify(text).slice(1, -1);
+	const schema = JSON.stringify(tool.outputSchema).replaceAll(
+		jsonEscape(IFRAME_URL_DESCRIPTION),
+		jsonEscape(IFRAME_URL_SHOW_ANSWER_DESCRIPTION),
+	);
+	return { ...tool, outputSchema: JSON.parse(schema) };
 }

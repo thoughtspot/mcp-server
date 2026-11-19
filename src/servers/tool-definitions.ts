@@ -360,7 +360,16 @@ export const GetSessionUpdatesInputSchema = z.object({
 		.describe("Identifier of the analytical session to get updates from."),
 });
 
-export const ConversationUpdateSchema = z.object({
+export const IFRAME_URL_DESCRIPTION =
+	"An embeddable URL for displaying the answer as an interactive visualization. Only present when `type` is `answer`, and only if embedded visualizations are enabled for this connection. If your environment supports iframes, you can use this URL as-is (do not modify it) to display an interactive chart or table. If your environment does not support iframes, you can modify the link (remove `?tsmcp=true` if present) and share it with the user to let them view the interactive visualization in a browser.";
+
+// For MCP Apps hosts (Claude, ChatGPT) that are offered show_answer, listTools swaps
+// IFRAME_URL_DESCRIPTION for this one so show_answer becomes the default way to show
+// answers there. Other clients keep the plain description and never hear of show_answer.
+export const IFRAME_URL_SHOW_ANSWER_DESCRIPTION =
+	"An embeddable URL for displaying the answer as an interactive visualization. Only present when `type` is `answer`, and only if embedded visualizations are enabled for this connection. Pass this URL verbatim to the show_answer tool as `iframe_url` to display the answer inline; that is the preferred way to show an answer. If show_answer fails, you can share the link (remove `?tsmcp=true` if present) with the user to let them view the interactive visualization in a browser.";
+
+const ConversationUpdateSchema = z.object({
 	type: z
 		.enum(["text", "text_chunk", "answer", "step_notification"])
 		.describe(
@@ -401,12 +410,7 @@ export const ConversationUpdateSchema = z.object({
 		.describe(
 			"The search query which the Analytics Agent used to generate the answer. Only present when `type` is `answer`. You can use this to explain to the user what data was queried, or to diagnose unexpected results.",
 		),
-	iframe_url: z
-		.string()
-		.optional()
-		.describe(
-			"An embeddable URL for displaying the answer as an interactive visualization. Only present when `type` is `answer`, and only if embedded visualizations are enabled for this connection. If the show_answer tool is available, pass this URL to it as `iframe_url` to display the answer inline; that is the preferred way to show an answer. Otherwise, if your environment supports iframes, you can use this URL as-is (do not modify it) to display an interactive chart or table. If your environment does not support iframes, you can modify the link (remove `?tsmcp=true` if present) and share it with the user to let them view the interactive visualization in a browser.",
-		),
+	iframe_url: z.string().optional().describe(IFRAME_URL_DESCRIPTION),
 });
 
 export const GetSessionUpdatesOutputSchema = z.object({
