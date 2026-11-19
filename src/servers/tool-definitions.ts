@@ -1,5 +1,9 @@
 import { z } from "zod";
 import { GET_DATA_SUPPORTED_TYPES } from "../services/clients/get-data/get-data-constants";
+import {
+	GET_FILE_DEFAULT_MAX_ROWS,
+	GET_FILE_MAX_ROWS_LIMIT,
+} from "../services/clients/get-file/conversation-file";
 
 export const PingSchema = z.object({});
 
@@ -246,6 +250,52 @@ export const GetDataInputSchema = z.object({
 		),
 });
 
+export const GetFileInputSchema = z.object({
+	file_id: z
+		.string()
+		.describe(
+			"The `file_id` of a `file` update returned by `get_session_updates`, passed verbatim.",
+		),
+	max_rows: z
+		.number()
+		.int()
+		.positive()
+		.max(GET_FILE_MAX_ROWS_LIMIT)
+		.optional()
+		.describe(
+			`CSV files only: the maximum number of rows to return. Defaults to ${GET_FILE_DEFAULT_MAX_ROWS}, at most ${GET_FILE_MAX_ROWS_LIMIT}. Raise this only when you need more of the file.`,
+		),
+});
+
+export const GetFileOutputSchema = z.object({
+	file_id: z.string().describe("The `file_id` that was requested."),
+	file_type: z
+		.string()
+		.describe("The file's type as a lower-case extension, e.g. `csv`."),
+	columns: z
+		.array(z.string())
+		.optional()
+		.describe("CSV files only: the column names, in order."),
+	data_rows: z
+		.array(z.array(z.string()))
+		.optional()
+		.describe(
+			"CSV files only: the data rows, each an array of cell values aligned to `columns`. Cells are the strings the file holds.",
+		),
+	total_row_count: z
+		.number()
+		.optional()
+		.describe(
+			"CSV files only: the number of rows in the whole file, which may exceed the rows returned when capped by `max_rows`.",
+		),
+	truncated: z
+		.boolean()
+		.optional()
+		.describe(
+			"CSV files only: true when the file has more rows than were returned.",
+		),
+});
+
 const GetDataVizSchema = z.object({
 	viz_id: z
 		.string()
@@ -357,9 +407,9 @@ export const GetSessionUpdatesInputSchema = z.object({
 
 export const ConversationUpdateSchema = z.object({
 	type: z
-		.enum(["text", "text_chunk", "answer", "step_notification"])
+		.enum(["text", "text_chunk", "answer", "step_notification", "file"])
 		.describe(
-			"The type of update: `text` or `text_chunk` for a natural language message from the Analytics Agent, `answer` for a query result, or `step_notification` to announce key progress steps which the Agent is working through. Determines which other fields are populated.",
+			"The type of update: `text` or `text_chunk` for a natural language message from the Analytics Agent, `answer` for a query result, `step_notification` to announce key progress steps which the Agent is working through, or `file` for a file the Agent produced (sent only when the `get_file` tool is available). Determines which other fields are populated.",
 		),
 	is_thinking: z
 		.boolean()
@@ -401,6 +451,30 @@ export const ConversationUpdateSchema = z.object({
 		.optional()
 		.describe(
 			"An embeddable URL for displaying the answer as an interactive visualization. Only present when `type` is `answer`, and only if embedded visualizations are enabled for this connection. If your environment supports iframes, you can use this URL as-is (do not modify it) to display an interactive chart or table. If your environment does not support iframes, you can modify the link (remove `?tsmcp=true` if present) and share it with the user to let them view the interactive visualization in a browser.",
+		),
+	file_id: z
+		.string()
+		.optional()
+		.describe(
+			"A unique identifier for the file. Only present when `type` is `file`. Pass it to `get_file` verbatim to read the file's contents.",
+		),
+	file_name: z
+		.string()
+		.optional()
+		.describe(
+			"The name of the file as the user sees it in ThoughtSpot. Only present when `type` is `file`.",
+		),
+	file_type: z
+		.string()
+		.optional()
+		.describe(
+			"The file's type as a lower-case extension, for example `csv` or `pdf`. Only present when `type` is `file`.",
+		),
+	file_download_url: z
+		.string()
+		.optional()
+		.describe(
+			"A link that downloads the file to the user's computer when opened in a browser where they are signed in to ThoughtSpot. Only present when `type` is `file`. When the user asks to download, save, or export the file, give them this link as is; do not call `get_file` for that. Tell the user about each file the Agent produced and offer this link.",
 		),
 });
 
@@ -661,6 +735,7 @@ export enum ToolName {
 	CheckConnectivity = "check_connectivity",
 	SearchObjects = "search_objects",
 	GetData = "get_data",
+	GetFile = "get_file",
 	CreateAnalysisSession = "create_analysis_session",
 	SendSessionMessage = "send_session_message",
 	GetSessionUpdates = "get_session_updates",
@@ -1277,6 +1352,29 @@ export const toolDefinitionsV5 = [
 	modifyDashboardToolDefinition,
 	getDashboardStatusToolDefinition,
 ];
+
+// The get_file tool (read a file the Analytics Agent produced). Gated behind the
+// data-download privilege at runtime in listTools/callGetFile, like get_data.
+const getFileToolDefinition = {
+	name: ToolName.GetFile,
+	description: [
+		"Read a file the Analytics Agent produced during an analytical session, such as a CSV of results. Files are announced by `get_session_updates` as updates of `type` `file`; pass that update's `file_id` verbatim.",
+		"Use this when the user asks what a file contains, or asks you to analyze, summarize, chart, or reuse its contents. This reads the file into the conversation; it does not save it to the user's computer. When the user wants the file itself (to download, save, or export it), give them the update's `file_download_url` instead of calling this tool.",
+		`A CSV file returns its \`columns\` and \`data_rows\` (up to \`max_rows\`, default ${GET_FILE_DEFAULT_MAX_ROWS}); \`total_row_count\` is the size of the whole file and \`truncated\` says whether rows were left out. A PDF or an image (PNG, JPEG) is returned as content of that type. Other file types are not supported.`,
+		"Files expire some time after they are produced. If the file has expired, ask the Analytics Agent to produce it again with `send_session_message`.",
+	].join("\n"),
+	inputSchema: z.toJSONSchema(GetFileInputSchema),
+	outputSchema: z.toJSONSchema(GetFileOutputSchema),
+	annotations: {
+		title: "Get File",
+		readOnlyHint: true,
+		destructiveHint: false,
+		openWorldHint: false,
+	},
+};
+
+// V6 — get_file (read files the Analytics Agent produces). Includes all V5 tools.
+export const toolDefinitionsV6 = [...toolDefinitionsV5, getFileToolDefinition];
 
 // CreateAnalysisSession has a slightly different contract for SpotterX
 export const createAnalysisSessionToolDefinitionSpotterX = {

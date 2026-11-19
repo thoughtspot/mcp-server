@@ -29,6 +29,10 @@ import {
 } from "../src/metrics/runtime/metrics-recorder";
 import { SpotterResponseFormat } from "../src/services/types";
 import {
+	buildFileId,
+	buildSpotter3FileDownloadUrl,
+	fileExtension,
+	parseFileId,
 	processSpotter3EventStream,
 	processSpotterXEventStream,
 } from "../src/streaming-utils";
@@ -45,6 +49,193 @@ function makeMockStorage() {
 
 const INSTANCE_URL = "https://test.thoughtspot.com";
 const CONV_ID = "conv-123";
+
+describe("file ids", () => {
+	it("round-trips a conversation id and file id", () => {
+		const fileId = buildFileId("conv-1", "report_20261119_SgGd.csv");
+		expect(parseFileId(fileId)).toEqual({
+			source: "spotter3",
+			conversationId: "conv-1",
+			tsFileId: "report_20261119_SgGd.csv",
+		});
+	});
+
+	it.each([
+		"not-json",
+		"{}",
+		'"report.csv"',
+		"null",
+		// No source, or one this server cannot fetch from.
+		JSON.stringify({ conversation_id: "conv-1", ts_file_id: "report.csv" }),
+		JSON.stringify({
+			source: "spotterx",
+			conversation_id: "c",
+			ts_file_id: "f",
+		}),
+		...[
+			{ conversation_id: "conv-1" },
+			{ conversation_id: "", ts_file_id: "report.csv" },
+			{ conversation_id: "conv-1", ts_file_id: 7 },
+			// Would resolve to another route.
+			{ conversation_id: "..", ts_file_id: "report.csv" },
+			{ conversation_id: ".", ts_file_id: "report.csv" },
+			{ conversation_id: "conv-1", ts_file_id: ".." },
+			{ conversation_id: "a/b", ts_file_id: "report.csv" },
+			{ conversation_id: "conv-1", ts_file_id: "..\\report.csv" },
+		].map((parts) => JSON.stringify({ source: "spotter3", ...parts })),
+	])("rejects %s", (fileId) => {
+		expect(parseFileId(fileId)).toBeUndefined();
+	});
+
+	it("builds a download URL with each id encoded as one path segment", () => {
+		expect(
+			buildSpotter3FileDownloadUrl(
+				"https://ts.example.com",
+				"conv/1",
+				"q3 revenue#1.csv",
+			),
+		).toBe(
+			"https://ts.example.com/conversation/v2/conv%2F1/download/q3%20revenue%231.csv",
+		);
+	});
+
+	it.each([
+		["report.csv", "csv"],
+		["Report.PDF", "pdf"],
+		["a.b.png", "png"],
+		["no-extension", ""],
+	])("reads the extension of %s as %j", (fileName, extension) => {
+		expect(fileExtension(fileName)).toBe(extension);
+	});
+});
+
+describe("processSpotter3EventStream file events", () => {
+	const fileEvent = {
+		id: "KjOhAjVxB2th",
+		type: "file",
+		group_id: "mCyEcbkDvf5P",
+		// A conversation id from the event is not trusted over the stream's own.
+		metadata: { conv_id: "another-conversation" },
+		files: [
+			{
+				ts_file_id: "load_time_20261119_082728_SgGd.csv",
+				display_name: "load\\_time.csv",
+				file_type: "csv",
+				created_at: "2026-11-19T08:27:28.422012+00:00",
+			},
+			{ ts_file_id: "Chart_Ab12.PDF" },
+			{ display_name: "no id.csv" },
+		],
+	};
+	const line = `data: ${JSON.stringify([fileEvent])}\n`;
+
+	beforeEach(() => {
+		vi.clearAllMocks();
+		tracingState.span = undefined;
+	});
+
+	it("drops a file event in the simplified format by default", async () => {
+		const storage = makeMockStorage();
+
+		await processSpotter3EventStream(
+			INSTANCE_URL,
+			SpotterResponseFormat.SIMPLIFIED,
+			CONV_ID,
+			makeReader([line]),
+			storage.appendMessages,
+		);
+
+		expect(storage.appendMessages).toHaveBeenCalledOnce();
+		expect(storage.appendMessages).toHaveBeenCalledWith(CONV_ID, [], true);
+		expect(tracingState.span?.setAttributes).toHaveBeenCalledWith(
+			expect.objectContaining({ total_messages_ignored: 1 }),
+		);
+	});
+
+	it("stores one file message per file when files are included", async () => {
+		const storage = makeMockStorage();
+		const recorder: MetricsRecorder = {
+			...NOOP_METRICS_RECORDER,
+			count: vi.fn(),
+		};
+
+		await processSpotter3EventStream(
+			INSTANCE_URL,
+			SpotterResponseFormat.SIMPLIFIED,
+			CONV_ID,
+			makeReader([line]),
+			storage.appendMessages,
+			recorder,
+			false,
+			true,
+		);
+
+		expect(storage.appendMessages).toHaveBeenCalledWith(CONV_ID, [
+			{
+				is_thinking: false,
+				type: "file",
+				file_id: buildFileId(CONV_ID, "load_time_20261119_082728_SgGd.csv"),
+				file_name: "load_time.csv",
+				file_type: "csv",
+				file_download_url: `${INSTANCE_URL}/conversation/v2/${CONV_ID}/download/load_time_20261119_082728_SgGd.csv`,
+			},
+			{
+				is_thinking: false,
+				type: "file",
+				file_id: buildFileId(CONV_ID, "Chart_Ab12.PDF"),
+				file_name: "Chart_Ab12.PDF",
+				file_type: "pdf",
+				file_download_url: `${INSTANCE_URL}/conversation/v2/${CONV_ID}/download/Chart_Ab12.PDF`,
+			},
+		]);
+		expect(recorder.count).toHaveBeenCalledWith(
+			METRIC_NAMES.upstreamStreamMessagesTotal,
+			1,
+			expect.objectContaining({ message_type: "file" }),
+		);
+		expect(tracingState.span?.setAttributes).toHaveBeenCalledWith(
+			expect.objectContaining({
+				total_messages_parsed: 2,
+				total_file_messages_parsed: 2,
+				// The entry with no ts_file_id.
+				total_messages_ignored: 1,
+			}),
+		);
+	});
+
+	it("ignores a file event with no files", async () => {
+		const storage = makeMockStorage();
+		const emptyLine = `data: ${JSON.stringify([{ type: "file" }])}\n`;
+
+		await processSpotter3EventStream(
+			INSTANCE_URL,
+			SpotterResponseFormat.SIMPLIFIED,
+			CONV_ID,
+			makeReader([emptyLine]),
+			storage.appendMessages,
+			undefined,
+			false,
+			true,
+		);
+
+		expect(storage.appendMessages).toHaveBeenCalledOnce();
+		expect(storage.appendMessages).toHaveBeenCalledWith(CONV_ID, [], true);
+	});
+
+	it("passes a file event through unchanged in the raw format", async () => {
+		const storage = makeMockStorage();
+
+		await processSpotter3EventStream(
+			INSTANCE_URL,
+			SpotterResponseFormat.RAW,
+			CONV_ID,
+			makeReader([line]),
+			storage.appendMessages,
+		);
+
+		expect(storage.appendMessages).toHaveBeenCalledWith(CONV_ID, [fileEvent]);
+	});
+});
 
 describe("processSpotter3EventStream", () => {
 	let consoleWarnSpy: ReturnType<typeof vi.spyOn>;

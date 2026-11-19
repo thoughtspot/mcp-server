@@ -30,6 +30,7 @@ export const UPSTREAM_OPERATION_NAMES = {
 	listOrgs: "list_orgs",
 	fetchOrgBearerToken: "fetch_org_bearer_token",
 	getData: "get_data",
+	downloadConversationFile: "download_conversation_file",
 } as const;
 
 export type UpstreamOperation =
@@ -41,6 +42,7 @@ export type UpstreamStreamMessageType =
 	| "text_chunk"
 	| "answer"
 	| "step_notification"
+	| "file"
 	| "error"
 	| "raw_untyped";
 

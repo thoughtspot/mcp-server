@@ -4,6 +4,7 @@ import {
 	toolDefinitionsV3,
 	toolDefinitionsV4,
 	toolDefinitionsV5,
+	toolDefinitionsV6,
 } from "./tool-definitions";
 
 export const YYYY_MM_DD_DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
@@ -61,8 +62,10 @@ export function getReleaseDateIdentifier(
  */
 export const VERSION_REGISTRY: VersionConfig[] = [
 	{
+		// get_file (read files the Analytics Agent produces) is in beta only until
+		// it has a release date.
 		version: ["beta"],
-		tools: [...toolDefinitionsV5],
+		tools: [...toolDefinitionsV6],
 		description: "Beta version",
 	},
 	{
