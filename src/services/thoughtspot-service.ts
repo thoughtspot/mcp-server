@@ -45,6 +45,7 @@ import type {
 	Answer,
 	DataSource,
 	DataSourceSuggestion,
+	LiveboardContext,
 	Message,
 	RawMessage,
 	SessionInfo,
@@ -456,7 +457,6 @@ export class ThoughtSpotService {
 		isSpotterDataSourceDiscoveryEnabled: boolean,
 		isSpotterChatHistoryEnabled: boolean,
 		dataSourceId?: string,
-		liveboardId?: string,
 	): Promise<AgentConversation> {
 		const span = trace.getSpan(context.active());
 		span?.setAttribute("data_source_id", dataSourceId ?? "(none)");
@@ -473,7 +473,6 @@ export class ThoughtSpotService {
 						orgId: this.client.orgId,
 						userId: this.client.userId,
 						dataSourceId,
-						liveboardId,
 					}),
 			);
 
@@ -509,11 +508,13 @@ export class ThoughtSpotService {
 		) => Promise<void>,
 		additionalContext?: string | undefined,
 		suppressIframes = false,
+		liveboardContext?: LiveboardContext,
 	): Promise<void> {
 		const span = trace.getSpan(context.active());
 		span?.setAttributes({
 			conversation_id: conversationId,
 			has_additional_context: !!additionalContext,
+			liveboard_id: liveboardContext?.liveboardId ?? "(none)",
 		});
 
 		try {
@@ -532,6 +533,7 @@ export class ThoughtSpotService {
 						userId: this.client.userId,
 						conversationId,
 						message: finalMessage,
+						liveboardContext,
 					});
 					const reader = response.body?.getReader();
 					if (!reader) {

@@ -115,26 +115,6 @@ describe("spotter-x-client", () => {
 			expect(result).toEqual({ conversation_id: "session-456" });
 		});
 
-		it("should scope the conversation to a liveboard when one is provided", async () => {
-			(fetch as any).mockResolvedValue({
-				ok: true,
-				json: vi.fn().mockResolvedValue({ session: { id: "session-lb" } }),
-			});
-
-			const result = await client.createSpotterXConversation({
-				isSpotterDataSourceDiscoveryEnabled: false,
-				isSpotterChatHistoryEnabled: false,
-				liveboardId: "lb-123",
-				...identity,
-			});
-
-			const body = JSON.parse((fetch as any).mock.calls[0][1].body);
-			expect(body.object_type).toBe("liveboard");
-			expect(body.object_id).toBe("lb-123");
-			expect(body).not.toHaveProperty("context");
-			expect(result).toEqual({ conversation_id: "session-lb" });
-		});
-
 		it("should include correct identity and settings in the request body", async () => {
 			(fetch as any).mockResolvedValue({
 				ok: true,
@@ -286,12 +266,34 @@ describe("spotter-x-client", () => {
 				enabled_connectors: [],
 				extra_headers: {
 					map: {
-						"x-ba-ts-host": mockInstanceUrl,
+						"x-ba-ts-host": "test.thoughtspot.com",
 					},
 				},
 			});
 
 			expect(result).toEqual(mockResponse);
+		});
+
+		it("should include the liveboard BACH session as context when provided", async () => {
+			(fetch as any).mockResolvedValue({ ok: true });
+
+			await client.sendSpotterXMessageStreaming({
+				conversationId: "foo",
+				message: "bar",
+				liveboardContext: {
+					liveboardId: "lb-123",
+					bachSession: { transactionId: "txn-1", generationNumber: "3" },
+				},
+				...identity,
+			});
+
+			const body = JSON.parse((fetch as any).mock.calls[0][1].body);
+			expect(body.context_delta).toEqual({
+				liveboard_in_context: true,
+				liveboard_bach_session_map: {
+					"lb-123": { sessionId: "txn-1", genNo: 3, answer_map: {} },
+				},
+			});
 		});
 
 		it("should encode the conversation identifier in the URL", async () => {

@@ -306,16 +306,6 @@ export const CreateAnalysisSessionSpotter3InputSchema = z.object({
 		),
 });
 
-export const CreateAnalysisSessionSpotterXInputSchema =
-	CreateAnalysisSessionSpotter3InputSchema.extend({
-		dashboard_id: z
-			.string()
-			.optional()
-			.describe(
-				'The ID of the dashboard to ask questions about. You can provide this when the user has specified or confirmed a dashboard, or when context makes a particular dashboard obvious. You can find dashboards with the `search_objects` tool. A valid ID follows the following format: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" (for example, "de1b3cfd-1725-400a-b6c7-0cd0f2b70bf1"). If you only have the dashboard name but not the ID, you can search for it using the `search_objects` tool.',
-			),
-	});
-
 export const CreateAnalysisSessionOutputSchema = z.object({
 	analytical_session_id: z
 		.string()
@@ -340,6 +330,16 @@ export const SendSessionMessageInputSchema = z.object({
 			'Extra information which the Analytics Agent should be aware of while interpreting the `message`. You can use this field to provide background or external information relevant to the request, which the Agent would not be aware of. For example, "The user\'s fiscal year starts in April", or "The user is a manager of the West region".',
 		),
 });
+
+export const SendSessionMessageSpotterXInputSchema =
+	SendSessionMessageInputSchema.extend({
+		dashboard_id: z
+			.string()
+			.optional()
+			.describe(
+				'The ID of a dashboard to ask questions about in this message. You can provide this when the user has specified or confirmed a dashboard, or when context makes a particular dashboard obvious. A valid ID follows the following format: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" (for example, "de1b3cfd-1725-400a-b6c7-0cd0f2b70bf1"). If you only have the dashboard name but not the ID, you can search for it using the `search_objects` tool.',
+			),
+	});
 
 export const SendSessionMessageOutputSchema = z.object({
 	success: z
@@ -1278,15 +1278,15 @@ export const toolDefinitionsV5 = [
 	getDashboardStatusToolDefinition,
 ];
 
-// CreateAnalysisSession has a slightly different contract for SpotterX
-export const createAnalysisSessionToolDefinitionSpotterX = {
-	name: ToolName.CreateAnalysisSession,
+// SendSessionMessage has a slightly different contract for SpotterX
+export const sendSessionMessageToolDefinitionSpotterX = {
+	name: ToolName.SendSessionMessage,
 	description:
-		"Start an analytical session with the Analytics Agent. This is the first step in a three-step workflow: create a session, send a message, then poll for updates. Once created, you can use the returned `analytical_session_id` to send analytical questions via `send_session_message` and retrieve answers via `get_session_updates`. Sessions are conversational, so you can ask follow-up questions in the same session without creating a new one. Using a single analytical session is preferable, because it reuses the same data source selection. You can also create an analysis session in the context of a dashboard or visualization within a dashboard, to ask questions about that content. When the user's intent is to create a dashboard, use the first message in this session to plan: ask the Analytics Agent what data and metrics are available for the topic, what trends or breakdowns would be most meaningful, and what chart types best fit the data. Use the Agent's response to form a dashboard plan before requesting any specific charts.",
-	inputSchema: z.toJSONSchema(CreateAnalysisSessionSpotterXInputSchema),
-	outputSchema: z.toJSONSchema(CreateAnalysisSessionOutputSchema),
+		"Send a message to a session with the Analytics Agent. The Agent may take some time to think and generate a response, so the response will not be returned immediately. Instead, you can use the `get_session_updates` tool to query for the latest updates on the session. After the Agent finishes responding (when `get_session_updates` returns `is_done: true`), you can send another message to the same session to ask follow-up questions without creating a new session. Do not send a new message until the Agent has finished responding to the previous message (when `get_session_updates` returns `is_done: true`). You can also send a message in the context of a dashboard by providing `dashboard_id`, to ask questions about that dashboard or a visualization within it. If sending followup messages, include the same `dashboard_id` for subsequent requests. If the user wants to create a dashboard, do not send a message with that request; instead use the `create_dashboard` tool.",
+	inputSchema: z.toJSONSchema(SendSessionMessageSpotterXInputSchema),
+	outputSchema: z.toJSONSchema(SendSessionMessageOutputSchema),
 	annotations: {
-		title: "Create Analysis Session",
+		title: "Send Analysis Session Message",
 		readOnlyHint: true,
 		destructiveHint: false,
 		openWorldHint: false,

@@ -60,9 +60,9 @@ import { UPSTREAM_CALL_TIMEOUT_MS, withTimeout } from "../spotterviz/timeouts";
 import type { StorageServiceClient } from "../storage-service/storage-service";
 import { McpServerError } from "../utils";
 import { BaseMCPServer, type Context } from "./mcp-server-base";
+import { getOrCreateLiveboardBachSession } from "./spotter-chat-utils";
 import {
 	CreateAnalysisSessionSpotter3InputSchema,
-	CreateAnalysisSessionSpotterXInputSchema,
 	CreateDashboardInputSchema,
 	CreateDashboardLegacyInputSchema,
 	CreateLiveboardSchema,
@@ -82,9 +82,10 @@ import {
 	SearchObjectsInputSchema,
 	SendModelMessageInputSchema,
 	SendSessionMessageInputSchema,
+	SendSessionMessageSpotterXInputSchema,
 	SwitchOrgInputSchema,
 	ToolName,
-	createAnalysisSessionToolDefinitionSpotterX,
+	sendSessionMessageToolDefinitionSpotterX,
 } from "./tool-definitions";
 import { recordGetDataFailure } from "./upstream-error-utils";
 import {
@@ -459,16 +460,16 @@ export class MCPServer extends BaseMCPServer {
 		let tools = [...versionConfig.tools];
 
 		// If the cluster is using SpotterX and all required flags are enabled, then replace the
-		// Spotter 3 CreateAnalysisSession tool with the SpotterX version
+		// Spotter 3 SendSessionMessage tool with the SpotterX version
 		if (versionConfig.version.includes("beta") && this.isSpotterXEnabled()) {
 			const toolIdxToReplace = tools.findIndex(
-				(tool) => tool.name === ToolName.CreateAnalysisSession,
+				(tool) => tool.name === ToolName.SendSessionMessage,
 			);
 			if (toolIdxToReplace !== -1) {
 				tools.splice(
 					toolIdxToReplace,
 					1,
-					createAnalysisSessionToolDefinitionSpotterX,
+					sendSessionMessageToolDefinitionSpotterX,
 				);
 			}
 		}
@@ -901,21 +902,14 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		recorder: MetricsRecorder,
 	) {
 		const span = trace.getSpan(context.active());
-		const { data_source_id, dashboard_id } =
-			CreateAnalysisSessionSpotterXInputSchema.parse(request.params.arguments);
+		const { data_source_id } = CreateAnalysisSessionSpotter3InputSchema.parse(
+			request.params.arguments,
+		);
 		span?.setAttribute("data_source_id", data_source_id ?? "(none)");
-		span?.setAttribute("dashboard_id", dashboard_id ?? "(none)");
 
-		if (
-			!data_source_id &&
-			!dashboard_id &&
-			!this.isSpotterDataSourceDiscoveryEnabled()
-		) {
-			return this.createErrorResponse(
-				"This ThoughtSpot instance does not select a data source automatically, so either `data_source_id` or `dashboard_id` is required. Find data sources or dashboards using `search_objects` tool.",
-				"Create analysis session rejected: no data_source_id/dashboard_id and data source discovery is disabled",
-			);
-		}
+		// No data source or auto mode check here unlike Spotter 3. This is because in SpotterX we
+		// may be creating a session to chat about a liveboard, and dashboard_id is only passed
+		// later via send_session_message.
 
 		let response: AgentConversation;
 		try {
@@ -925,7 +919,6 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 				this.isSpotterDataSourceDiscoveryEnabled(),
 				this.isSpotterChatHistoryEnabled(),
 				data_source_id,
-				dashboard_id,
 			);
 		} catch (error) {
 			if (this.apiErrorStatus(error) !== 401) {
@@ -971,6 +964,7 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		);
 		span?.setAttribute("data_source_id", data_source_id ?? "(none)");
 
+		// A data source is required if auto mode is not available on the cluster
 		if (!data_source_id && !this.isSpotterDataSourceDiscoveryEnabled()) {
 			return this.createErrorResponse(
 				"This ThoughtSpot instance does not select a data source automatically, so `data_source_id` is required. Find data sources using `search_objects` tool.",
@@ -1016,14 +1010,15 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		recorder: MetricsRecorder = NOOP_METRICS_RECORDER,
 	) {
 		const span = trace.getSpan(context.active());
-		const { analytical_session_id, message, additional_context } =
-			SendSessionMessageInputSchema.parse(request.params.arguments);
+		const { analytical_session_id, message, additional_context, dashboard_id } =
+			SendSessionMessageSpotterXInputSchema.parse(request.params.arguments);
 		recorder.setAnalyticsContext({
 			analyticalSessionId: analytical_session_id,
 		});
 		span?.setAttributes({
 			analytical_session_id,
 			has_additional_context: !!additional_context,
+			dashboard_id: dashboard_id ?? "(none)",
 		});
 
 		const storageService = await this.getStorageService();
@@ -1041,9 +1036,22 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		}
 
 		try {
-			await this.getThoughtSpotService(recorder, {
+			const thoughtSpotService = this.getThoughtSpotService(recorder, {
 				analyticalSessionId: analytical_session_id,
-			}).sendSpotterXMessageStreaming(
+			});
+			const liveboardContext = dashboard_id
+				? {
+						liveboardId: dashboard_id,
+						bachSession: await getOrCreateLiveboardBachSession(
+							storageService,
+							thoughtSpotService,
+							analytical_session_id,
+							dashboard_id,
+						),
+					}
+				: undefined;
+
+			await thoughtSpotService.sendSpotterXMessageStreaming(
 				analytical_session_id,
 				message,
 				this.ctx.props.enableRawSessionUpdates
@@ -1052,6 +1060,7 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 				storageService.appendMessages.bind(storageService),
 				additional_context,
 				!!this.ctx.props.suppressIframes,
+				liveboardContext,
 			);
 		} catch (error) {
 			console.error("Error sending message to SpotterX conversation:", error);
