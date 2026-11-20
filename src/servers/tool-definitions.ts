@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { answerWidgetToolMeta } from "../apps/answer-widget";
+import { directFrameToolMeta } from "../apps/direct-frame-widget";
 import {
 	API_RELAY_METHODS,
 	THOUGHTSPOT_UI_WIDGET_URI,
@@ -692,6 +693,9 @@ export enum ToolName {
 	ShowAnswer = "show_answer",
 	GetThoughtSpotPage = "get_thoughtspot_page",
 	ThoughtSpotApiRequest = "thoughtspot_api_request",
+	// Approach C2 prototype: frame the cluster directly (off unless the
+	// `direct-frame=true` URL flag is set)
+	ShowAnswerFrame = "show_answer_frame",
 }
 
 /**
@@ -1475,4 +1479,24 @@ export const thoughtSpotApiRequestToolDefinition = {
 		openWorldHint: false,
 	},
 	_meta: { ui: { visibility: ["app"] } },
+};
+
+// ── Approach C2 prototype: cluster framed directly ─────────────────────────
+export const ShowAnswerFrameOutputSchema = z.object({
+	frame_url: z.string().describe("The ThoughtSpot URL framed in the widget."),
+});
+
+export const showAnswerFrameToolDefinition = {
+	name: ToolName.ShowAnswerFrame,
+	description:
+		'Prototype: show an Analytics Agent answer, or any ThoughtSpot page, inline by framing the ThoughtSpot instance directly. Pass the answer\'s `iframe_url` from get_session_updates verbatim, or a route such as "#/pinboard/<liveboard id>". Use it only when asked to test the direct frame; otherwise prefer show_answer. The result only confirms which URL was framed.',
+	inputSchema: z.toJSONSchema(ShowAnswerInputSchema),
+	outputSchema: z.toJSONSchema(ShowAnswerFrameOutputSchema),
+	annotations: {
+		title: "Show ThoughtSpot (direct frame)",
+		readOnlyHint: true,
+		destructiveHint: false,
+		openWorldHint: false,
+	},
+	_meta: directFrameToolMeta(),
 };

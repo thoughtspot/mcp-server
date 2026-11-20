@@ -42,6 +42,10 @@ export type Props = {
 	// the hosted chart iframe (*.pdom.thoughtspot.com) through the resource CSP's
 	// frameDomains. Gives the page frame allow-same-origin.
 	enableDirectChartIframe?: boolean;
+	// Approach C2 prototype. Undocumented `direct-frame=true` URL flag (see
+	// index.ts): offer show_answer_frame, which frames the cluster directly
+	// (frameDomains) with no token.
+	enableDirectFrameWidget?: boolean;
 };
 
 const DEFAULT_CLIENT_NAME = "Bearer Token client";
