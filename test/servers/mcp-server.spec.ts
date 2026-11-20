@@ -1878,6 +1878,109 @@ describe("MCP Server", () => {
 		});
 	});
 
+	describe("Approach C2 prototype: direct frame (direct-frame URL flag)", () => {
+		const mcpAppsCapabilities = {
+			extensions: {
+				"io.modelcontextprotocol/ui": {
+					mimeTypes: ["text/html;profile=mcp-app"],
+				},
+			},
+		};
+		const supportMcpApps = () =>
+			vi
+				.spyOn(server, "getClientCapabilities")
+				.mockReturnValue(mcpAppsCapabilities as any);
+
+		it("is off by default", async () => {
+			supportMcpApps();
+			await server.init();
+			const { listTools } = connect(server);
+
+			const names = (await listTools()).tools.map((t) => t.name);
+			expect(names).not.toContain("show_answer_frame");
+		});
+
+		describe("when on", () => {
+			beforeEach(() => {
+				mockProps.enableDirectFrameWidget = true;
+			});
+
+			it("hides the tool from clients without MCP Apps support", async () => {
+				await server.init();
+				const { listTools } = connect(server);
+
+				const names = (await listTools()).tools.map((t) => t.name);
+				expect(names).not.toContain("show_answer_frame");
+			});
+
+			describe("for an MCP Apps client", () => {
+				beforeEach(() => {
+					supportMcpApps();
+				});
+
+				it("lists show_answer_frame linked to the widget", async () => {
+					await server.init();
+					const { listTools } = connect(server);
+
+					const { tools } = await listTools();
+					const tool = tools.find((t) => t.name === "show_answer_frame") as any;
+					expect(tool._meta.ui.resourceUri).toBe(
+						"ui://thoughtspot/direct-frame.html",
+					);
+				});
+
+				it("serves the widget with only the cluster as a frame domain", async () => {
+					await server.init();
+
+					const result = await server.readResource({
+						method: "resources/read",
+						params: { uri: "ui://thoughtspot/direct-frame.html" },
+					});
+					const [content] = result.contents as any[];
+					expect(content.mimeType).toBe("text/html;profile=mcp-app");
+					expect(content._meta.ui.csp).toEqual({
+						frameDomains: ["https://test.thoughtspot.cloud"],
+					});
+				});
+
+				it("frames an answer iframe_url as is", async () => {
+					await server.init();
+					const { callTool } = connect(server);
+					const iframeUrl =
+						"https://test.thoughtspot.cloud/?tsmcp=true#/embed/conv-assist-answer?sessionId=s";
+
+					const result = await callTool("show_answer_frame", {
+						iframe_url: iframeUrl,
+					});
+
+					expect(result.structuredContent).toEqual({ frame_url: iframeUrl });
+				});
+
+				it("opens home with no target", async () => {
+					await server.init();
+					const { callTool } = connect(server);
+
+					const result = await callTool("show_answer_frame", {});
+
+					expect(result.structuredContent).toEqual({
+						frame_url: "https://test.thoughtspot.cloud/#/home",
+					});
+				});
+
+				it("rejects URLs off the instance", async () => {
+					await server.init();
+					const { callTool } = connect(server);
+
+					const result = await callTool("show_answer_frame", {
+						iframe_url: "https://evil.example.com/#/home",
+					});
+
+					expect(result.isError).toBe(true);
+				});
+			});
+		});
+	});
+
 	describe("MCP Apps ThoughtSpot UI widget (thoughtspot-ui URL flag)", () => {
 		const indexHtml =
 			"<!DOCTYPE html><html><head><script>var blink = {};</script></head><body></body></html>";
