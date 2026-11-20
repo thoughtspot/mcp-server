@@ -48,3 +48,15 @@ describe("embed-sdk-widget (approach B prototype)", () => {
 		});
 	});
 });
+
+describe("embed-sdk-widget script", () => {
+	it("parses as JavaScript", () => {
+		const scripts = [
+			...EMBED_SDK_WIDGET_HTML.matchAll(/<script>([\s\S]*?)<\/script>/g),
+		].map((m) => m[1]);
+		expect(scripts).toHaveLength(1);
+		for (const body of scripts) {
+			expect(() => new Function(body)).not.toThrow();
+		}
+	});
+});

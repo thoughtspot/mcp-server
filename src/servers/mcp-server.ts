@@ -2278,7 +2278,9 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			const token = await withTimeout(
 				fetchOrgToken({
 					instanceUrl: this.ctx.props.instanceUrl,
-					bearerToken: this.getActiveToken(),
+					// Mint with the global token, as switch_org does: the org mint
+					// endpoint is only known to accept the cluster-wide token.
+					bearerToken: await this.initGlobalTokenAndReconcileWithStorage(),
 					orgId,
 					validityTimeInSec: EMBED_TOKEN_VALIDITY_SEC,
 				}),
