@@ -44,20 +44,51 @@ export function parseAnswerIds(
 }
 
 /**
- * The conversation ids in an `answer_id`, which outlive its session ids and let the answer be
- * loaded again. Undefined for an `answer_id` without them (issued before they were added).
+ * What an `answer_id` carries for loading the answer again once its session ids expire.
+ * Spotter 3 answers reload through their conversation message; SpotterX answers (which
+ * have no message id) are rebuilt from the recipe stored under their conversation.
+ */
+export type AnswerReloadIds =
+	| { kind: "spotter3"; conversationId: string; messageId: string }
+	| {
+			kind: "spotterx";
+			conversationId: string;
+			sessionId: string;
+			genNo: number;
+	  };
+
+/**
+ * The ids in an `answer_id` that let the answer be loaded again. Undefined for an
+ * `answer_id` without them (issued before they were added).
  */
 export function parseAnswerReloadIds(
 	answerId: string,
-): { conversationId: string; messageId: string } | undefined {
+): AnswerReloadIds | undefined {
 	try {
-		const { conversation_id, message_id } = JSON.parse(answerId);
-		return typeof conversation_id === "string" && typeof message_id === "string"
-			? { conversationId: conversation_id, messageId: message_id }
-			: undefined;
+		const { conversation_id, message_id, session_id, gen_no } =
+			JSON.parse(answerId);
+		if (typeof conversation_id === "string") {
+			if (typeof message_id === "string") {
+				return {
+					kind: "spotter3",
+					conversationId: conversation_id,
+					messageId: message_id,
+				};
+			}
+			if (typeof session_id === "string" && typeof gen_no === "number") {
+				return {
+					kind: "spotterx",
+					conversationId: conversation_id,
+					sessionId: session_id,
+					genNo: gen_no,
+				};
+			}
+		}
 	} catch {
-		return undefined;
+		// Logged below with the other unparseable formats
 	}
+	console.error("Could not parse answer reload ids from answer_id:", answerId);
+	return undefined;
 }
 
 export function invalidAnswerIdResult(

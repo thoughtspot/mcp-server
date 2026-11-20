@@ -17,6 +17,7 @@ import {
 	recordUpstreamStreamStartedMetric,
 } from "../metrics/runtime/tool-metrics";
 import { WithSpan, getActiveSpan } from "../metrics/tracing/tracing-utils";
+import type { AnswerReloadIds } from "../spotterviz/dashboard-tools";
 import {
 	processSpotter3EventStream,
 	processSpotterXEventStream,
@@ -1065,21 +1066,58 @@ export class ThoughtSpotService {
 	}
 
 	/**
-	 * Load an Analytics Agent answer again through its conversation, for fresh
-	 * session/generation ids once the original ones have expired. Re-runs the query.
+	 * Load an Analytics Agent answer again, for fresh session/generation ids once the
+	 * original ones have expired. Re-runs the query. Spotter 3 answers load through their
+	 * conversation message; SpotterX answers are rebuilt from their stored recipe.
 	 */
 	@WithSpan("reload-spotter-answer")
-	async reloadSpotterAnswer(params: {
-		conversationId: string;
-		messageId: string;
-	}): Promise<{ sessionIdentifier: string; generationNumber: number }> {
-		getActiveSpan()?.setAttributes({
-			conversation_id: params.conversationId,
-			message_id: params.messageId,
+	async reloadSpotterAnswer(
+		reload: AnswerReloadIds,
+	): Promise<{ sessionIdentifier: string; generationNumber: number }> {
+		const span = getActiveSpan();
+		span?.setAttributes({
+			reload_kind: reload.kind,
+			conversation_id: reload.conversationId,
 		});
-		return this.observeUpstreamCall(
-			UPSTREAM_OPERATION_NAMES.loadAgentConversationAnswer,
-			() => this.client.loadSpotter3Answer(params),
+		if (reload.kind === "spotter3") {
+			span?.setAttribute("message_id", reload.messageId);
+			return this.observeUpstreamCall(
+				UPSTREAM_OPERATION_NAMES.loadAgentConversationAnswer,
+				() =>
+					this.client.loadSpotter3Answer({
+						conversationId: reload.conversationId,
+						messageId: reload.messageId,
+					}),
+			);
+		}
+
+		if (reload.kind === "spotterx") {
+			span?.setAttributes({
+				session_identifier: reload.sessionId,
+				generation_number: reload.genNo,
+			});
+			const recipeText = await this.observeUpstreamCall(
+				UPSTREAM_OPERATION_NAMES.fetchAgentArtifact,
+				() =>
+					this.client.fetchSpotterXArtifact({
+						tenantId: this.client.tenantId,
+						orgId: this.client.orgId,
+						userId: this.client.userId,
+						conversationId: reload.conversationId,
+						filename: `recipe-${reload.sessionId}-${reload.genNo}-json`,
+						category: "ASSETS",
+					}),
+			);
+			// Forwarded as is; the recipe is not reshaped
+			return this.observeUpstreamCall(
+				UPSTREAM_OPERATION_NAMES.remintAgentAnswer,
+				() =>
+					this.client.remintSpotterXAnswer({ recipe: JSON.parse(recipeText) }),
+			);
+		}
+
+		throw new Error(
+			`Unknown answer reload kind: ${(reload as { kind: string }).kind}`,
 		);
 	}
 

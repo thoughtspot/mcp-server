@@ -97,6 +97,13 @@ describe("MCP Server", () => {
 				sessionIdentifier: "session-fresh",
 				generationNumber: 5,
 			}),
+			fetchSpotterXArtifact: vi
+				.fn()
+				.mockResolvedValue('{"recipe_version":"recipe.v1"}'),
+			remintSpotterXAnswer: vi.fn().mockResolvedValue({
+				sessionIdentifier: "session-reminted",
+				generationNumber: 7,
+			}),
 			exportUnsavedAnswerTML: vi.fn().mockResolvedValue({
 				answer: {
 					name: "Test Answer",
@@ -1111,6 +1118,101 @@ describe("MCP Server", () => {
 					code: SpanStatusCode.ERROR,
 					message:
 						"get_data (ANALYTICS_AGENT_ANSWER) upstream error (status 404)",
+				});
+			});
+
+			describe("SpotterX", () => {
+				const spotterXAnswerId = JSON.stringify({
+					session_id: "session-9",
+					gen_no: 3,
+					conversation_id: "cx-conv-1",
+				});
+
+				it("remints the answer from its stored recipe and retries the export", async () => {
+					mockClient()
+						.exportAnswerReport.mockRejectedValueOnce(
+							new ThoughtSpotApiError(400, "exportAnswerReport"),
+						)
+						.mockResolvedValueOnce({
+							text: vi.fn().mockResolvedValue("Region,Revenue\nEast,100\n"),
+						});
+					await server.init();
+					const { callTool } = connect(server);
+
+					const result = await callTool("get_data", {
+						object_id: spotterXAnswerId,
+						object_type: "ANALYTICS_AGENT_ANSWER",
+					});
+
+					expect(result.isError).toBeUndefined();
+					expect(mockClient().loadSpotter3Answer).not.toHaveBeenCalled();
+					expect(mockClient().fetchSpotterXArtifact).toHaveBeenCalledWith(
+						expect.objectContaining({
+							conversationId: "cx-conv-1",
+							filename: "recipe-session-9-3-json",
+							category: "ASSETS",
+						}),
+					);
+					expect(mockClient().remintSpotterXAnswer).toHaveBeenCalledWith({
+						recipe: { recipe_version: "recipe.v1" },
+					});
+					expect(mockClient().exportAnswerReport).toHaveBeenLastCalledWith({
+						session_identifier: "session-reminted",
+						generation_number: 7,
+						file_format: "CSV",
+					});
+					expect(result.structuredContent).toMatchObject({
+						data: [
+							{ columns: ["Region", "Revenue"], data_rows: [["East", "100"]] },
+						],
+					});
+				});
+
+				it("asks to re-ask when the answer has no stored recipe", async () => {
+					mockClient().exportAnswerReport.mockRejectedValueOnce(
+						new ThoughtSpotApiError(400, "exportAnswerReport"),
+					);
+					mockClient().fetchSpotterXArtifact.mockRejectedValueOnce(
+						new ThoughtSpotApiError(404, "fetchSpotterXArtifact"),
+					);
+					await server.init();
+					const { callTool } = connect(server);
+
+					const result = await callTool("get_data", {
+						object_id: spotterXAnswerId,
+						object_type: "ANALYTICS_AGENT_ANSWER",
+					});
+
+					expect(result.isError).toBe(true);
+					expect(mockClient().remintSpotterXAnswer).not.toHaveBeenCalled();
+					expect((result.content as any[])[0].text).toMatch(
+						/ask the Analytics Agent the question again/,
+					);
+				});
+
+				it("says so when the user lost access to the data model", async () => {
+					mockClient().exportAnswerReport.mockRejectedValueOnce(
+						new ThoughtSpotApiError(400, "exportAnswerReport"),
+					);
+					mockClient().remintSpotterXAnswer.mockRejectedValueOnce(
+						new ThoughtSpotApiError(
+							400,
+							"remintSpotterXAnswer",
+							JSON.stringify({ error_code: "WORKSHEET_NOT_FOUND" }),
+						),
+					);
+					await server.init();
+					const { callTool } = connect(server);
+
+					const result = await callTool("get_data", {
+						object_id: spotterXAnswerId,
+						object_type: "ANALYTICS_AGENT_ANSWER",
+					});
+
+					expect(result.isError).toBe(true);
+					const text = (result.content as any[])[0].text;
+					expect(text).toMatch(/no longer have access to the data model/);
+					expect(text).not.toMatch(/may have expired/);
 				});
 			});
 		});

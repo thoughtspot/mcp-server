@@ -143,3 +143,108 @@ export async function sendSpotterXMessageStreaming(
 
 	return response;
 }
+
+// Artifact namespaces addressable through the agents gateway. The server takes the enum
+// name, and an unspecified category silently resolves to FILES, so it is always sent
+export type SpotterXArtifactCategory = "FILES" | "ASSETS";
+
+/*
+ * Fetch the content of a SpotterX session artifact as text. Artifacts are addressed by
+ * session id alone, not under the /agents/spotterx prefix. The gateway answers either with
+ * the raw bytes or with a JSON envelope whose `data` (or `data_b64`) is base64.
+ */
+export async function fetchSpotterXArtifact(
+	ctx: ClientContext,
+	{
+		tenantId,
+		orgId,
+		userId,
+		conversationId,
+		filename,
+		category,
+	}: {
+		tenantId: string;
+		orgId: string;
+		userId: string;
+		conversationId: string;
+		filename: string;
+		category: SpotterXArtifactCategory;
+	},
+): Promise<string> {
+	const endpoint = `/agents/v1/sessions/${encodeURIComponent(conversationId)}/artifacts/${encodeURIComponent(filename)}?category=${category}`;
+	const response = await fetchApi(
+		ctx,
+		endpoint,
+		spotterXRequestOptions(tenantId, orgId, userId),
+	);
+
+	if (!response.ok) {
+		const errorText = await response.text();
+		throw new ThoughtSpotApiError(
+			response.status,
+			"fetchSpotterXArtifact",
+			errorText,
+		);
+	}
+
+	if (!response.headers.get("content-type")?.includes("application/json")) {
+		return await response.text();
+	}
+	const envelope = (await response.json()) as {
+		data?: string;
+		data_b64?: string;
+	};
+	const base64 = envelope.data_b64 ?? envelope.data;
+	if (!base64) {
+		throw new Error(`SpotterX artifact ${filename} has no content`);
+	}
+	return Buffer.from(base64, "base64").toString("utf8");
+}
+
+/*
+ * Rebuild an expired SpotterX answer from its stored recipe (see fetchSpotterXArtifact).
+ * Re-runs the query and returns fresh session/generation ids. On failure, the body's
+ * `error_code` is WORKSHEET_NOT_FOUND when the user lost access to the data model.
+ */
+export async function remintSpotterXAnswer(
+	ctx: ClientContext,
+	{ recipe }: { recipe: unknown },
+): Promise<{ sessionIdentifier: string; generationNumber: number }> {
+	const response = await fetchApi(ctx, "/conversation/v2/answer/remint", {
+		headers: { "x-requested-by": "ThoughtSpot" },
+		json: recipe,
+	});
+
+	if (!response.ok) {
+		const errorText = await response.text();
+		throw new ThoughtSpotApiError(
+			response.status,
+			"remintSpotterXAnswer",
+			errorText,
+		);
+	}
+
+	const data = (await response.json()) as {
+		session_id?: string;
+		gen_no?: number;
+	};
+	if (!data.session_id || data.gen_no === undefined) {
+		throw new Error("remintSpotterXAnswer returned no answer session");
+	}
+	return { sessionIdentifier: data.session_id, generationNumber: data.gen_no };
+}
+
+/*
+ * Whether a remint failed because the user can no longer access the answer's data model,
+ * the one remint failure the user can act on
+ */
+export function isRemintAccessDeniedError(error: unknown): boolean {
+	if (!(error instanceof ThoughtSpotApiError) || !error.body) {
+		return false;
+	}
+	try {
+		return JSON.parse(error.body)?.error_code === "WORKSHEET_NOT_FOUND";
+	} catch {
+		return false;
+	}
+}

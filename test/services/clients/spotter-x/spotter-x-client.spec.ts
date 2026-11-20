@@ -1,6 +1,8 @@
 import { createBearerAuthenticationConfig } from "@thoughtspot/rest-api-sdk";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { isRemintAccessDeniedError } from "../../../../src/services/clients/spotter-x/spotter-x-client";
 import { ThoughtSpotClient } from "../../../../src/services/clients/thoughtspot-client";
+import { ThoughtSpotApiError } from "../../../../src/services/types";
 
 // Mock the ThoughtSpot REST API SDK
 vi.mock("@thoughtspot/rest-api-sdk", () => ({
@@ -393,6 +395,148 @@ describe("spotter-x-client", () => {
 			const id1 = (fetch as any).mock.calls[0][1].headers["x-request-id"];
 			const id2 = (fetch as any).mock.calls[1][1].headers["x-request-id"];
 			expect(id1).not.toBe(id2);
+		});
+	});
+
+	describe("fetchSpotterXArtifact", () => {
+		let client: any;
+		const args = {
+			...identity,
+			conversationId: "cx/conv-1",
+			filename: "recipe-session-1-2-json",
+			category: "ASSETS",
+		};
+
+		beforeEach(() => {
+			client = new ThoughtSpotClient({
+				instanceUrl: mockInstanceUrl,
+				token: mockBearerToken,
+				tenantId: "",
+				orgId: "",
+				userId: "",
+			}) as any;
+		});
+
+		it("decodes the gateway's base64 JSON envelope", async () => {
+			const recipe = '{"recipe_version":"recipe.v1","title":"Größe"}';
+			(fetch as any).mockResolvedValue({
+				ok: true,
+				headers: new Headers({ "content-type": "application/json" }),
+				json: vi.fn().mockResolvedValue({
+					filename: args.filename,
+					data: Buffer.from(recipe, "utf8").toString("base64"),
+				}),
+			});
+
+			const result = await client.fetchSpotterXArtifact(args);
+
+			expect(result).toBe(recipe);
+			const [url, init] = (fetch as any).mock.calls[0];
+			expect(url).toBe(
+				`${mockInstanceUrl}/agents/v1/sessions/cx%2Fconv-1/artifacts/recipe-session-1-2-json?category=ASSETS`,
+			);
+			expect(init.method).toBe("GET");
+			expect(init.headers["x-thoughtspot-fuid"]).toBe(expectedFuid);
+			expect(init.headers).not.toHaveProperty("x-thoughtspot-org-id");
+		});
+
+		it("returns raw bytes as text when the gateway does not wrap them", async () => {
+			(fetch as any).mockResolvedValue({
+				ok: true,
+				headers: new Headers({ "content-type": "application/octet-stream" }),
+				text: vi.fn().mockResolvedValue("raw-recipe"),
+			});
+
+			expect(await client.fetchSpotterXArtifact(args)).toBe("raw-recipe");
+		});
+
+		it("throws a ThoughtSpotApiError with the status on failure", async () => {
+			(fetch as any).mockResolvedValue({
+				ok: false,
+				status: 404,
+				text: vi.fn().mockResolvedValue("not found"),
+			});
+
+			await expect(client.fetchSpotterXArtifact(args)).rejects.toMatchObject({
+				status: 404,
+			});
+		});
+	});
+
+	describe("remintSpotterXAnswer", () => {
+		let client: any;
+
+		beforeEach(() => {
+			client = new ThoughtSpotClient({
+				instanceUrl: mockInstanceUrl,
+				token: mockBearerToken,
+				tenantId: "",
+				orgId: "",
+				userId: "",
+			}) as any;
+		});
+
+		it("posts the recipe and returns the fresh session ids", async () => {
+			(fetch as any).mockResolvedValue({
+				ok: true,
+				json: vi.fn().mockResolvedValue({
+					session_id: "fresh-session",
+					gen_no: 1,
+					ac_state: { transaction_id: "tx-1", gen_no: 1 },
+				}),
+			});
+			const recipe = { recipe_version: "recipe.v1", gen_no: 1 };
+
+			const result = await client.remintSpotterXAnswer({ recipe });
+
+			expect(result).toEqual({
+				sessionIdentifier: "fresh-session",
+				generationNumber: 1,
+			});
+			const [url, init] = (fetch as any).mock.calls[0];
+			expect(url).toBe(`${mockInstanceUrl}/conversation/v2/answer/remint`);
+			expect(init.method).toBe("POST");
+			expect(init.headers["x-requested-by"]).toBe("ThoughtSpot");
+			expect(JSON.parse(init.body)).toEqual(recipe);
+		});
+
+		it("keeps the error body so an access loss can be told apart", async () => {
+			(fetch as any).mockResolvedValue({
+				ok: false,
+				status: 400,
+				text: vi
+					.fn()
+					.mockResolvedValue(
+						JSON.stringify({ error_code: "WORKSHEET_NOT_FOUND" }),
+					),
+			});
+
+			const error = await client
+				.remintSpotterXAnswer({ recipe: {} })
+				.catch((e: unknown) => e);
+
+			expect(error).toMatchObject({ status: 400 });
+			expect(isRemintAccessDeniedError(error)).toBe(true);
+			expect(
+				isRemintAccessDeniedError(
+					new ThoughtSpotApiError(
+						500,
+						"remintSpotterXAnswer",
+						JSON.stringify({ error_code: "RELOAD_ANSWER_FAILED" }),
+					),
+				),
+			).toBe(false);
+		});
+
+		it("throws when the response carries no answer session", async () => {
+			(fetch as any).mockResolvedValue({
+				ok: true,
+				json: vi.fn().mockResolvedValue({}),
+			});
+
+			await expect(client.remintSpotterXAnswer({ recipe: {} })).rejects.toThrow(
+				/no answer session/,
+			);
 		});
 	});
 });

@@ -30,6 +30,7 @@ import type {
 	ModelStreamSink,
 	ModelUpdate,
 } from "../services/clients/spotter-model/spotter-model-types";
+import { isRemintAccessDeniedError } from "../services/clients/spotter-x/spotter-x-client";
 import type {
 	DataSource,
 	ThoughtSpotService,
@@ -1692,8 +1693,9 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			if (status === 401) {
 				throw error;
 			}
-			const hint =
-				status === 403
+			const hint = isRemintAccessDeniedError(error)
+				? "You no longer have access to the data model behind this answer."
+				: status === 403
 					? "You may not have permission to download this answer's data."
 					: "The answer's conversation may have expired; ask the Analytics Agent the question again and pass the new answer's `answer_id`.";
 			const { summary, statusMessage } = recordGetDataFailure(
