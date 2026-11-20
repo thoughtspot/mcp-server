@@ -580,10 +580,74 @@ describe("processSpotter3EventStream", () => {
 		expect(storage.appendMessagesAndRestartTtl).toHaveBeenCalledOnce();
 	});
 
-	it("handles malformed JSON gracefully and logs an error", async () => {
+	it("logs and skips a malformed JSON line, then keeps processing the stream", async () => {
 		const storage = makeMockStorage();
-		const chunk = "data: {not valid json}\n";
-		const reader = makeReader([chunk]);
+		const validLine = `data: ${JSON.stringify([
+			{
+				type: "text",
+				content: "After bad line",
+				metadata: { format: "markdown" },
+			},
+		])}\n`;
+		const reader = makeReader([`data: {not valid json}\n${validLine}`]);
+
+		await processSpotter3EventStream(
+			INSTANCE_URL,
+			SpotterResponseFormat.SIMPLIFIED,
+			CONV_ID,
+			reader,
+			storage.appendMessages,
+		);
+
+		expect(consoleErrorSpy).toHaveBeenCalledWith(
+			"Failed to parse event stream line:",
+			"data: {not valid json}",
+			expect.any(Error),
+		);
+		expect(storage.appendMessages).toHaveBeenCalledTimes(2);
+		expect(storage.appendMessages).toHaveBeenNthCalledWith(1, CONV_ID, [
+			{ is_thinking: false, type: "text", text: "After bad line" },
+		]);
+		expect(storage.appendMessages).toHaveBeenNthCalledWith(
+			2,
+			CONV_ID,
+			[],
+			true,
+		);
+		expect(tracingState.span!.setStatus).toHaveBeenCalledWith({
+			code: SpanStatusCode.ERROR,
+			message: "Failed to parse event stream line: data: {not valid json}",
+		});
+	});
+
+	it("processes a last line with no trailing newline when the stream ends", async () => {
+		const storage = makeMockStorage();
+		const line = `data: ${JSON.stringify([
+			{ type: "text", content: "No newline", metadata: { format: "markdown" } },
+		])}`;
+		const reader = makeReader([line]);
+
+		await processSpotter3EventStream(
+			INSTANCE_URL,
+			SpotterResponseFormat.SIMPLIFIED,
+			CONV_ID,
+			reader,
+			storage.appendMessages,
+		);
+
+		expect(storage.appendMessages).toHaveBeenCalledOnce();
+		expect(storage.appendMessages).toHaveBeenCalledWith(
+			CONV_ID,
+			[{ is_thinking: false, type: "text", text: "No newline" }],
+			true,
+		);
+	});
+
+	it("adds a generic error message and marks the conversation done when the reader throws", async () => {
+		const storage = makeMockStorage();
+		const reader = {
+			read: vi.fn().mockRejectedValue(new Error("connection reset")),
+		} as unknown as ReadableStreamDefaultReader;
 
 		await processSpotter3EventStream(
 			INSTANCE_URL,
@@ -595,6 +659,41 @@ describe("processSpotter3EventStream", () => {
 
 		expect(consoleErrorSpy).toHaveBeenCalledWith(
 			"Error while processing streaming response:",
+			expect.any(Error),
+		);
+		expect(storage.appendMessages).toHaveBeenCalledOnce();
+		expect(storage.appendMessages).toHaveBeenCalledWith(
+			CONV_ID,
+			[
+				{
+					is_thinking: false,
+					type: "text",
+					text: "Something went wrong and the conversation ended early. Please try asking your question again, or create a new conversation if it keeps happening.",
+				},
+			],
+			true,
+		);
+	});
+
+	it("logs and resolves when storage fails while closing the stream after an error", async () => {
+		const appendMessages = vi.fn().mockRejectedValue(new Error("storage down"));
+		const line = `data: ${JSON.stringify([
+			{ type: "text", content: "Hello", metadata: { format: "markdown" } },
+		])}\n`;
+
+		await expect(
+			processSpotter3EventStream(
+				INSTANCE_URL,
+				SpotterResponseFormat.SIMPLIFIED,
+				CONV_ID,
+				makeReader([line]),
+				appendMessages,
+			),
+		).resolves.toBeUndefined();
+
+		expect(appendMessages).toHaveBeenCalledTimes(2);
+		expect(consoleErrorSpy).toHaveBeenCalledWith(
+			"Failed to mark conversation done after stream error:",
 			expect.any(Error),
 		);
 	});
@@ -1346,23 +1445,54 @@ describe("processSpotterXEventStream", () => {
 			});
 		});
 
-		it("sets an error span status without throwing on malformed JSON", async () => {
+		it("skips a malformed JSON line, sets an error span status, and keeps processing", async () => {
 			const storage = makeMockStorage();
-			const reader = makeReader(["data: {not json\n"]);
+			const item = { type: "text", content: "After bad line" };
+			const reader = makeReader([
+				`data: {not json\ndata: ${JSON.stringify(item)}\n`,
+			]);
 
 			await expect(process(reader, storage)).resolves.toBeUndefined();
 
 			const span = tracingState.span!;
-			expect(span.setStatus).toHaveBeenCalledWith(
-				expect.objectContaining({ code: SpanStatusCode.ERROR }),
-			);
+			expect(span.setStatus).toHaveBeenCalledWith({
+				code: SpanStatusCode.ERROR,
+				message: "Failed to parse event stream line: data: {not json",
+			});
 			expect(span.setStatus).not.toHaveBeenCalledWith(
 				expect.objectContaining({ code: SpanStatusCode.OK }),
 			);
-			expect(consoleErrorSpy).toHaveBeenCalled();
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				"Failed to parse event stream line:",
+				"data: {not json",
+				expect.any(Error),
+			);
+			expect(storage.appendMessages).toHaveBeenNthCalledWith(1, CONV_ID, [
+				item,
+			]);
+			expect(storage.appendMessages).toHaveBeenNthCalledWith(
+				2,
+				CONV_ID,
+				[],
+				true,
+			);
 		});
 
-		it("sets an error span status when the reader throws", async () => {
+		it("processes a last line with no trailing newline when the stream ends", async () => {
+			const storage = makeMockStorage();
+			const item = { type: "text", content: "No newline" };
+
+			await process(makeReader([`data: ${JSON.stringify(item)}`]), storage);
+
+			expect(storage.appendMessages).toHaveBeenCalledOnce();
+			expect(storage.appendMessages).toHaveBeenCalledWith(
+				CONV_ID,
+				[item],
+				true,
+			);
+		});
+
+		it("sets an error span status and closes the stream with an error message when the reader throws", async () => {
 			const storage = makeMockStorage();
 			const reader = {
 				read: vi.fn().mockRejectedValue(new Error("connection reset")),
@@ -1374,7 +1504,38 @@ describe("processSpotterXEventStream", () => {
 				code: SpanStatusCode.ERROR,
 				message: "connection reset",
 			});
-			expect(storage.appendMessages).not.toHaveBeenCalled();
+			expect(storage.appendMessages).toHaveBeenCalledOnce();
+			expect(storage.appendMessages).toHaveBeenCalledWith(
+				CONV_ID,
+				[
+					{
+						is_thinking: false,
+						type: "text",
+						text: "Something went wrong and the conversation ended early. Please try asking your question again, or create a new conversation if it keeps happening.",
+					},
+				],
+				true,
+			);
+		});
+
+		it("logs and resolves when storage fails while closing the stream after an error", async () => {
+			const appendMessages = vi
+				.fn()
+				.mockRejectedValue(new Error("storage down"));
+			const item = { type: "text", content: "Hello" };
+
+			await expect(
+				process(makeReader([`data: ${JSON.stringify(item)}\n`]), {
+					appendMessages,
+					appendMessagesAndRestartTtl: appendMessages,
+				}),
+			).resolves.toBeUndefined();
+
+			expect(appendMessages).toHaveBeenCalledTimes(2);
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				"Failed to mark conversation done after stream error:",
+				expect.any(Error),
+			);
 		});
 	});
 

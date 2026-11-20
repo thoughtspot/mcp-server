@@ -11,6 +11,38 @@ import {
 	SpotterResponseFormat,
 } from "./services/types";
 
+/*
+ * Called after a fatal stream processing error. Adds a generic error message and marks the
+ * conversation done, so the host agent stop waiting for more messages.
+ */
+async function closeStreamOnFatalError(
+	conversationId: string,
+	appendStoredMessages: (
+		conversationId: string,
+		messages: (Message | RawMessage)[],
+		isDone?: boolean,
+	) => Promise<void>,
+) {
+	try {
+		await appendStoredMessages(
+			conversationId,
+			[
+				{
+					is_thinking: false,
+					type: "text",
+					text: "Something went wrong and the conversation ended early. Please try asking your question again, or create a new conversation if it keeps happening.",
+				},
+			],
+			true,
+		);
+	} catch (appendError) {
+		console.error(
+			"Failed to mark conversation done after stream error:",
+			appendError,
+		);
+	}
+}
+
 // `session_id` + `gen_no` name the answer for export and dashboards, but expire
 // (about 8 hours). `conversation_id` + `message_id` stay valid as long as the
 // conversation does, and let get_data load the answer again for fresh ids.
@@ -72,20 +104,18 @@ export const processSpotter3EventStream = async (
 
 			// Keep looping to read more content from the stream
 			while (true) {
-				const { done, value } = await streamingResponseReader.read();
-
-				// If stream is marked done, mark the conversation as done and exit
-				if (done) {
-					await appendStoredMessages(conversationId, [], true);
-					break;
-				}
+				const { done: isStreamDone, value } =
+					await streamingResponseReader.read();
 
 				// Decode the latest contents from the stream, and split by line. Leave the
 				// last line in the buffer as it may be incomplete, so we'll check it on the
-				// next loop.
-				buffer += decoder.decode(value, { stream: true });
+				// next loop. Once the stream is done, flush the decoder and process
+				// everything left, since no more data is coming.
+				buffer += isStreamDone
+					? decoder.decode()
+					: decoder.decode(value, { stream: true });
 				const lines = buffer.split("\n");
-				buffer = lines.pop() || "";
+				buffer = isStreamDone ? "" : lines.pop() || "";
 
 				// Loop through the lines and parse them into messages to be stored
 				const newMessages: (Message | RawMessage)[] = [];
@@ -105,7 +135,18 @@ export const processSpotter3EventStream = async (
 					}
 
 					// Trim the "data: " prefix, then parse the line
-					const data = JSON.parse(line.slice(6));
+					let data: any[];
+					try {
+						data = JSON.parse(line.slice(6));
+					} catch (error) {
+						console.error("Failed to parse event stream line:", line, error);
+						spanHasError = true;
+						span.setStatus({
+							code: SpanStatusCode.ERROR,
+							message: `Failed to parse event stream line: ${line}`,
+						});
+						continue;
+					}
 
 					// Loop through the items in the line and convert to messages if applicable
 					for (const item of data) {
@@ -250,7 +291,12 @@ export const processSpotter3EventStream = async (
 					}
 				}
 
-				// If we parsed any new messages, store them in the storage
+				// Store any new messages. If the stream is done, also mark the conversation
+				// as done and exit.
+				if (isStreamDone) {
+					await appendStoredMessages(conversationId, newMessages, true);
+					break;
+				}
 				if (newMessages.length > 0) {
 					await appendStoredMessages(conversationId, newMessages);
 				}
@@ -262,6 +308,7 @@ export const processSpotter3EventStream = async (
 				code: SpanStatusCode.ERROR,
 				message: error instanceof Error ? error.message : String(error),
 			});
+			await closeStreamOnFatalError(conversationId, appendStoredMessages);
 		}
 
 		span.setAttributes({
@@ -409,20 +456,18 @@ export const processSpotterXEventStream = async (
 
 			// Keep looping to read more content from the stream
 			while (true) {
-				const { done, value } = await streamingResponseReader.read();
-
-				// If stream is marked done, mark the conversation as done and exit
-				if (done) {
-					await appendStoredMessages(conversationId, [], true);
-					break;
-				}
+				const { done: isStreamDone, value } =
+					await streamingResponseReader.read();
 
 				// Decode the latest contents from the stream, and split by line. Leave the
 				// last line in the buffer as it may be incomplete, so we'll check it on the
-				// next loop.
-				buffer += decoder.decode(value, { stream: true });
+				// next loop. Once the stream is done, flush the decoder and process
+				// everything left, since no more data is coming.
+				buffer += isStreamDone
+					? decoder.decode()
+					: decoder.decode(value, { stream: true });
 				const lines = buffer.split("\n");
-				buffer = lines.pop() || "";
+				buffer = isStreamDone ? "" : lines.pop() || "";
 
 				// Loop through the lines and parse them into messages to be stored
 				const newMessages: (Message | RawMessage)[] = [];
@@ -450,7 +495,18 @@ export const processSpotterXEventStream = async (
 					if (prefixTrimmedLine.trim() === "") {
 						continue;
 					}
-					const item = JSON.parse(prefixTrimmedLine) as SpotterXStreamItem;
+					let item: SpotterXStreamItem;
+					try {
+						item = JSON.parse(prefixTrimmedLine);
+					} catch (error) {
+						console.error("Failed to parse event stream line:", line, error);
+						spanHasError = true;
+						span.setStatus({
+							code: SpanStatusCode.ERROR,
+							message: `Failed to parse event stream line: ${line}`,
+						});
+						continue;
+					}
 
 					// For the raw format, we don't need to perform any post-processing, so
 					// just add the messages directly
@@ -657,7 +713,12 @@ export const processSpotterXEventStream = async (
 					}
 				}
 
-				// If we parsed any new messages, store them in the storage
+				// Store any new messages. If the stream is done, also mark the conversation
+				// as done and exit.
+				if (isStreamDone) {
+					await appendStoredMessages(conversationId, newMessages, true);
+					break;
+				}
 				if (newMessages.length > 0) {
 					await appendStoredMessages(conversationId, newMessages);
 				}
@@ -669,6 +730,7 @@ export const processSpotterXEventStream = async (
 				code: SpanStatusCode.ERROR,
 				message: error instanceof Error ? error.message : String(error),
 			});
+			await closeStreamOnFatalError(conversationId, appendStoredMessages);
 		}
 
 		span.setAttributes({
