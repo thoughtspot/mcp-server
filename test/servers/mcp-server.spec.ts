@@ -2020,6 +2020,10 @@ describe("MCP Server", () => {
 				});
 
 				it("get_embed_token mints a short-lived org token, not the session token", async () => {
+					vi.spyOn(
+						server as any,
+						"initGlobalTokenAndReconcileWithStorage",
+					).mockResolvedValue("global-token");
 					const fetchSpy = vi.fn().mockResolvedValue(
 						new Response(JSON.stringify({ data: { token: "short-lived" } }), {
 							status: 200,
@@ -2040,9 +2044,17 @@ describe("MCP Server", () => {
 					expect(String(url)).toContain("/callosum/v1/v2/auth/token/fetch?");
 					expect(String(url)).toContain("validity_time_in_sec=300");
 					expect(String(url)).toContain("org_identifier=test-org");
+					// Minted with the global token, as switch_org does.
+					expect(fetchSpy.mock.calls[0][1].headers.Authorization).toBe(
+						"Bearer global-token",
+					);
 				});
 
 				it("get_embed_token reports a mint failure without leaking details", async () => {
+					vi.spyOn(
+						server as any,
+						"initGlobalTokenAndReconcileWithStorage",
+					).mockResolvedValue("global-token");
 					vi.stubGlobal(
 						"fetch",
 						vi.fn().mockResolvedValue(new Response("nope", { status: 500 })),
