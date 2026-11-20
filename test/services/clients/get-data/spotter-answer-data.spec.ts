@@ -46,6 +46,27 @@ describe("csvToGetDataViz", () => {
 		expect(viz.total_row_count).toBe(3);
 	});
 
+	it("counts rows past the cap without a trailing newline, quoted breaks included", () => {
+		const long = 'A,B\n1,x\n2,"multi\nline, ""q"""\n3,y\n4,"z"';
+		expect(csvToGetDataViz(long, 1)).toEqual({
+			columns: ["A", "B"],
+			data_rows: [["1", "x"]],
+			total_row_count: 4,
+		});
+		// Same count as an uncapped read.
+		expect(csvToGetDataViz(long, 25).total_row_count).toBe(4);
+	});
+
+	it("reports the full count of a watermarked export past the cap", () => {
+		const watermarked =
+			'"Data extract produced by someone on 29/10/2026"\n""\nRegion,Sales\nEast,1\nWest,2\nNorth,3\n';
+		expect(csvToGetDataViz(watermarked, 1)).toEqual({
+			columns: ["Region", "Sales"],
+			data_rows: [["East", "1"]],
+			total_row_count: 3,
+		});
+	});
+
 	it("skips the data-extract watermark preamble", () => {
 		// Shape returned by a real cluster with watermarking on.
 		const watermarked =

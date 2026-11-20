@@ -38,10 +38,20 @@ import { StorageServiceClient } from "../storage-service/storage-service";
 import type { Props } from "../utils";
 
 // Response utility types
-export type ContentItem = {
-	type: "text";
-	text: string;
-};
+export type ContentItem =
+	| {
+			type: "text";
+			text: string;
+	  }
+	| {
+			type: "image";
+			data: string;
+			mimeType: string;
+	  }
+	| {
+			type: "resource";
+			resource: { uri: string; mimeType: string; blob: string };
+	  };
 
 export type SuccessResponse<T = any> = {
 	content: ContentItem[];

@@ -97,7 +97,18 @@ export interface AnswerMessage extends BaseMessage {
 	iframe_url: string;
 }
 
-export type Message = TextMessage | AnswerMessage;
+// A file the Analytics Agent produced (e.g. a CSV from code execution). `file_id`
+// is opaque: pass it to get_file verbatim.
+export interface FileMessage extends BaseMessage {
+	type: "file";
+	file_id: string;
+	file_name: string;
+	file_type: string;
+	// Opens the file in a browser signed in to ThoughtSpot, which saves it.
+	file_download_url: string;
+}
+
+export type Message = TextMessage | AnswerMessage | FileMessage;
 
 // In raw mode, upstream events are passed through unmodified instead of being reshaped into a
 // `Message`, so their shape is not guaranteed to match `Message` at all.

@@ -379,7 +379,10 @@ describe("MCP Server", () => {
 				expect(
 					tools.map((t) => t.name).indexOf("create_analysis_session"),
 				).toBe(2);
-				expect(tools).toHaveLength(13);
+				// The beta version adds get_file, for Spotter 3 sessions only.
+				expect(tools).toHaveLength(
+					apiVersion === "beta" && !isSpotterXEnabled ? 14 : 13,
+				);
 
 				const [sessionTool] = sessionTools;
 				const properties = (sessionTool.inputSchema as any).properties;
@@ -867,6 +870,347 @@ describe("MCP Server", () => {
 		});
 	});
 
+	describe("get_file", () => {
+		const fileIdFor = (tsFileId: string) =>
+			JSON.stringify({
+				source: "spotter3",
+				conversation_id: "conv-1",
+				ts_file_id: tsFileId,
+			});
+		const fileId = fileIdFor("load_time_20261119_SgGd.csv");
+
+		const mockClient = () =>
+			new thoughtspotClient.ThoughtSpotClient({
+				instanceUrl: "https://test.thoughtspot.cloud",
+				token: "test-access-token",
+				tenantId: "",
+				orgId: "",
+				userId: "",
+			}) as any;
+
+		const toolNames = async () => {
+			const { listTools } = connect(server);
+			return (await listTools()).tools.map((tool: any) => tool.name);
+		};
+
+		// get_file is released in the beta API version only.
+		beforeEach(() => {
+			mockProps.apiVersion = "beta";
+			mockClient().downloadSpotter3File = vi.fn();
+		});
+
+		// Session updates announce files only to a client that can call get_file.
+		it.each([
+			{ name: "beta version with the privilege", expected: true },
+			{ name: "latest version", apiVersion: undefined, expected: false },
+			{ name: "no data-download privilege", privileges: [], expected: false },
+			{ name: "raw session updates", raw: true, expected: false },
+		])(
+			"send_session_message includes files=$expected for $name",
+			async ({ expected, ...overrides }) => {
+				if ("apiVersion" in overrides) {
+					mockProps.apiVersion = overrides.apiVersion;
+				}
+				if (overrides.raw) {
+					mockProps.enableRawSessionUpdates = true;
+				}
+				vi.spyOn(server as any, "getStorageService").mockReturnValue({
+					initializeConversation: vi.fn().mockResolvedValue(undefined),
+					appendMessages: vi.fn().mockResolvedValue(undefined),
+				});
+				const send = vi
+					.spyOn(ThoughtSpotService.prototype, "sendSpotter3MessageStreaming")
+					.mockResolvedValue(undefined);
+				await server.init();
+				if (overrides.privileges) {
+					(server as any).sessionInfo.privileges = overrides.privileges;
+				}
+				const { callTool } = connect(server);
+
+				await callTool("send_session_message", {
+					analytical_session_id: "conv-1",
+					message: "Export load times as a CSV",
+				});
+
+				expect(send).toHaveBeenCalledWith(
+					"conv-1",
+					"Export load times as a CSV",
+					overrides.raw
+						? SpotterResponseFormat.RAW
+						: SpotterResponseFormat.SIMPLIFIED,
+					expect.any(Function),
+					undefined,
+					false,
+					expected,
+				);
+			},
+		);
+
+		it("tells the model to give the user the download link instead of reading the file", async () => {
+			await server.init();
+			const { listTools } = connect(server);
+			const { tools } = await listTools();
+			const getFile = tools.find((tool: any) => tool.name === "get_file");
+			const update = (
+				tools.find((tool: any) => tool.name === "get_session_updates") as any
+			).outputSchema.properties.session_updates.items.properties;
+
+			expect(getFile?.description).toMatch(
+				/give them the update's `file_download_url` instead/,
+			);
+			expect(update.file_download_url.description).toMatch(
+				/do not call `get_file` for that/,
+			);
+		});
+
+		it("is listed in the beta API version", async () => {
+			await server.init();
+			expect(await toolNames()).toContain("get_file");
+		});
+
+		it("is not listed in the latest API version", async () => {
+			mockProps.apiVersion = undefined;
+			await server.init();
+			expect(await toolNames()).not.toContain("get_file");
+		});
+
+		it("is not listed when the user lacks the data-download privilege", async () => {
+			await server.init();
+			(server as any).sessionInfo.privileges = [];
+			expect(await toolNames()).not.toContain("get_file");
+		});
+
+		// The tool cannot work in these cases, so it is neither listed nor callable.
+		it.each([
+			{
+				name: "SpotterX sessions",
+				setup: () => {
+					(server as any).sessionInfo.configInfo.isSpotterXEnabled = true;
+				},
+			},
+			{
+				name: "raw session updates",
+				setup: () => {
+					mockProps.enableRawSessionUpdates = true;
+				},
+			},
+			{
+				name: "an API version without the tool",
+				setup: () => {
+					mockProps.apiVersion = "2026-10-02";
+				},
+			},
+		])("is hidden and refused with $name", async ({ setup }) => {
+			await server.init();
+			setup();
+			// Listed directly: the test connection carries one request.
+			const { tools } = await (server as any).listTools();
+			expect(tools.map((tool: any) => tool.name)).not.toContain("get_file");
+			const { callTool } = connect(server);
+
+			const result = await callTool("get_file", { file_id: fileId });
+
+			expect(result.isError).toBe(true);
+			expect((result.content as any[])[0].text).toMatch(
+				/not available for this connection/,
+			);
+			expect(mockClient().downloadSpotter3File).not.toHaveBeenCalled();
+		});
+
+		it("refuses a direct call when the user lacks the data-download privilege", async () => {
+			await server.init();
+			(server as any).sessionInfo.privileges = [];
+			const { callTool } = connect(server);
+
+			const result = await callTool("get_file", { file_id: fileId });
+
+			expect(result.isError).toBe(true);
+			expect((result.content as any[])[0].text).toMatch(
+				/do not have permission to download files/i,
+			);
+			expect(mockClient().downloadSpotter3File).not.toHaveBeenCalled();
+		});
+
+		it("returns a CSV file as rows capped by max_rows", async () => {
+			mockClient().downloadSpotter3File.mockResolvedValueOnce(
+				new Response("Cluster,Load time\nA,1.2\nB,3.4\nC,5.6\n"),
+			);
+			await server.init();
+			const { callTool } = connect(server);
+
+			const result = await callTool("get_file", {
+				file_id: fileId,
+				max_rows: 2,
+			});
+
+			expect(result.isError).toBeUndefined();
+			expect(mockClient().downloadSpotter3File).toHaveBeenCalledWith({
+				conversationId: "conv-1",
+				tsFileId: "load_time_20261119_SgGd.csv",
+			});
+			expect(result.structuredContent).toEqual({
+				file_id: fileId,
+				file_type: "csv",
+				columns: ["Cluster", "Load time"],
+				data_rows: [
+					["A", "1.2"],
+					["B", "3.4"],
+				],
+				total_row_count: 3,
+				truncated: true,
+			});
+		});
+
+		it("reports a CSV file returned whole as not truncated", async () => {
+			mockClient().downloadSpotter3File.mockResolvedValueOnce(
+				new Response("Cluster\nA\n"),
+			);
+			await server.init();
+			const { callTool } = connect(server);
+
+			const result = await callTool("get_file", { file_id: fileId });
+
+			expect(result.structuredContent).toMatchObject({
+				data_rows: [["A"]],
+				total_row_count: 1,
+				truncated: false,
+			});
+		});
+
+		it("returns a PDF as an embedded resource", async () => {
+			mockClient().downloadSpotter3File.mockResolvedValueOnce(
+				new Response("%PDF-1.7"),
+			);
+			await server.init();
+			const { callTool } = connect(server);
+			const pdfId = fileIdFor("Report_Ab12.pdf");
+
+			const result = await callTool("get_file", { file_id: pdfId });
+
+			expect(result.isError).toBeUndefined();
+			expect(result.structuredContent).toEqual({
+				file_id: pdfId,
+				file_type: "pdf",
+			});
+			expect((result.content as any[])[1]).toEqual({
+				type: "resource",
+				resource: {
+					uri: "thoughtspot-file:///conv-1/Report_Ab12.pdf",
+					mimeType: "application/pdf",
+					blob: btoa("%PDF-1.7"),
+				},
+			});
+		});
+
+		it("returns an image as image content", async () => {
+			mockClient().downloadSpotter3File.mockResolvedValueOnce(
+				new Response("png-bytes"),
+			);
+			await server.init();
+			const { callTool } = connect(server);
+
+			const result = await callTool("get_file", {
+				file_id: fileIdFor("chart.PNG"),
+			});
+
+			expect((result.content as any[])[1]).toEqual({
+				type: "image",
+				mimeType: "image/png",
+				data: btoa("png-bytes"),
+			});
+		});
+
+		it("refuses an unsupported file type without downloading it", async () => {
+			await server.init();
+			const { callTool } = connect(server);
+
+			const result = await callTool("get_file", {
+				file_id: fileIdFor("workbook.xlsx"),
+			});
+
+			expect(result.isError).toBe(true);
+			expect((result.content as any[])[0].text).toMatch(/type "xlsx"/);
+			expect(mockClient().downloadSpotter3File).not.toHaveBeenCalled();
+		});
+
+		it("returns an error for a malformed file_id", async () => {
+			await server.init();
+			const { callTool } = connect(server);
+
+			const result = await callTool("get_file", { file_id: "report.csv" });
+
+			expect(result.isError).toBe(true);
+			expect((result.content as any[])[0].text).toMatch(/Invalid file_id/);
+			expect(mockClient().downloadSpotter3File).not.toHaveBeenCalled();
+		});
+
+		it("refuses a file over the size cap", async () => {
+			mockClient().downloadSpotter3File.mockResolvedValueOnce(
+				new Response("a,b\n", {
+					headers: { "content-length": String(11 * 1024 * 1024) },
+				}),
+			);
+			await server.init();
+			const { callTool } = connect(server);
+
+			const result = await callTool("get_file", { file_id: fileId });
+
+			expect(result.isError).toBe(true);
+			expect((result.content as any[])[0].text).toMatch(
+				/too large to return \(over 10 MB\)/,
+			);
+		});
+
+		it("reports a file that is not a CSV table", async () => {
+			mockClient().downloadSpotter3File.mockResolvedValueOnce(new Response(""));
+			await server.init();
+			const { callTool } = connect(server);
+
+			const result = await callTool("get_file", { file_id: fileId });
+
+			expect(result.isError).toBe(true);
+			expect((result.content as any[])[0].text).toMatch(
+				/could not be read as a CSV table/,
+			);
+		});
+
+		it.each([
+			[400, '{"error_code":"FILE_EXPIRED"}', /has expired/],
+			[403, "Download not permitted", /do not have permission/],
+			[404, "File not found", /was not found, or file download is disabled/],
+			[429, "rate limit", /rate limit was reached/],
+			[500, "boom", /Failed to fetch the file/],
+			[400, "Invalid file name", /Failed to fetch the file/],
+		])(
+			"maps an upstream %i (%s) to a clear error",
+			async (status, body, message) => {
+				mockClient().downloadSpotter3File.mockRejectedValueOnce(
+					new ThoughtSpotApiError(status, "downloadSpotter3File", body),
+				);
+				await server.init();
+				const { callTool } = connect(server);
+
+				const result = await callTool("get_file", { file_id: fileId });
+
+				expect(result.isError).toBe(true);
+				expect((result.content as any[])[0].text).toMatch(message);
+			},
+		);
+
+		it("asks the user to reauthenticate on an upstream 401", async () => {
+			mockClient().downloadSpotter3File.mockRejectedValueOnce(
+				new ThoughtSpotApiError(401, "downloadSpotter3File", ""),
+			);
+			await server.init();
+			const { callTool } = connect(server);
+
+			const result = await callTool("get_file", { file_id: fileId });
+
+			expect(result.isError).toBe(true);
+			expect((result.content as any[])[0].text).toMatch(/reauthenticate/);
+		});
+	});
+
 	describe("Spotter answer data and iframe suppression URL flags", () => {
 		const answerId = JSON.stringify({ session_id: "session-9", gen_no: 3 });
 		const embedUrl =
@@ -1148,6 +1492,7 @@ describe("MCP Server", () => {
 				expect.any(Function),
 				undefined,
 				true,
+				false,
 			);
 		});
 	});
@@ -2398,6 +2743,7 @@ describe("MCP Server", () => {
 				expect.any(Function),
 				undefined,
 				false,
+				false,
 			);
 		});
 
@@ -2417,6 +2763,7 @@ describe("MCP Server", () => {
 				SpotterResponseFormat.SIMPLIFIED,
 				expect.any(Function),
 				"The user is focused on North America",
+				false,
 				false,
 			);
 		});

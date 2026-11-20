@@ -18,6 +18,7 @@ import {
 } from "../metrics/runtime/tool-metrics";
 import { WithSpan, getActiveSpan } from "../metrics/tracing/tracing-utils";
 import {
+	fileExtension,
 	processSpotter3EventStream,
 	processSpotterXEventStream,
 } from "../streaming-utils";
@@ -27,6 +28,14 @@ import {
 	SpotterAnswerCsvError,
 	csvToGetDataViz,
 } from "./clients/get-data/spotter-answer-data";
+import {
+	type ConversationFileKind,
+	GET_FILE_DEFAULT_MAX_ROWS,
+	UnsupportedFileTypeError,
+	bytesToBase64,
+	conversationFileFormat,
+	readBodyCapped,
+} from "./clients/get-file/conversation-file";
 import type {
 	CreateModelSessionResult,
 	FetchWorksheetModelParams,
@@ -58,6 +67,15 @@ type ThoughtSpotServiceMetricsOptions = {
 	analyticsContext?: MetricAnalyticsContext;
 	eventIdentity?: MetricEventIdentity;
 };
+
+// What get_file returns: a CSV as parsed rows, anything else as base64 content.
+export type ConversationFile =
+	| ({ kind: "csv" } & GetDataViz)
+	| {
+			kind: Exclude<ConversationFileKind, "csv">;
+			mimeType: string;
+			data: string;
+	  };
 
 /**
  * Main ThoughtSpot service class using decorator pattern for tracing
@@ -368,6 +386,7 @@ export class ThoughtSpotService {
 		) => Promise<void>,
 		additionalContext?: string | undefined,
 		suppressIframes = false,
+		includeFiles = false,
 	): Promise<void> {
 		const span = trace.getSpan(context.active());
 		span?.setAttributes({
@@ -412,6 +431,7 @@ export class ThoughtSpotService {
 				appendStoredMessages,
 				streamRecorder,
 				suppressIframes,
+				includeFiles,
 			).finally(() => {
 				this.scheduleBackgroundMetricsFlush(streamRecorder);
 			});
@@ -1060,6 +1080,67 @@ export class ThoughtSpotService {
 		}
 		span?.setAttribute("total_row_count", viz.total_row_count ?? 0);
 		return { data: [viz] };
+	}
+
+	/**
+	 * Fetch a file the Analytics Agent produced in a conversation. The type comes
+	 * from the file name; an unsupported one is refused before any download, which
+	 * is rate limited upstream.
+	 */
+	@WithSpan("get-conversation-file")
+	async getConversationFile({
+		conversationId,
+		tsFileId,
+		maxRows = GET_FILE_DEFAULT_MAX_ROWS,
+	}: {
+		conversationId: string;
+		tsFileId: string;
+		maxRows?: number;
+	}): Promise<ConversationFile> {
+		const span = getActiveSpan();
+		const extension = fileExtension(tsFileId);
+		span?.setAttributes({
+			conversation_id: conversationId,
+			file_type: extension,
+		});
+
+		const format = conversationFileFormat(extension);
+		if (!format) {
+			throw new UnsupportedFileTypeError(extension);
+		}
+
+		// Read the body inside the observed call, so a file over the size cap or a
+		// broken stream is not counted as an upstream success.
+		const bytes = await this.observeUpstreamCall(
+			UPSTREAM_OPERATION_NAMES.downloadConversationFile,
+			async () => {
+				const response = await this.client.downloadSpotter3File({
+					conversationId,
+					tsFileId,
+				});
+				return readBodyCapped(response, format.maxBytes);
+			},
+		);
+		span?.setAttribute("file_bytes", bytes.byteLength);
+
+		if (format.kind !== "csv") {
+			return {
+				kind: format.kind,
+				mimeType: format.mimeType,
+				data: bytesToBase64(bytes),
+			};
+		}
+
+		let viz: GetDataViz;
+		try {
+			viz = csvToGetDataViz(new TextDecoder().decode(bytes), maxRows);
+		} catch (error) {
+			throw error instanceof SpotterAnswerCsvError
+				? error
+				: new SpotterAnswerCsvError(error);
+		}
+		span?.setAttribute("total_row_count", viz.total_row_count ?? 0);
+		return { kind: "csv", ...viz };
 	}
 
 	/**

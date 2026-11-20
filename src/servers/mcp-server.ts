@@ -17,6 +17,10 @@ import { ANALYTICS_AGENT_ANSWER_TYPE } from "../services/clients/get-data/get-da
 import type { GetDataResult } from "../services/clients/get-data/get-data-types";
 import { SpotterAnswerCsvError } from "../services/clients/get-data/spotter-answer-data";
 import {
+	FileTooLargeError,
+	UnsupportedFileTypeError,
+} from "../services/clients/get-file/conversation-file";
+import {
 	MODEL_POLL_INTERVAL_MS,
 	MODEL_POLL_ITERATIONS,
 } from "../services/clients/spotter-model/spotter-model-constants";
@@ -58,6 +62,7 @@ import {
 } from "../spotterviz/dashboard-tools";
 import { UPSTREAM_CALL_TIMEOUT_MS, withTimeout } from "../spotterviz/timeouts";
 import type { StorageServiceClient } from "../storage-service/storage-service";
+import { fileExtension, parseFileId } from "../streaming-utils";
 import { McpServerError } from "../utils";
 import { BaseMCPServer, type Context } from "./mcp-server-base";
 import {
@@ -74,6 +79,7 @@ import {
 	GetDashboardStatusInputSchema,
 	GetDataInputSchema,
 	GetDataSourceSuggestionsSchema,
+	GetFileInputSchema,
 	GetModelUpdatesInputSchema,
 	GetRelevantQuestionsSchema,
 	GetSessionUpdatesInputSchema,
@@ -513,6 +519,11 @@ export class MCPServer extends BaseMCPServer {
 			tools = tools.filter((tool) => tool.name !== ToolName.GetData);
 		}
 
+		// Hide get_file where it cannot work (see isGetFileAvailable).
+		if (!this.isGetFileAvailable()) {
+			tools = tools.filter((tool) => tool.name !== ToolName.GetFile);
+		}
+
 		// Filter out orgs tools if feature is disabled
 		if (!this.areOrgToolsAvailable()) {
 			tools = tools.filter(
@@ -682,6 +693,10 @@ export class MCPServer extends BaseMCPServer {
 
 			case ToolName.GetData: {
 				return this.callGetData(request, recorder);
+			}
+
+			case ToolName.GetFile: {
+				return this.callGetFile(request, recorder);
 			}
 
 			case ToolName.CheckConnectivity: {
@@ -1135,6 +1150,7 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 				storageService.appendMessages.bind(storageService),
 				additional_context,
 				!!this.ctx.props.suppressIframes,
+				this.isGetFileAvailable(),
 			);
 		} catch (error) {
 			console.error("Error sending message to Spotter 3 conversation:", error);
@@ -1755,6 +1771,173 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			const { summary, statusMessage } = recordGetDataFailure(error, status);
 			return this.createErrorResponse(
 				`Failed to fetch object data: ${summary}`,
+				statusMessage,
+			);
+		}
+	}
+
+	/**
+	 * Whether this connection can use get_file. All of these must hold:
+	 * - the tool is in the client's API version;
+	 * - the user can download data;
+	 * - sessions run on Spotter 3: SpotterX has no file download yet;
+	 * - session updates are simplified: raw updates carry no `file_id`.
+	 * Session updates announce files only then, so a client is never offered a
+	 * file it cannot read.
+	 */
+	private isGetFileAvailable(): boolean {
+		let versionConfig: VersionConfig;
+		try {
+			versionConfig = resolveApiVersion(this.ctx.props.apiVersion);
+		} catch {
+			// listTools falls back to the latest version the same way.
+			versionConfig = resolveApiVersion();
+		}
+		const usesSpotterX =
+			versionConfig.version.includes("beta") && this.isSpotterXEnabled();
+		return (
+			versionConfig.tools.some((tool) => tool.name === ToolName.GetFile) &&
+			this.canDownloadData() &&
+			!usesSpotterX &&
+			!this.ctx.props.enableRawSessionUpdates
+		);
+	}
+
+	@WithSpan("call-get-file")
+	async callGetFile(
+		request: z.infer<typeof CallToolRequestSchema>,
+		recorder: MetricsRecorder,
+	) {
+		// Repair session info (see ensureSessionInfo) so the gate below is real,
+		// matching listTools.
+		await this.ensureSessionInfo();
+		// Enforce the gate even if a client calls the hidden tool directly.
+		if (!this.canDownloadData()) {
+			return this.createErrorResponse(
+				"You do not have permission to download files (requires the data-download privilege).",
+				"get_file forbidden",
+			);
+		}
+		// A client can also call the tool when it is hidden for another reason.
+		if (!this.isGetFileAvailable()) {
+			return this.createErrorResponse(
+				"The get_file tool is not available for this connection.",
+				"get_file unavailable",
+			);
+		}
+
+		const { file_id, max_rows } = GetFileInputSchema.parse(
+			request.params.arguments,
+		);
+		const file = parseFileId(file_id);
+		if (!file) {
+			return this.createErrorResponse(
+				'Invalid file_id. Pass the `file_id` of a `file` update returned from the "get_session_updates" tool verbatim.',
+				"get_file: invalid file_id",
+			);
+		}
+		const fileType = fileExtension(file.tsFileId);
+
+		try {
+			const result = await this.getThoughtSpotService(recorder, {
+				analyticalSessionId: file.conversationId,
+			}).getConversationFile({
+				conversationId: file.conversationId,
+				tsFileId: file.tsFileId,
+				maxRows: max_rows,
+			});
+
+			if (result.kind === "csv") {
+				const totalRowCount = result.total_row_count ?? result.data_rows.length;
+				return this.createStructuredContentSuccessResponse(
+					{
+						file_id,
+						file_type: fileType,
+						columns: result.columns,
+						data_rows: result.data_rows,
+						total_row_count: totalRowCount,
+						truncated: totalRowCount > result.data_rows.length,
+					},
+					`Fetched csv file (${result.data_rows.length} of ${totalRowCount} row(s))`,
+				);
+			}
+
+			// The file itself goes in a content item; the structured part only names it.
+			const structuredContent = { file_id, file_type: fileType };
+			const response = this.createStructuredContentSuccessResponse(
+				structuredContent,
+				`Fetched ${fileType} file`,
+			);
+			response.content.push(
+				result.kind === "image"
+					? { type: "image", data: result.data, mimeType: result.mimeType }
+					: {
+							type: "resource",
+							resource: {
+								uri: `thoughtspot-file:///${encodeURIComponent(file.conversationId)}/${encodeURIComponent(file.tsFileId)}`,
+								mimeType: result.mimeType,
+								blob: result.data,
+							},
+						},
+			);
+			return response;
+		} catch (error) {
+			if (error instanceof UnsupportedFileTypeError) {
+				return this.createErrorResponse(
+					`Files of type "${error.fileType || "unknown"}" cannot be read with this tool (supported: csv, pdf, png, jpg). The user can download the file in ThoughtSpot.`,
+					"get_file: unsupported file type",
+				);
+			}
+			if (error instanceof FileTooLargeError) {
+				return this.createErrorResponse(
+					`The file is too large to return (over ${Math.round(error.maxBytes / (1024 * 1024))} MB). The user can download it in ThoughtSpot.`,
+					"get_file: file too large",
+				);
+			}
+			if (error instanceof SpotterAnswerCsvError) {
+				return this.createErrorResponse(
+					"The file could not be read as a CSV table. The user can download it in ThoughtSpot.",
+					"get_file: csv parse error",
+				);
+			}
+
+			// Let a 401 propagate to the central reauth handler in callTool.
+			const status = this.apiErrorStatus(error);
+			if (status === 401) {
+				throw error;
+			}
+			const { summary, statusMessage } = recordGetDataFailure(
+				error,
+				status,
+				"get_file",
+			);
+			const body = error instanceof ThoughtSpotApiError ? error.body : "";
+			if (status === 400 && /FILE_EXPIRED|expired/i.test(body ?? "")) {
+				return this.createErrorResponse(
+					"This file has expired and can no longer be read. Ask the Analytics Agent to produce it again with `send_session_message`.",
+					"get_file: file expired",
+				);
+			}
+			if (status === 403) {
+				return this.createErrorResponse(
+					"You do not have permission to download this file. A PDF also requires the privilege to download visuals.",
+					statusMessage,
+				);
+			}
+			if (status === 404) {
+				return this.createErrorResponse(
+					"The file was not found, or file download is disabled for this ThoughtSpot instance.",
+					statusMessage,
+				);
+			}
+			if (status === 429) {
+				return this.createErrorResponse(
+					"The file download rate limit was reached. Wait a minute and try again.",
+					statusMessage,
+				);
+			}
+			return this.createErrorResponse(
+				`Failed to fetch the file: ${summary}`,
 				statusMessage,
 			);
 		}

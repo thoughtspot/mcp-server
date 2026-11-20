@@ -58,6 +58,80 @@ function buildAnswerId(
 	});
 }
 
+// Which agent backend holds a file. get_file routes on it, so a file id stays
+// valid if the connection later moves to another backend.
+export type FileSource = "spotter3";
+const FILE_SOURCES: readonly string[] = ["spotter3"] satisfies FileSource[];
+
+// Names a file by its backend, conversation and upstream file id, so get_file
+// needs one value and the parts cannot be mismatched. Parsed by `parseFileId`.
+export function buildFileId(conversationId: string, tsFileId: string): string {
+	return JSON.stringify({
+		source: "spotter3" satisfies FileSource,
+		conversation_id: conversationId,
+		ts_file_id: tsFileId,
+	});
+}
+
+// One URL path segment: not empty, no separator, and not a dot segment, which
+// a URL parser would resolve to a different route.
+function isPathSegment(value: unknown): value is string {
+	return (
+		typeof value === "string" &&
+		value !== "" &&
+		value !== "." &&
+		value !== ".." &&
+		!/[/\\]/.test(value)
+	);
+}
+
+export function parseFileId(
+	fileId: string,
+):
+	| { source: FileSource; conversationId: string; tsFileId: string }
+	| undefined {
+	try {
+		const parsed = JSON.parse(fileId);
+		if (
+			FILE_SOURCES.includes(parsed?.source) &&
+			isPathSegment(parsed.conversation_id) &&
+			isPathSegment(parsed.ts_file_id)
+		) {
+			return {
+				source: parsed.source,
+				conversationId: parsed.conversation_id,
+				tsFileId: parsed.ts_file_id,
+			};
+		}
+	} catch {
+		// Not JSON: fall through.
+	}
+	return undefined;
+}
+
+// The ThoughtSpot route that serves a Spotter 3 file. It authenticates with the
+// ThoughtSpot session cookie, so a browser signed in to ThoughtSpot can open
+// it and the file never passes through the MCP client.
+export function buildSpotter3FileDownloadUrl(
+	instanceUrl: string,
+	conversationId: string,
+	tsFileId: string,
+): string {
+	return `${instanceUrl}/conversation/v2/${encodeURIComponent(conversationId)}/download/${encodeURIComponent(tsFileId)}`;
+}
+
+// Lower-case extension of a file name, without the dot ("" when there is none).
+export function fileExtension(fileName: string): string {
+	const dot = fileName.lastIndexOf(".");
+	return dot === -1 ? "" : fileName.slice(dot + 1).toLowerCase();
+}
+
+interface Spotter3FileItem {
+	ts_file_id?: string;
+	display_name?: string;
+	file_type?: string;
+}
+
 function buildAnswerIframeUrl(
 	instanceUrl: string,
 	metadata?: {
@@ -86,6 +160,9 @@ export const processSpotter3EventStream = async (
 	) => Promise<void>,
 	recorder?: MetricsRecorder,
 	suppressIframes = false,
+	// Emit `file` messages (simplified format). Off unless the caller can fetch
+	// them with get_file, so the client is not offered a file it cannot read.
+	includeFiles = false,
 ) => {
 	return await withSpan("process-spotter3-event-stream", async (span: Span) => {
 		// Include the operation on every stream-message metric so future streamed
@@ -95,6 +172,7 @@ export const processSpotter3EventStream = async (
 		span.setAttribute("conversation_id", conversationId);
 		let nTextMessagesParsed = 0;
 		let nAnswerMessagesParsed = 0;
+		let nFileMessagesParsed = 0;
 		let nMessagesIgnored = 0;
 		let spanHasError = false;
 
@@ -252,6 +330,41 @@ export const processSpotter3EventStream = async (
 								type: "step_notification",
 								text: item.metadata.tool_title,
 							});
+						} else if (item.type === "file" && includeFiles) {
+							const files: Spotter3FileItem[] = Array.isArray(item.files)
+								? item.files
+								: [];
+							for (const file of files) {
+								if (!file?.ts_file_id) {
+									nMessagesIgnored++;
+									continue;
+								}
+								nFileMessagesParsed++;
+								recordUpstreamStreamMessageMetric(
+									recorder,
+									upstreamOperation,
+									"file",
+									item.metadata?.type === "thinking",
+								);
+								newMessages.push({
+									is_thinking: item.metadata?.type === "thinking",
+									type: "file",
+									file_id: buildFileId(conversationId, file.ts_file_id),
+									// Upstream escapes some names with backslashes.
+									file_name: (file.display_name || file.ts_file_id).replace(
+										/\\/g,
+										"",
+									),
+									file_type: (
+										file.file_type || fileExtension(file.ts_file_id)
+									).toLowerCase(),
+									file_download_url: buildSpotter3FileDownloadUrl(
+										instanceUrl,
+										conversationId,
+										file.ts_file_id,
+									),
+								});
+							}
 						} else if (
 							item.type === "ack" ||
 							item.type === "search_datasets" ||
@@ -313,9 +426,13 @@ export const processSpotter3EventStream = async (
 
 		span.setAttributes({
 			spotter_response_format: spotterResponseFormat,
-			total_messages_parsed: nTextMessagesParsed + nAnswerMessagesParsed,
+			total_messages_parsed:
+				nTextMessagesParsed + nAnswerMessagesParsed + nFileMessagesParsed,
 			total_text_messages_parsed: nTextMessagesParsed,
 			total_answer_messages_parsed: nAnswerMessagesParsed,
+			...(includeFiles && {
+				total_file_messages_parsed: nFileMessagesParsed,
+			}),
 			total_messages_ignored: nMessagesIgnored,
 		});
 		if (!spanHasError) {

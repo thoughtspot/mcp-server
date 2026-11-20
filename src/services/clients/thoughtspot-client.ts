@@ -18,6 +18,7 @@ import {
 	getAnswerSession,
 } from "./answer/answer-client";
 import { getData } from "./get-data/get-data-client";
+import { downloadSpotter3File } from "./get-file/conversation-file";
 import { fetchOrgBearerToken, listOrgs } from "./orgs/orgs-client";
 import { searchObjects } from "./search-objects/search-objects-client";
 import {
@@ -129,6 +130,10 @@ export class ThoughtSpotClient extends ThoughtSpotRestApi {
 		params: Params<typeof sendSpotter3MessageStreaming>,
 	) {
 		return sendSpotter3MessageStreaming(this.ctx, params);
+	}
+
+	downloadSpotter3File(params: Params<typeof downloadSpotter3File>) {
+		return downloadSpotter3File(this.ctx, params);
 	}
 
 	loadSpotter3Answer(params: Params<typeof loadSpotter3Answer>) {
