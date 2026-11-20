@@ -79,9 +79,10 @@ export type ViewRelayRequest = {
 /**
  * Check a page request against VIEW_RELAY_ALLOWLIST. The path must match exactly
  * (no query, no encoding tricks) and the body must be a JSON object with only the
- * allowed keys. Throws ApiRelayRejectedError otherwise.
+ * allowed keys. Returns the body to relay; throws ApiRelayRejectedError
+ * otherwise.
  */
-export function checkViewRelayRequest(request: ViewRelayRequest): void {
+export function checkViewRelayRequest(request: ViewRelayRequest): string {
 	const method = request.method.toUpperCase();
 	const entry = VIEW_RELAY_ALLOWLIST.find(
 		(allowed) => allowed.method === method && allowed.path === request.path,
@@ -112,6 +113,9 @@ export function checkViewRelayRequest(request: ViewRelayRequest): void {
 	if (problem) {
 		throw new ApiRelayRejectedError(problem);
 	}
+	// The body to relay: re-serialized from what was checked, so the cluster
+	// can't read the original bytes (duplicate keys, say) differently.
+	return JSON.stringify(body);
 }
 
 // ── Stand-in MCP view page ──────────────────────────────────────────────────

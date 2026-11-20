@@ -130,3 +130,34 @@ describe("mcp-view-widget (approach C1 prototype)", () => {
 		});
 	});
 });
+
+describe("mcp-view scripts", () => {
+	it.each([
+		["widget", MCP_VIEW_WIDGET_HTML],
+		["page", MCP_VIEW_PAGE_HTML],
+	])("%s script parses as JavaScript", (_label, html) => {
+		const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(
+			(m) => m[1],
+		);
+		expect(scripts).toHaveLength(1);
+		for (const body of scripts) {
+			expect(() => new Function(body)).not.toThrow();
+		}
+	});
+});
+
+describe("checkViewRelayRequest body", () => {
+	it("returns the checked body re-serialized, collapsing duplicate keys", () => {
+		const relayed = checkViewRelayRequest({
+			method: "POST",
+			path: "/api/rest/2.0/report/answer",
+			body: '{"session_identifier":"s","generation_number":1,"file_format":"PDF","file_format":"CSV"}',
+		});
+		expect(JSON.parse(relayed)).toEqual({
+			session_identifier: "s",
+			generation_number: 1,
+			file_format: "CSV",
+		});
+		expect(relayed).not.toContain("PDF");
+	});
+});
