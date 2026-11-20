@@ -46,6 +46,10 @@ export type Props = {
 	// thoughtspot_api_request as "[relay-capture] METHOD path ops status", to
 	// collect the calls the view-only relay allowlist must cover. Local use.
 	enableRelayCapture?: boolean;
+	// Approach B prototype. Undocumented `embed-sdk=true` URL flag (see
+	// index.ts): offer show_answer_embed, which frames the cluster with the
+	// Visual Embed SDK and hands the widget a short-lived user token.
+	enableEmbedSdkWidget?: boolean;
 };
 
 const DEFAULT_CLIENT_NAME = "Bearer Token client";
