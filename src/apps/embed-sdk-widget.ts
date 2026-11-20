@@ -23,6 +23,13 @@ export const EMBED_SDK_WIDGET_URI = "ui://thoughtspot/embed-sdk.html";
 export const EMBED_SDK_VERSION = "1.54.0";
 export const EMBED_SDK_CDN_ORIGIN = "https://cdn.jsdelivr.net";
 export const EMBED_SDK_SCRIPT_URL = `${EMBED_SDK_CDN_ORIGIN}/npm/@thoughtspot/visual-embed-sdk@${EMBED_SDK_VERSION}/dist/tsembed.js`;
+// Subresource Integrity hash of that exact file (dist/tsembed.js from the npm
+// tarball; the CDN serves the same bytes). The widget handles a user token, so
+// the browser must refuse the script if the CDN ever serves anything else.
+// Update together with EMBED_SDK_VERSION:
+//   openssl dgst -sha384 -binary tsembed.js | openssl base64 -A
+export const EMBED_SDK_SCRIPT_INTEGRITY =
+	"sha384-93lR+LbF5W4Yk63Ca5cHg1BR82j4uTtpgQJpit8AZykgwVO93hsel4kcCs8A9uqn";
 
 // Lifetime of the token handed to the widget. Short, because the token is a full
 // user token (the mint endpoint takes a validity and org, not a scope) and any
@@ -79,7 +86,7 @@ export const EMBED_SDK_WIDGET_HTML = `<!doctype html>
 	.status { padding: 24px; text-align: center; }
 	.status.error { color: #b42318; white-space: pre-wrap; }
 </style>
-<script src="${EMBED_SDK_SCRIPT_URL}"></script>
+<script src="${EMBED_SDK_SCRIPT_URL}" integrity="${EMBED_SDK_SCRIPT_INTEGRITY}" crossorigin="anonymous"></script>
 </head>
 <body>
 <div id="embed"><div class="status">Loading ThoughtSpot…</div></div>

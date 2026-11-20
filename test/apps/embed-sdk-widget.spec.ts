@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+	EMBED_SDK_SCRIPT_INTEGRITY,
 	EMBED_SDK_SCRIPT_URL,
 	EMBED_SDK_WIDGET_HTML,
 	EMBED_TOKEN_VALIDITY_SEC,
@@ -29,9 +30,12 @@ describe("embed-sdk-widget (approach B prototype)", () => {
 	});
 
 	describe("widget HTML", () => {
-		it("loads a pinned SDK build", () => {
+		it("loads a pinned SDK build with an integrity hash", () => {
 			expect(EMBED_SDK_SCRIPT_URL).toMatch(/visual-embed-sdk@\d+\.\d+\.\d+\//);
-			expect(EMBED_SDK_WIDGET_HTML).toContain(`src="${EMBED_SDK_SCRIPT_URL}"`);
+			expect(EMBED_SDK_SCRIPT_INTEGRITY).toMatch(/^sha384-[A-Za-z0-9+/]{64}$/);
+			expect(EMBED_SDK_WIDGET_HTML).toContain(
+				`<script src="${EMBED_SDK_SCRIPT_URL}" integrity="${EMBED_SDK_SCRIPT_INTEGRITY}" crossorigin="anonymous"></script>`,
+			);
 		});
 
 		it("authenticates cookieless through get_embed_token", () => {
