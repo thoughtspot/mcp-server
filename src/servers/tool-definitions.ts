@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { answerWidgetToolMeta } from "../apps/answer-widget";
+import { embedSdkToolMeta } from "../apps/embed-sdk-widget";
 import {
 	API_RELAY_METHODS,
 	THOUGHTSPOT_UI_WIDGET_URI,
@@ -692,6 +693,10 @@ export enum ToolName {
 	ShowAnswer = "show_answer",
 	GetThoughtSpotPage = "get_thoughtspot_page",
 	ThoughtSpotApiRequest = "thoughtspot_api_request",
+	// Approach B prototype: Visual Embed SDK widget (off unless the
+	// `embed-sdk=true` URL flag is set)
+	ShowAnswerEmbed = "show_answer_embed",
+	GetEmbedToken = "get_embed_token",
 }
 
 /**
@@ -1472,6 +1477,49 @@ export const thoughtSpotApiRequestToolDefinition = {
 		title: "ThoughtSpot API Request",
 		readOnlyHint: false,
 		destructiveHint: true,
+		openWorldHint: false,
+	},
+	_meta: { ui: { visibility: ["app"] } },
+};
+
+// ── Approach B prototype: Visual Embed SDK widget ──────────────────────────
+export const ShowAnswerEmbedOutputSchema = z.object({
+	thoughtspot_host: z.string().describe("The ThoughtSpot instance framed."),
+	path: z.string().describe("The AppEmbed path opened in the widget."),
+});
+
+export const showAnswerEmbedToolDefinition = {
+	name: ToolName.ShowAnswerEmbed,
+	description:
+		'Prototype: show an Analytics Agent answer, or any ThoughtSpot page, inline using the ThoughtSpot Visual Embed SDK, which frames the ThoughtSpot instance directly. Pass the answer\'s `iframe_url` from get_session_updates verbatim, or a route such as "#/pinboard/<liveboard id>". Use it only when asked to test the embed SDK view; otherwise prefer show_answer. The result only confirms which page was opened.',
+	inputSchema: z.toJSONSchema(ShowAnswerInputSchema),
+	outputSchema: z.toJSONSchema(ShowAnswerEmbedOutputSchema),
+	annotations: {
+		title: "Show ThoughtSpot (Embed SDK)",
+		readOnlyHint: true,
+		destructiveHint: false,
+		openWorldHint: false,
+	},
+	_meta: embedSdkToolMeta(),
+};
+
+export const GetEmbedTokenOutputSchema = z.object({
+	token: z.string(),
+	expires_in_sec: z.number(),
+});
+
+// Widget-only helper: the SDK's getAuthToken callback. Returns a short-lived
+// user token, which reaches the widget's JavaScript (approach B's trade-off).
+export const getEmbedTokenToolDefinition = {
+	name: ToolName.GetEmbedToken,
+	description:
+		"Mint a short-lived ThoughtSpot token for the show_answer_embed widget. Not for direct use.",
+	inputSchema: z.toJSONSchema(z.object({})),
+	outputSchema: z.toJSONSchema(GetEmbedTokenOutputSchema),
+	annotations: {
+		title: "Get Embed Token",
+		readOnlyHint: true,
+		destructiveHint: false,
 		openWorldHint: false,
 	},
 	_meta: { ui: { visibility: ["app"] } },
