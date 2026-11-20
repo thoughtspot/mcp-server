@@ -17,11 +17,11 @@ import {
 	recordUpstreamStreamStartedMetric,
 } from "../metrics/runtime/tool-metrics";
 import { WithSpan, getActiveSpan } from "../metrics/tracing/tracing-utils";
-import type { AnswerReloadIds } from "../spotterviz/dashboard-tools";
 import {
 	processSpotter3EventStream,
 	processSpotterXEventStream,
 } from "../streaming-utils";
+import type { AnswerReloadIds } from "./answer-id-utils";
 import { GET_DATA_DEFAULT_MAX_ROWS } from "./clients/get-data/get-data-client";
 import type { GetDataViz } from "./clients/get-data/get-data-types";
 import {
@@ -470,9 +470,6 @@ export class ThoughtSpotService {
 					this.client.createSpotterXConversation({
 						isSpotterDataSourceDiscoveryEnabled,
 						isSpotterChatHistoryEnabled,
-						tenantId: this.client.tenantId,
-						orgId: this.client.orgId,
-						userId: this.client.userId,
 						dataSourceId,
 					}),
 			);
@@ -529,9 +526,6 @@ export class ThoughtSpotService {
 				UPSTREAM_OPERATION_NAMES.sendAgentConversationMessageStreaming,
 				async () => {
 					const response = await this.client.sendSpotterXMessageStreaming({
-						tenantId: this.client.tenantId,
-						orgId: this.client.orgId,
-						userId: this.client.userId,
 						conversationId,
 						message: finalMessage,
 						liveboardContext,
@@ -1079,46 +1073,42 @@ export class ThoughtSpotService {
 			reload_kind: reload.kind,
 			conversation_id: reload.conversationId,
 		});
-		if (reload.kind === "spotter3") {
-			span?.setAttribute("message_id", reload.messageId);
-			return this.observeUpstreamCall(
-				UPSTREAM_OPERATION_NAMES.loadAgentConversationAnswer,
-				() =>
-					this.client.loadSpotter3Answer({
-						conversationId: reload.conversationId,
-						messageId: reload.messageId,
-					}),
-			);
+		switch (reload.kind) {
+			case "spotter3":
+				span?.setAttribute("message_id", reload.messageId);
+				return this.observeUpstreamCall(
+					UPSTREAM_OPERATION_NAMES.loadAgentConversationAnswer,
+					() =>
+						this.client.loadSpotter3Answer({
+							conversationId: reload.conversationId,
+							messageId: reload.messageId,
+						}),
+				);
+			case "spotterx": {
+				span?.setAttributes({
+					session_identifier: reload.sessionId,
+					generation_number: reload.genNo,
+				});
+				const recipe = await this.observeUpstreamCall(
+					UPSTREAM_OPERATION_NAMES.fetchAgentArtifact,
+					() =>
+						this.client.fetchSpotterXAnswerRecipe({
+							conversationId: reload.conversationId,
+							sessionId: reload.sessionId,
+							genNo: reload.genNo,
+						}),
+				);
+				return this.observeUpstreamCall(
+					UPSTREAM_OPERATION_NAMES.remintAgentAnswer,
+					() => this.client.remintSpotterXAnswer({ recipe }),
+				);
+			}
+			default:
+				// `satisfies never` fails to compile if a reload kind is left unhandled
+				throw new Error(
+					`Unknown answer reload kind: ${JSON.stringify(reload satisfies never)}`,
+				);
 		}
-
-		if (reload.kind === "spotterx") {
-			span?.setAttributes({
-				session_identifier: reload.sessionId,
-				generation_number: reload.genNo,
-			});
-			const recipeText = await this.observeUpstreamCall(
-				UPSTREAM_OPERATION_NAMES.fetchAgentArtifact,
-				() =>
-					this.client.fetchSpotterXArtifact({
-						tenantId: this.client.tenantId,
-						orgId: this.client.orgId,
-						userId: this.client.userId,
-						conversationId: reload.conversationId,
-						filename: `recipe-${reload.sessionId}-${reload.genNo}-json`,
-						category: "ASSETS",
-					}),
-			);
-			// Forwarded as is; the recipe is not reshaped
-			return this.observeUpstreamCall(
-				UPSTREAM_OPERATION_NAMES.remintAgentAnswer,
-				() =>
-					this.client.remintSpotterXAnswer({ recipe: JSON.parse(recipeText) }),
-			);
-		}
-
-		throw new Error(
-			`Unknown answer reload kind: ${(reload as { kind: string }).kind}`,
-		);
 	}
 
 	/**

@@ -5,6 +5,7 @@ import {
 	recordUpstreamStreamMessageMetric,
 } from "./metrics/runtime/tool-metrics";
 import { withSpan } from "./metrics/tracing/tracing-utils";
+import { buildAnswerId } from "./services/answer-id-utils";
 import {
 	type Message,
 	type RawMessage,
@@ -41,21 +42,6 @@ async function closeStreamOnFatalError(
 			appendError,
 		);
 	}
-}
-
-// `session_id` + `gen_no` name the answer for export and dashboards, but expire
-// (about 8 hours). `conversation_id` + `message_id` stay valid as long as the
-// conversation does, and let get_data load the answer again for fresh ids.
-function buildAnswerId(
-	conversationId: string,
-	item: { id?: string; metadata?: { session_id?: string; gen_no?: number } },
-): string {
-	return JSON.stringify({
-		session_id: item.metadata?.session_id,
-		gen_no: item.metadata?.gen_no,
-		conversation_id: conversationId,
-		message_id: item.id,
-	});
 }
 
 function buildAnswerIframeUrl(

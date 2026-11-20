@@ -32,7 +32,7 @@ import {
 } from "./spotter-viz/spotter-viz-client";
 import {
 	createSpotterXConversation,
-	fetchSpotterXArtifact,
+	fetchSpotterXAnswerRecipe,
 	remintSpotterXAnswer,
 	sendSpotterXMessageStreaming,
 } from "./spotter-x/spotter-x-client";
@@ -149,8 +149,8 @@ export class ThoughtSpotClient extends ThoughtSpotRestApi {
 		return sendSpotterXMessageStreaming(this.ctx, params);
 	}
 
-	fetchSpotterXArtifact(params: Params<typeof fetchSpotterXArtifact>) {
-		return fetchSpotterXArtifact(this.ctx, params);
+	fetchSpotterXAnswerRecipe(params: Params<typeof fetchSpotterXAnswerRecipe>) {
+		return fetchSpotterXAnswerRecipe(this.ctx, params);
 	}
 
 	remintSpotterXAnswer(params: Params<typeof remintSpotterXAnswer>) {

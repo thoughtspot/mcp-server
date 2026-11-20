@@ -11,15 +11,13 @@ import {
 } from "../../types";
 
 // SpotterX expects the fuid header and omits the org header (org is carried in the fuid)
-function spotterXRequestOptions(
-	tenantId: string,
-	orgId: string,
-	userId: string,
-): ApiRequestOptions {
+function spotterXRequestOptions(ctx: ClientContext): ApiRequestOptions {
 	return {
 		scopeToOrg: false,
 		requestId: generateRequestId(),
-		headers: { "x-thoughtspot-fuid": `${tenantId}.${orgId}.${userId}` },
+		headers: {
+			"x-thoughtspot-fuid": `${ctx.tenantId}.${ctx.orgId}.${ctx.userId}`,
+		},
 	};
 }
 
@@ -31,26 +29,20 @@ export async function createSpotterXConversation(
 	{
 		isSpotterDataSourceDiscoveryEnabled,
 		isSpotterChatHistoryEnabled,
-		tenantId,
-		orgId,
-		userId,
 		dataSourceId,
 	}: {
 		isSpotterDataSourceDiscoveryEnabled: boolean;
 		isSpotterChatHistoryEnabled: boolean;
-		tenantId: string;
-		orgId: string;
-		userId: string;
 		dataSourceId?: string;
 	},
 ): Promise<AgentConversation> {
 	const endpoint = "/agents/v1/agents/spotterx/sessions";
 	const response = await fetchApi(ctx, endpoint, {
-		...spotterXRequestOptions(tenantId, orgId, userId),
+		...spotterXRequestOptions(ctx),
 		json: {
-			user_id: userId,
-			tenant_id: tenantId,
-			org_id: orgId,
+			user_id: ctx.userId,
+			tenant_id: ctx.tenantId,
+			org_id: ctx.orgId,
 			saved: isSpotterChatHistoryEnabled,
 			labels: { client: "mcp-server" },
 			settings_override: {
@@ -88,16 +80,10 @@ export async function createSpotterXConversation(
 export async function sendSpotterXMessageStreaming(
 	ctx: ClientContext,
 	{
-		tenantId,
-		orgId,
-		userId,
 		conversationId,
 		message,
 		liveboardContext,
 	}: {
-		tenantId: string;
-		orgId: string;
-		userId: string;
 		conversationId: string;
 		message: string;
 		liveboardContext?: LiveboardContext;
@@ -106,7 +92,7 @@ export async function sendSpotterXMessageStreaming(
 	// Encoding for safety, though for valid IDs it should not make a difference
 	const endpoint = `/agents/v1/agents/spotterx/sessions/${encodeURIComponent(conversationId)}/query?alt=sse`;
 	const response = await fetchApi(ctx, endpoint, {
-		...spotterXRequestOptions(tenantId, orgId, userId),
+		...spotterXRequestOptions(ctx),
 		accept: "text/event-stream",
 		json: {
 			input: { parts: [{ text_part: { text: message } }] },
@@ -146,7 +132,7 @@ export async function sendSpotterXMessageStreaming(
 
 // Artifact namespaces addressable through the agents gateway. The server takes the enum
 // name, and an unspecified category silently resolves to FILES, so it is always sent
-export type SpotterXArtifactCategory = "FILES" | "ASSETS";
+export type SpotterXArtifactCategory = "ASSETS";
 
 /*
  * Fetch the content of a SpotterX session artifact as text. Artifacts are addressed by
@@ -156,27 +142,17 @@ export type SpotterXArtifactCategory = "FILES" | "ASSETS";
 export async function fetchSpotterXArtifact(
 	ctx: ClientContext,
 	{
-		tenantId,
-		orgId,
-		userId,
 		conversationId,
 		filename,
 		category,
 	}: {
-		tenantId: string;
-		orgId: string;
-		userId: string;
 		conversationId: string;
 		filename: string;
 		category: SpotterXArtifactCategory;
 	},
 ): Promise<string> {
 	const endpoint = `/agents/v1/sessions/${encodeURIComponent(conversationId)}/artifacts/${encodeURIComponent(filename)}?category=${category}`;
-	const response = await fetchApi(
-		ctx,
-		endpoint,
-		spotterXRequestOptions(tenantId, orgId, userId),
-	);
+	const response = await fetchApi(ctx, endpoint, spotterXRequestOptions(ctx));
 
 	if (!response.ok) {
 		const errorText = await response.text();
@@ -202,9 +178,47 @@ export async function fetchSpotterXArtifact(
 }
 
 /*
- * Rebuild an expired SpotterX answer from its stored recipe (see fetchSpotterXArtifact).
- * Re-runs the query and returns fresh session/generation ids. On failure, the body's
- * `error_code` is WORKSHEET_NOT_FOUND when the user lost access to the data model.
+ * Fetch the recipe SpotterX stored for an answer, which remintSpotterXAnswer rebuilds it
+ * from. Keyed by the answer's original session id and generation number.
+ */
+export async function fetchSpotterXAnswerRecipe(
+	ctx: ClientContext,
+	{
+		conversationId,
+		sessionId,
+		genNo,
+	}: { conversationId: string; sessionId: string; genNo: number },
+): Promise<unknown> {
+	const recipeText = await fetchSpotterXArtifact(ctx, {
+		conversationId,
+		filename: `recipe-${sessionId}-${genNo}-json`,
+		category: "ASSETS",
+	});
+	return JSON.parse(recipeText);
+}
+
+/*
+ * A remint refused because the user can no longer access the answer's data model, the one
+ * remint failure the user can act on
+ */
+export class SpotterXAnswerAccessDeniedError extends ThoughtSpotApiError {
+	constructor(status: number, body: string) {
+		super(status, "remintSpotterXAnswer", body);
+		this.name = "SpotterXAnswerAccessDeniedError";
+	}
+}
+
+function remintErrorCode(body: string): string | undefined {
+	try {
+		return JSON.parse(body)?.error_code;
+	} catch {
+		return undefined;
+	}
+}
+
+/*
+ * Rebuild an expired SpotterX answer from its stored recipe (see fetchSpotterXAnswerRecipe).
+ * Re-runs the query and returns fresh session/generation ids.
  */
 export async function remintSpotterXAnswer(
 	ctx: ClientContext,
@@ -217,6 +231,9 @@ export async function remintSpotterXAnswer(
 
 	if (!response.ok) {
 		const errorText = await response.text();
+		if (remintErrorCode(errorText) === "WORKSHEET_NOT_FOUND") {
+			throw new SpotterXAnswerAccessDeniedError(response.status, errorText);
+		}
 		throw new ThoughtSpotApiError(
 			response.status,
 			"remintSpotterXAnswer",
@@ -232,19 +249,4 @@ export async function remintSpotterXAnswer(
 		throw new Error("remintSpotterXAnswer returned no answer session");
 	}
 	return { sessionIdentifier: data.session_id, generationNumber: data.gen_no };
-}
-
-/*
- * Whether a remint failed because the user can no longer access the answer's data model,
- * the one remint failure the user can act on
- */
-export function isRemintAccessDeniedError(error: unknown): boolean {
-	if (!(error instanceof ThoughtSpotApiError) || !error.body) {
-		return false;
-	}
-	try {
-		return JSON.parse(error.body)?.error_code === "WORKSHEET_NOT_FOUND";
-	} catch {
-		return false;
-	}
 }

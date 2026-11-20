@@ -1,6 +1,6 @@
 import { createBearerAuthenticationConfig } from "@thoughtspot/rest-api-sdk";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { isRemintAccessDeniedError } from "../../../../src/services/clients/spotter-x/spotter-x-client";
+import { SpotterXAnswerAccessDeniedError } from "../../../../src/services/clients/spotter-x/spotter-x-client";
 import { ThoughtSpotClient } from "../../../../src/services/clients/thoughtspot-client";
 import { ThoughtSpotApiError } from "../../../../src/services/types";
 
@@ -52,9 +52,7 @@ describe("spotter-x-client", () => {
 			client = new ThoughtSpotClient({
 				instanceUrl: mockInstanceUrl,
 				token: mockBearerToken,
-				tenantId: "",
-				orgId: "",
-				userId: "",
+				...identity,
 			}) as any;
 		});
 
@@ -67,7 +65,6 @@ describe("spotter-x-client", () => {
 			const result = await client.createSpotterXConversation({
 				isSpotterDataSourceDiscoveryEnabled: true,
 				isSpotterChatHistoryEnabled: true,
-				...identity,
 			});
 
 			expect(fetch).toHaveBeenCalledWith(
@@ -106,7 +103,6 @@ describe("spotter-x-client", () => {
 				isSpotterDataSourceDiscoveryEnabled: true,
 				isSpotterChatHistoryEnabled: true,
 				dataSourceId,
-				...identity,
 			});
 
 			const fetchCall = (fetch as any).mock.calls[0];
@@ -126,7 +122,6 @@ describe("spotter-x-client", () => {
 			await client.createSpotterXConversation({
 				isSpotterDataSourceDiscoveryEnabled: false,
 				isSpotterChatHistoryEnabled: false,
-				...identity,
 			});
 
 			const fetchCall = (fetch as any).mock.calls[0];
@@ -153,7 +148,7 @@ describe("spotter-x-client", () => {
 				json: vi.fn().mockResolvedValue({ id: "session-top-level" }),
 			});
 
-			const result = await client.createSpotterXConversation(identity);
+			const result = await client.createSpotterXConversation({});
 
 			expect(result).toEqual({ conversation_id: "session-top-level" });
 		});
@@ -164,7 +159,7 @@ describe("spotter-x-client", () => {
 				json: vi.fn().mockResolvedValue({ session: {} }),
 			});
 
-			await expect(client.createSpotterXConversation(identity)).rejects.toThrow(
+			await expect(client.createSpotterXConversation({})).rejects.toThrow(
 				"Could not extract session id from response.",
 			);
 		});
@@ -176,18 +171,18 @@ describe("spotter-x-client", () => {
 				text: vi.fn().mockResolvedValue("Unauthorized"),
 			});
 
-			await expect(
-				client.createSpotterXConversation(identity),
-			).rejects.toMatchObject({
-				status: 401,
-				message: "createSpotterXConversation failed with status 401",
-			});
+			await expect(client.createSpotterXConversation({})).rejects.toMatchObject(
+				{
+					status: 401,
+					message: "createSpotterXConversation failed with status 401",
+				},
+			);
 		});
 
 		it("should handle network errors", async () => {
 			(fetch as any).mockRejectedValue(new Error("Network error"));
 
-			await expect(client.createSpotterXConversation(identity)).rejects.toThrow(
+			await expect(client.createSpotterXConversation({})).rejects.toThrow(
 				"Network error",
 			);
 		});
@@ -198,15 +193,8 @@ describe("spotter-x-client", () => {
 				json: vi.fn().mockResolvedValue({ session: { id: "session-123" } }),
 			});
 
-			// An org on the client must not add the org header; the org travels in the fuid
-			const orgClient = new ThoughtSpotClient({
-				instanceUrl: mockInstanceUrl,
-				token: mockBearerToken,
-				tenantId: "",
-				orgId: "99",
-				userId: "",
-			}) as any;
-			await orgClient.createSpotterXConversation(identity);
+			// The client's org must not add the org header; the org travels in the fuid
+			await client.createSpotterXConversation({});
 
 			const fetchCall = (fetch as any).mock.calls[0];
 			const headers = fetchCall[1].headers;
@@ -226,9 +214,7 @@ describe("spotter-x-client", () => {
 			client = new ThoughtSpotClient({
 				instanceUrl: mockInstanceUrl,
 				token: mockBearerToken,
-				tenantId: "",
-				orgId: "",
-				userId: "",
+				...identity,
 			}) as any;
 		});
 
@@ -242,7 +228,6 @@ describe("spotter-x-client", () => {
 			const result = await client.sendSpotterXMessageStreaming({
 				conversationId: "foo",
 				message: "bar",
-				...identity,
 			});
 
 			expect(fetch).toHaveBeenCalledWith(
@@ -286,7 +271,6 @@ describe("spotter-x-client", () => {
 					liveboardId: "lb-123",
 					bachSession: { transactionId: "txn-1", generationNumber: "3" },
 				},
-				...identity,
 			});
 
 			const body = JSON.parse((fetch as any).mock.calls[0][1].body);
@@ -304,7 +288,6 @@ describe("spotter-x-client", () => {
 			await client.sendSpotterXMessageStreaming({
 				conversationId: "a/b?c",
 				message: "bar",
-				...identity,
 			});
 
 			const fetchCall = (fetch as any).mock.calls[0];
@@ -321,7 +304,6 @@ describe("spotter-x-client", () => {
 				client.sendSpotterXMessageStreaming({
 					conversationId: "foo",
 					message: "bar",
-					...identity,
 				}),
 			).rejects.toThrow("Network error");
 		});
@@ -340,7 +322,6 @@ describe("spotter-x-client", () => {
 				client.sendSpotterXMessageStreaming({
 					conversationId: "foo",
 					message: "bar",
-					...identity,
 				}),
 			).rejects.toMatchObject({
 				status: 401,
@@ -353,18 +334,10 @@ describe("spotter-x-client", () => {
 				ok: true,
 			});
 
-			// An org on the client must not add the org header; the org travels in the fuid
-			const orgClient = new ThoughtSpotClient({
-				instanceUrl: mockInstanceUrl,
-				token: mockBearerToken,
-				tenantId: "",
-				orgId: "99",
-				userId: "",
-			}) as any;
-			await orgClient.sendSpotterXMessageStreaming({
+			// The client's org must not add the org header; the org travels in the fuid
+			await client.sendSpotterXMessageStreaming({
 				conversationId: "foo",
 				message: "bar",
-				...identity,
 			});
 
 			const fetchCall = (fetch as any).mock.calls[0];
@@ -384,12 +357,10 @@ describe("spotter-x-client", () => {
 			await client.sendSpotterXMessageStreaming({
 				conversationId: "conv-id",
 				message: "first message",
-				...identity,
 			});
 			await client.sendSpotterXMessageStreaming({
 				conversationId: "conv-id",
 				message: "second message",
-				...identity,
 			});
 
 			const id1 = (fetch as any).mock.calls[0][1].headers["x-request-id"];
@@ -398,56 +369,55 @@ describe("spotter-x-client", () => {
 		});
 	});
 
-	describe("fetchSpotterXArtifact", () => {
+	describe("fetchSpotterXAnswerRecipe", () => {
 		let client: any;
 		const args = {
-			...identity,
 			conversationId: "cx/conv-1",
-			filename: "recipe-session-1-2-json",
-			category: "ASSETS",
+			sessionId: "session-1",
+			genNo: 2,
 		};
 
 		beforeEach(() => {
 			client = new ThoughtSpotClient({
 				instanceUrl: mockInstanceUrl,
 				token: mockBearerToken,
-				tenantId: "",
-				orgId: "",
-				userId: "",
+				...identity,
 			}) as any;
 		});
 
-		it("decodes the gateway's base64 JSON envelope", async () => {
-			const recipe = '{"recipe_version":"recipe.v1","title":"Größe"}';
+		it("fetches the answer's recipe artifact and decodes the base64 JSON envelope", async () => {
+			const recipe = { recipe_version: "recipe.v1", title: "Größe" };
 			(fetch as any).mockResolvedValue({
 				ok: true,
 				headers: new Headers({ "content-type": "application/json" }),
 				json: vi.fn().mockResolvedValue({
-					filename: args.filename,
-					data: Buffer.from(recipe, "utf8").toString("base64"),
+					filename: "recipe-session-1-2-json",
+					data: Buffer.from(JSON.stringify(recipe), "utf8").toString("base64"),
 				}),
 			});
 
-			const result = await client.fetchSpotterXArtifact(args);
+			const result = await client.fetchSpotterXAnswerRecipe(args);
 
-			expect(result).toBe(recipe);
+			expect(result).toEqual(recipe);
 			const [url, init] = (fetch as any).mock.calls[0];
 			expect(url).toBe(
 				`${mockInstanceUrl}/agents/v1/sessions/cx%2Fconv-1/artifacts/recipe-session-1-2-json?category=ASSETS`,
 			);
 			expect(init.method).toBe("GET");
 			expect(init.headers["x-thoughtspot-fuid"]).toBe(expectedFuid);
-			expect(init.headers).not.toHaveProperty("x-thoughtspot-org-id");
+			expect(init.headers).not.toHaveProperty("x-thoughtspot-orgs");
 		});
 
-		it("returns raw bytes as text when the gateway does not wrap them", async () => {
+		it("reads raw bytes when the gateway does not wrap them", async () => {
 			(fetch as any).mockResolvedValue({
 				ok: true,
 				headers: new Headers({ "content-type": "application/octet-stream" }),
-				text: vi.fn().mockResolvedValue("raw-recipe"),
+				text: vi.fn().mockResolvedValue('{"recipe_version":"recipe.v1"}'),
 			});
 
-			expect(await client.fetchSpotterXArtifact(args)).toBe("raw-recipe");
+			expect(await client.fetchSpotterXAnswerRecipe(args)).toEqual({
+				recipe_version: "recipe.v1",
+			});
 		});
 
 		it("throws a ThoughtSpotApiError with the status on failure", async () => {
@@ -457,9 +427,9 @@ describe("spotter-x-client", () => {
 				text: vi.fn().mockResolvedValue("not found"),
 			});
 
-			await expect(client.fetchSpotterXArtifact(args)).rejects.toMatchObject({
-				status: 404,
-			});
+			await expect(
+				client.fetchSpotterXAnswerRecipe(args),
+			).rejects.toMatchObject({ status: 404 });
 		});
 	});
 
@@ -470,9 +440,7 @@ describe("spotter-x-client", () => {
 			client = new ThoughtSpotClient({
 				instanceUrl: mockInstanceUrl,
 				token: mockBearerToken,
-				tenantId: "",
-				orgId: "",
-				userId: "",
+				...identity,
 			}) as any;
 		});
 
@@ -500,33 +468,31 @@ describe("spotter-x-client", () => {
 			expect(JSON.parse(init.body)).toEqual(recipe);
 		});
 
-		it("keeps the error body so an access loss can be told apart", async () => {
-			(fetch as any).mockResolvedValue({
-				ok: false,
-				status: 400,
-				text: vi
-					.fn()
-					.mockResolvedValue(
-						JSON.stringify({ error_code: "WORKSHEET_NOT_FOUND" }),
-					),
-			});
+		it.each([
+			{ errorCode: "WORKSHEET_NOT_FOUND", accessDenied: true },
+			{ errorCode: "RELOAD_ANSWER_FAILED", accessDenied: false },
+		])(
+			"throws a ThoughtSpotApiError, typed as access denied only for $errorCode",
+			async ({ errorCode, accessDenied }) => {
+				(fetch as any).mockResolvedValue({
+					ok: false,
+					status: 400,
+					text: vi
+						.fn()
+						.mockResolvedValue(JSON.stringify({ error_code: errorCode })),
+				});
 
-			const error = await client
-				.remintSpotterXAnswer({ recipe: {} })
-				.catch((e: unknown) => e);
+				const error = await client
+					.remintSpotterXAnswer({ recipe: {} })
+					.catch((e: unknown) => e);
 
-			expect(error).toMatchObject({ status: 400 });
-			expect(isRemintAccessDeniedError(error)).toBe(true);
-			expect(
-				isRemintAccessDeniedError(
-					new ThoughtSpotApiError(
-						500,
-						"remintSpotterXAnswer",
-						JSON.stringify({ error_code: "RELOAD_ANSWER_FAILED" }),
-					),
-				),
-			).toBe(false);
-		});
+				expect(error).toBeInstanceOf(ThoughtSpotApiError);
+				expect(error).toMatchObject({ status: 400 });
+				expect(error instanceof SpotterXAnswerAccessDeniedError).toBe(
+					accessDenied,
+				);
+			},
+		);
 
 		it("throws when the response carries no answer session", async () => {
 			(fetch as any).mockResolvedValue({

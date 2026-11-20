@@ -6,6 +6,7 @@ import { ANALYTICS_ENGINE_SCHEMA_VERSION } from "../../src/metrics/runtime/analy
 import { METRIC_NAMES } from "../../src/metrics/runtime/metric-types";
 import { NOOP_METRICS_RECORDER } from "../../src/metrics/runtime/metrics-recorder";
 import { MCPServer } from "../../src/servers/mcp-server";
+import { SpotterXAnswerAccessDeniedError } from "../../src/services/clients/spotter-x/spotter-x-client";
 import * as thoughtspotClient from "../../src/services/clients/thoughtspot-client";
 import { ThoughtSpotService } from "../../src/services/thoughtspot-service";
 import {
@@ -97,9 +98,9 @@ describe("MCP Server", () => {
 				sessionIdentifier: "session-fresh",
 				generationNumber: 5,
 			}),
-			fetchSpotterXArtifact: vi
+			fetchSpotterXAnswerRecipe: vi
 				.fn()
-				.mockResolvedValue('{"recipe_version":"recipe.v1"}'),
+				.mockResolvedValue({ recipe_version: "recipe.v1" }),
 			remintSpotterXAnswer: vi.fn().mockResolvedValue({
 				sessionIdentifier: "session-reminted",
 				generationNumber: 7,
@@ -1146,13 +1147,11 @@ describe("MCP Server", () => {
 
 					expect(result.isError).toBeUndefined();
 					expect(mockClient().loadSpotter3Answer).not.toHaveBeenCalled();
-					expect(mockClient().fetchSpotterXArtifact).toHaveBeenCalledWith(
-						expect.objectContaining({
-							conversationId: "cx-conv-1",
-							filename: "recipe-session-9-3-json",
-							category: "ASSETS",
-						}),
-					);
+					expect(mockClient().fetchSpotterXAnswerRecipe).toHaveBeenCalledWith({
+						conversationId: "cx-conv-1",
+						sessionId: "session-9",
+						genNo: 3,
+					});
 					expect(mockClient().remintSpotterXAnswer).toHaveBeenCalledWith({
 						recipe: { recipe_version: "recipe.v1" },
 					});
@@ -1172,7 +1171,7 @@ describe("MCP Server", () => {
 					mockClient().exportAnswerReport.mockRejectedValueOnce(
 						new ThoughtSpotApiError(400, "exportAnswerReport"),
 					);
-					mockClient().fetchSpotterXArtifact.mockRejectedValueOnce(
+					mockClient().fetchSpotterXAnswerRecipe.mockRejectedValueOnce(
 						new ThoughtSpotApiError(404, "fetchSpotterXArtifact"),
 					);
 					await server.init();
@@ -1195,9 +1194,8 @@ describe("MCP Server", () => {
 						new ThoughtSpotApiError(400, "exportAnswerReport"),
 					);
 					mockClient().remintSpotterXAnswer.mockRejectedValueOnce(
-						new ThoughtSpotApiError(
+						new SpotterXAnswerAccessDeniedError(
 							400,
-							"remintSpotterXAnswer",
 							JSON.stringify({ error_code: "WORKSHEET_NOT_FOUND" }),
 						),
 					);
@@ -2269,9 +2267,6 @@ describe("MCP Server", () => {
 				expect(createSpotterX).toHaveBeenCalledWith({
 					isSpotterDataSourceDiscoveryEnabled: true,
 					isSpotterChatHistoryEnabled: false,
-					tenantId: "test-cluster-123",
-					orgId: "test-org",
-					userId: "test-user-123",
 					dataSourceId: "ds-123",
 				});
 				expect(createSpotter3).not.toHaveBeenCalled();
