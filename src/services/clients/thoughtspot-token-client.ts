@@ -4,9 +4,10 @@
 // tokens; this module owns the private-endpoint paths, headers, validity, and
 // response shape so a change is picked up by both instead of silently drifting.
 
-// Org-scoped token validity (24h); the keep-warm alarm re-mints it alongside
-// the global token so it never expires under an active session.
-export const ORG_TOKEN_VALIDITY_SEC = 24 * 60 * 60;
+// Org-scoped token validity (30 days). The keep-warm alarm still re-mints it
+// alongside the global token; the long validity is a safety margin so it
+// outlives a dead keep-warm chain rather than expiring with the global token.
+export const ORG_TOKEN_VALIDITY_SEC = 30 * 24 * 60 * 60;
 
 // Working org-token mint path is /callosum/v1/v2/auth/token/fetch (the
 // /callosum/v2/... path 404s); the token is nested under data.token.

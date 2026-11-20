@@ -84,6 +84,9 @@ export interface Context {
 export abstract class BaseMCPServer extends Server {
 	protected trackers: Trackers = new Trackers();
 	protected sessionInfo: SessionInfo | undefined;
+	// The bearer token sessionInfo was last fetched with. Privileges and flags are per-org, so
+	// callers refetch when the active token (and so the org) no longer matches.
+	protected sessionInfoToken: string | undefined;
 	// In-flight ensureSessionInfo() refetch, so concurrent callers share one fetch.
 	private sessionInfoPromise?: Promise<void>;
 
@@ -520,7 +523,9 @@ export abstract class BaseMCPServer extends Server {
 
 	protected async initializeService(): Promise<void> {
 		try {
+			const token = this.getActiveToken();
 			this.sessionInfo = await this.getThoughtSpotService().getSessionInfo();
+			this.sessionInfoToken = token;
 			const mixpanel = new MixpanelTracker(
 				this.sessionInfo,
 				this.ctx.props.clientName,
@@ -555,7 +560,9 @@ export abstract class BaseMCPServer extends Server {
 	// failure keep the existing value.
 	protected async refreshSessionInfo(): Promise<void> {
 		try {
+			const token = this.getActiveToken();
 			this.sessionInfo = await this.getThoughtSpotService().getSessionInfo();
+			this.sessionInfoToken = token;
 		} catch (error) {
 			console.error("Error refreshing session info:", error);
 		}

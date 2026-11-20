@@ -271,7 +271,8 @@ export class UserTokenStoreSQLite {
 	}
 
 	// Re-mint the active org token from a freshly refreshed global token, so it
-	// stays as warm as the global token (both 24h). No-op if no org is active.
+	// stays warm (it is minted with a 30-day validity, the global token ~24h).
+	// No-op if no org is active.
 	// On failure, keep the existing org token and let the next 11h alarm retry;
 	// never throws (the global refresh must still commit and the alarm re-arm).
 	// A token that is genuinely expired only surfaces after 14 idle days, as an

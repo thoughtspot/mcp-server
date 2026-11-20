@@ -59,7 +59,11 @@ import {
 import { UPSTREAM_CALL_TIMEOUT_MS, withTimeout } from "../spotterviz/timeouts";
 import type { StorageServiceClient } from "../storage-service/storage-service";
 import { McpServerError } from "../utils";
-import { BaseMCPServer, type Context } from "./mcp-server-base";
+import {
+	BaseMCPServer,
+	type Context,
+	type ErrorResponse,
+} from "./mcp-server-base";
 import {
 	CreateAnalysisSessionSpotter3InputSchema,
 	CreateAnalysisSessionSpotterXInputSchema,
@@ -93,6 +97,9 @@ import {
 	resolveApiVersionMetrics,
 } from "./version-registry";
 
+const REAUTH_MESSAGE =
+	"Your authentication has expired, please reauthenticate and try again. You may need to disconnect and reconnect the MCP Server if you don't have any other way to reauthenticate.";
+
 export class MCPServer extends BaseMCPServer {
 	private activeOrgId: string | undefined;
 	private activeOrgToken: string | undefined;
@@ -104,8 +111,23 @@ export class MCPServer extends BaseMCPServer {
 		super(ctx, "ThoughtSpot", "2.0.0");
 	}
 
+	// The org to scope requests to (x-thoughtspot-orgs header). On a cluster without Orgs the
+	// minted token is still used, but no org scoping is sent. Unknown (no session info yet)
+	// counts as enabled, matching isOrgsEnabled(), without its warning on every request.
 	protected getActiveOrgId(): string | undefined {
-		return this.activeOrgId;
+		const orgsEnabled = this.sessionInfo
+			? this.sessionInfo.configInfo?.orgsConfiguration?.enabled === true
+			: true;
+		return orgsEnabled ? this.activeOrgId : undefined;
+	}
+
+	// True when tools run on an org-scoped token (fetched for the active org from the global
+	// token) rather than on the global token: every OAuth session with a refresh token, whether or
+	// not the cluster has Orgs (on a non-org cluster the token is for the current org, org 0, and is
+	// used without org scoping). The global token is then only used to fetch org tokens and to
+	// list/switch orgs, so a dead global token does not end the session.
+	private usesOrgScopedToken(): boolean {
+		return this.ctx.props.authMode === "oauth" && this.grantHasRefreshToken;
 	}
 
 	protected getActiveToken(): string {
@@ -145,6 +167,15 @@ export class MCPServer extends BaseMCPServer {
 	// expiry is treated as NOT expired, matching the prior fallback behavior.
 	private static isExpired(expiresAt: number | null | undefined): boolean {
 		return typeof expiresAt === "number" && expiresAt <= Date.now();
+	}
+
+	// Privileges and flags are per-org, so session info must also have been fetched under the
+	// active org token: refetch if it came from the global token or a previous org's token.
+	protected async ensureSessionInfo(): Promise<void> {
+		await super.ensureSessionInfo();
+		if (this.activeOrgToken && this.sessionInfoToken !== this.activeOrgToken) {
+			await this.refreshSessionInfo();
+		}
 	}
 
 	private async loadActiveOrg(): Promise<void> {
@@ -210,26 +241,32 @@ export class MCPServer extends BaseMCPServer {
 				error,
 			);
 		}
+		// Load the stored active org (id + minted token) too, so the init-time session info is
+		// fetched under the minted token whenever one exists: privileges and flags are per-org, and
+		// the minted token outlives a dead global token. Needs only the DO.
+		if (this.usesOrgScopedToken()) {
+			try {
+				await this.loadActiveOrg();
+			} catch (error) {
+				console.error(
+					"Failed to load the active org on connect (init will use the global token):",
+					error,
+				);
+			}
+		}
 	}
 
 	protected async postInit(): Promise<void> {
-		// areOrgToolsAvailable() already requires authMode === "oauth", so this
-		// gates the whole active-org bootstrap on oauth + orgs-enabled + refresh token.
-		if (!this.areOrgToolsAvailable()) {
+		// Bearer/token connections and pre-multi-org grants keep using their own token.
+		if (!this.usesOrgScopedToken()) {
 			return;
 		}
 		try {
 			await this.ensureActiveOrg();
-			// sessionInfo was fetched under the global token before the active-org
-			// mint. Refetch under the org token only when the active org differs from
-			// the one init already fetched — otherwise the init-time fetch stands.
-			const activeOrgId = this.getActiveOrgId();
-			if (
-				activeOrgId &&
-				String(this.sessionInfo?.currentOrgId ?? "") !== activeOrgId
-			) {
-				await this.refreshSessionInfo();
-			}
+			// Session info must come from the org token. preInit already loaded a stored org, so
+			// the init-time fetch normally used it; this only refetches on a first connect, where
+			// the org token was just minted and init had to use the global token.
+			await this.ensureSessionInfo();
 		} catch (error) {
 			// A failed bootstrap must not leave the session with an active org but
 			// no token; fall back to the global token until the next connect or the
@@ -248,10 +285,14 @@ export class MCPServer extends BaseMCPServer {
 	private async ensureActiveOrg(): Promise<void> {
 		await this.loadActiveOrg();
 		if (!this.activeOrgId) {
+			// A cluster without Orgs reports the primary org (0); fall back to it if the
+			// field is absent. Without session info there is nothing to seed from.
 			const currentOrgId =
 				this.sessionInfo?.currentOrgId != null
 					? String(this.sessionInfo.currentOrgId)
-					: undefined;
+					: this.sessionInfo
+						? "0"
+						: undefined;
 			if (currentOrgId) {
 				// In memory only; persisted with the token once the mint succeeds, so
 				// a mint failure never leaves a tokenless active org in the DO.
@@ -583,7 +624,7 @@ export class MCPServer extends BaseMCPServer {
 			this.touchLastSeen();
 		}
 
-		if (this.areOrgToolsAvailable()) {
+		if (this.usesOrgScopedToken()) {
 			// Reload the shared active org from the DO per call so a switch_org in
 			// another session is picked up (an instance-cached value would go stale).
 			await this.loadActiveOrg();
@@ -595,11 +636,15 @@ export class MCPServer extends BaseMCPServer {
 					// return a graceful error rather than a raw throw.
 					console.error("Failed to mint active org token on call:", error);
 					return this.createErrorResponse(
-						`Could not access the active org "${this.activeOrgId}"; it may no longer be available to you. Call list_orgs to see your orgs and switch_org to select a different one.`,
+						REAUTH_MESSAGE,
 						"Active org token mint failed",
 					);
 				}
 			}
+			// A sibling session may have switched org (or the keep-warm alarm re-minted the
+			// token) since session info was fetched; the privilege/flag gates below must
+			// describe the org this call runs in.
+			await this.ensureSessionInfo();
 		}
 
 		try {
@@ -617,7 +662,7 @@ export class MCPServer extends BaseMCPServer {
 				throw error;
 			}
 			return this.createErrorResponse(
-				"Your authentication has expired, please reauthenticate and try again. You may need to disconnect and reconnect the MCP Server if you don't have any other way to reauthenticate.",
+				REAUTH_MESSAGE,
 				"User authentication has expired, prompting them to reauthenticate",
 			);
 		}
@@ -933,7 +978,7 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			}
 
 			return this.createErrorResponse(
-				"Your authentication has expired, please reauthenticate and try again. You may need to disconnect and reconnect the MCP Server if you don't have any other way to reauthenticate.",
+				REAUTH_MESSAGE,
 				"User authentication has expired, prompting them to reauthenticate",
 			);
 		}
@@ -993,7 +1038,7 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			}
 
 			return this.createErrorResponse(
-				"Your authentication has expired, please reauthenticate and try again. You may need to disconnect and reconnect the MCP Server if you don't have any other way to reauthenticate.",
+				REAUTH_MESSAGE,
 				"User authentication has expired, prompting them to reauthenticate",
 			);
 		}
@@ -1538,11 +1583,35 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		}
 	}
 
+	// list_orgs and switch_org need the GLOBAL token (listing is cluster-scoped; switching mints
+	// the new org's token from it). It can be expired while the active org token is still valid, in
+	// which case every other tool keeps working in that org — so say that, rather than
+	// "authentication expired", which the client would read as a dead session. Anything else is
+	// re-thrown for the central 401 handler / the caller.
+	private async getGlobalTokenForOrgTools(
+		toolName: string,
+	): Promise<string | ErrorResponse> {
+		try {
+			return await this.initGlobalTokenAndReconcileWithStorage();
+		} catch (error) {
+			if (this.apiErrorStatus(error) !== 401 || !this.activeOrgToken) {
+				throw error;
+			}
+			return this.createErrorResponse(
+				`Your authentication for ${toolName} has expired, please reauthenticate and try again. You may need to disconnect and reconnect the MCP Server if you don't have any other way to reauthenticate. Other tools keep working in your current org "${this.activeOrgId}".`,
+				`${toolName} rejected: global token expired while the token for org ${this.activeOrgId} is still active`,
+			);
+		}
+	}
+
 	@WithSpan("call-list-orgs")
 	async callListOrgs(recorder: MetricsRecorder) {
 		const span = trace.getSpan(context.active());
 
-		const globalToken = await this.initGlobalTokenAndReconcileWithStorage();
+		const globalToken = await this.getGlobalTokenForOrgTools(ToolName.ListOrgs);
+		if (typeof globalToken !== "string") {
+			return globalToken;
+		}
 		const orgs = await this.getOrgService(
 			globalToken,
 			undefined,
@@ -1575,9 +1644,15 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		const orgId = String(org_id);
 		span?.setAttribute("requested_org_id", orgId);
 
+		const globalToken = await this.getGlobalTokenForOrgTools(
+			ToolName.SwitchOrg,
+		);
+		if (typeof globalToken !== "string") {
+			return globalToken;
+		}
+
 		let orgToken: string;
 		try {
-			const globalToken = await this.initGlobalTokenAndReconcileWithStorage();
 			orgToken = await this.getOrgService(
 				globalToken,
 				undefined,
