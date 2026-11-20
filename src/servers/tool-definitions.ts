@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { answerWidgetToolMeta } from "../apps/answer-widget";
+import { mcpViewToolMeta } from "../apps/mcp-view-widget";
 import {
 	API_RELAY_METHODS,
 	THOUGHTSPOT_UI_WIDGET_URI,
@@ -692,6 +693,11 @@ export enum ToolName {
 	ShowAnswer = "show_answer",
 	GetThoughtSpotPage = "get_thoughtspot_page",
 	ThoughtSpotApiRequest = "thoughtspot_api_request",
+	// Approach C1 prototype: small MCP view page through a read-only relay (off
+	// unless the `mcp-view=true` URL flag is set)
+	ShowAnswerView = "show_answer_view",
+	GetMcpViewPage = "get_mcp_view_page",
+	ThoughtSpotViewRequest = "thoughtspot_view_request",
 }
 
 /**
@@ -1466,6 +1472,90 @@ export const thoughtSpotApiRequestToolDefinition = {
 		title: "ThoughtSpot API Request",
 		readOnlyHint: false,
 		destructiveHint: true,
+		openWorldHint: false,
+	},
+	_meta: { ui: { visibility: ["app"] } },
+};
+
+// ── Approach C1 prototype: MCP view page via a read-only relay ─────────────
+export const ShowAnswerViewInputSchema = z.object({
+	answer_id: z
+		.string()
+		.optional()
+		.describe(
+			'To show an Analytics Agent answer: its `answer_id` from "get_session_updates", passed verbatim.',
+		),
+	liveboard_id: z
+		.string()
+		.optional()
+		.describe("To show a Liveboard: its GUID."),
+	visualization_ids: z
+		.array(z.string())
+		.optional()
+		.describe("Optional: only these visualizations of the Liveboard."),
+	title: z.string().optional().describe("A short title shown above the view."),
+});
+
+export const ShowAnswerViewOutputSchema = z.object({
+	kind: z.enum(["answer", "liveboard"]),
+	title: z.string().optional(),
+	session_identifier: z.string().optional(),
+	generation_number: z.number().optional(),
+	liveboard_id: z.string().optional(),
+	visualization_ids: z.array(z.string()).optional(),
+});
+
+export const showAnswerViewToolDefinition = {
+	name: ToolName.ShowAnswerView,
+	description:
+		"Prototype: show an Analytics Agent answer (by `answer_id`) or a Liveboard (by `liveboard_id`) inline as a lightweight read-only view: a simple chart and table of its data. Use it only when asked to test the MCP view; otherwise prefer show_answer. The result only confirms what was opened.",
+	inputSchema: z.toJSONSchema(ShowAnswerViewInputSchema),
+	outputSchema: z.toJSONSchema(ShowAnswerViewOutputSchema),
+	annotations: {
+		title: "Show ThoughtSpot (MCP view)",
+		readOnlyHint: true,
+		destructiveHint: false,
+		openWorldHint: false,
+	},
+	_meta: mcpViewToolMeta(),
+};
+
+// Widget-only helper: the MCP view page HTML plus a nonce for its relay calls.
+export const getMcpViewPageToolDefinition = {
+	name: ToolName.GetMcpViewPage,
+	description:
+		"Fetch the MCP view page for the show_answer_view widget. Not for direct use.",
+	inputSchema: z.toJSONSchema(z.object({})),
+	annotations: {
+		title: "Get MCP View Page",
+		readOnlyHint: true,
+		destructiveHint: false,
+		openWorldHint: false,
+	},
+	_meta: { ui: { visibility: ["app"] } },
+};
+
+export const ThoughtSpotViewRequestInputSchema = z.object({
+	method: z.string(),
+	path: z.string().describe("One of the MCP view's allowed endpoint paths."),
+	body_base64: z.string().optional(),
+	relay_nonce: z
+		.string()
+		.describe("The relay_nonce returned by get_mcp_view_page."),
+});
+
+// Widget-only helper: relays one of the few read requests the MCP view page is
+// allowed to make, with the user's token.
+export const thoughtSpotViewRequestToolDefinition = {
+	name: ToolName.ThoughtSpotViewRequest,
+	description:
+		"Make a read-only ThoughtSpot data request for the show_answer_view widget. Not for direct use.",
+	inputSchema: z.toJSONSchema(ThoughtSpotViewRequestInputSchema),
+	outputSchema: z.toJSONSchema(ThoughtSpotApiRequestOutputSchema),
+	annotations: {
+		title: "ThoughtSpot View Request",
+		readOnlyHint: true,
+		destructiveHint: false,
 		openWorldHint: false,
 	},
 	_meta: { ui: { visibility: ["app"] } },

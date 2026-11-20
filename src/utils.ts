@@ -46,6 +46,10 @@ export type Props = {
 	// thoughtspot_api_request as "[relay-capture] METHOD path ops status", to
 	// collect the calls the view-only relay allowlist must cover. Local use.
 	enableRelayCapture?: boolean;
+	// Approach C1 prototype. Undocumented `mcp-view=true` URL flag (see
+	// index.ts): offer show_answer_view, a small read-only page in a srcdoc
+	// frame whose data calls go through a fixed allowlist relay.
+	enableMcpViewWidget?: boolean;
 };
 
 const DEFAULT_CLIENT_NAME = "Bearer Token client";
