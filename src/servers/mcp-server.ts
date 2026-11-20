@@ -5,6 +5,27 @@ import type {
 import { SpanStatusCode, context, trace } from "@opentelemetry/api";
 import type { AgentConversation } from "@thoughtspot/rest-api-sdk";
 import type { z } from "zod";
+import {
+	ANSWER_WIDGET_HTML,
+	ANSWER_WIDGET_URI,
+	MCP_APP_MIME_TYPE,
+	buildAnswerOpenUrl,
+} from "../apps/answer-widget";
+import {
+	ApiRelayRejectedError,
+	DEFAULT_THOUGHTSPOT_ROUTE,
+	RelayNonceSigner,
+	THOUGHTSPOT_SERVER_USER_AGENT,
+	THOUGHTSPOT_UI_WIDGET_HTML,
+	THOUGHTSPOT_UI_WIDGET_URI,
+	clientSupportsMcpApps,
+	injectProxyScript,
+	needsSameOriginFrame,
+	relayThoughtSpotApiRequest,
+	resolveThoughtSpotRoute,
+	thoughtspotUiCsp,
+	tryResolveThoughtSpotRoute,
+} from "../apps/thoughtspot-ui-widget";
 import { TrackEvent } from "../metrics";
 import type { ApiVersionMode } from "../metrics/runtime/metric-types";
 import {
@@ -67,9 +88,11 @@ import {
 	CreateDashboardLegacyInputSchema,
 	CreateLiveboardSchema,
 	CreateModelSessionInputSchema,
+	FetchAnswerImageInputSchema,
 	FinalizeModelInputSchema,
 	GET_DATA_ANALYTICS_AGENT_ANSWER_DESCRIPTION,
 	GET_DATA_ANALYTICS_AGENT_ANSWER_SUPPRESSED_IFRAMES_DESCRIPTION,
+	GetAnswerImageInputSchema,
 	GetAnswerSchema,
 	GetDashboardStatusInputSchema,
 	GetDataInputSchema,
@@ -77,14 +100,24 @@ import {
 	GetModelUpdatesInputSchema,
 	GetRelevantQuestionsSchema,
 	GetSessionUpdatesInputSchema,
+	GetThoughtSpotPageInputSchema,
+	IFRAME_URL_DESCRIPTION,
+	IFRAME_URL_SHOW_ANSWER_DESCRIPTION,
 	MODEL_TOOL_NAMES,
 	ModifyDashboardInputSchema,
 	SearchObjectsInputSchema,
 	SendModelMessageInputSchema,
 	SendSessionMessageInputSchema,
+	ShowAnswerInputSchema,
 	SwitchOrgInputSchema,
+	ThoughtSpotApiRequestInputSchema,
 	ToolName,
 	createAnalysisSessionToolDefinitionSpotterX,
+	fetchAnswerImageToolDefinition,
+	getAnswerImageToolDefinition,
+	getThoughtSpotPageToolDefinition,
+	showAnswerToolDefinition,
+	thoughtSpotApiRequestToolDefinition,
 } from "./tool-definitions";
 import { recordGetDataFailure } from "./upstream-error-utils";
 import {
@@ -99,6 +132,11 @@ export class MCPServer extends BaseMCPServer {
 	private globalToken: string | undefined;
 	// False for pre-multi-org grants (no refresh token) — keeps old behavior until re-auth.
 	private grantHasRefreshToken = false;
+	// Per-render secrets that authorise thoughtspot_api_request (thoughtspot-ui).
+	// Signed with a per-login secret so nonces survive Durable Object restarts.
+	private readonly relayNonces = new RelayNonceSigner(() =>
+		this.getStorageKeyHash(),
+	);
 
 	constructor(ctx: Context) {
 		super(ctx, "ThoughtSpot", "2.0.0");
@@ -526,25 +564,109 @@ export class MCPServer extends BaseMCPServer {
 			tools = tools.filter((tool) => !MODEL_TOOL_NAMES.includes(tool.name));
 		}
 
+		if (this.isAnswerWidgetAvailable(tools)) {
+			tools.push(getAnswerImageToolDefinition, fetchAnswerImageToolDefinition);
+		}
+
+		if (this.isThoughtSpotUiAvailable()) {
+			// show_answer is the default way to show answers only on MCP Apps hosts, so
+			// only their get_session_updates points answers' iframe_url at it.
+			tools = tools.map((tool) =>
+				tool.name === ToolName.GetSessionUpdates
+					? withShowAnswerIframeUrlDescription(tool)
+					: tool,
+			);
+			tools.push(
+				showAnswerToolDefinition,
+				getThoughtSpotPageToolDefinition,
+				thoughtSpotApiRequestToolDefinition,
+			);
+		}
+
 		return { tools };
+	}
+
+	/**
+	 * The get_answer_image MCP Apps widget (on unless `answer-widget=false`) needs the
+	 * Analytics Agent tools that produce `answer_id`s, and exports the answer, so it
+	 * shares get_data's data-download gate. Like show_answer it is only offered
+	 * to clients that render MCP Apps: elsewhere get_answer_image would show nothing,
+	 * and the app-only fetch_answer_image would be exposed to the model.
+	 */
+	private isAnswerWidgetAvailable(tools: { name: string }[]): boolean {
+		return (
+			this.isAnswerWidgetEnabledForClient() &&
+			this.canDownloadData() &&
+			tools.some((tool) => tool.name === ToolName.GetSessionUpdates)
+		);
 	}
 
 	protected async listResources() {
 		const sources = await this.getDatasources();
-		return {
-			resources: sources.list.map((s) => ({
-				uri: `datasource:///${s.id}`,
-				name: s.name,
-				description: s.description,
-				mimeType: "text/plain",
-			})),
-		};
+		const resources = sources.list.map((s) => ({
+			uri: `datasource:///${s.id}`,
+			name: s.name,
+			description: s.description,
+			mimeType: "text/plain",
+		}));
+		if (this.isThoughtSpotUiAvailable()) {
+			resources.push({
+				uri: THOUGHTSPOT_UI_WIDGET_URI,
+				name: "ThoughtSpot",
+				description: "The ThoughtSpot app, rendered inline.",
+				mimeType: MCP_APP_MIME_TYPE,
+			});
+		}
+		if (this.isAnswerWidgetEnabledForClient()) {
+			resources.push({
+				uri: ANSWER_WIDGET_URI,
+				name: "ThoughtSpot Answer",
+				description: "Interactive card that shows an Analytics Agent answer.",
+				mimeType: MCP_APP_MIME_TYPE,
+			});
+		}
+		return { resources };
 	}
 
 	protected async readResource(
 		request: z.infer<typeof ReadResourceRequestSchema>,
 	) {
 		const { uri } = request.params;
+		if (uri === ANSWER_WIDGET_URI && this.isAnswerWidgetEnabledForClient()) {
+			return {
+				contents: [
+					{
+						uri,
+						mimeType: MCP_APP_MIME_TYPE,
+						text: ANSWER_WIDGET_HTML,
+						// The widget needs no external origins: the image arrives as a data: URL
+						// and the open-in-ThoughtSpot link goes through the host (ui/open-link).
+						_meta: { ui: { prefersBorder: true } },
+					},
+				],
+			};
+		}
+		if (uri === THOUGHTSPOT_UI_WIDGET_URI && this.isThoughtSpotUiAvailable()) {
+			return {
+				contents: [
+					{
+						uri,
+						mimeType: MCP_APP_MIME_TYPE,
+						text: THOUGHTSPOT_UI_WIDGET_HTML,
+						// The srcdoc frame inherits this CSP, so it must allow the
+						// ThoughtSpot CDNs and the cluster's API.
+						_meta: {
+							ui: {
+								csp: thoughtspotUiCsp(this.ctx.props.instanceUrl, {
+									directChartIframe: this.ctx.props.enableDirectChartIframe,
+								}),
+								prefersBorder: false,
+							},
+						},
+					},
+				],
+			};
+		}
 		const sourceId = uri.split("///").pop();
 		if (!sourceId) {
 			throw new McpServerError({ message: "Invalid datasource uri" }, 400);
@@ -765,6 +887,26 @@ export class MCPServer extends BaseMCPServer {
 
 			case ToolName.FinalizeModel: {
 				return this.callFinalizeModel(request, recorder);
+			}
+
+			case ToolName.GetAnswerImage: {
+				return this.callGetAnswerImage(request);
+			}
+
+			case ToolName.FetchAnswerImage: {
+				return this.callFetchAnswerImage(request, recorder);
+			}
+
+			case ToolName.ShowAnswer: {
+				return this.callShowAnswer(request);
+			}
+
+			case ToolName.GetThoughtSpotPage: {
+				return this.callGetThoughtSpotPage(request);
+			}
+
+			case ToolName.ThoughtSpotApiRequest: {
+				return this.callThoughtSpotApiRequest(request);
 			}
 
 			default:
@@ -1699,6 +1841,323 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		}
 	}
 
+	/**
+	 * get_answer_image: hand the answer to the MCP Apps widget. The widget fetches the
+	 * image itself through fetch_answer_image, so this result stays small and the PNG
+	 * never enters the model's context.
+	 */
+	@WithSpan("call-show-answer")
+	async callGetAnswerImage(request: z.infer<typeof CallToolRequestSchema>) {
+		const gateError = await this.answerWidgetGateError();
+		if (gateError) {
+			return gateError;
+		}
+		const { answer_id, title, iframe_url } = GetAnswerImageInputSchema.parse(
+			request.params.arguments,
+		);
+		if (!parseAnswerIds([{ answer_id, title: "" }])) {
+			return this.createErrorResponse(
+				'Invalid answer_id. Pass the `answer_id` returned from the "get_session_updates" tool verbatim.',
+				`get_answer_image: invalid answer_id ${answer_id}`,
+			);
+		}
+		return this.createStructuredContentSuccessResponse(
+			{
+				answer_id,
+				title: title || "ThoughtSpot answer",
+				open_url: buildAnswerOpenUrl(this.ctx.props.instanceUrl, iframe_url),
+			},
+			"Showed answer widget",
+		);
+	}
+
+	/** fetch_answer_image: PNG export of an answer, for the get_answer_image widget. */
+	@WithSpan("call-get-answer-image")
+	async callFetchAnswerImage(
+		request: z.infer<typeof CallToolRequestSchema>,
+		recorder: MetricsRecorder,
+	) {
+		const gateError = await this.answerWidgetGateError();
+		if (gateError) {
+			return gateError;
+		}
+		const { answer_id } = FetchAnswerImageInputSchema.parse(
+			request.params.arguments,
+		);
+		const [answer] = parseAnswerIds([{ answer_id, title: "" }]) ?? [];
+		if (!answer) {
+			return this.createErrorResponse(
+				"Invalid answer_id.",
+				`fetch_answer_image: invalid answer_id ${answer_id}`,
+			);
+		}
+
+		const service = this.getThoughtSpotService(recorder);
+		try {
+			let image: { data: string; mimeType: string };
+			try {
+				image = await service.getSpotterAnswerImage({
+					sessionIdentifier: answer.session_identifier,
+					generationNumber: answer.generation_number,
+				});
+			} catch (error) {
+				// Session ids expire after about 8 hours; reload the answer through its
+				// conversation for fresh ones, as get_data does. Not for auth failures.
+				const reload = parseAnswerReloadIds(answer_id);
+				const status = this.apiErrorStatus(error);
+				if (!reload || status === 401 || status === 403) {
+					throw error;
+				}
+				const fresh = await service.reloadSpotterAnswer(reload);
+				image = await service.getSpotterAnswerImage(fresh);
+			}
+			const span = this.initSpanWithCommonAttributes();
+			span?.setStatus({
+				code: SpanStatusCode.OK,
+				message: "Exported answer image",
+			});
+			return {
+				content: [
+					{
+						type: "image" as const,
+						data: image.data,
+						mimeType: image.mimeType,
+					},
+				],
+			};
+		} catch (error) {
+			const status = this.apiErrorStatus(error);
+			if (status === 401) {
+				throw error;
+			}
+			const hint =
+				status === 403
+					? "You may not have permission to export this answer."
+					: "The answer may have expired; ask the question again.";
+			return this.createErrorResponse(
+				`Could not load the visualization. ${hint}`,
+				`fetch_answer_image failed (status ${status ?? "unknown"})`,
+			);
+		}
+	}
+
+	/**
+	 * Calls can arrive for tools listTools hid (cached tool lists, direct calls), so
+	 * re-check the widget gates here. Undefined when the call may proceed.
+	 */
+	private async answerWidgetGateError() {
+		if (!this.isAnswerWidgetEnabledForClient()) {
+			return this.createErrorResponse(
+				"The answer widget is not enabled for this connection.",
+				"answer widget tool called without the answer-widget flag",
+			);
+		}
+		await this.ensureSessionInfo();
+		if (!this.canDownloadData()) {
+			return this.createErrorResponse(
+				"You do not have permission to export answers (requires the data-download privilege).",
+				"answer widget forbidden",
+			);
+		}
+		return undefined;
+	}
+
+	private isAnswerWidgetEnabledForClient(): boolean {
+		return (
+			!!this.ctx.props.enableAnswerWidget &&
+			clientSupportsMcpApps(this.getClientCapabilities())
+		);
+	}
+
+	/**
+	 * The show_answer widget is on unless `thoughtspot-ui=false` is set, and only
+	 * offered to clients that render MCP Apps: other hosts ignore the app-only
+	 * `visibility` of its helper tools, which would expose them to the model.
+	 */
+	private isThoughtSpotUiAvailable(): boolean {
+		return (
+			!!this.ctx.props.enableThoughtSpotUiWidget &&
+			clientSupportsMcpApps(this.getClientCapabilities())
+		);
+	}
+
+	private thoughtSpotUiDisabledError() {
+		return this.createErrorResponse(
+			"The ThoughtSpot app view is not available for this connection.",
+			"thoughtspot ui widget tool called without the flag or MCP Apps support",
+		);
+	}
+
+	/** show_answer: tell the widget which ThoughtSpot route to open. */
+	@WithSpan("call-show-thoughtspot")
+	async callShowAnswer(request: z.infer<typeof CallToolRequestSchema>) {
+		if (!this.isThoughtSpotUiAvailable()) {
+			return this.thoughtSpotUiDisabledError();
+		}
+		const { iframe_url, path, answer_id } = ShowAnswerInputSchema.parse(
+			request.params.arguments ?? {},
+		);
+		const target = iframe_url || path;
+		if (!target) {
+			if (answer_id) {
+				return this.createErrorResponse(
+					"To show an answer, pass its `iframe_url` from get_session_updates; `answer_id` alone is not enough.",
+					"show_answer called with answer_id but no iframe_url",
+				);
+			}
+			return this.createStructuredContentSuccessResponse(
+				{ path: DEFAULT_THOUGHTSPOT_ROUTE },
+				"Opened ThoughtSpot widget",
+			);
+		}
+		const route = tryResolveThoughtSpotRoute(
+			this.ctx.props.instanceUrl,
+			target,
+		);
+		if (!route) {
+			return this.createErrorResponse(
+				'Could not open that in ThoughtSpot. Pass the answer\'s `iframe_url` from get_session_updates verbatim, or a ThoughtSpot route such as "#/home".',
+				`show_answer: unresolvable target ${target.slice(0, 200)}`,
+			);
+		}
+		return this.createStructuredContentSuccessResponse(
+			{ path: route },
+			"Opened ThoughtSpot widget",
+		);
+	}
+
+	/**
+	 * get_thoughtspot_page: the cluster's index.html with the relay proxy script
+	 * injected, for the widget's srcdoc frame. Carries no credentials. App-only.
+	 */
+	@WithSpan("call-get-thoughtspot-page")
+	async callGetThoughtSpotPage(request: z.infer<typeof CallToolRequestSchema>) {
+		if (!this.isThoughtSpotUiAvailable()) {
+			return this.thoughtSpotUiDisabledError();
+		}
+		const { path } = GetThoughtSpotPageInputSchema.parse(
+			request.params.arguments,
+		);
+		const instanceUrl = this.ctx.props.instanceUrl;
+		const route = resolveThoughtSpotRoute(instanceUrl, path);
+
+		let indexHtml: string;
+		try {
+			const response = await withTimeout(
+				fetch(new URL("/", instanceUrl).toString(), {
+					// Clusters answer 403 without a User-Agent; Workers sends none.
+					headers: {
+						Accept: "text/html",
+						"user-agent": THOUGHTSPOT_SERVER_USER_AGENT,
+					},
+				}),
+				UPSTREAM_CALL_TIMEOUT_MS,
+				"ThoughtSpot index.html",
+			);
+			if (!response.ok) {
+				throw new Error(`status ${response.status}`);
+			}
+			// A followed redirect (an SSO login page, say) must not get the proxy
+			// injected into someone else's HTML.
+			if (
+				response.url &&
+				new URL(response.url).origin !== new URL(instanceUrl).origin
+			) {
+				throw new Error(`redirected off the instance to ${response.url}`);
+			}
+			indexHtml = await response.text();
+		} catch (error) {
+			return this.createErrorResponse(
+				"Could not load the ThoughtSpot app.",
+				`get_thoughtspot_page: index.html fetch failed: ${error}`,
+			);
+		}
+
+		const chartModes = {
+			inlineCharts: !!this.ctx.props.enableInlineCharts,
+			directChartIframe: !!this.ctx.props.enableDirectChartIframe,
+		};
+		const html = injectProxyScript(indexHtml, {
+			apiHost: instanceUrl,
+			route,
+			...chartModes,
+		});
+		const span = this.initSpanWithCommonAttributes();
+		span?.setStatus({
+			code: SpanStatusCode.OK,
+			message: "Built ThoughtSpot page",
+		});
+		// The widget reads structuredContent; keep the bulky HTML out of the text.
+		// relay_nonce stays with the widget: it authorises this render's relay
+		// calls and is never put into the page.
+		return {
+			content: [{ type: "text" as const, text: "ThoughtSpot page ready." }],
+			structuredContent: {
+				html,
+				path: route,
+				relay_nonce: await this.relayNonces.issue(),
+				// Tells the widget to sandbox the page with allow-same-origin.
+				same_origin: needsSameOriginFrame(chartModes),
+			},
+		};
+	}
+
+	/**
+	 * thoughtspot_api_request: one ThoughtSpot API call on behalf of the embedded
+	 * app, made here with the user's token so it never reaches the browser.
+	 * App-only.
+	 */
+	@WithSpan("call-thoughtspot-api-request")
+	async callThoughtSpotApiRequest(
+		request: z.infer<typeof CallToolRequestSchema>,
+	) {
+		if (!this.isThoughtSpotUiAvailable()) {
+			return this.thoughtSpotUiDisabledError();
+		}
+		// Check the nonce before anything else about the call.
+		const nonce = request.params.arguments?.relay_nonce;
+		if (typeof nonce !== "string" || !(await this.relayNonces.isValid(nonce))) {
+			return this.createErrorResponse(
+				"Request not allowed: the ThoughtSpot page is not loaded; reopen it.",
+				"thoughtspot_api_request rejected: missing or unknown relay nonce",
+			);
+		}
+		const { relay_nonce: _nonce, ...relayRequest } =
+			ThoughtSpotApiRequestInputSchema.parse(request.params.arguments);
+		const span = this.initSpanWithCommonAttributes();
+		span?.setAttributes({
+			relay_method: relayRequest.method,
+			relay_path: relayRequest.path.split("?")[0],
+		});
+		try {
+			const response = await withTimeout(
+				relayThoughtSpotApiRequest(
+					this.ctx.props.instanceUrl,
+					this.getActiveToken(),
+					relayRequest,
+				),
+				UPSTREAM_CALL_TIMEOUT_MS,
+				"ThoughtSpot API relay",
+			);
+			span?.setAttribute("relay_status", response.status);
+			return {
+				content: [{ type: "text" as const, text: `Status ${response.status}` }],
+				structuredContent: response,
+			};
+		} catch (error) {
+			if (error instanceof ApiRelayRejectedError) {
+				return this.createErrorResponse(
+					`Request not allowed: ${error.message}.`,
+					`thoughtspot_api_request rejected: ${error.message}`,
+				);
+			}
+			return this.createErrorResponse(
+				"The ThoughtSpot request failed.",
+				`thoughtspot_api_request failed: ${error}`,
+			);
+		}
+	}
+
 	@WithSpan("call-get-data")
 	async callGetData(
 		request: z.infer<typeof CallToolRequestSchema>,
@@ -2159,4 +2618,17 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			);
 		}
 	}
+}
+
+/** Swap get_session_updates' iframe_url description for the show_answer one. */
+function withShowAnswerIframeUrlDescription<
+	T extends { outputSchema?: unknown },
+>(tool: T): T {
+	if (!tool.outputSchema) return tool;
+	const jsonEscape = (text: string) => JSON.stringify(text).slice(1, -1);
+	const schema = JSON.stringify(tool.outputSchema).replaceAll(
+		jsonEscape(IFRAME_URL_DESCRIPTION),
+		jsonEscape(IFRAME_URL_SHOW_ANSWER_DESCRIPTION),
+	);
+	return { ...tool, outputSchema: JSON.parse(schema) };
 }

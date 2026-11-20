@@ -1592,6 +1592,745 @@ describe("MCP Server", () => {
 		});
 	});
 
+	describe("MCP Apps answer image card (answer-widget URL flag)", () => {
+		const answerId = JSON.stringify({ session_id: "session-9", gen_no: 3 });
+		const reloadableAnswerId = JSON.stringify({
+			session_id: "session-9",
+			gen_no: 3,
+			conversation_id: "conv-1",
+			message_id: "msg-1",
+		});
+		const embedUrl =
+			"https://test.thoughtspot.cloud/?tsmcp=true#/embed/conv-assist-answer?sessionId=session-9&genNo=3";
+		const pngBytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
+
+		const mockClient = () =>
+			new thoughtspotClient.ThoughtSpotClient({
+				instanceUrl: "https://test.thoughtspot.cloud",
+				token: "test-access-token",
+				tenantId: "",
+				orgId: "",
+				userId: "",
+			}) as any;
+
+		const pngFile = () => ({
+			arrayBuffer: vi.fn().mockResolvedValue(pngBytes.buffer),
+		});
+
+		it("hides the widget tools when turned off", async () => {
+			await server.init();
+			const { listTools } = connect(server);
+
+			const names = (await listTools()).tools.map((t) => t.name);
+			expect(names).not.toContain("get_answer_image");
+			expect(names).not.toContain("fetch_answer_image");
+		});
+
+		it("lists no widget resource when turned off", async () => {
+			await server.init();
+			const { listResources } = connect(server);
+
+			const { resources } = await listResources();
+			expect(resources.map((r) => r.uri)).toEqual([
+				"datasource:///ds-123",
+				"datasource:///ds-456",
+			]);
+		});
+
+		it("rejects widget tool calls without the flag", async () => {
+			await server.init();
+			const { callTool } = connect(server);
+
+			const result = await callTool("get_answer_image", {
+				answer_id: answerId,
+			});
+
+			expect(result.isError).toBe(true);
+			expect((result.content as any[])[0].text).toMatch(/not enabled/);
+		});
+
+		describe("with the flag but a client without MCP Apps support", () => {
+			beforeEach(() => {
+				mockProps.enableAnswerWidget = true;
+			});
+
+			it("hides the widget tools", async () => {
+				await server.init();
+				const { listTools } = connect(server);
+
+				const names = (await listTools()).tools.map((t) => t.name);
+				expect(names).not.toContain("get_answer_image");
+				expect(names).not.toContain("fetch_answer_image");
+			});
+
+			it("rejects widget tool calls", async () => {
+				await server.init();
+				const { callTool } = connect(server);
+
+				const result = await callTool("fetch_answer_image", {
+					answer_id: answerId,
+				});
+
+				expect(result.isError).toBe(true);
+				expect((result.content as any[])[0].text).toMatch(/not enabled/);
+			});
+
+			it("does not serve the widget resource", async () => {
+				await server.init();
+
+				const read = server.readResource({
+					method: "resources/read",
+					params: { uri: "ui://thoughtspot/answer.html" },
+				});
+
+				await expect(read).rejects.toThrow();
+			});
+		});
+
+		describe("when on (the default)", () => {
+			beforeEach(() => {
+				mockProps.enableAnswerWidget = true;
+				vi.spyOn(server, "getClientCapabilities").mockReturnValue({
+					extensions: {
+						"io.modelcontextprotocol/ui": {
+							mimeTypes: ["text/html;profile=mcp-app"],
+						},
+					},
+				} as any);
+			});
+
+			it("lists get_answer_image linked to the widget and fetch_answer_image as app-only", async () => {
+				await server.init();
+				const { listTools } = connect(server);
+
+				const { tools } = await listTools();
+				const show = tools.find((t) => t.name === "get_answer_image") as any;
+				const image = tools.find((t) => t.name === "fetch_answer_image") as any;
+				expect(show._meta.ui.resourceUri).toBe("ui://thoughtspot/answer.html");
+				expect(show._meta["ui/resourceUri"]).toBe(
+					"ui://thoughtspot/answer.html",
+				);
+				expect(image._meta.ui).toEqual({ visibility: ["app"] });
+				// The image card is only a fallback to show_answer.
+				expect(show.description).toMatch(/^Fallback for show_answer/);
+			});
+
+			it("hides the widget tools without the data-download privilege", async () => {
+				await server.init();
+				(server as any).sessionInfo.privileges = [];
+				const { listTools } = connect(server);
+
+				const names = (await listTools()).tools.map((t) => t.name);
+				expect(names).not.toContain("get_answer_image");
+				expect(names).not.toContain("fetch_answer_image");
+			});
+
+			it("hides the widget tools on versions without the Analytics Agent", async () => {
+				mockProps.apiVersion = "backwards-compatibility-default";
+				await server.init();
+				const { listTools } = connect(server);
+
+				const names = (await listTools()).tools.map((t) => t.name);
+				expect(names).not.toContain("get_answer_image");
+			});
+
+			it("serves the widget HTML as an MCP App resource", async () => {
+				await server.init();
+				const { listResources } = connect(server);
+
+				const uris = (await listResources()).resources.map((r) => r.uri);
+				expect(uris).toContain("ui://thoughtspot/answer.html");
+
+				const result = await server.readResource({
+					method: "resources/read",
+					params: { uri: "ui://thoughtspot/answer.html" },
+				});
+				const [content] = result.contents as any[];
+				expect(content.mimeType).toBe("text/html;profile=mcp-app");
+				expect(content.text).toContain("ui/initialize");
+				expect(content.text).toContain("fetch_answer_image");
+			});
+
+			it("get_answer_image returns the answer and a browser link on the instance", async () => {
+				await server.init();
+				const { callTool } = connect(server);
+
+				const result = await callTool("get_answer_image", {
+					answer_id: answerId,
+					title: "Revenue by region",
+					iframe_url: embedUrl,
+				});
+
+				expect(result.isError).toBeUndefined();
+				expect(result.structuredContent).toEqual({
+					answer_id: answerId,
+					title: "Revenue by region",
+					open_url:
+						"https://test.thoughtspot.cloud/#/embed/conv-assist-answer?sessionId=session-9&genNo=3",
+				});
+				expect(mockClient().exportAnswerReport).not.toHaveBeenCalled();
+			});
+
+			it("get_answer_image drops a link that is not on the instance", async () => {
+				await server.init();
+				const { callTool } = connect(server);
+
+				const result = await callTool("get_answer_image", {
+					answer_id: answerId,
+					iframe_url: "https://evil.example.com/phish",
+				});
+
+				expect(result.structuredContent).toEqual({
+					answer_id: answerId,
+					title: "ThoughtSpot answer",
+				});
+			});
+
+			it("get_answer_image rejects a malformed answer_id", async () => {
+				await server.init();
+				const { callTool } = connect(server);
+
+				const result = await callTool("get_answer_image", {
+					answer_id: "nope",
+				});
+
+				expect(result.isError).toBe(true);
+				expect((result.content as any[])[0].text).toMatch(/Invalid answer_id/);
+			});
+
+			it("fetch_answer_image returns the PNG export as image content", async () => {
+				mockClient().exportAnswerReport.mockResolvedValueOnce(pngFile());
+				await server.init();
+				const { callTool } = connect(server);
+
+				const result = await callTool("fetch_answer_image", {
+					answer_id: answerId,
+				});
+
+				expect(result.isError).toBeUndefined();
+				expect(mockClient().exportAnswerReport).toHaveBeenCalledWith({
+					session_identifier: "session-9",
+					generation_number: 3,
+					file_format: "PNG",
+				});
+				expect(result.content).toEqual([
+					{
+						type: "image",
+						data: Buffer.from(pngBytes).toString("base64"),
+						mimeType: "image/png",
+					},
+				]);
+			});
+
+			it("fetch_answer_image reloads an expired answer and retries", async () => {
+				mockClient()
+					.exportAnswerReport.mockRejectedValueOnce(
+						new ThoughtSpotApiError(400, "exportAnswerReport"),
+					)
+					.mockResolvedValueOnce(pngFile());
+				await server.init();
+				const { callTool } = connect(server);
+
+				const result = await callTool("fetch_answer_image", {
+					answer_id: reloadableAnswerId,
+				});
+
+				expect(result.isError).toBeUndefined();
+				expect(mockClient().loadSpotter3Answer).toHaveBeenCalledWith({
+					conversationId: "conv-1",
+					messageId: "msg-1",
+				});
+				expect(mockClient().exportAnswerReport).toHaveBeenLastCalledWith({
+					session_identifier: "session-fresh",
+					generation_number: 5,
+					file_format: "PNG",
+				});
+			});
+
+			it("fetch_answer_image does not reload on a permission error", async () => {
+				mockClient().exportAnswerReport.mockRejectedValueOnce(
+					new ThoughtSpotApiError(403, "exportAnswerReport"),
+				);
+				await server.init();
+				const { callTool } = connect(server);
+
+				const result = await callTool("fetch_answer_image", {
+					answer_id: reloadableAnswerId,
+				});
+
+				expect(result.isError).toBe(true);
+				expect((result.content as any[])[0].text).toMatch(/permission/);
+				expect(mockClient().loadSpotter3Answer).not.toHaveBeenCalled();
+			});
+
+			it("fetch_answer_image refuses without the data-download privilege", async () => {
+				await server.init();
+				(server as any).sessionInfo.privileges = [];
+				const { callTool } = connect(server);
+
+				const result = await callTool("fetch_answer_image", {
+					answer_id: answerId,
+				});
+
+				expect(result.isError).toBe(true);
+				expect(mockClient().exportAnswerReport).not.toHaveBeenCalled();
+			});
+		});
+	});
+
+	describe("MCP Apps ThoughtSpot UI widget (thoughtspot-ui URL flag)", () => {
+		const indexHtml =
+			"<!DOCTYPE html><html><head><script>var blink = {};</script></head><body></body></html>";
+		const mcpAppsCapabilities = {
+			extensions: {
+				"io.modelcontextprotocol/ui": {
+					mimeTypes: ["text/html;profile=mcp-app"],
+				},
+			},
+		};
+		const supportMcpApps = () =>
+			vi
+				.spyOn(server, "getClientCapabilities")
+				.mockReturnValue(mcpAppsCapabilities as any);
+
+		afterEach(() => {
+			vi.unstubAllGlobals();
+		});
+
+		it("hides the widget tools when turned off", async () => {
+			supportMcpApps();
+			await server.init();
+			const { listTools } = connect(server);
+
+			const names = (await listTools()).tools.map((t) => t.name);
+			expect(names).not.toContain("show_answer");
+			expect(names).not.toContain("thoughtspot_api_request");
+		});
+
+		it("refuses relay calls when turned off", async () => {
+			supportMcpApps();
+			const fetchSpy = vi.fn();
+			vi.stubGlobal("fetch", fetchSpy);
+			await server.init();
+			const { callTool } = connect(server);
+
+			const result = await callTool("thoughtspot_api_request", {
+				method: "GET",
+				path: "/prism/",
+			});
+
+			expect(result.isError).toBe(true);
+			expect(fetchSpy).not.toHaveBeenCalled();
+		});
+
+		describe("when on (the default)", () => {
+			beforeEach(() => {
+				mockProps.enableThoughtSpotUiWidget = true;
+			});
+
+			it("hides the widget tools from clients without MCP Apps support", async () => {
+				await server.init();
+				const { listTools } = connect(server);
+
+				const names = (await listTools()).tools.map((t) => t.name);
+				expect(names).not.toContain("show_answer");
+				expect(names).not.toContain("get_thoughtspot_page");
+				expect(names).not.toContain("thoughtspot_api_request");
+			});
+
+			it("does not point other clients' get_session_updates at show_answer", async () => {
+				await server.init();
+				const { listTools } = connect(server);
+
+				const { tools } = await listTools();
+				const updates = JSON.stringify(
+					tools.find((t) => t.name === "get_session_updates"),
+				);
+				expect(updates).toContain("iframe_url");
+				expect(updates).not.toContain("show_answer");
+			});
+
+			it("refuses relay calls from clients without MCP Apps support", async () => {
+				const fetchSpy = vi.fn();
+				vi.stubGlobal("fetch", fetchSpy);
+				await server.init();
+				const { callTool } = connect(server);
+
+				const result = await callTool("thoughtspot_api_request", {
+					method: "GET",
+					path: "/prism/",
+				});
+
+				expect(result.isError).toBe(true);
+				expect(fetchSpy).not.toHaveBeenCalled();
+			});
+
+			it("does not serve the widget to clients without MCP Apps support", async () => {
+				await server.init();
+
+				const read = server.readResource({
+					method: "resources/read",
+					params: { uri: "ui://thoughtspot/app.html" },
+				});
+
+				await expect(read).rejects.toThrow();
+			});
+
+			describe("for an MCP Apps client", () => {
+				beforeEach(() => {
+					supportMcpApps();
+				});
+
+				it("lists show_answer linked to the widget and the helpers as app-only", async () => {
+					await server.init();
+					const { listTools } = connect(server);
+
+					const { tools } = await listTools();
+					const byName = (name: string) =>
+						tools.find((t) => t.name === name) as any;
+					expect(byName("show_answer")._meta.ui.resourceUri).toBe(
+						"ui://thoughtspot/app.html",
+					);
+					// show_answer is the default way to show answers.
+					expect(byName("show_answer").description).toMatch(
+						/default way to show answers.*`iframe_url`/,
+					);
+					expect(byName("get_thoughtspot_page")._meta.ui).toEqual({
+						visibility: ["app"],
+					});
+					expect(byName("thoughtspot_api_request")._meta.ui).toEqual({
+						visibility: ["app"],
+					});
+				});
+
+				it("points get_session_updates' iframe_url at show_answer", async () => {
+					await server.init();
+					const { listTools } = connect(server);
+
+					const { tools } = await listTools();
+					const updates = tools.find(
+						(t) => t.name === "get_session_updates",
+					) as any;
+					const iframeUrl =
+						updates.outputSchema.properties.session_updates.items.properties
+							.iframe_url;
+					expect(iframeUrl.description).toMatch(
+						/show_answer tool as `iframe_url`/,
+					);
+				});
+
+				it("keeps the plain iframe_url description when thoughtspot-ui is off", async () => {
+					mockProps.enableThoughtSpotUiWidget = false;
+					await server.init();
+					const { listTools } = connect(server);
+
+					const { tools } = await listTools();
+					const updates = JSON.stringify(
+						tools.find((t) => t.name === "get_session_updates"),
+					);
+					expect(updates).not.toContain("show_answer");
+				});
+
+				it("serves the widget with a CSP covering the CDNs and cluster images", async () => {
+					await server.init();
+
+					const result = await server.readResource({
+						method: "resources/read",
+						params: { uri: "ui://thoughtspot/app.html" },
+					});
+					const [content] = result.contents as any[];
+					expect(content.mimeType).toBe("text/html;profile=mcp-app");
+					expect(content.text).toContain("thoughtspot_api_request");
+					expect(content._meta.ui.csp.resourceDomains).toContain(
+						"https://test.thoughtspot.cloud",
+					);
+					expect(content._meta.ui.csp.connectDomains).not.toContain(
+						"https://test.thoughtspot.cloud",
+					);
+				});
+
+				it("show_answer resolves an answer iframe_url to its route", async () => {
+					await server.init();
+					const { callTool } = connect(server);
+
+					const result = await callTool("show_answer", {
+						path: "https://test.thoughtspot.cloud/?tsmcp=true#/embed/conv-assist-answer?sessionId=s",
+					});
+
+					expect(result.structuredContent).toEqual({
+						path: "#/embed/conv-assist-answer?sessionId=s",
+					});
+				});
+
+				it("show_answer defaults to the home page", async () => {
+					await server.init();
+					const { callTool } = connect(server);
+
+					const result = await callTool("show_answer", {});
+
+					expect(result.structuredContent).toEqual({ path: "#/home" });
+				});
+
+				it("show_answer opens an answer from its iframe_url", async () => {
+					await server.init();
+					const { callTool } = connect(server);
+
+					const result = await callTool("show_answer", {
+						answer_id: '{"session_id":"s","gen_no":1}',
+						iframe_url:
+							"https://test.thoughtspot.cloud/?tsmcp=true#/embed/conv-assist-answer?sessionId=s&genNo=1",
+					});
+
+					expect(result.structuredContent).toEqual({
+						path: "#/embed/conv-assist-answer?sessionId=s&genNo=1",
+					});
+				});
+
+				it("show_answer asks for the iframe_url instead of opening home for an answer_id alone", async () => {
+					await server.init();
+					const { callTool } = connect(server);
+
+					const result = await callTool("show_answer", {
+						answer_id: '{"session_id":"s","gen_no":1}',
+					});
+
+					expect(result.isError).toBe(true);
+					expect(JSON.stringify(result.content)).toContain("iframe_url");
+				});
+
+				it("show_answer reports a target it cannot open instead of opening home", async () => {
+					await server.init();
+					const { callTool } = connect(server);
+
+					for (const target of [
+						"https://elsewhere.example.com/#/home",
+						"not a route",
+					]) {
+						const result = await callTool("show_answer", {
+							iframe_url: target,
+						});
+						expect(result.isError).toBe(true);
+					}
+				});
+
+				it("get_thoughtspot_page injects the relay proxy and no credentials", async () => {
+					const fetchSpy = vi
+						.fn()
+						.mockResolvedValue(new Response(indexHtml, { status: 200 }));
+					vi.stubGlobal("fetch", fetchSpy);
+					await server.init();
+					const { callTool } = connect(server);
+
+					const result = await callTool("get_thoughtspot_page", {
+						path: "#/pinboard/abc",
+					});
+
+					expect(result.isError).toBeUndefined();
+					expect(fetchSpy.mock.calls[0][0]).toBe(
+						"https://test.thoughtspot.cloud/",
+					);
+					// Clusters return 403 to requests without a User-Agent.
+					expect(fetchSpy.mock.calls[0][1].headers["user-agent"]).toBe(
+						"ThoughtSpot-ts-client",
+					);
+					const { html, path, relay_nonce } = result.structuredContent as any;
+					expect(path).toBe("#/pinboard/abc");
+					// The nonce goes to the widget, never into the sandboxed page.
+					expect(relay_nonce).toMatch(/^v1\./);
+					expect(html).not.toContain(relay_nonce);
+					expect(await (server as any).relayNonces.isValid(relay_nonce)).toBe(
+						true,
+					);
+					expect(html).toContain("[api-relay]");
+					expect(html.indexOf("[api-relay]")).toBeLessThan(
+						html.indexOf("var blink"),
+					);
+					expect(JSON.stringify(result)).not.toContain("test-access-token");
+				});
+
+				it("keeps the page cross-origin and adds no chart frame domain by default", async () => {
+					vi.stubGlobal(
+						"fetch",
+						vi.fn().mockResolvedValue(new Response(indexHtml, { status: 200 })),
+					);
+					await server.init();
+					const { callTool } = connect(server);
+
+					const result = await callTool("get_thoughtspot_page", {
+						path: "#/home",
+					});
+					const resource = await server.readResource({
+						method: "resources/read",
+						params: { uri: "ui://thoughtspot/app.html" },
+					});
+
+					const { html, same_origin } = result.structuredContent as any;
+					expect(same_origin).toBe(false);
+					expect(html).not.toContain("enableHostedChartSameOriginSafari: true");
+					expect(
+						(resource.contents[0] as any)._meta.ui.csp.frameDomains,
+					).toBeUndefined();
+				});
+
+				it("inline-charts turns on same-origin charts and a same-origin page", async () => {
+					mockProps.enableInlineCharts = true;
+					vi.stubGlobal(
+						"fetch",
+						vi.fn().mockResolvedValue(new Response(indexHtml, { status: 200 })),
+					);
+					await server.init();
+					const { callTool } = connect(server);
+
+					const result = await callTool("get_thoughtspot_page", {
+						path: "#/home",
+					});
+
+					const { html, same_origin } = result.structuredContent as any;
+					expect(same_origin).toBe(true);
+					expect(html).toContain("var INLINE_CHARTS = true;");
+					expect(html).toContain("enableHostedChartSameOriginSafari: true");
+				});
+
+				it("direct-chart-iframe allows the hosted chart frame and a same-origin page", async () => {
+					mockProps.enableDirectChartIframe = true;
+					vi.stubGlobal(
+						"fetch",
+						vi.fn().mockResolvedValue(new Response(indexHtml, { status: 200 })),
+					);
+					await server.init();
+					const { callTool } = connect(server);
+
+					const result = await callTool("get_thoughtspot_page", {
+						path: "#/home",
+					});
+					const resource = await server.readResource({
+						method: "resources/read",
+						params: { uri: "ui://thoughtspot/app.html" },
+					});
+
+					const { html, same_origin } = result.structuredContent as any;
+					expect(same_origin).toBe(true);
+					expect(html).toContain("var DIRECT_CHART_IFRAME = true;");
+					expect(html).not.toContain("enableHostedChartSameOriginSafari: true");
+					expect(
+						(resource.contents[0] as any)._meta.ui.csp.frameDomains,
+					).toEqual(["https://*.pdom.thoughtspot.com"]);
+				});
+
+				it("get_thoughtspot_page refuses an index.html redirected off the instance", async () => {
+					const redirected = new Response(indexHtml, { status: 200 });
+					Object.defineProperty(redirected, "url", {
+						value: "https://idp.example.com/login",
+					});
+					vi.stubGlobal("fetch", vi.fn().mockResolvedValue(redirected));
+					await server.init();
+					const { callTool } = connect(server);
+
+					const result = await callTool("get_thoughtspot_page", {
+						path: "#/home",
+					});
+
+					expect(result.isError).toBe(true);
+					expect(JSON.stringify(result)).not.toContain("[api-relay]");
+				});
+
+				it("get_thoughtspot_page reports a failed index.html fetch", async () => {
+					vi.stubGlobal(
+						"fetch",
+						vi.fn().mockResolvedValue(new Response("nope", { status: 502 })),
+					);
+					await server.init();
+					const { callTool } = connect(server);
+
+					const result = await callTool("get_thoughtspot_page", {
+						path: "#/home",
+					});
+
+					expect(result.isError).toBe(true);
+					expect((result.content as any[])[0].text).toMatch(
+						/Could not load the ThoughtSpot app/,
+					);
+				});
+
+				it("thoughtspot_api_request makes the call server side with the user's token", async () => {
+					const fetchSpy = vi.fn().mockResolvedValue(
+						new Response('{"ok":true}', {
+							status: 200,
+							headers: { "content-type": "application/json" },
+						}),
+					);
+					vi.stubGlobal("fetch", fetchSpy);
+					await server.init();
+					const relayNonce = await (server as any).relayNonces.issue();
+					const { callTool } = connect(server);
+
+					const result = await callTool("thoughtspot_api_request", {
+						method: "GET",
+						path: "/callosum/v1/session/info",
+						headers: { authorization: "Bearer from-page" },
+						relay_nonce: relayNonce,
+					});
+
+					expect(result.isError).toBeUndefined();
+					const [url, init] = fetchSpy.mock.calls[0];
+					expect(url).toBe(
+						"https://test.thoughtspot.cloud/callosum/v1/session/info",
+					);
+					expect(init.headers.get("Authorization")).toBe(
+						"Bearer test-access-token",
+					);
+					expect(result.structuredContent).toEqual({
+						status: 200,
+						headers: { "content-type": "application/json" },
+						body_base64: Buffer.from('{"ok":true}').toString("base64"),
+					});
+				});
+
+				it("thoughtspot_api_request refuses credential endpoints", async () => {
+					const fetchSpy = vi.fn();
+					vi.stubGlobal("fetch", fetchSpy);
+					await server.init();
+					const relayNonce = await (server as any).relayNonces.issue();
+					const { callTool } = connect(server);
+
+					const result = await callTool("thoughtspot_api_request", {
+						method: "POST",
+						path: "/api/rest/2.0/auth/token/full",
+						relay_nonce: relayNonce,
+					});
+
+					expect(result.isError).toBe(true);
+					expect((result.content as any[])[0].text).toMatch(/not allowed/);
+					expect(fetchSpy).not.toHaveBeenCalled();
+				});
+
+				it.each([
+					["without a relay nonce", undefined],
+					["with a nonce the server did not issue", "0".repeat(32)],
+				])(
+					"thoughtspot_api_request refuses calls %s",
+					async (_label, nonce) => {
+						const fetchSpy = vi.fn();
+						vi.stubGlobal("fetch", fetchSpy);
+						await server.init();
+						await (server as any).relayNonces.issue();
+						const { callTool } = connect(server);
+
+						const result = await callTool("thoughtspot_api_request", {
+							method: "GET",
+							path: "/prism/",
+							...(nonce && { relay_nonce: nonce }),
+						});
+
+						expect(result.isError).toBe(true);
+						expect((result.content as any[])[0].text).toMatch(/not allowed/);
+						expect(fetchSpy).not.toHaveBeenCalled();
+					},
+				);
+			});
+		});
+	});
+
 	describe("List Resources", () => {
 		// Using real service with mocked client, no service method mocks needed
 

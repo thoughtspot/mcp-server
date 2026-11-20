@@ -1082,6 +1082,41 @@ export class ThoughtSpotService {
 	}
 
 	/**
+	 * Export an unsaved Analytics Agent answer as a PNG, base64-encoded for an MCP
+	 * image content block. Runs as the calling user, like the CSV export.
+	 */
+	@WithSpan("get-spotter-answer-image")
+	async getSpotterAnswerImage({
+		sessionIdentifier,
+		generationNumber,
+	}: {
+		sessionIdentifier: string;
+		generationNumber: number;
+	}): Promise<{ data: string; mimeType: "image/png" }> {
+		getActiveSpan()?.setAttributes({
+			session_identifier: sessionIdentifier,
+			generation_number: generationNumber,
+		});
+
+		const file = await this.observeUpstreamCall(
+			UPSTREAM_OPERATION_NAMES.exportAnswerReport,
+			() =>
+				this.client.exportAnswerReport({
+					session_identifier: sessionIdentifier,
+					generation_number: generationNumber,
+					file_format: "PNG",
+				}),
+		);
+
+		const bytes = new Uint8Array(await file.arrayBuffer());
+		getActiveSpan()?.setAttribute("image_bytes", bytes.byteLength);
+		return {
+			data: Buffer.from(bytes).toString("base64"),
+			mimeType: "image/png",
+		};
+	}
+
+	/**
 	 * Validate connection to ThoughtSpot
 	 */
 	@WithSpan("validate-connection")

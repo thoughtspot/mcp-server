@@ -25,6 +25,23 @@ export type Props = {
 	// Undocumented URL flag (see index.ts): omit `iframe_url` from Analytics
 	// Agent answers.
 	suppressIframes?: boolean;
+	// On by default; the undocumented `answer-widget=false` URL flag (see
+	// index.ts) turns off the get_answer_image MCP Apps image card, the fallback
+	// to show_answer.
+	enableAnswerWidget?: boolean;
+	// On by default; the undocumented `thoughtspot-ui=false` URL flag (see
+	// index.ts) turns off the show_answer MCP Apps widget, which renders the full
+	// ThoughtSpot UI inline via iframe srcdoc.
+	enableThoughtSpotUiWidget?: boolean;
+	// On by default; the undocumented `inline-charts=false` URL flag (see
+	// index.ts) turns it off. In the show_answer widget, render charts in the
+	// page (ThoughtSpot's same-origin chart mode) instead of in the hosted chart
+	// iframe. Gives the page frame allow-same-origin.
+	enableInlineCharts?: boolean;
+	// Undocumented URL flag (see index.ts): in the show_answer widget, allow
+	// the hosted chart iframe (*.pdom.thoughtspot.com) through the resource CSP's
+	// frameDomains. Gives the page frame allow-same-origin.
+	enableDirectChartIframe?: boolean;
 };
 
 const DEFAULT_CLIENT_NAME = "Bearer Token client";

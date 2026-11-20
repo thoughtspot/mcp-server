@@ -137,6 +137,14 @@ const hooks: AuthHooks<Props> = {
 		props.enableRawSessionUpdates = enableRawSessionUpdates;
 		const suppressIframes = url.searchParams.get("suppress-iframes") === "true";
 		props.suppressIframes = suppressIframes;
+		props.enableAnswerWidget =
+			url.searchParams.get("answer-widget") !== "false";
+		props.enableThoughtSpotUiWidget =
+			url.searchParams.get("thoughtspot-ui") !== "false";
+		props.enableInlineCharts =
+			url.searchParams.get("inline-charts") !== "false";
+		props.enableDirectChartIframe =
+			url.searchParams.get("direct-chart-iframe") === "true";
 
 		return props;
 	},
@@ -168,6 +176,14 @@ const oauthFetchHandler = createOAuthHandler<Props>({
 		const enableRawSessionUpdates =
 			url.searchParams.get("enable-raw-session-updates") === "true";
 		const suppressIframes = url.searchParams.get("suppress-iframes") === "true";
+		const enableAnswerWidget =
+			url.searchParams.get("answer-widget") !== "false";
+		const enableThoughtSpotUiWidget =
+			url.searchParams.get("thoughtspot-ui") !== "false";
+		const enableInlineCharts =
+			url.searchParams.get("inline-charts") !== "false";
+		const enableDirectChartIframe =
+			url.searchParams.get("direct-chart-iframe") === "true";
 
 		return {
 			...(baseProps as Props),
@@ -181,6 +197,10 @@ const oauthFetchHandler = createOAuthHandler<Props>({
 			authMode: "oauth",
 			enableRawSessionUpdates,
 			suppressIframes,
+			enableAnswerWidget,
+			enableThoughtSpotUiWidget,
+			enableInlineCharts,
+			enableDirectChartIframe,
 		};
 	},
 	// Extra routes mounted on the default handler app (consumer-specific).
