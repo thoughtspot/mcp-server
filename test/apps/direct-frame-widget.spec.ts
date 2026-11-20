@@ -44,3 +44,15 @@ describe("direct-frame-widget (approach C2 prototype)", () => {
 		);
 	});
 });
+
+describe("direct-frame-widget script", () => {
+	it("parses as JavaScript", () => {
+		const scripts = [
+			...DIRECT_FRAME_WIDGET_HTML.matchAll(/<script>([\s\S]*?)<\/script>/g),
+		].map((m) => m[1]);
+		expect(scripts).toHaveLength(1);
+		for (const body of scripts) {
+			expect(() => new Function(body)).not.toThrow();
+		}
+	});
+});
