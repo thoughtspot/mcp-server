@@ -42,6 +42,10 @@ export type Props = {
 	// the hosted chart iframe (*.pdom.thoughtspot.com) through the resource CSP's
 	// frameDomains. Gives the page frame allow-same-origin.
 	enableDirectChartIframe?: boolean;
+	// Approach C1 prototype. Undocumented `mcp-view=true` URL flag (see
+	// index.ts): offer show_answer_view, a small read-only page in a srcdoc
+	// frame whose data calls go through a fixed allowlist relay.
+	enableMcpViewWidget?: boolean;
 };
 
 const DEFAULT_CLIENT_NAME = "Bearer Token client";
