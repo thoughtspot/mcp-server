@@ -163,7 +163,13 @@ export async function fetchSpotterXArtifact(
 		);
 	}
 
-	if (!response.headers.get("content-type")?.includes("application/json")) {
+	// Media types are case-insensitive
+	if (
+		!response.headers
+			.get("content-type")
+			?.toLowerCase()
+			.includes("application/json")
+	) {
 		return await response.text();
 	}
 	const envelope = (await response.json()) as {

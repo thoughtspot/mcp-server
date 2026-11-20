@@ -389,7 +389,9 @@ describe("spotter-x-client", () => {
 			const recipe = { recipe_version: "recipe.v1", title: "Größe" };
 			(fetch as any).mockResolvedValue({
 				ok: true,
-				headers: new Headers({ "content-type": "application/json" }),
+				headers: new Headers({
+					"content-type": "Application/JSON; charset=utf-8",
+				}),
 				json: vi.fn().mockResolvedValue({
 					filename: "recipe-session-1-2-json",
 					data: Buffer.from(JSON.stringify(recipe), "utf8").toString("base64"),
