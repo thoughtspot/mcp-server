@@ -359,7 +359,7 @@ describe("MCP Server", () => {
 				expectSpotterX: false,
 			},
 		])(
-			"uses SpotterX create_analysis_session=$expectSpotterX for apiVersion=$apiVersion, isSpotterXEnabled=$isSpotterXEnabled",
+			"uses SpotterX send_session_message=$expectSpotterX for apiVersion=$apiVersion, isSpotterXEnabled=$isSpotterXEnabled",
 			async ({ apiVersion, isSpotterXEnabled, expectSpotterX }) => {
 				const testServer = new MCPServer({
 					props: { ...mockProps, apiVersion },
@@ -371,30 +371,39 @@ describe("MCP Server", () => {
 				const { listTools } = connect(testServer);
 
 				const tools = (await listTools()).tools ?? [];
-				const sessionTools = tools.filter(
-					(t) => t.name === "create_analysis_session",
+				const messageTools = tools.filter(
+					(t) => t.name === "send_session_message",
 				);
 				// Swapped in place, never duplicated or dropped
-				expect(sessionTools).toHaveLength(1);
-				expect(
-					tools.map((t) => t.name).indexOf("create_analysis_session"),
-				).toBe(2);
+				expect(messageTools).toHaveLength(1);
+				expect(tools.map((t) => t.name).indexOf("send_session_message")).toBe(
+					3,
+				);
 				expect(tools).toHaveLength(13);
 
-				const [sessionTool] = sessionTools;
-				const properties = (sessionTool.inputSchema as any).properties;
-				expect(properties).toHaveProperty("data_source_id");
+				const [messageTool] = messageTools;
+				const properties = (messageTool.inputSchema as any).properties;
+				expect(properties).toHaveProperty("analytical_session_id");
+				expect(properties).toHaveProperty("message");
 				if (expectSpotterX) {
 					expect(properties).toHaveProperty("dashboard_id");
-					expect(sessionTool.description).toMatch(
+					expect(messageTool.description).toMatch(
 						/in the context of a dashboard/i,
 					);
 				} else {
 					expect(properties).not.toHaveProperty("dashboard_id");
-					expect(sessionTool.description).not.toMatch(
+					expect(messageTool.description).not.toMatch(
 						/in the context of a dashboard/i,
 					);
 				}
+
+				// create_analysis_session never takes a dashboard
+				const sessionTool = tools.find(
+					(t) => t.name === "create_analysis_session",
+				);
+				expect((sessionTool?.inputSchema as any).properties).not.toHaveProperty(
+					"dashboard_id",
+				);
 			},
 		);
 
@@ -2142,13 +2151,13 @@ describe("MCP Server", () => {
 				return { testServer, createSpotter3, createSpotterX };
 			}
 
-			it("creates a SpotterX conversation with data source and dashboard context", async () => {
+			it("creates a SpotterX conversation with data source context", async () => {
 				const { testServer, createSpotter3, createSpotterX } = setup();
 				await testServer.init();
 
 				const result = await connect(testServer).callTool(
 					"create_analysis_session",
-					{ data_source_id: "ds-123", dashboard_id: "lb-456" },
+					{ data_source_id: "ds-123" },
 				);
 
 				expect(result.isError).toBeUndefined();
@@ -2162,7 +2171,6 @@ describe("MCP Server", () => {
 					orgId: "test-org",
 					userId: "test-user-123",
 					dataSourceId: "ds-123",
-					liveboardId: "lb-456",
 				});
 				expect(createSpotter3).not.toHaveBeenCalled();
 			});
@@ -2191,7 +2199,7 @@ describe("MCP Server", () => {
 				},
 			);
 
-			it("rejects a session with neither data_source_id nor dashboard_id when discovery is disabled", async () => {
+			it("allows a session without data_source_id when discovery is disabled", async () => {
 				const { testServer, createSpotterX } = setup({ discovery: false });
 				await testServer.init();
 
@@ -2200,28 +2208,14 @@ describe("MCP Server", () => {
 					{},
 				);
 
-				expect(result.isError).toBe(true);
-				expect((result.content as any)[0].text).toContain(
-					"either `data_source_id` or `dashboard_id` is required",
-				);
-				expect(createSpotterX).not.toHaveBeenCalled();
-			});
-
-			it("accepts a dashboard_id alone when discovery is disabled", async () => {
-				const { testServer, createSpotterX } = setup({ discovery: false });
-				await testServer.init();
-
-				const result = await connect(testServer).callTool(
-					"create_analysis_session",
-					{ dashboard_id: "lb-456" },
-				);
-
 				expect(result.isError).toBeUndefined();
+				expect((result.structuredContent as any).analytical_session_id).toBe(
+					"conv-x-1",
+				);
 				expect(createSpotterX).toHaveBeenCalledWith(
 					expect.objectContaining({
 						isSpotterDataSourceDiscoveryEnabled: false,
 						dataSourceId: undefined,
-						liveboardId: "lb-456",
 					}),
 				);
 			});
@@ -2357,6 +2351,8 @@ describe("MCP Server", () => {
 			initializeConversation: ReturnType<typeof vi.fn>;
 			appendMessages: ReturnType<typeof vi.fn>;
 			getNewMessages: ReturnType<typeof vi.fn>;
+			getSessionState: ReturnType<typeof vi.fn>;
+			updateMetadata: ReturnType<typeof vi.fn>;
 		};
 		let mockSendAgentConversationMessageStreaming: ReturnType<typeof vi.fn>;
 
@@ -2367,6 +2363,8 @@ describe("MCP Server", () => {
 				getNewMessages: vi
 					.fn()
 					.mockResolvedValue({ messages: [], isDone: true }),
+				getSessionState: vi.fn().mockResolvedValue(null),
+				updateMetadata: vi.fn().mockResolvedValue(undefined),
 			};
 			vi.spyOn(server as any, "getStorageService").mockReturnValue(
 				mockStorageService,
@@ -2512,6 +2510,8 @@ describe("MCP Server", () => {
 
 		describe("SpotterX routing", () => {
 			let mockSendSpotterX: ReturnType<typeof vi.fn>;
+			let mockCreateBachSession: ReturnType<typeof vi.fn>;
+			const newBachSession = { transactionId: "txn-1", generationNumber: "3" };
 
 			function setup({
 				apiVersion = "beta",
@@ -2571,9 +2571,14 @@ describe("MCP Server", () => {
 				mockSendSpotterX = vi
 					.spyOn(ThoughtSpotService.prototype, "sendSpotterXMessageStreaming")
 					.mockResolvedValue(undefined) as unknown as ReturnType<typeof vi.fn>;
+				mockCreateBachSession = vi
+					.spyOn(ThoughtSpotService.prototype, "createBachPinboardSession")
+					.mockResolvedValue(newBachSession) as unknown as ReturnType<
+					typeof vi.fn
+				>;
 			});
 
-			it("sends the message to SpotterX with the raw format", async () => {
+			it("sends the message to SpotterX with the raw format and a new dashboard BACH session", async () => {
 				const testServer = setup();
 				await testServer.init();
 
@@ -2583,6 +2588,7 @@ describe("MCP Server", () => {
 						analytical_session_id: "conv-x-1",
 						message: "Compare revenue by region",
 						additional_context: "Focus on North America",
+						dashboard_id: "lb-456",
 					},
 				);
 
@@ -2598,10 +2604,102 @@ describe("MCP Server", () => {
 					expect.any(Function),
 					"Focus on North America",
 					false,
+					{ liveboardId: "lb-456", bachSession: newBachSession },
+				);
+				expect(mockCreateBachSession).toHaveBeenCalledWith("lb-456");
+				expect(mockStorageService.updateMetadata).toHaveBeenCalledWith(
+					"conv-x-1",
+					{ liveboardBachSessions: { "lb-456": newBachSession } },
 				);
 				expect(
 					mockSendAgentConversationMessageStreaming,
 				).not.toHaveBeenCalled();
+			});
+
+			it("reuses the BACH session stored in the chat state for the same dashboard", async () => {
+				const storedSession = {
+					transactionId: "txn-old",
+					generationNumber: "2",
+				};
+				mockStorageService.getSessionState.mockResolvedValue({
+					liveboardBachSessions: { "lb-456": storedSession },
+				});
+				const testServer = setup();
+				await testServer.init();
+
+				await testServer.callSendSessionMessage(
+					sendRequest({
+						analytical_session_id: "conv-x-1",
+						message: "Hi",
+						dashboard_id: "lb-456",
+					}),
+				);
+
+				expect(mockStorageService.getSessionState).toHaveBeenCalledWith(
+					"conv-x-1",
+				);
+				expect(mockCreateBachSession).not.toHaveBeenCalled();
+				expect(mockStorageService.updateMetadata).not.toHaveBeenCalled();
+				expect(mockSendSpotterX.mock.calls[0][6]).toEqual({
+					liveboardId: "lb-456",
+					bachSession: storedSession,
+				});
+			});
+
+			it("keeps sessions for other dashboards when storing a new one", async () => {
+				const otherSession = {
+					transactionId: "txn-other",
+					generationNumber: "5",
+				};
+				mockStorageService.getSessionState.mockResolvedValue({
+					liveboardBachSessions: { "lb-other": otherSession },
+				});
+				const testServer = setup();
+				await testServer.init();
+
+				await testServer.callSendSessionMessage(
+					sendRequest({
+						analytical_session_id: "conv-x-1",
+						message: "Hi",
+						dashboard_id: "lb-456",
+					}),
+				);
+
+				expect(mockCreateBachSession).toHaveBeenCalledWith("lb-456");
+				expect(mockStorageService.updateMetadata).toHaveBeenCalledWith(
+					"conv-x-1",
+					{
+						liveboardBachSessions: {
+							"lb-other": otherSession,
+							"lb-456": newBachSession,
+						},
+					},
+				);
+			});
+
+			it("closes out the conversation and rethrows when creating the BACH session fails", async () => {
+				mockCreateBachSession.mockRejectedValue(
+					new Error("bach create failed"),
+				);
+				const testServer = setup();
+				await testServer.init();
+
+				await expect(
+					testServer.callSendSessionMessage(
+						sendRequest({
+							analytical_session_id: "conv-x-1",
+							message: "Hi",
+							dashboard_id: "lb-456",
+						}),
+					),
+				).rejects.toThrow("bach create failed");
+
+				expect(mockSendSpotterX).not.toHaveBeenCalled();
+				expect(mockStorageService.appendMessages).toHaveBeenCalledWith(
+					"conv-x-1",
+					[{ is_thinking: false, type: "text", text: "Something went wrong" }],
+					true,
+				);
 			});
 
 			it("passes the simplified format and suppress-iframes flag through", async () => {
@@ -2622,6 +2720,7 @@ describe("MCP Server", () => {
 					expect.any(Function),
 					undefined,
 					true,
+					undefined,
 				);
 			});
 

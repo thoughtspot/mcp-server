@@ -124,3 +124,9 @@ export interface BachSession {
 	transactionId: string;
 	generationNumber: string;
 }
+
+// A liveboard to use as context in a Spotter chat, along with its loaded BACH session
+export interface LiveboardContext {
+	liveboardId: string;
+	bachSession: BachSession;
+}

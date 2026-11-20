@@ -242,7 +242,7 @@ describe("thoughtspot-service", () => {
 			userId: "user-guid-1",
 		};
 
-		it("passes the client identity, data source and liveboard to the client", async () => {
+		it("passes the client identity and data source to the client", async () => {
 			spotterXClient.createSpotterXConversation = vi
 				.fn()
 				.mockResolvedValue({ conversation_id: "conv-x" });
@@ -252,7 +252,6 @@ describe("thoughtspot-service", () => {
 				true,
 				false,
 				"worksheet-123",
-				"lb-123",
 			);
 
 			expect(spotterXClient.createSpotterXConversation).toHaveBeenCalledWith({
@@ -262,7 +261,6 @@ describe("thoughtspot-service", () => {
 				orgId: "42",
 				userId: "user-guid-1",
 				dataSourceId: "worksheet-123",
-				liveboardId: "lb-123",
 			});
 			expect(result).toEqual({ conversation_id: "conv-x" });
 		});
@@ -837,6 +835,33 @@ describe("thoughtspot-service", () => {
 				conversationId: "conv-x",
 				message: "Show me revenue",
 			});
+			expect(
+				spotterXClient.sendSpotterXMessageStreaming.mock.calls[0][0]
+					.liveboardContext,
+			).toBeUndefined();
+		});
+
+		it("passes the liveboard context through to the client", async () => {
+			mockStreamingResponse();
+			const service = new ThoughtSpotService(spotterXClient);
+			const liveboardContext = {
+				liveboardId: "lb-123",
+				bachSession: { transactionId: "txn-1", generationNumber: "3" },
+			};
+
+			await service.sendSpotterXMessageStreaming(
+				"conv-x",
+				"Show me revenue",
+				SpotterResponseFormat.RAW,
+				vi.fn().mockResolvedValue(undefined),
+				undefined,
+				false,
+				liveboardContext,
+			);
+
+			expect(spotterXClient.sendSpotterXMessageStreaming).toHaveBeenCalledWith(
+				expect.objectContaining({ liveboardContext }),
+			);
 		});
 
 		it("appends additionalContext to the message when provided", async () => {

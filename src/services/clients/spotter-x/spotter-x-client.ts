@@ -4,7 +4,11 @@ import {
 	fetchApi,
 	generateRequestId,
 } from "../../rest-utils";
-import { type ClientContext, ThoughtSpotApiError } from "../../types";
+import {
+	type ClientContext,
+	type LiveboardContext,
+	ThoughtSpotApiError,
+} from "../../types";
 
 // SpotterX expects the fuid header and omits the org header (org is carried in the fuid)
 function spotterXRequestOptions(
@@ -31,7 +35,6 @@ export async function createSpotterXConversation(
 		orgId,
 		userId,
 		dataSourceId,
-		liveboardId,
 	}: {
 		isSpotterDataSourceDiscoveryEnabled: boolean;
 		isSpotterChatHistoryEnabled: boolean;
@@ -39,7 +42,6 @@ export async function createSpotterXConversation(
 		orgId: string;
 		userId: string;
 		dataSourceId?: string;
-		liveboardId?: string;
 	},
 ): Promise<AgentConversation> {
 	const endpoint = "/agents/v1/agents/spotterx/sessions";
@@ -60,7 +62,6 @@ export async function createSpotterXConversation(
 				},
 			},
 			...(dataSourceId && { context: { dataset_ids: [dataSourceId] } }),
-			...(liveboardId && { object_type: "liveboard", object_id: liveboardId }),
 		},
 	});
 
@@ -92,12 +93,14 @@ export async function sendSpotterXMessageStreaming(
 		userId,
 		conversationId,
 		message,
+		liveboardContext,
 	}: {
 		tenantId: string;
 		orgId: string;
 		userId: string;
 		conversationId: string;
 		message: string;
+		liveboardContext?: LiveboardContext;
 	},
 ): Promise<Response> {
 	// Encoding for safety, though for valid IDs it should not make a difference
@@ -110,9 +113,22 @@ export async function sendSpotterXMessageStreaming(
 			enabled_connectors: [],
 			extra_headers: {
 				map: {
-					"x-ba-ts-host": ctx.instanceUrl,
+					// API expects raw hostname (no https:// or www.)
+					"x-ba-ts-host": new URL(ctx.instanceUrl).host,
 				},
 			},
+			...(liveboardContext && {
+				context_delta: {
+					liveboard_in_context: true,
+					liveboard_bach_session_map: {
+						[liveboardContext.liveboardId]: {
+							sessionId: liveboardContext.bachSession.transactionId,
+							genNo: Number(liveboardContext.bachSession.generationNumber),
+							answer_map: {},
+						},
+					},
+				},
+			}),
 		},
 	});
 
