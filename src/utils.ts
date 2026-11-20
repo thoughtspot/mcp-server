@@ -42,6 +42,10 @@ export type Props = {
 	// the hosted chart iframe (*.pdom.thoughtspot.com) through the resource CSP's
 	// frameDomains. Gives the page frame allow-same-origin.
 	enableDirectChartIframe?: boolean;
+	// Approach B prototype. Undocumented `embed-sdk=true` URL flag (see
+	// index.ts): offer show_answer_embed, which frames the cluster with the
+	// Visual Embed SDK and hands the widget a short-lived user token.
+	enableEmbedSdkWidget?: boolean;
 };
 
 const DEFAULT_CLIENT_NAME = "Bearer Token client";

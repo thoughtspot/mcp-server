@@ -1878,6 +1878,199 @@ describe("MCP Server", () => {
 		});
 	});
 
+	describe("Approach B prototype: Visual Embed SDK widget (embed-sdk URL flag)", () => {
+		const mcpAppsCapabilities = {
+			extensions: {
+				"io.modelcontextprotocol/ui": {
+					mimeTypes: ["text/html;profile=mcp-app"],
+				},
+			},
+		};
+		const supportMcpApps = () =>
+			vi
+				.spyOn(server, "getClientCapabilities")
+				.mockReturnValue(mcpAppsCapabilities as any);
+
+		afterEach(() => {
+			vi.unstubAllGlobals();
+		});
+
+		it("is off by default", async () => {
+			supportMcpApps();
+			await server.init();
+			const { listTools } = connect(server);
+
+			const names = (await listTools()).tools.map((t) => t.name);
+			expect(names).not.toContain("show_answer_embed");
+			expect(names).not.toContain("get_embed_token");
+		});
+
+		it("refuses to mint a token when off", async () => {
+			supportMcpApps();
+			const fetchSpy = vi.fn();
+			vi.stubGlobal("fetch", fetchSpy);
+			await server.init();
+			const { callTool } = connect(server);
+
+			const result = await callTool("get_embed_token", {});
+
+			expect(result.isError).toBe(true);
+			expect(fetchSpy).not.toHaveBeenCalled();
+		});
+
+		describe("when on", () => {
+			beforeEach(() => {
+				mockProps.enableEmbedSdkWidget = true;
+			});
+
+			it("hides the tools from clients without MCP Apps support", async () => {
+				await server.init();
+				const { listTools } = connect(server);
+
+				const names = (await listTools()).tools.map((t) => t.name);
+				expect(names).not.toContain("show_answer_embed");
+				expect(names).not.toContain("get_embed_token");
+			});
+
+			it("refuses to mint a token for clients without MCP Apps support", async () => {
+				const fetchSpy = vi.fn();
+				vi.stubGlobal("fetch", fetchSpy);
+				await server.init();
+				const { callTool } = connect(server);
+
+				const result = await callTool("get_embed_token", {});
+
+				expect(result.isError).toBe(true);
+				expect(fetchSpy).not.toHaveBeenCalled();
+			});
+
+			describe("for an MCP Apps client", () => {
+				beforeEach(() => {
+					supportMcpApps();
+				});
+
+				it("lists show_answer_embed linked to the widget and get_embed_token as app-only", async () => {
+					await server.init();
+					const { listTools } = connect(server);
+
+					const { tools } = await listTools();
+					const byName = (name: string) =>
+						tools.find((t) => t.name === name) as any;
+					expect(byName("show_answer_embed")._meta.ui.resourceUri).toBe(
+						"ui://thoughtspot/embed-sdk.html",
+					);
+					expect(byName("get_embed_token")._meta.ui).toEqual({
+						visibility: ["app"],
+					});
+				});
+
+				it("serves the widget with the cluster in frame and connect domains", async () => {
+					await server.init();
+
+					const result = await server.readResource({
+						method: "resources/read",
+						params: { uri: "ui://thoughtspot/embed-sdk.html" },
+					});
+					const [content] = result.contents as any[];
+					expect(content.mimeType).toBe("text/html;profile=mcp-app");
+					expect(content.text).toContain(
+						"@thoughtspot/visual-embed-sdk@1.54.0/dist/tsembed.js",
+					);
+					expect(content.text).toContain("TrustedAuthTokenCookieless");
+					expect(content._meta.ui.csp).toEqual({
+						resourceDomains: ["https://cdn.jsdelivr.net"],
+						connectDomains: ["https://test.thoughtspot.cloud"],
+						frameDomains: ["https://test.thoughtspot.cloud"],
+					});
+				});
+
+				it("show_answer_embed maps an answer iframe_url to an AppEmbed path", async () => {
+					await server.init();
+					const { callTool } = connect(server);
+
+					const result = await callTool("show_answer_embed", {
+						iframe_url:
+							"https://test.thoughtspot.cloud/?tsmcp=true#/embed/conv-assist-answer?sessionId=s",
+					});
+
+					expect(result.structuredContent).toEqual({
+						thoughtspot_host: "https://test.thoughtspot.cloud",
+						path: "embed/conv-assist-answer?sessionId=s",
+					});
+				});
+
+				it("show_answer_embed opens home with no target", async () => {
+					await server.init();
+					const { callTool } = connect(server);
+
+					const result = await callTool("show_answer_embed", {});
+
+					expect((result.structuredContent as any).path).toBe("home");
+				});
+
+				it("show_answer_embed rejects URLs off the instance", async () => {
+					await server.init();
+					const { callTool } = connect(server);
+
+					const result = await callTool("show_answer_embed", {
+						iframe_url: "https://evil.example.com/#/home",
+					});
+
+					expect(result.isError).toBe(true);
+				});
+
+				it("get_embed_token mints a short-lived org token, not the session token", async () => {
+					vi.spyOn(
+						server as any,
+						"initGlobalTokenAndReconcileWithStorage",
+					).mockResolvedValue("global-token");
+					const fetchSpy = vi.fn().mockResolvedValue(
+						new Response(JSON.stringify({ data: { token: "short-lived" } }), {
+							status: 200,
+							headers: { "content-type": "application/json" },
+						}),
+					);
+					vi.stubGlobal("fetch", fetchSpy);
+					await server.init();
+					const { callTool } = connect(server);
+
+					const result = await callTool("get_embed_token", {});
+
+					expect(result.structuredContent).toEqual({
+						token: "short-lived",
+						expires_in_sec: 300,
+					});
+					const [url] = fetchSpy.mock.calls[0];
+					expect(String(url)).toContain("/callosum/v1/v2/auth/token/fetch?");
+					expect(String(url)).toContain("validity_time_in_sec=300");
+					expect(String(url)).toContain("org_identifier=test-org");
+					// Minted with the global token, as switch_org does.
+					expect(fetchSpy.mock.calls[0][1].headers.Authorization).toBe(
+						"Bearer global-token",
+					);
+				});
+
+				it("get_embed_token reports a mint failure without leaking details", async () => {
+					vi.spyOn(
+						server as any,
+						"initGlobalTokenAndReconcileWithStorage",
+					).mockResolvedValue("global-token");
+					vi.stubGlobal(
+						"fetch",
+						vi.fn().mockResolvedValue(new Response("nope", { status: 500 })),
+					);
+					await server.init();
+					const { callTool } = connect(server);
+
+					const result = await callTool("get_embed_token", {});
+
+					expect(result.isError).toBe(true);
+					expect(JSON.stringify(result.content)).not.toContain("nope");
+				});
+			});
+		});
+	});
+
 	describe("MCP Apps ThoughtSpot UI widget (thoughtspot-ui URL flag)", () => {
 		const indexHtml =
 			"<!DOCTYPE html><html><head><script>var blink = {};</script></head><body></body></html>";

@@ -145,6 +145,7 @@ const hooks: AuthHooks<Props> = {
 			url.searchParams.get("inline-charts") !== "false";
 		props.enableDirectChartIframe =
 			url.searchParams.get("direct-chart-iframe") === "true";
+		props.enableEmbedSdkWidget = url.searchParams.get("embed-sdk") === "true";
 
 		return props;
 	},
@@ -184,6 +185,7 @@ const oauthFetchHandler = createOAuthHandler<Props>({
 			url.searchParams.get("inline-charts") !== "false";
 		const enableDirectChartIframe =
 			url.searchParams.get("direct-chart-iframe") === "true";
+		const enableEmbedSdkWidget = url.searchParams.get("embed-sdk") === "true";
 
 		return {
 			...(baseProps as Props),
@@ -201,6 +203,7 @@ const oauthFetchHandler = createOAuthHandler<Props>({
 			enableThoughtSpotUiWidget,
 			enableInlineCharts,
 			enableDirectChartIframe,
+			enableEmbedSdkWidget,
 		};
 	},
 	// Extra routes mounted on the default handler app (consumer-specific).
