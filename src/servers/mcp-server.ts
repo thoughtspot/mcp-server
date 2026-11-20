@@ -2317,7 +2317,7 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		const span = this.initSpanWithCommonAttributes();
 		span?.setAttributes({ relay_method: method, relay_path: path });
 		try {
-			checkViewRelayRequest({
+			const checkedBody = checkViewRelayRequest({
 				method,
 				path,
 				body: Buffer.from(body_base64 ?? "", "base64").toString("utf8"),
@@ -2333,7 +2333,7 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 							"content-type": "application/json",
 							accept: "*/*",
 						},
-						body_base64,
+						body_base64: Buffer.from(checkedBody).toString("base64"),
 					},
 				),
 				UPSTREAM_CALL_TIMEOUT_MS,
