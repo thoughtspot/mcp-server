@@ -218,29 +218,33 @@ describe("MCP Server", () => {
 	});
 
 	describe("List Tools", () => {
+		const LATEST_TOOL_NAMES = [
+			"check_connectivity",
+			"search_objects",
+			"create_analysis_session",
+			"send_session_message",
+			"get_session_updates",
+			"create_dashboard",
+			"create_model_session",
+			"send_model_message",
+			"get_model_updates",
+			"finalize_model",
+			"get_data",
+			"modify_dashboard",
+			"get_dashboard_status",
+			"list_analysts",
+			"switch_analyst",
+		];
+
 		it("should return all available tools", async () => {
 			await server.init();
 			const { listTools } = connect(server);
 
 			const result = await listTools();
 
-			// Latest version: 13 tools (6 non-OAuth base + 4 model tools + get_data + 2 dashboard tools)
-			expect(result.tools).toHaveLength(13);
-			expect(result.tools?.map((t) => t.name)).toEqual([
-				"check_connectivity",
-				"search_objects",
-				"create_analysis_session",
-				"send_session_message",
-				"get_session_updates",
-				"create_dashboard",
-				"create_model_session",
-				"send_model_message",
-				"get_model_updates",
-				"finalize_model",
-				"get_data",
-				"modify_dashboard",
-				"get_dashboard_status",
-			]);
+			// Latest version: 15 tools (6 non-OAuth base + 4 model tools + get_data + 2 dashboard
+			// tools + list_analysts + switch_analyst)
+			expect(result.tools?.map((t) => t.name)).toEqual(LATEST_TOOL_NAMES);
 		});
 
 		it("should include correct tool descriptions", async () => {
@@ -298,7 +302,7 @@ describe("MCP Server", () => {
 			}
 		});
 
-		it("should return 13 tools regardless of enableSpotterDataSourceDiscovery when using latest", async () => {
+		it("should return 15 tools regardless of enableSpotterDataSourceDiscovery when using latest", async () => {
 			// Mock the ThoughtSpotClient constructor with enableSpotterDataSourceDiscovery set to false
 			vi.spyOn(thoughtspotClient, "ThoughtSpotClient").mockReturnValue({
 				getSessionInfo: vi.fn().mockResolvedValue({
@@ -332,22 +336,7 @@ describe("MCP Server", () => {
 			const result = await listTools();
 
 			// No tool in this set is a datasource discovery tool, so filtering has no effect
-			expect(result.tools).toHaveLength(13);
-			expect(result.tools?.map((t) => t.name)).toEqual([
-				"check_connectivity",
-				"search_objects",
-				"create_analysis_session",
-				"send_session_message",
-				"get_session_updates",
-				"create_dashboard",
-				"create_model_session",
-				"send_model_message",
-				"get_model_updates",
-				"finalize_model",
-				"get_data",
-				"modify_dashboard",
-				"get_dashboard_status",
-			]);
+			expect(result.tools?.map((t) => t.name)).toEqual(LATEST_TOOL_NAMES);
 		});
 
 		it.each([
@@ -379,11 +368,18 @@ describe("MCP Server", () => {
 				expect(
 					tools.map((t) => t.name).indexOf("create_analysis_session"),
 				).toBe(2);
-				expect(tools).toHaveLength(13);
+				// list_analysts / switch_analyst are Spotter 3 only: hidden when the SpotterX swap is
+				// active
+				for (const name of ["list_analysts", "switch_analyst"]) {
+					expect(tools.some((t) => t.name === name)).toBe(!expectSpotterX);
+				}
+				expect(tools).toHaveLength(expectSpotterX ? 13 : 15);
 
 				const [sessionTool] = sessionTools;
 				const properties = (sessionTool.inputSchema as any).properties;
 				expect(properties).toHaveProperty("data_source_id");
+				// analyst_id is Spotter 3 only
+				expect("analyst_id" in properties).toBe(!expectSpotterX);
 				if (expectSpotterX) {
 					expect(properties).toHaveProperty("dashboard_id");
 					expect(sessionTool.description).toMatch(
@@ -436,10 +432,13 @@ describe("MCP Server", () => {
 			"get_session_updates",
 			"create_dashboard",
 		];
-		// The dashboard designer tools are appended after everything else in the latest version.
+		// The dashboard designer tools, then the Analyst tools, are appended after everything else
+		// in the latest version.
 		const DASHBOARD_DESIGNER_TOOLS = [
 			"modify_dashboard",
 			"get_dashboard_status",
+			"list_analysts",
+			"switch_analyst",
 		];
 		const V2_TOOLS = [...BASE_TOOLS, ...DASHBOARD_DESIGNER_TOOLS];
 		// Base tools plus get_data, i.e. what a user with the data-download privilege
@@ -1914,6 +1913,363 @@ describe("MCP Server", () => {
 			expect(suggestionsData[0].header.guid).toBe("ds-789");
 			expect(suggestionsData[0].confidence).toBe(0.95);
 		});
+	});
+
+	describe("create_analysis_session with analyst_id", () => {
+		const ANALYST_ID = "550e8400-e29b-41d4-a716-446655440000";
+		const apiError = (status: number, op: string, body = "{}") =>
+			vi.fn().mockRejectedValue(new ThoughtSpotApiError(status, op, body));
+
+		// Calls the handler on the default mocked client, with the conversation calls swapped in
+		async function call(
+			args: Record<string, unknown>,
+			{
+				apiVersion = "latest",
+				isSpotterXEnabled = false,
+				createSpotter3 = vi
+					.fn()
+					.mockResolvedValue({ conversation_id: "conv-analyst-1" }),
+			} = {},
+		) {
+			const createSpotterX = vi
+				.fn()
+				.mockResolvedValue({ conversation_id: "conv-x-1" });
+			Object.assign(new (thoughtspotClient.ThoughtSpotClient as any)(), {
+				createSpotter3Conversation: createSpotter3,
+				createSpotterXConversation: createSpotterX,
+			});
+			const testServer = new MCPServer({
+				props: { ...mockProps, apiVersion },
+				env: {} as any,
+			});
+			await testServer.init();
+			(testServer as any).sessionInfo.configInfo.isSpotterXEnabled =
+				isSpotterXEnabled;
+			const result = (await testServer.callCreateAnalysisSession(
+				{
+					method: "tools/call",
+					params: { name: "create_analysis_session", arguments: args },
+				},
+				NOOP_METRICS_RECORDER,
+			)) as any;
+			return { result, createSpotter3, createSpotterX };
+		}
+
+		it.each(["latest", "beta"])(
+			"binds the conversation to the Analyst on %s without a lookup",
+			async (apiVersion) => {
+				const { result, createSpotter3 } = await call(
+					{ analyst_id: ANALYST_ID },
+					{ apiVersion },
+				);
+
+				expect(result.structuredContent).toEqual({
+					analytical_session_id: "conv-analyst-1",
+					analyst: { id: ANALYST_ID },
+					connector_notice: expect.stringContaining(
+						"not supported over the MCP server",
+					),
+				});
+				expect(createSpotter3).toHaveBeenCalledTimes(1);
+				expect(createSpotter3).toHaveBeenCalledWith({
+					isSpotterDataSourceDiscoveryEnabled: true,
+					isSpotterChatHistoryEnabled: false,
+					dataSourceId: undefined,
+					analystId: ANALYST_ID,
+				});
+			},
+		);
+
+		const notFound = '{"message":"Spot abc not found"}';
+		const denied = '{"detail":{"error_code":"SPOT_ACCESS_DENIED"}}';
+		it.each([
+			{ status: 400, body: notFound, code: "analyst_not_found" },
+			{ status: 403, body: denied, code: "analyst_forbidden" },
+		])(
+			"maps a $status create failure to $code without falling back",
+			async ({ status, body, code }) => {
+				const createSpotter3 = apiError(
+					status,
+					"createSpotter3Conversation",
+					body,
+				);
+				const { result } = await call(
+					{ analyst_id: ANALYST_ID },
+					{ createSpotter3 },
+				);
+
+				expect(result.isError).toBe(true);
+				expect(result.content[0].text).toContain(code);
+				expect(createSpotter3).toHaveBeenCalledTimes(1);
+			},
+		);
+
+		it.each([
+			{ status: 400, body: '{"message":"Failed to load spot abc"}' },
+			{ status: 500, body: "boom" },
+		])(
+			"rethrows a $status create failure that is not about the Analyst",
+			async ({ status, body }) => {
+				await expect(
+					call(
+						{ analyst_id: ANALYST_ID },
+						{
+							createSpotter3: apiError(
+								status,
+								"createSpotter3Conversation",
+								body,
+							),
+						},
+					),
+				).rejects.toBeInstanceOf(ThoughtSpotApiError);
+			},
+		);
+
+		it("rejects analyst_id combined with data_source_id", async () => {
+			const { result, createSpotter3 } = await call({
+				analyst_id: ANALYST_ID,
+				data_source_id: "ds-123",
+			});
+
+			expect(result.content[0].text).toContain("cannot be combined");
+			expect(createSpotter3).not.toHaveBeenCalled();
+		});
+
+		it.each([
+			{ apiVersion: "2026-10-02", isSpotterXEnabled: false },
+			{ apiVersion: "beta", isSpotterXEnabled: true },
+		])(
+			"ignores analyst_id where it is not offered (apiVersion=$apiVersion, SpotterX=$isSpotterXEnabled)",
+			async (options) => {
+				const { result, createSpotter3, createSpotterX } = await call(
+					{ analyst_id: ANALYST_ID },
+					options,
+				);
+
+				expect(result.isError).toBeUndefined();
+				const created = options.isSpotterXEnabled
+					? createSpotterX
+					: createSpotter3;
+				expect(created).toHaveBeenCalledWith(
+					expect.not.objectContaining({ analystId: ANALYST_ID }),
+				);
+			},
+		);
+	});
+
+	describe("switch_analyst", () => {
+		const ANALYST_ID = "550e8400-e29b-41d4-a716-446655440000";
+
+		async function call(
+			args: Record<string, unknown>,
+			{
+				apiVersion = "latest",
+				isSpotterXEnabled = false,
+				createSpotter3 = vi
+					.fn()
+					.mockResolvedValue({ conversation_id: "conv-analyst-2" }),
+			} = {},
+		) {
+			Object.assign(new (thoughtspotClient.ThoughtSpotClient as any)(), {
+				createSpotter3Conversation: createSpotter3,
+			});
+			const testServer = new MCPServer({
+				props: { ...mockProps, apiVersion },
+				env: {} as any,
+			});
+			await testServer.init();
+			(testServer as any).sessionInfo.configInfo.isSpotterXEnabled =
+				isSpotterXEnabled;
+			const result = (await testServer.callSwitchAnalyst(
+				makeRequest("switch_analyst", args),
+				NOOP_METRICS_RECORDER,
+			)) as any;
+			return { result, createSpotter3 };
+		}
+
+		it("starts a new session on the Analyst and reports the replaced one", async () => {
+			const { result, createSpotter3 } = await call({
+				analyst_id: ANALYST_ID,
+				analytical_session_id: "conv-old",
+			});
+
+			expect(result.structuredContent).toEqual({
+				analytical_session_id: "conv-analyst-2",
+				analyst: { id: ANALYST_ID },
+				connector_notice: expect.stringContaining(
+					"not supported over the MCP server",
+				),
+				previous_analytical_session_id: "conv-old",
+			});
+			expect(createSpotter3).toHaveBeenCalledWith(
+				expect.objectContaining({
+					analystId: ANALYST_ID,
+					dataSourceId: undefined,
+				}),
+			);
+		});
+
+		it("omits previous_analytical_session_id when none was given", async () => {
+			const { result } = await call({ analyst_id: ANALYST_ID });
+
+			expect(result.structuredContent).not.toHaveProperty(
+				"previous_analytical_session_id",
+			);
+			expect(result.structuredContent.analytical_session_id).toBe(
+				"conv-analyst-2",
+			);
+		});
+
+		it("maps an unknown Analyst to analyst_not_found", async () => {
+			const { result } = await call(
+				{ analyst_id: ANALYST_ID },
+				{
+					createSpotter3: vi
+						.fn()
+						.mockRejectedValue(
+							new ThoughtSpotApiError(
+								400,
+								"createSpotter3Conversation",
+								'{"message":"Spot abc not found"}',
+							),
+						),
+				},
+			);
+
+			expect(result.isError).toBe(true);
+			expect(result.content[0].text).toContain("analyst_not_found");
+		});
+
+		it("rejects on a SpotterX cluster without creating a session", async () => {
+			const { result, createSpotter3 } = await call(
+				{ analyst_id: ANALYST_ID },
+				{ apiVersion: "beta", isSpotterXEnabled: true },
+			);
+
+			expect(result.isError).toBe(true);
+			expect(result.content[0].text).toContain("SpotterX");
+			expect(createSpotter3).not.toHaveBeenCalled();
+		});
+	});
+
+	describe("list_analysts", () => {
+		const analysts = (n: number, start = 0) =>
+			Array.from({ length: n }, (_, i) => ({
+				id: `a-${start + i}`,
+				name: `Analyst ${start + i}`,
+				description: `Desc ${start + i}`,
+			}));
+
+		// Adds searchAnalysts to the shared client mock behind `server` (apiVersion: latest).
+		async function setup(
+			searchAnalysts = vi
+				.fn()
+				.mockResolvedValue({ analysts: [], totalSize: 0 }),
+		) {
+			const client = new (thoughtspotClient.ThoughtSpotClient as any)();
+			client.searchAnalysts = searchAnalysts;
+			await server.init();
+			return searchAnalysts;
+		}
+
+		it("pages with a cursor that round-trips into the next request", async () => {
+			const searchAnalysts = await setup(
+				vi
+					.fn()
+					.mockResolvedValueOnce({ analysts: analysts(20), totalSize: 25 })
+					.mockResolvedValueOnce({ analysts: analysts(5, 20), totalSize: 25 }),
+			);
+
+			// mcp-testing-kit resolves only one response per connection, so call the handler directly.
+			const call = (args: Record<string, unknown>) =>
+				server.callListAnalysts(
+					makeRequest("list_analysts", args),
+					NOOP_METRICS_RECORDER,
+				);
+			const first = (await call({ query: "rev" })).structuredContent as any;
+			expect(first.analysts).toHaveLength(20);
+			expect(first.analysts[0]).toEqual({
+				id: "a-0",
+				name: "Analyst 0",
+				description: "Desc 0",
+			});
+			expect(first.total_size).toBe(25);
+
+			expect(first.next_cursor).toBe("20");
+
+			const second = (
+				await call({
+					cursor: first.next_cursor,
+					page_size: 10,
+					type: "SHARED_TO_ME",
+				})
+			).structuredContent as any;
+			expect(second.analysts).toHaveLength(5);
+			expect(second).not.toHaveProperty("next_cursor");
+			expect(searchAnalysts.mock.calls).toEqual([
+				[{ recordSize: 50, recordOffset: 0, query: "rev", type: undefined }],
+				[
+					{
+						recordSize: 10,
+						recordOffset: 20,
+						query: undefined,
+						type: "SHARED_TO_ME",
+					},
+				],
+			]);
+		});
+
+		it("emits next_cursor for a full page even when total_size is missing", async () => {
+			await setup(
+				vi.fn().mockResolvedValue({ analysts: analysts(3), totalSize: 0 }),
+			);
+
+			const result = (
+				await server.callListAnalysts(
+					makeRequest("list_analysts", { page_size: 3 }),
+					NOOP_METRICS_RECORDER,
+				)
+			).structuredContent as any;
+
+			expect(result.analysts).toHaveLength(3);
+			expect(result.next_cursor).toBe("3");
+		});
+
+		it.each(["not-a-cursor", "-1", "1.5", "", "10001", "99999999999999999999"])(
+			"rejects an invalid cursor %s",
+			async (cursor) => {
+				const searchAnalysts = await setup();
+
+				const result = await connect(server).callTool("list_analysts", {
+					cursor,
+				});
+
+				expect(result.isError).toBe(true);
+				expect((result.content as any)[0].text).toContain("Invalid `cursor`");
+				expect(searchAnalysts).not.toHaveBeenCalled();
+			},
+		);
+
+		it.each([
+			{ status: 500, message: "Failed to list Analysts" },
+			{ status: 401, message: "reauthenticate" },
+		])(
+			"maps an upstream $status to an error mentioning '$message'",
+			async ({ status, message }) => {
+				await setup(
+					vi
+						.fn()
+						.mockRejectedValue(
+							new ThoughtSpotApiError(status, "searchAnalysts", "boom"),
+						),
+				);
+
+				const result = await connect(server).callTool("list_analysts", {});
+
+				expect(result.isError).toBe(true);
+				expect((result.content as any)[0].text).toContain(message);
+			},
+		);
 	});
 
 	describe("Create Analysis Session Tool", () => {

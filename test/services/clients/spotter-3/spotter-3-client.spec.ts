@@ -140,6 +140,35 @@ describe("spotter-3-client", () => {
 			});
 		});
 
+		it.each([
+			// A bound Analyst turns discovery off even when the cluster enables it
+			{ analystId: "analyst-1", spotIds: ["analyst-1"], discovery: false },
+			{ analystId: undefined, spotIds: undefined, discovery: true },
+		])(
+			"should send spot_ids=$spotIds and discovery=$discovery for analystId=$analystId",
+			async ({ analystId, spotIds, discovery }) => {
+				(fetch as any).mockResolvedValue({
+					ok: true,
+					json: vi.fn().mockResolvedValue({ conversation_id: "conv-1" }),
+				});
+
+				await client.createSpotter3Conversation({
+					isSpotterDataSourceDiscoveryEnabled: true,
+					isSpotterChatHistoryEnabled: false,
+					analystId,
+				});
+
+				const body = JSON.parse((fetch as any).mock.calls[0][1].body);
+				expect(body.spot_ids).toEqual(spotIds);
+				expect("spot_ids" in body).toBe(!!analystId);
+				expect(body.conv_settings).toMatchObject({
+					enable_search_datasets: discovery,
+					enable_auto_select_dataset: discovery,
+					tags: ["mcp-server"],
+				});
+			},
+		);
+
 		it("should handle HTTP error responses", async () => {
 			(fetch as any).mockResolvedValue({
 				ok: false,

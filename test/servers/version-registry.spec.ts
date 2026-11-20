@@ -28,6 +28,24 @@ describe("Version Registry", () => {
 			expect(result.version).toContain("latest");
 		});
 
+		it.each(["latest", "beta"])(
+			"should expose analyst_id on create_analysis_session for %s",
+			(version) => {
+				const tool = resolveApiVersion(version).tools.find(
+					(t) => t.name === "create_analysis_session",
+				);
+				expect(tool?.inputSchema.properties).toHaveProperty("analyst_id");
+			},
+		);
+		it.each(["latest", "beta"])(
+			"should expose list_analysts and switch_analyst on %s",
+			(version) => {
+				const toolNames = resolveApiVersion(version).tools.map((t) => t.name);
+				expect(toolNames).toContain("list_analysts");
+				expect(toolNames).toContain("switch_analyst");
+			},
+		);
+
 		it("should return beta version when 'beta' is specified", () => {
 			const result = resolveApiVersion("beta");
 			expect(result.version).toContain("beta");

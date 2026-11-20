@@ -1,5 +1,16 @@
 import { z } from "zod";
+import {
+	LIST_ANALYSTS_DEFAULT_PAGE_SIZE,
+	LIST_ANALYSTS_MAX_PAGE_SIZE,
+} from "../services/clients/analysts/analysts-constants";
 import { GET_DATA_SUPPORTED_TYPES } from "../services/clients/get-data/get-data-constants";
+
+export { LIST_ANALYSTS_DEFAULT_PAGE_SIZE, LIST_ANALYSTS_MAX_PAGE_SIZE };
+
+// Connectors are not applied on Analyst sessions created over MCP. Shared wording for the tool
+// descriptions so the host agent can tell the user and compensate via additional_context.
+export const MCP_CONNECTORS_UNSUPPORTED_NOTICE =
+	"Connectors are not supported over the MCP server, so an Analyst used here runs without its Spotter connectors and its answers can differ from the same Analyst in ThoughtSpot. Tell the user this when they start using an Analyst. If the host agent has access to the same connector, fetch the information itself and pass it in the `additional_context` field of `send_session_message`.";
 
 export const PingSchema = z.object({});
 
@@ -322,6 +333,136 @@ export const CreateAnalysisSessionOutputSchema = z.object({
 		.describe(
 			"Identifier for the analytical session. You can use this to send messages or get updates on the session.",
 		),
+});
+
+// Create a session on a saved Analyst. Spotter 3 only; the SpotterX variant is unchanged.
+export const CreateAnalysisSessionWithAnalystInputSchema =
+	CreateAnalysisSessionSpotter3InputSchema.extend({
+		analyst_id: z
+			.string()
+			.trim()
+			.min(1)
+			.optional()
+			.describe(
+				`The ID of a saved Analyst to run this session on. Only pass it when the user explicitly asks to use a specific Analyst; omit it to use the default Analytics Agent. The session stays on this Analyst for its whole life, so follow-up messages do not need it again; to use a different Analyst, call \`switch_analyst\`. Find Analyst IDs with \`list_analysts\` (or from the Analyst's URL in ThoughtSpot). Cannot be combined with \`data_source_id\`, because the Analyst brings its own data sources. If the ID is unknown or the user cannot access it, the tool returns an error (\`analyst_not_found\` or \`analyst_forbidden\`) instead of falling back to the default agent. ${MCP_CONNECTORS_UNSUPPORTED_NOTICE}`,
+			),
+	});
+
+export const CreateAnalysisSessionWithAnalystOutputSchema =
+	CreateAnalysisSessionOutputSchema.extend({
+		analyst: z
+			.object({
+				id: z.string().describe("ID of the Analyst the session runs on."),
+			})
+			.optional()
+			.describe("Present when the session was created with `analyst_id`."),
+		connector_notice: z
+			.string()
+			.optional()
+			.describe(
+				"Present when the session runs on an Analyst: its connectors are not applied over the MCP server. Tell the user.",
+			),
+	});
+
+// Switch the conversation to a different Analyst. A Spotter conversation is bound to one Analyst
+// for its whole life, so switching means starting a new session on the new Analyst.
+export const SwitchAnalystInputSchema = z.object({
+	analyst_id: z
+		.string()
+		.trim()
+		.min(1)
+		.describe(
+			"The ID of the Analyst to switch to. Find Analyst IDs with `list_analysts` (or from the Analyst's URL in ThoughtSpot).",
+		),
+	analytical_session_id: z
+		.string()
+		.trim()
+		.min(1)
+		.optional()
+		.describe(
+			"The current `analytical_session_id`, if any. It is recorded as the session being replaced; it is not modified and can still be used.",
+		),
+});
+
+export const SwitchAnalystOutputSchema = z.object({
+	analytical_session_id: z
+		.string()
+		.describe(
+			"The new session ID, bound to the requested Analyst. Use it for `send_session_message` and `get_session_updates` from now on.",
+		),
+	analyst: z.object({
+		id: z.string().describe("ID of the Analyst the new session runs on."),
+	}),
+	connector_notice: z
+		.string()
+		.describe(
+			"The Analyst's connectors are not applied over the MCP server. Tell the user.",
+		),
+	previous_analytical_session_id: z
+		.string()
+		.optional()
+		.describe("The session that was replaced, when one was given."),
+});
+
+export const ListAnalystsInputSchema = z.object({
+	query: z
+		.string()
+		.trim()
+		.min(1)
+		.optional()
+		.describe(
+			"Optional case-insensitive substring to match against Analyst names.",
+		),
+	type: z
+		.enum(["ALL", "CREATED_BY_ME", "SHARED_TO_ME"])
+		.optional()
+		.describe(
+			"Optional ownership filter: ALL (default; created by or shared with the user), CREATED_BY_ME, or SHARED_TO_ME.",
+		),
+	page_size: z
+		.number()
+		.int()
+		.min(1)
+		.max(LIST_ANALYSTS_MAX_PAGE_SIZE)
+		.optional()
+		.describe(
+			`Number of Analysts to return (default ${LIST_ANALYSTS_DEFAULT_PAGE_SIZE}, max ${LIST_ANALYSTS_MAX_PAGE_SIZE}).`,
+		),
+	cursor: z
+		.string()
+		.optional()
+		.describe(
+			"Opaque cursor from a previous `list_analysts` response's `next_cursor`, to fetch the next page. Pass the same `query` and `type` as before.",
+		),
+});
+
+export const ListAnalystsOutputSchema = z.object({
+	analysts: z
+		.array(
+			z.object({
+				id: z
+					.string()
+					.describe(
+						"Analyst ID. Pass it as `analyst_id` to `create_analysis_session` to use this Analyst.",
+					),
+				name: z.string().describe("Display name of the Analyst."),
+				description: z
+					.string()
+					.describe(
+						"What the Analyst is for; empty when the Analyst has none.",
+					),
+			}),
+		)
+		.describe("Analysts the user can access, in this page."),
+	next_cursor: z
+		.string()
+		.optional()
+		.describe(
+			"Present when more Analysts are available; pass it as `cursor` to get the next page.",
+		),
+	total_size: z
+		.number()
+		.describe("Total number of Analysts matching the request."),
 });
 
 export const SendSessionMessageInputSchema = z.object({
@@ -669,6 +810,9 @@ export enum ToolName {
 	GetDashboardStatus = "get_dashboard_status",
 	ListOrgs = "list_orgs",
 	SwitchOrg = "switch_org",
+	// Analysts
+	ListAnalysts = "list_analysts",
+	SwitchAnalyst = "switch_analyst",
 	// V3 (Spotter Model — agentic model creation)
 	CreateModelSession = "create_model_session",
 	SendModelMessage = "send_model_message",
@@ -1262,20 +1406,70 @@ ${DASHBOARD_RESULT_CONTRACT_BRIEF}`,
 	},
 };
 
+// Analysts: create_analysis_session with `analyst_id`. Spotter 3 only: on SpotterX clusters the
+// server swaps in the SpotterX create_analysis_session, which has no `analyst_id`.
+export const createAnalysisSessionToolDefinitionWithAnalyst = {
+	name: ToolName.CreateAnalysisSession,
+	description:
+		"Start an analytical session with the Analytics Agent. This is the first step in a three-step workflow: create a session, send a message, then poll for updates. Once created, you can use the returned `analytical_session_id` to send analytical questions via `send_session_message` and retrieve answers via `get_session_updates`. Sessions are conversational, so you can ask follow-up questions in the same session without creating a new one. Using a single analytical session is preferable, because it reuses the same data source selection. If the user asks to use a specific Analyst (a saved, purpose-built Spotter agent), pass its `analyst_id`; otherwise omit it. When using an Analyst, tell the user its connectors are not applied over MCP. When the user's intent is to create a dashboard, use the first message in this session to plan: ask the Analytics Agent what data and metrics are available for the topic, what trends or breakdowns would be most meaningful, and what chart types best fit the data. Use the Agent's response to form a dashboard plan before requesting any specific charts.",
+	inputSchema: z.toJSONSchema(CreateAnalysisSessionWithAnalystInputSchema),
+	outputSchema: z.toJSONSchema(CreateAnalysisSessionWithAnalystOutputSchema),
+	annotations: {
+		title: "Create Analysis Session",
+		readOnlyHint: true,
+		destructiveHint: false,
+		openWorldHint: false,
+	},
+};
+
+// list_analysts is Spotter 3 only: on SpotterX clusters the server drops it.
+export const listAnalystsToolDefinition = {
+	name: ToolName.ListAnalysts,
+	description: `List the Analysts the user can access, with each Analyst's ID, name and description. An Analyst is a saved, purpose-built Spotter agent with its own instructions and data sources. Only call this when the user explicitly asks to see, find or choose Analysts; do not call it for ordinary data questions. Results are paginated: if \`next_cursor\` is returned and the user wants more, call again with it as \`cursor\`. To use an Analyst the user picks, call \`create_analysis_session\` with its \`id\` as \`analyst_id\`, or \`switch_analyst\` if a session already exists. ${MCP_CONNECTORS_UNSUPPORTED_NOTICE}`,
+	inputSchema: z.toJSONSchema(ListAnalystsInputSchema),
+	outputSchema: z.toJSONSchema(ListAnalystsOutputSchema),
+	annotations: {
+		title: "List Analysts",
+		readOnlyHint: true,
+		destructiveHint: false,
+		openWorldHint: false,
+	},
+};
+
+// switch_analyst is Spotter 3 only: on SpotterX clusters the server drops it.
+export const switchAnalystToolDefinition = {
+	name: ToolName.SwitchAnalyst,
+	description: `Switch to a different Analyst by starting a new analytical session bound to it. Only call this when the user explicitly asks to use or change to a specific Analyst. A session stays on one Analyst for its whole life, so this returns a new \`analytical_session_id\`; use it for \`send_session_message\` and \`get_session_updates\` from now on. The previous session is left as is, but its conversational context does not carry over, so restate anything the new Analyst needs in \`additional_context\`. If the ID is unknown or the user cannot access it, the tool returns \`analyst_not_found\` or \`analyst_forbidden\` and no session is created. ${MCP_CONNECTORS_UNSUPPORTED_NOTICE}`,
+	inputSchema: z.toJSONSchema(SwitchAnalystInputSchema),
+	outputSchema: z.toJSONSchema(SwitchAnalystOutputSchema),
+	annotations: {
+		title: "Switch Analyst",
+		readOnlyHint: true,
+		destructiveHint: false,
+		openWorldHint: false,
+	},
+};
+
 /**
  * Adds the dashboard designer: `create_dashboard` gains a design pass and a description-only mode,
  * and `modify_dashboard` / `get_dashboard_status` are new. Earlier versions keep the original
- * `create_dashboard` contract.
+ * `create_dashboard` contract. `create_analysis_session` also accepts `analyst_id`, and
+ * `list_analysts` / `switch_analyst` are added.
  */
 export const toolDefinitionsV5 = [
 	...toolDefinitionsV4.map((tool) => {
 		if (tool.name === ToolName.CreateDashboard) {
 			return createDashboardToolDefinition;
 		}
+		if (tool.name === ToolName.CreateAnalysisSession) {
+			return createAnalysisSessionToolDefinitionWithAnalyst;
+		}
 		return tool;
 	}),
 	modifyDashboardToolDefinition,
 	getDashboardStatusToolDefinition,
+	listAnalystsToolDefinition,
+	switchAnalystToolDefinition,
 ];
 
 // CreateAnalysisSession has a slightly different contract for SpotterX

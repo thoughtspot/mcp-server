@@ -70,7 +70,7 @@ export const VERSION_REGISTRY: VersionConfig[] = [
 		version: ["latest", "2026-10-14"],
 		tools: [...toolDefinitionsV5],
 		description:
-			"Dashboard designer: create_dashboard organises and styles, modify_dashboard and get_dashboard_status added",
+			"Dashboard designer: create_dashboard organises and styles, modify_dashboard and get_dashboard_status added. Analysts: create_analysis_session accepts analyst_id, list_analysts added",
 	},
 	{
 		version: ["2026-10-02"],

@@ -37,6 +37,8 @@ import type {
 import type {
 	GetDataParams,
 	GetDataResult,
+	SearchAnalystsParams,
+	SearchAnalystsResult,
 	SearchObjectsParams,
 	SearchObjectsResponse,
 	ThoughtSpotClient,
@@ -320,9 +322,11 @@ export class ThoughtSpotService {
 		isSpotterDataSourceDiscoveryEnabled: boolean,
 		isSpotterChatHistoryEnabled: boolean,
 		dataSourceId?: string,
+		analystId?: string,
 	): Promise<AgentConversation> {
 		const span = trace.getSpan(context.active());
 		span?.setAttribute("data_source_id", dataSourceId ?? "(none)");
+		span?.setAttribute("analyst_id", analystId ?? "(none)");
 
 		try {
 			// Use auto mode by default, but support passing an explicit data source context
@@ -333,6 +337,7 @@ export class ThoughtSpotService {
 						isSpotterDataSourceDiscoveryEnabled,
 						isSpotterChatHistoryEnabled,
 						dataSourceId,
+						analystId,
 					}),
 			);
 
@@ -997,6 +1002,30 @@ export class ThoughtSpotService {
 		);
 
 		span?.setAttribute("results_count", result.results.length);
+		return result;
+	}
+
+	/**
+	 * List the Analysts (saved Spotter configurations) the caller can access
+	 */
+	@WithSpan("search-analysts")
+	async searchAnalysts(
+		params: SearchAnalystsParams,
+	): Promise<SearchAnalystsResult> {
+		const span = getActiveSpan();
+		span?.setAttributes({
+			record_size: params.recordSize,
+			record_offset: params.recordOffset,
+			has_query: !!params.query,
+		});
+
+		const result = await this.observeUpstreamCall(
+			UPSTREAM_OPERATION_NAMES.searchAnalysts,
+			() => this.client.searchAnalysts(params),
+		);
+
+		span?.setAttribute("results_count", result.analysts.length);
+		span?.setAttribute("total_size", result.totalSize);
 		return result;
 	}
 
