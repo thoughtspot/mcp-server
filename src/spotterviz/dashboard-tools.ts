@@ -4,6 +4,7 @@
  * plain result; the handlers turn it into an MCP response.
  */
 
+import { parseAnswerId } from "../services/answer-id-utils";
 import type { Answer } from "../services/types";
 import type { StorageServiceClient } from "../storage-service/storage-service";
 import {
@@ -26,38 +27,19 @@ export type DashboardToolResult =
 export function parseAnswerIds(
 	answers: { answer_id: string; title: string }[],
 ): Answer[] | undefined {
-	try {
-		return answers.map((answer) => {
-			const { session_id, gen_no } = JSON.parse(answer.answer_id);
-			if (session_id === undefined || gen_no === undefined) {
-				throw new Error("missing session_id or gen_no");
-			}
-			return {
-				title: answer.title,
-				session_identifier: session_id,
-				generation_number: gen_no,
-			};
+	const parsed: Answer[] = [];
+	for (const answer of answers) {
+		const answerId = parseAnswerId(answer.answer_id);
+		if (!answerId) {
+			return undefined;
+		}
+		parsed.push({
+			title: answer.title,
+			session_identifier: answerId.sessionIdentifier,
+			generation_number: answerId.generationNumber,
 		});
-	} catch {
-		return undefined;
 	}
-}
-
-/**
- * The conversation ids in an `answer_id`, which outlive its session ids and let the answer be
- * loaded again. Undefined for an `answer_id` without them (issued before they were added).
- */
-export function parseAnswerReloadIds(
-	answerId: string,
-): { conversationId: string; messageId: string } | undefined {
-	try {
-		const { conversation_id, message_id } = JSON.parse(answerId);
-		return typeof conversation_id === "string" && typeof message_id === "string"
-			? { conversationId: conversation_id, messageId: message_id }
-			: undefined;
-	} catch {
-		return undefined;
-	}
+	return parsed;
 }
 
 export function invalidAnswerIdResult(

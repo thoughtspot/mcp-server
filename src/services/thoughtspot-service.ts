@@ -21,6 +21,7 @@ import {
 	processSpotter3EventStream,
 	processSpotterXEventStream,
 } from "../streaming-utils";
+import type { AnswerReloadIds } from "./answer-id-utils";
 import { GET_DATA_DEFAULT_MAX_ROWS } from "./clients/get-data/get-data-client";
 import type { GetDataViz } from "./clients/get-data/get-data-types";
 import {
@@ -469,9 +470,6 @@ export class ThoughtSpotService {
 					this.client.createSpotterXConversation({
 						isSpotterDataSourceDiscoveryEnabled,
 						isSpotterChatHistoryEnabled,
-						tenantId: this.client.tenantId,
-						orgId: this.client.orgId,
-						userId: this.client.userId,
 						dataSourceId,
 					}),
 			);
@@ -528,9 +526,6 @@ export class ThoughtSpotService {
 				UPSTREAM_OPERATION_NAMES.sendAgentConversationMessageStreaming,
 				async () => {
 					const response = await this.client.sendSpotterXMessageStreaming({
-						tenantId: this.client.tenantId,
-						orgId: this.client.orgId,
-						userId: this.client.userId,
 						conversationId,
 						message: finalMessage,
 						liveboardContext,
@@ -1065,22 +1060,55 @@ export class ThoughtSpotService {
 	}
 
 	/**
-	 * Load an Analytics Agent answer again through its conversation, for fresh
-	 * session/generation ids once the original ones have expired. Re-runs the query.
+	 * Load an Analytics Agent answer again, for fresh session/generation ids once the
+	 * original ones have expired. Re-runs the query. Spotter 3 answers load through their
+	 * conversation message; SpotterX answers are rebuilt from their stored recipe.
 	 */
 	@WithSpan("reload-spotter-answer")
-	async reloadSpotterAnswer(params: {
-		conversationId: string;
-		messageId: string;
-	}): Promise<{ sessionIdentifier: string; generationNumber: number }> {
-		getActiveSpan()?.setAttributes({
-			conversation_id: params.conversationId,
-			message_id: params.messageId,
+	async reloadSpotterAnswer(
+		reload: AnswerReloadIds,
+	): Promise<{ sessionIdentifier: string; generationNumber: number }> {
+		const span = getActiveSpan();
+		span?.setAttributes({
+			reload_kind: reload.kind,
+			conversation_id: reload.conversationId,
 		});
-		return this.observeUpstreamCall(
-			UPSTREAM_OPERATION_NAMES.loadAgentConversationAnswer,
-			() => this.client.loadSpotter3Answer(params),
-		);
+		switch (reload.kind) {
+			case "spotter3":
+				span?.setAttribute("message_id", reload.messageId);
+				return this.observeUpstreamCall(
+					UPSTREAM_OPERATION_NAMES.loadAgentConversationAnswer,
+					() =>
+						this.client.loadSpotter3Answer({
+							conversationId: reload.conversationId,
+							messageId: reload.messageId,
+						}),
+				);
+			case "spotterx": {
+				span?.setAttributes({
+					session_identifier: reload.sessionId,
+					generation_number: reload.genNo,
+				});
+				const recipe = await this.observeUpstreamCall(
+					UPSTREAM_OPERATION_NAMES.fetchAgentArtifact,
+					() =>
+						this.client.fetchSpotterXAnswerRecipe({
+							conversationId: reload.conversationId,
+							sessionId: reload.sessionId,
+							genNo: reload.genNo,
+						}),
+				);
+				return this.observeUpstreamCall(
+					UPSTREAM_OPERATION_NAMES.remintAgentAnswer,
+					() => this.client.remintSpotterXAnswer({ recipe }),
+				);
+			}
+			default:
+				// `satisfies never` fails to compile if a reload kind is left unhandled
+				throw new Error(
+					`Unknown answer reload kind: ${JSON.stringify(reload satisfies never)}`,
+				);
+		}
 	}
 
 	/**

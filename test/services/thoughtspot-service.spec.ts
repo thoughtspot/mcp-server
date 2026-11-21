@@ -235,14 +235,9 @@ describe("thoughtspot-service", () => {
 	});
 
 	describe("createSpotterXConversation", () => {
-		const spotterXClient = {
-			...mockClient,
-			tenantId: "tenant-1",
-			orgId: "42",
-			userId: "user-guid-1",
-		};
+		const spotterXClient = { ...mockClient };
 
-		it("passes the client identity and data source to the client", async () => {
+		it("passes the settings and data source to the client", async () => {
 			spotterXClient.createSpotterXConversation = vi
 				.fn()
 				.mockResolvedValue({ conversation_id: "conv-x" });
@@ -257,9 +252,6 @@ describe("thoughtspot-service", () => {
 			expect(spotterXClient.createSpotterXConversation).toHaveBeenCalledWith({
 				isSpotterDataSourceDiscoveryEnabled: true,
 				isSpotterChatHistoryEnabled: false,
-				tenantId: "tenant-1",
-				orgId: "42",
-				userId: "user-guid-1",
 				dataSourceId: "worksheet-123",
 			});
 			expect(result).toEqual({ conversation_id: "conv-x" });
@@ -789,12 +781,7 @@ describe("thoughtspot-service", () => {
 	});
 
 	describe("sendSpotterXMessageStreaming", () => {
-		const spotterXClient = {
-			...mockClient,
-			tenantId: "tenant-1",
-			orgId: "42",
-			userId: "user-guid-1",
-		};
+		const spotterXClient = { ...mockClient };
 
 		const makeStreamReader = (chunks: string[]) => {
 			const encoder = new TextEncoder();
@@ -817,7 +804,7 @@ describe("thoughtspot-service", () => {
 			return reader;
 		};
 
-		it("passes the client identity, conversation and message to the client", async () => {
+		it("passes the conversation and message to the client", async () => {
 			mockStreamingResponse();
 			const service = new ThoughtSpotService(spotterXClient);
 
@@ -829,9 +816,6 @@ describe("thoughtspot-service", () => {
 			);
 
 			expect(spotterXClient.sendSpotterXMessageStreaming).toHaveBeenCalledWith({
-				tenantId: "tenant-1",
-				orgId: "42",
-				userId: "user-guid-1",
 				conversationId: "conv-x",
 				message: "Show me revenue",
 			});

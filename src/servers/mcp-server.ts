@@ -13,6 +13,7 @@ import {
 } from "../metrics/runtime/metrics-recorder";
 import type { ToolMetricApiSurface } from "../metrics/runtime/tool-metrics";
 import { WithSpan } from "../metrics/tracing/tracing-utils";
+import { parseAnswerId } from "../services/answer-id-utils";
 import { ANALYTICS_AGENT_ANSWER_TYPE } from "../services/clients/get-data/get-data-constants";
 import type { GetDataResult } from "../services/clients/get-data/get-data-types";
 import { SpotterAnswerCsvError } from "../services/clients/get-data/spotter-answer-data";
@@ -30,6 +31,7 @@ import type {
 	ModelStreamSink,
 	ModelUpdate,
 } from "../services/clients/spotter-model/spotter-model-types";
+import { SpotterXAnswerAccessDeniedError } from "../services/clients/spotter-x/spotter-x-client";
 import type {
 	DataSource,
 	ThoughtSpotService,
@@ -52,7 +54,6 @@ import {
 	findTaskDashboardMismatch,
 	invalidAnswerIdResult,
 	parseAnswerIds,
-	parseAnswerReloadIds,
 	resolveTaskDashboard,
 	runDashboardWork,
 } from "../spotterviz/dashboard-tools";
@@ -1634,7 +1635,7 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		maxRows: number | undefined,
 		recorder: MetricsRecorder,
 	) {
-		const [answer] = parseAnswerIds([{ answer_id: answerId, title: "" }]) ?? [];
+		const answer = parseAnswerId(answerId);
 		if (!answer) {
 			return this.createErrorResponse(
 				'Invalid answer_id for object_type ANALYTICS_AGENT_ANSWER. Pass the `answer_id` returned from the "get_session_updates" tool verbatim.',
@@ -1654,24 +1655,26 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			let result: GetDataResult;
 			try {
 				result = await fetchRows(
-					answer.session_identifier,
-					answer.generation_number,
+					answer.sessionIdentifier,
+					answer.generationNumber,
 				);
 			} catch (error) {
 				// The answer's session ids expire after about 8 hours. Load it again
 				// through its conversation for fresh ids, unless auth was the problem.
 				// A CSV that won't parse is not an expiry, so don't re-run the query for it.
-				const reload = parseAnswerReloadIds(answerId);
 				const status = this.apiErrorStatus(error);
 				if (
-					!reload ||
 					error instanceof SpotterAnswerCsvError ||
 					status === 401 ||
 					status === 403
 				) {
 					throw error;
 				}
-				const fresh = await service.reloadSpotterAnswer(reload);
+				if (!answer.reload) {
+					console.error("No answer reload ids in answer_id:", answerId);
+					throw error;
+				}
+				const fresh = await service.reloadSpotterAnswer(answer.reload);
 				result = await fetchRows(
 					fresh.sessionIdentifier,
 					fresh.generationNumber,
@@ -1693,9 +1696,11 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 				throw error;
 			}
 			const hint =
-				status === 403
-					? "You may not have permission to download this answer's data."
-					: "The answer's conversation may have expired; ask the Analytics Agent the question again and pass the new answer's `answer_id`.";
+				error instanceof SpotterXAnswerAccessDeniedError
+					? "You no longer have access to the data model behind this answer."
+					: status === 403
+						? "You may not have permission to download this answer's data."
+						: "The answer's conversation may have expired; ask the Analytics Agent the question again and pass the new answer's `answer_id`.";
 			const { summary, statusMessage } = recordGetDataFailure(
 				error,
 				status,

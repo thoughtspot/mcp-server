@@ -11,15 +11,13 @@ import {
 } from "../../types";
 
 // SpotterX expects the fuid header and omits the org header (org is carried in the fuid)
-function spotterXRequestOptions(
-	tenantId: string,
-	orgId: string,
-	userId: string,
-): ApiRequestOptions {
+function spotterXRequestOptions(ctx: ClientContext): ApiRequestOptions {
 	return {
 		scopeToOrg: false,
 		requestId: generateRequestId(),
-		headers: { "x-thoughtspot-fuid": `${tenantId}.${orgId}.${userId}` },
+		headers: {
+			"x-thoughtspot-fuid": `${ctx.tenantId}.${ctx.orgId}.${ctx.userId}`,
+		},
 	};
 }
 
@@ -31,26 +29,20 @@ export async function createSpotterXConversation(
 	{
 		isSpotterDataSourceDiscoveryEnabled,
 		isSpotterChatHistoryEnabled,
-		tenantId,
-		orgId,
-		userId,
 		dataSourceId,
 	}: {
 		isSpotterDataSourceDiscoveryEnabled: boolean;
 		isSpotterChatHistoryEnabled: boolean;
-		tenantId: string;
-		orgId: string;
-		userId: string;
 		dataSourceId?: string;
 	},
 ): Promise<AgentConversation> {
 	const endpoint = "/agents/v1/agents/spotterx/sessions";
 	const response = await fetchApi(ctx, endpoint, {
-		...spotterXRequestOptions(tenantId, orgId, userId),
+		...spotterXRequestOptions(ctx),
 		json: {
-			user_id: userId,
-			tenant_id: tenantId,
-			org_id: orgId,
+			user_id: ctx.userId,
+			tenant_id: ctx.tenantId,
+			org_id: ctx.orgId,
 			saved: isSpotterChatHistoryEnabled,
 			labels: { client: "mcp-server" },
 			settings_override: {
@@ -88,16 +80,10 @@ export async function createSpotterXConversation(
 export async function sendSpotterXMessageStreaming(
 	ctx: ClientContext,
 	{
-		tenantId,
-		orgId,
-		userId,
 		conversationId,
 		message,
 		liveboardContext,
 	}: {
-		tenantId: string;
-		orgId: string;
-		userId: string;
 		conversationId: string;
 		message: string;
 		liveboardContext?: LiveboardContext;
@@ -106,7 +92,7 @@ export async function sendSpotterXMessageStreaming(
 	// Encoding for safety, though for valid IDs it should not make a difference
 	const endpoint = `/agents/v1/agents/spotterx/sessions/${encodeURIComponent(conversationId)}/query?alt=sse`;
 	const response = await fetchApi(ctx, endpoint, {
-		...spotterXRequestOptions(tenantId, orgId, userId),
+		...spotterXRequestOptions(ctx),
 		accept: "text/event-stream",
 		json: {
 			input: { parts: [{ text_part: { text: message } }] },
@@ -142,4 +128,131 @@ export async function sendSpotterXMessageStreaming(
 	}
 
 	return response;
+}
+
+// Artifact namespaces addressable through the agents gateway. The server takes the enum
+// name, and an unspecified category silently resolves to FILES, so it is always sent
+export type SpotterXArtifactCategory = "ASSETS";
+
+/*
+ * Fetch the content of a SpotterX session artifact as text. Artifacts are addressed by
+ * session id alone, not under the /agents/spotterx prefix. The gateway answers either with
+ * the raw bytes or with a JSON envelope whose `data` (or `data_b64`) is base64.
+ */
+export async function fetchSpotterXArtifact(
+	ctx: ClientContext,
+	{
+		conversationId,
+		filename,
+		category,
+	}: {
+		conversationId: string;
+		filename: string;
+		category: SpotterXArtifactCategory;
+	},
+): Promise<string> {
+	const endpoint = `/agents/v1/sessions/${encodeURIComponent(conversationId)}/artifacts/${encodeURIComponent(filename)}?category=${category}`;
+	const response = await fetchApi(ctx, endpoint, spotterXRequestOptions(ctx));
+
+	if (!response.ok) {
+		const errorText = await response.text();
+		throw new ThoughtSpotApiError(
+			response.status,
+			"fetchSpotterXArtifact",
+			errorText,
+		);
+	}
+
+	// Media types are case-insensitive
+	if (
+		!response.headers
+			.get("content-type")
+			?.toLowerCase()
+			.includes("application/json")
+	) {
+		return await response.text();
+	}
+	const envelope = (await response.json()) as {
+		data?: string;
+		data_b64?: string;
+	};
+	const base64 = envelope.data_b64 ?? envelope.data;
+	if (!base64) {
+		throw new Error(`SpotterX artifact ${filename} has no content`);
+	}
+	return Buffer.from(base64, "base64").toString("utf8");
+}
+
+/*
+ * Fetch the recipe SpotterX stored for an answer, which remintSpotterXAnswer rebuilds it
+ * from. Keyed by the answer's original session id and generation number.
+ */
+export async function fetchSpotterXAnswerRecipe(
+	ctx: ClientContext,
+	{
+		conversationId,
+		sessionId,
+		genNo,
+	}: { conversationId: string; sessionId: string; genNo: number },
+): Promise<unknown> {
+	const recipeText = await fetchSpotterXArtifact(ctx, {
+		conversationId,
+		filename: `recipe-${sessionId}-${genNo}-json`,
+		category: "ASSETS",
+	});
+	return JSON.parse(recipeText);
+}
+
+/*
+ * A remint refused because the user can no longer access the answer's data model, the one
+ * remint failure the user can act on
+ */
+export class SpotterXAnswerAccessDeniedError extends ThoughtSpotApiError {
+	constructor(status: number, body: string) {
+		super(status, "remintSpotterXAnswer", body);
+		this.name = "SpotterXAnswerAccessDeniedError";
+	}
+}
+
+function remintErrorCode(body: string): string | undefined {
+	try {
+		return JSON.parse(body)?.error_code;
+	} catch {
+		return undefined;
+	}
+}
+
+/*
+ * Rebuild an expired SpotterX answer from its stored recipe (see fetchSpotterXAnswerRecipe).
+ * Re-runs the query and returns fresh session/generation ids.
+ */
+export async function remintSpotterXAnswer(
+	ctx: ClientContext,
+	{ recipe }: { recipe: unknown },
+): Promise<{ sessionIdentifier: string; generationNumber: number }> {
+	const response = await fetchApi(ctx, "/conversation/v2/answer/remint", {
+		headers: { "x-requested-by": "ThoughtSpot" },
+		json: recipe,
+	});
+
+	if (!response.ok) {
+		const errorText = await response.text();
+		if (remintErrorCode(errorText) === "WORKSHEET_NOT_FOUND") {
+			throw new SpotterXAnswerAccessDeniedError(response.status, errorText);
+		}
+		throw new ThoughtSpotApiError(
+			response.status,
+			"remintSpotterXAnswer",
+			errorText,
+		);
+	}
+
+	const data = (await response.json()) as {
+		session_id?: string;
+		gen_no?: number;
+	};
+	if (!data.session_id || data.gen_no === undefined) {
+		throw new Error("remintSpotterXAnswer returned no answer session");
+	}
+	return { sessionIdentifier: data.session_id, generationNumber: data.gen_no };
 }
