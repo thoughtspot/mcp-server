@@ -1,5 +1,6 @@
 import { type ResolveConfigFn, instrumentDO } from "@microlabs/otel-cf-workers";
 import { McpAgent } from "agents/mcp";
+import { installBaton } from "./baton";
 import { checkMcpInstanceAllowed } from "./instance-allowlist";
 import type { BaseMCPServer, Context } from "./servers/mcp-server-base";
 import type { Props } from "./utils";
@@ -99,6 +100,12 @@ export function instrumentedMCPServer<T extends BaseMCPServer>(
 		}
 
 		async init() {
+			await installBaton(
+				this.server,
+				this.env as any,
+				this.props?.instanceUrl,
+				() => this.server.cachedSessionInfo(),
+			);
 			await this.server.init();
 		}
 

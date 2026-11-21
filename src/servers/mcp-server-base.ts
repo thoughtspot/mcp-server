@@ -550,6 +550,11 @@ export abstract class BaseMCPServer extends Server {
 		await this.sessionInfoPromise;
 	}
 
+	/** This session's ThoughtSpot user and org as init() fetched them. Never fetches. */
+	cachedSessionInfo(): SessionInfo | undefined {
+		return this.sessionInfo;
+	}
+
 	// Refetch session info in place (e.g. after an org switch) so privilege-gated
 	// state re-derives under the current token, without re-running full init. On
 	// failure keep the existing value.
