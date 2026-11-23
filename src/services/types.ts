@@ -88,6 +88,16 @@ export interface TextMessage extends BaseMessage {
 	text: string;
 }
 
+// A question the agent needs the user to answer before it can continue. The user's answer
+// is sent back as a normal followup message
+export interface QuestionMessage extends BaseMessage {
+	type: "question";
+	text: string;
+	options: string[];
+	multi_select: boolean;
+	allow_free_text: boolean;
+}
+
 export interface AnswerMessage extends BaseMessage {
 	type: "answer";
 	answer_id: string;
@@ -97,7 +107,7 @@ export interface AnswerMessage extends BaseMessage {
 	iframe_url: string;
 }
 
-export type Message = TextMessage | AnswerMessage;
+export type Message = TextMessage | QuestionMessage | AnswerMessage;
 
 // In raw mode, upstream events are passed through unmodified instead of being reshaped into a
 // `Message`, so their shape is not guaranteed to match `Message` at all.

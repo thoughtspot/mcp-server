@@ -1951,6 +1951,29 @@ describe("processSpotterXEventStream", () => {
 									response: { content: [{ type: "text", text: "{}" }] },
 								},
 							},
+							// A clarification resource instructs the agent to ask the user, it is
+							// not itself a question to the user
+							{
+								function_response: {
+									id: "call-2",
+									name: "spotter_tools_search_datasets",
+									response: {
+										content: [
+											{
+												type: "resource",
+												annotations: { name: "clarification" },
+												resource: {
+													mimeType: "application/json",
+													text: JSON.stringify({
+														status: "needs_clarification",
+														questions: [{ id: "q1", text: "Which dataset?" }],
+													}),
+												},
+											},
+										],
+									},
+								},
+							},
 						]),
 					),
 					storage,
@@ -1994,6 +2017,128 @@ describe("processSpotterXEventStream", () => {
 					expect(message).not.toHaveProperty("iframe_url");
 					expect(message).toMatchObject({ type: "answer" });
 				}
+			});
+		});
+
+		describe("questions", () => {
+			const DATASET_QUESTION = {
+				id: "dataset_choice",
+				text: "Which dataset(s) should I use to answer this? Pick all that apply.",
+				options: ["Retail - Apparel", "Dunder Mifflin Sales"],
+				multi_select: true,
+				required: true,
+				allow_free_text: true,
+			};
+			const askUserCallPart = (questions: unknown[]) => ({
+				function_call: {
+					id: "call-ask",
+					name: "ask_user_disambiguation",
+					args: { questions },
+				},
+			});
+			const askUserResponsePart = (questions: unknown[], status: string) => ({
+				function_response: {
+					id: "call-ask",
+					name: "ask_user_disambiguation",
+					response: { questions, status },
+				},
+			});
+
+			it("stores a question when ask_user_disambiguation awaits user input, with no step_notification for its call", async () => {
+				const storage = makeMockStorage();
+				const recorder = makeRecorder();
+
+				await processSimplified(
+					sse(
+						withParts([askUserCallPart([DATASET_QUESTION])]),
+						withParts([
+							askUserResponsePart(
+								[{ ...DATASET_QUESTION, render_target: "default" }],
+								"awaiting_user_input",
+							),
+						]),
+					),
+					storage,
+					recorder,
+				);
+
+				expect(storedMessages(storage)).toEqual([
+					{
+						is_thinking: false,
+						type: "question",
+						text: DATASET_QUESTION.text,
+						options: DATASET_QUESTION.options,
+						multi_select: true,
+						allow_free_text: true,
+					},
+				]);
+				expect(metricLabels(recorder)).toEqual([
+					expect.objectContaining({
+						message_type: "question",
+						is_thinking: false,
+					}),
+				]);
+			});
+
+			it("stores one question per question with text, normalizing options and missing flags", async () => {
+				const storage = makeMockStorage();
+
+				await processSimplified(
+					sse(
+						withParts([
+							askUserResponsePart(
+								[
+									{
+										id: "q1",
+										text: "Which region?",
+										options: [
+											"West",
+											{ value: "East", label: "East region" },
+											{ label: "No value" },
+										],
+									},
+									{ id: "q2", text: "Anything else to consider?" },
+									{ id: "q3", options: ["Ignored, no text"] },
+								],
+								"awaiting_user_input",
+							),
+						]),
+					),
+					storage,
+				);
+
+				expect(storedMessages(storage)).toEqual([
+					{
+						is_thinking: false,
+						type: "question",
+						text: "Which region?",
+						options: ["West", "East"],
+						multi_select: false,
+						allow_free_text: false,
+					},
+					{
+						is_thinking: false,
+						type: "question",
+						text: "Anything else to consider?",
+						options: [],
+						multi_select: false,
+						allow_free_text: false,
+					},
+				]);
+			});
+
+			it("ignores ask_user_disambiguation responses that are not awaiting input or have no questions", async () => {
+				const storage = makeMockStorage();
+
+				await processSimplified(
+					sse(
+						withParts([askUserResponsePart([DATASET_QUESTION], "completed")]),
+						withParts([askUserResponsePart([], "awaiting_user_input")]),
+					),
+					storage,
+				);
+
+				expect(storedMessages(storage)).toEqual([]);
 			});
 		});
 

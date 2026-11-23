@@ -43,6 +43,7 @@ export type UpstreamStreamMessageType =
 	| "text_chunk"
 	| "answer"
 	| "step_notification"
+	| "question"
 	| "error"
 	| "raw_untyped";
 
