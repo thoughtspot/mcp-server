@@ -18,6 +18,7 @@ import {
 	THOUGHTSPOT_UI_WIDGET_HTML,
 	THOUGHTSPOT_UI_WIDGET_URI,
 	clientSupportsMcpApps,
+	describeRelayOperations,
 	injectProxyScript,
 	needsSameOriginFrame,
 	relayThoughtSpotApiRequest,
@@ -2126,10 +2127,19 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		const { relay_nonce: _nonce, ...relayRequest } =
 			ThoughtSpotApiRequestInputSchema.parse(request.params.arguments);
 		const span = this.initSpanWithCommonAttributes();
+		const relayOps = describeRelayOperations(relayRequest);
 		span?.setAttributes({
 			relay_method: relayRequest.method,
 			relay_path: relayRequest.path.split("?")[0],
+			relay_ops: relayOps.join(","),
 		});
+		const capture = (status: number | string) => {
+			if (this.ctx.props.enableRelayCapture) {
+				console.log(
+					`[relay-capture] ${relayRequest.method} ${relayRequest.path.split("?")[0]} ${relayOps.join(",") || "-"} ${status}`,
+				);
+			}
+		};
 		try {
 			const response = await withTimeout(
 				relayThoughtSpotApiRequest(
@@ -2141,17 +2151,20 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 				"ThoughtSpot API relay",
 			);
 			span?.setAttribute("relay_status", response.status);
+			capture(response.status);
 			return {
 				content: [{ type: "text" as const, text: `Status ${response.status}` }],
 				structuredContent: response,
 			};
 		} catch (error) {
 			if (error instanceof ApiRelayRejectedError) {
+				capture("rejected");
 				return this.createErrorResponse(
 					`Request not allowed: ${error.message}.`,
 					`thoughtspot_api_request rejected: ${error.message}`,
 				);
 			}
+			capture("failed");
 			return this.createErrorResponse(
 				"The ThoughtSpot request failed.",
 				`thoughtspot_api_request failed: ${error}`,

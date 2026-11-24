@@ -42,6 +42,10 @@ export type Props = {
 	// the hosted chart iframe (*.pdom.thoughtspot.com) through the resource CSP's
 	// frameDomains. Gives the page frame allow-same-origin.
 	enableDirectChartIframe?: boolean;
+	// Undocumented `relay-capture=true` URL flag (see index.ts): log each
+	// thoughtspot_api_request as "[relay-capture] METHOD path ops status", to
+	// collect the calls the view-only relay allowlist must cover. Local use.
+	enableRelayCapture?: boolean;
 };
 
 const DEFAULT_CLIENT_NAME = "Bearer Token client";

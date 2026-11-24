@@ -2305,6 +2305,63 @@ describe("MCP Server", () => {
 					});
 				});
 
+				it("relay-capture logs method, path, operations and status only", async () => {
+					mockProps.enableRelayCapture = true;
+					vi.stubGlobal(
+						"fetch",
+						vi.fn().mockResolvedValue(new Response("{}", { status: 200 })),
+					);
+					const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+					await server.init();
+					const relayNonce = await (server as any).relayNonces.issue();
+					const { callTool } = connect(server);
+
+					await callTool("thoughtspot_api_request", {
+						method: "POST",
+						path: "/prism/?op=GetChartWithData",
+						body_base64: Buffer.from(
+							JSON.stringify({
+								operationName: "GetChartWithData",
+								query: "query GetChartWithData { x }",
+								variables: { id: "secret-id" },
+							}),
+						).toString("base64"),
+						relay_nonce: relayNonce,
+					});
+
+					const lines = logSpy.mock.calls
+						.map((args) => String(args[0]))
+						.filter((line) => line.startsWith("[relay-capture]"));
+					expect(lines).toEqual([
+						"[relay-capture] POST /prism/ op:GetChartWithData,Q:GetChartWithData 200",
+					]);
+					logSpy.mockRestore();
+				});
+
+				it("does not log relay calls without relay-capture", async () => {
+					vi.stubGlobal(
+						"fetch",
+						vi.fn().mockResolvedValue(new Response("{}", { status: 200 })),
+					);
+					const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+					await server.init();
+					const relayNonce = await (server as any).relayNonces.issue();
+					const { callTool } = connect(server);
+
+					await callTool("thoughtspot_api_request", {
+						method: "GET",
+						path: "/prism/?op=GetChartWithData",
+						relay_nonce: relayNonce,
+					});
+
+					expect(
+						logSpy.mock.calls.some((args) =>
+							String(args[0]).startsWith("[relay-capture]"),
+						),
+					).toBe(false);
+					logSpy.mockRestore();
+				});
+
 				it("thoughtspot_api_request refuses credential endpoints", async () => {
 					const fetchSpy = vi.fn();
 					vi.stubGlobal("fetch", fetchSpy);

@@ -7,6 +7,7 @@ import {
 	THOUGHTSPOT_FRAME_SANDBOX_SAME_ORIGIN,
 	THOUGHTSPOT_UI_WIDGET_HTML,
 	clientSupportsMcpApps,
+	describeRelayOperations,
 	injectProxyScript,
 	needsSameOriginFrame,
 	relayThoughtSpotApiRequest,
@@ -1092,5 +1093,98 @@ describe("ThoughtSpot UI widget", () => {
 		);
 
 		expect(toHost).toHaveLength(before);
+	});
+});
+
+describe("describeRelayOperations", () => {
+	const b64 = (value: unknown) =>
+		Buffer.from(
+			typeof value === "string" ? value : JSON.stringify(value),
+		).toString("base64");
+
+	it("reads prism's op query parameter", () => {
+		expect(
+			describeRelayOperations({
+				method: "POST",
+				path: "/prism/?op=GetChartWithData",
+			}),
+		).toEqual(["op:GetChartWithData"]);
+	});
+
+	it("names GraphQL queries and mutations from the body", () => {
+		expect(
+			describeRelayOperations({
+				method: "POST",
+				path: "/prism/",
+				body_base64: b64({
+					operationName: "GetAnswerTitle",
+					query: "query GetAnswerTitle { x }",
+					variables: { secret: "s3cret" },
+				}),
+			}),
+		).toEqual(["Q:GetAnswerTitle"]);
+		expect(
+			describeRelayOperations({
+				method: "POST",
+				path: "/prism/",
+				body_base64: b64({ query: "  mutation CreateView($a: ID) { x }" }),
+			}),
+		).toEqual(["M:CreateView"]);
+	});
+
+	it("lists every operation in a batch and marks persisted ones", () => {
+		expect(
+			describeRelayOperations({
+				method: "POST",
+				path: "/prism/?op=Batch",
+				body_base64: b64([
+					{ operationName: "GetFilters", query: "query GetFilters { x }" },
+					{ operationName: "SageSearch" },
+				]),
+			}),
+		).toEqual(["op:Batch", "Q:GetFilters", "P:SageSearch"]);
+	});
+
+	it("never reports variables or other body content", () => {
+		const ops = describeRelayOperations({
+			method: "POST",
+			path: "/prism/",
+			body_base64: b64({
+				operationName: "Q",
+				query: "query Q { x }",
+				variables: { token: "s3cret" },
+			}),
+		});
+		expect(ops.join(",")).not.toContain("s3cret");
+	});
+
+	it("returns nothing for non-JSON or non-GraphQL bodies", () => {
+		expect(
+			describeRelayOperations({
+				method: "POST",
+				path: "/callosum/v1/x",
+				body_base64: b64("a=1&b=2"),
+			}),
+		).toEqual([]);
+		expect(
+			describeRelayOperations({
+				method: "POST",
+				path: "/api/rest/2.0/metadata/search",
+				body_base64: b64({ metadata: [] }),
+			}),
+		).toEqual([]);
+		expect(describeRelayOperations({ method: "GET", path: "/prism/" })).toEqual(
+			[],
+		);
+	});
+
+	it("does not decode very large bodies", () => {
+		expect(
+			describeRelayOperations({
+				method: "POST",
+				path: "/prism/",
+				body_base64: b64("x".repeat(300 * 1024)),
+			}),
+		).toEqual(["(large body)"]);
 	});
 });

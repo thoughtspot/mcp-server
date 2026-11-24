@@ -127,6 +127,68 @@ export type ApiRelayRequest = {
 	body_base64?: string;
 };
 
+// Largest request body parsed for operation names; bigger bodies are reported
+// as "(large body)" rather than decoded.
+const MAX_OPERATION_SCAN_BYTES = 256 * 1024;
+
+/**
+ * The API operations a relayed request performs, for building the view-only
+ * relay allowlist: the `op` query parameter prism uses (`/prism/?op=Name`) and,
+ * for GraphQL bodies (one request or a batch), each operation's name prefixed
+ * Q (query), M (mutation) or P (persisted, no query text). Never includes
+ * variables or other body content.
+ */
+export function describeRelayOperations(request: ApiRelayRequest): string[] {
+	const ops: string[] = [];
+	const queryOp = new URL(
+		request.path,
+		"https://relay.invalid",
+	).searchParams.get("op");
+	if (queryOp) {
+		ops.push(`op:${queryOp}`);
+	}
+	if (!request.body_base64) {
+		return ops;
+	}
+	const body = Buffer.from(request.body_base64, "base64");
+	if (body.byteLength > MAX_OPERATION_SCAN_BYTES) {
+		ops.push("(large body)");
+		return ops;
+	}
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(body.toString("utf8"));
+	} catch {
+		return ops;
+	}
+	for (const entry of Array.isArray(parsed) ? parsed : [parsed]) {
+		if (!entry || typeof entry !== "object") continue;
+		const { operationName, query } = entry as {
+			operationName?: unknown;
+			query?: unknown;
+		};
+		if (typeof operationName !== "string" && typeof query !== "string") {
+			continue;
+		}
+		const kind =
+			typeof query !== "string"
+				? "P"
+				: /^\s*mutation\b/.test(query)
+					? "M"
+					: "Q";
+		const name =
+			typeof operationName === "string"
+				? operationName
+				: (typeof query === "string" &&
+						/^\s*(?:query|mutation)\s+([A-Za-z_][A-Za-z0-9_]*)/.exec(
+							query,
+						)?.[1]) ||
+					"?";
+		ops.push(`${kind}:${name}`);
+	}
+	return ops;
+}
+
 export type ApiRelayResponse = {
 	status: number;
 	headers: Record<string, string>;

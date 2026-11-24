@@ -145,6 +145,7 @@ const hooks: AuthHooks<Props> = {
 			url.searchParams.get("inline-charts") !== "false";
 		props.enableDirectChartIframe =
 			url.searchParams.get("direct-chart-iframe") === "true";
+		props.enableRelayCapture = url.searchParams.get("relay-capture") === "true";
 
 		return props;
 	},
@@ -184,6 +185,7 @@ const oauthFetchHandler = createOAuthHandler<Props>({
 			url.searchParams.get("inline-charts") !== "false";
 		const enableDirectChartIframe =
 			url.searchParams.get("direct-chart-iframe") === "true";
+		const enableRelayCapture = url.searchParams.get("relay-capture") === "true";
 
 		return {
 			...(baseProps as Props),
@@ -201,6 +203,7 @@ const oauthFetchHandler = createOAuthHandler<Props>({
 			enableThoughtSpotUiWidget,
 			enableInlineCharts,
 			enableDirectChartIframe,
+			enableRelayCapture,
 		};
 	},
 	// Extra routes mounted on the default handler app (consumer-specific).
