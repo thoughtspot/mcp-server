@@ -2233,15 +2233,20 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 				"direct frame tool called without the flag or MCP Apps support",
 			);
 		}
-		const { iframe_url, path } = ShowAnswerInputSchema.parse(
+		const { iframe_url } = ShowAnswerInputSchema.parse(
 			request.params.arguments ?? {},
 		);
-		const target = iframe_url || path || DEFAULT_THOUGHTSPOT_ROUTE;
-		const frameUrl = directFrameUrl(this.ctx.props.instanceUrl, target);
+		if (!iframe_url) {
+			return this.createErrorResponse(
+				"To show an answer, pass its `iframe_url` from get_session_updates.",
+				"show_answer_frame called without an iframe_url",
+			);
+		}
+		const frameUrl = directFrameUrl(this.ctx.props.instanceUrl, iframe_url);
 		if (!frameUrl) {
 			return this.createErrorResponse(
-				'Could not open that in ThoughtSpot. Pass the answer\'s `iframe_url` from get_session_updates verbatim, or a ThoughtSpot route such as "#/home".',
-				`show_answer_frame: unresolvable target ${target.slice(0, 200)}`,
+				"show_answer_frame only opens Analytics Agent answers. Pass the answer's `iframe_url` from get_session_updates verbatim; Liveboards and other ThoughtSpot pages cannot be opened here.",
+				`show_answer_frame: not an answer embed ${iframe_url.slice(0, 200)}`,
 			);
 		}
 		return this.createStructuredContentSuccessResponse(

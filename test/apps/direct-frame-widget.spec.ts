@@ -14,14 +14,23 @@ describe("direct-frame-widget (approach C2 prototype)", () => {
 			expect(directFrameUrl(instance, iframeUrl)).toBe(iframeUrl);
 		});
 
-		it("turns a hash route into an instance URL", () => {
-			expect(directFrameUrl(instance, "#/pinboard/abc")).toBe(
-				`${instance}/#/pinboard/abc`,
-			);
+		it("turns an answer hash route into an instance URL", () => {
+			expect(
+				directFrameUrl(instance, "#/embed/conv-assist-answer?sessionId=s"),
+			).toBe(`${instance}/#/embed/conv-assist-answer?sessionId=s`);
 		});
 
 		it.each([
-			["another origin", "https://evil.example.com/#/home"],
+			["the home page", "#/home"],
+			["a Liveboard route", "#/pinboard/abc"],
+			[
+				"a Liveboard URL on the instance",
+				`${instance}/#/insights/pinboard/abc`,
+			],
+			[
+				"another origin",
+				"https://evil.example.com/#/embed/conv-assist-answer?sessionId=s",
+			],
 			["a lookalike host", "https://test.thoughtspot.cloud.evil.com/#/home"],
 			["a URL without a hash route", `${instance}/login`],
 			["a javascript: URL", "javascript:alert(1)"],

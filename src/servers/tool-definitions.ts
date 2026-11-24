@@ -1483,7 +1483,7 @@ export const ShowAnswerFrameOutputSchema = z.object({
 export const showAnswerFrameToolDefinition = {
 	name: ToolName.ShowAnswerFrame,
 	description:
-		'Prototype: show an Analytics Agent answer, or any ThoughtSpot page, inline by framing the ThoughtSpot instance directly. Pass the answer\'s `iframe_url` from get_session_updates verbatim, or a route such as "#/pinboard/<liveboard id>". Use it only when asked to test the direct frame; otherwise prefer show_answer. The result only confirms which URL was framed.',
+		"Prototype: show an Analytics Agent answer inline by framing the ThoughtSpot instance directly. Pass the answer's `iframe_url` from get_session_updates verbatim. It opens only Analytics Agent answers, not Liveboards, the home page or other ThoughtSpot pages. Use it only when asked to test the direct frame; otherwise prefer show_answer. The result only confirms which URL was framed.",
 	inputSchema: z.toJSONSchema(ShowAnswerInputSchema),
 	outputSchema: z.toJSONSchema(ShowAnswerFrameOutputSchema),
 	annotations: {

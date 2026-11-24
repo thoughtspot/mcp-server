@@ -16,6 +16,8 @@
 //
 // Off by default; the undocumented `direct-frame=true` URL flag turns it on.
 
+import { ANSWER_EMBED_ROUTE_PREFIX } from "./thoughtspot-ui-widget";
+
 export const DIRECT_FRAME_WIDGET_URI = "ui://thoughtspot/direct-frame.html";
 
 /** CSP for the widget: it frames the connected cluster and loads nothing else. */
@@ -24,21 +26,25 @@ export function directFrameCsp(instanceUrl: string) {
 }
 
 /**
- * The URL to frame for a target: an `iframe_url` on the connected instance is
- * framed as is (it carries the embed route and its query); a hash route becomes
- * `<instance>/#/...`. Anything else is undefined.
+ * The URL to frame for an Analytics Agent answer: its `iframe_url` on the
+ * connected instance is framed as is (it carries the embed route and its
+ * query); the answer's hash route becomes `<instance>/#/...`. Anything else,
+ * including Liveboards and other ThoughtSpot pages, is undefined.
  */
 export function directFrameUrl(
 	instanceUrl: string,
 	target: string,
 ): string | undefined {
 	const origin = new URL(instanceUrl).origin;
-	if (target.startsWith("#/")) {
+	if (target.startsWith(ANSWER_EMBED_ROUTE_PREFIX)) {
 		return `${origin}/${target}`;
 	}
 	try {
 		const url = new URL(target);
-		if (url.origin === origin && url.hash.startsWith("#/")) {
+		if (
+			url.origin === origin &&
+			url.hash.startsWith(ANSWER_EMBED_ROUTE_PREFIX)
+		) {
 			return url.toString();
 		}
 	} catch {
