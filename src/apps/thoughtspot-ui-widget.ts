@@ -77,47 +77,36 @@ export function thoughtspotUiCsp(
 
 export const HOSTED_CHART_FRAME_DOMAIN = "https://*.pdom.thoughtspot.com";
 
-export const DEFAULT_THOUGHTSPOT_ROUTE = "#/home";
-
 /**
- * Hash route to open, from either a route ("#/home", "#/pinboard/<id>") or a
- * ThoughtSpot URL on the connected instance (such as an answer's iframe_url).
- * Anything else falls back to the home page.
+ * The only route the widget opens: an Analytics Agent answer embed, as in an
+ * answer's iframe_url. Liveboards, the home page and other pages are refused.
  */
-export function resolveThoughtSpotRoute(
-	instanceUrl: string,
-	target: string | undefined,
-): string {
-	return (
-		(target && tryResolveThoughtSpotRoute(instanceUrl, target)) ||
-		DEFAULT_THOUGHTSPOT_ROUTE
-	);
-}
+export const ANSWER_EMBED_ROUTE_PREFIX = "#/embed/conv-assist-answer?";
 
 /**
- * Like resolveThoughtSpotRoute, but undefined when the target is not a hash
- * route or a URL on the instance, so callers can report it instead of quietly
- * opening the home page.
+ * Hash route of the Analytics Agent answer to open, from either the route
+ * itself or a URL on the connected instance (an answer's iframe_url).
+ * Undefined for anything else, including other ThoughtSpot pages, so callers
+ * report it instead of opening something other than an answer.
  */
 export function tryResolveThoughtSpotRoute(
 	instanceUrl: string,
 	target: string,
 ): string | undefined {
+	let route: string | undefined;
 	if (target.startsWith("#/")) {
-		return target;
-	}
-	try {
-		const url = new URL(target);
-		if (
-			url.origin === new URL(instanceUrl).origin &&
-			url.hash.startsWith("#/")
-		) {
-			return url.hash;
+		route = target;
+	} else {
+		try {
+			const url = new URL(target);
+			if (url.origin === new URL(instanceUrl).origin) {
+				route = url.hash;
+			}
+		} catch {
+			// Not a URL.
 		}
-	} catch {
-		// Not a URL.
 	}
-	return undefined;
+	return route?.startsWith(ANSWER_EMBED_ROUTE_PREFIX) ? route : undefined;
 }
 
 // ── Server-side API relay ──────────────────────────────────────────────────

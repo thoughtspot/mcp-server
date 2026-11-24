@@ -2049,26 +2049,31 @@ describe("MCP Server", () => {
 					);
 				});
 
-				it("show_answer resolves an answer iframe_url to its route", async () => {
-					await server.init();
-					const { callTool } = connect(server);
-
-					const result = await callTool("show_answer", {
-						path: "https://test.thoughtspot.cloud/?tsmcp=true#/embed/conv-assist-answer?sessionId=s",
-					});
-
-					expect(result.structuredContent).toEqual({
-						path: "#/embed/conv-assist-answer?sessionId=s",
-					});
-				});
-
-				it("show_answer defaults to the home page", async () => {
+				it("show_answer asks for an iframe_url instead of opening the home page", async () => {
 					await server.init();
 					const { callTool } = connect(server);
 
 					const result = await callTool("show_answer", {});
 
-					expect(result.structuredContent).toEqual({ path: "#/home" });
+					expect(result.isError).toBe(true);
+					expect(JSON.stringify(result.content)).toContain("iframe_url");
+				});
+
+				it("show_answer refuses Liveboards and other pages", async () => {
+					await server.init();
+					const { callTool } = connect(server);
+
+					for (const target of [
+						"#/home",
+						"#/pinboard/abc",
+						"https://test.thoughtspot.cloud/#/insights/pinboard/abc",
+					]) {
+						const result = await callTool("show_answer", {
+							iframe_url: target,
+						});
+						expect(result.isError).toBe(true);
+						expect(result.structuredContent).toBeUndefined();
+					}
 				});
 
 				it("show_answer opens an answer from its iframe_url", async () => {
@@ -2103,7 +2108,7 @@ describe("MCP Server", () => {
 					const { callTool } = connect(server);
 
 					for (const target of [
-						"https://elsewhere.example.com/#/home",
+						"https://elsewhere.example.com/#/embed/conv-assist-answer?sessionId=s",
 						"not a route",
 					]) {
 						const result = await callTool("show_answer", {
@@ -2122,7 +2127,7 @@ describe("MCP Server", () => {
 					const { callTool } = connect(server);
 
 					const result = await callTool("get_thoughtspot_page", {
-						path: "#/pinboard/abc",
+						path: "#/embed/conv-assist-answer?sessionId=s&genNo=1",
 					});
 
 					expect(result.isError).toBeUndefined();
@@ -2134,7 +2139,7 @@ describe("MCP Server", () => {
 						"ThoughtSpot-ts-client",
 					);
 					const { html, path, relay_nonce } = result.structuredContent as any;
-					expect(path).toBe("#/pinboard/abc");
+					expect(path).toBe("#/embed/conv-assist-answer?sessionId=s&genNo=1");
 					// The nonce goes to the widget, never into the sandboxed page.
 					expect(relay_nonce).toMatch(/^v1\./);
 					expect(html).not.toContain(relay_nonce);
@@ -2157,7 +2162,7 @@ describe("MCP Server", () => {
 					const { callTool } = connect(server);
 
 					const result = await callTool("get_thoughtspot_page", {
-						path: "#/home",
+						path: "#/embed/conv-assist-answer?sessionId=s&genNo=1",
 					});
 					const resource = await server.readResource({
 						method: "resources/read",
@@ -2182,7 +2187,7 @@ describe("MCP Server", () => {
 					const { callTool } = connect(server);
 
 					const result = await callTool("get_thoughtspot_page", {
-						path: "#/home",
+						path: "#/embed/conv-assist-answer?sessionId=s&genNo=1",
 					});
 
 					const { html, same_origin } = result.structuredContent as any;
@@ -2201,7 +2206,7 @@ describe("MCP Server", () => {
 					const { callTool } = connect(server);
 
 					const result = await callTool("get_thoughtspot_page", {
-						path: "#/home",
+						path: "#/embed/conv-assist-answer?sessionId=s&genNo=1",
 					});
 					const resource = await server.readResource({
 						method: "resources/read",
@@ -2217,6 +2222,20 @@ describe("MCP Server", () => {
 					).toEqual(["https://*.pdom.thoughtspot.com"]);
 				});
 
+				it("get_thoughtspot_page refuses pages other than answers without fetching", async () => {
+					const fetchSpy = vi.fn();
+					vi.stubGlobal("fetch", fetchSpy);
+					await server.init();
+					const { callTool } = connect(server);
+
+					const result = await callTool("get_thoughtspot_page", {
+						path: "#/pinboard/abc",
+					});
+
+					expect(result.isError).toBe(true);
+					expect(fetchSpy).not.toHaveBeenCalled();
+				});
+
 				it("get_thoughtspot_page refuses an index.html redirected off the instance", async () => {
 					const redirected = new Response(indexHtml, { status: 200 });
 					Object.defineProperty(redirected, "url", {
@@ -2227,7 +2246,7 @@ describe("MCP Server", () => {
 					const { callTool } = connect(server);
 
 					const result = await callTool("get_thoughtspot_page", {
-						path: "#/home",
+						path: "#/embed/conv-assist-answer?sessionId=s&genNo=1",
 					});
 
 					expect(result.isError).toBe(true);
@@ -2243,7 +2262,7 @@ describe("MCP Server", () => {
 					const { callTool } = connect(server);
 
 					const result = await callTool("get_thoughtspot_page", {
-						path: "#/home",
+						path: "#/embed/conv-assist-answer?sessionId=s&genNo=1",
 					});
 
 					expect(result.isError).toBe(true);

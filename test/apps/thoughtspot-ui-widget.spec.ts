@@ -11,8 +11,8 @@ import {
 	needsSameOriginFrame,
 	relayThoughtSpotApiRequest,
 	resolveRelayUrl,
-	resolveThoughtSpotRoute,
 	thoughtspotUiCsp,
+	tryResolveThoughtSpotRoute,
 } from "../../src/apps/thoughtspot-ui-widget";
 
 const instanceUrl = "https://champagne.thoughtspotstaging.cloud";
@@ -54,20 +54,30 @@ describe("clientSupportsMcpApps", () => {
 	});
 });
 
-describe("resolveThoughtSpotRoute", () => {
+describe("tryResolveThoughtSpotRoute", () => {
 	it.each([
-		[undefined, "#/home"],
-		["#/pinboard/abc", "#/pinboard/abc"],
 		[
 			`${instanceUrl}/?tsmcp=true#/embed/conv-assist-answer?sessionId=s`,
 			"#/embed/conv-assist-answer?sessionId=s",
 		],
-		["https://evil.example.com/#/home", "#/home"],
-		[`${instanceUrl}/`, "#/home"],
-		["javascript:alert(1)", "#/home"],
-		["not a url", "#/home"],
+		[
+			"#/embed/conv-assist-answer?sessionId=s&genNo=1",
+			"#/embed/conv-assist-answer?sessionId=s&genNo=1",
+		],
+		// Only answer embeds: Liveboards, home and other pages are refused.
+		["#/home", undefined],
+		["#/pinboard/abc", undefined],
+		[`${instanceUrl}/#/insights/pinboard/abc`, undefined],
+		["#/embed/conv-assist-answer-other?sessionId=s", undefined],
+		[
+			"https://evil.example.com/#/embed/conv-assist-answer?sessionId=s",
+			undefined,
+		],
+		[`${instanceUrl}/`, undefined],
+		["javascript:alert(1)", undefined],
+		["not a url", undefined],
 	])("%s → %s", (target, route) => {
-		expect(resolveThoughtSpotRoute(instanceUrl, target)).toBe(route);
+		expect(tryResolveThoughtSpotRoute(instanceUrl, target)).toBe(route);
 	});
 });
 

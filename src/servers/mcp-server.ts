@@ -13,7 +13,6 @@ import {
 } from "../apps/answer-widget";
 import {
 	ApiRelayRejectedError,
-	DEFAULT_THOUGHTSPOT_ROUTE,
 	RelayNonceSigner,
 	THOUGHTSPOT_SERVER_USER_AGENT,
 	THOUGHTSPOT_UI_WIDGET_HTML,
@@ -22,7 +21,6 @@ import {
 	injectProxyScript,
 	needsSameOriginFrame,
 	relayThoughtSpotApiRequest,
-	resolveThoughtSpotRoute,
 	thoughtspotUiCsp,
 	tryResolveThoughtSpotRoute,
 } from "../apps/thoughtspot-ui-widget";
@@ -1988,36 +1986,32 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		);
 	}
 
-	/** show_answer: tell the widget which ThoughtSpot route to open. */
+	/**
+	 * show_answer: tell the widget which Analytics Agent answer to open. Only
+	 * answer embeds are opened; Liveboards and other pages are refused.
+	 */
 	@WithSpan("call-show-thoughtspot")
 	async callShowAnswer(request: z.infer<typeof CallToolRequestSchema>) {
 		if (!this.isThoughtSpotUiAvailable()) {
 			return this.thoughtSpotUiDisabledError();
 		}
-		const { iframe_url, path, answer_id } = ShowAnswerInputSchema.parse(
+		const { iframe_url } = ShowAnswerInputSchema.parse(
 			request.params.arguments ?? {},
 		);
-		const target = iframe_url || path;
-		if (!target) {
-			if (answer_id) {
-				return this.createErrorResponse(
-					"To show an answer, pass its `iframe_url` from get_session_updates; `answer_id` alone is not enough.",
-					"show_answer called with answer_id but no iframe_url",
-				);
-			}
-			return this.createStructuredContentSuccessResponse(
-				{ path: DEFAULT_THOUGHTSPOT_ROUTE },
-				"Opened ThoughtSpot widget",
+		if (!iframe_url) {
+			return this.createErrorResponse(
+				"To show an answer, pass its `iframe_url` from get_session_updates.",
+				"show_answer called without an iframe_url",
 			);
 		}
 		const route = tryResolveThoughtSpotRoute(
 			this.ctx.props.instanceUrl,
-			target,
+			iframe_url,
 		);
 		if (!route) {
 			return this.createErrorResponse(
-				'Could not open that in ThoughtSpot. Pass the answer\'s `iframe_url` from get_session_updates verbatim, or a ThoughtSpot route such as "#/home".',
-				`show_answer: unresolvable target ${target.slice(0, 200)}`,
+				"show_answer only opens Analytics Agent answers. Pass the answer's `iframe_url` from get_session_updates verbatim; Liveboards and other ThoughtSpot pages cannot be opened here.",
+				`show_answer: not an answer embed ${iframe_url.slice(0, 200)}`,
 			);
 		}
 		return this.createStructuredContentSuccessResponse(
@@ -2039,7 +2033,14 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			request.params.arguments,
 		);
 		const instanceUrl = this.ctx.props.instanceUrl;
-		const route = resolveThoughtSpotRoute(instanceUrl, path);
+		// Checked again here: the widget only loads what show_answer allowed.
+		const route = tryResolveThoughtSpotRoute(instanceUrl, path);
+		if (!route) {
+			return this.createErrorResponse(
+				"Only Analytics Agent answers can be opened.",
+				`get_thoughtspot_page: not an answer embed ${path.slice(0, 200)}`,
+			);
+		}
 
 		let indexHtml: string;
 		try {

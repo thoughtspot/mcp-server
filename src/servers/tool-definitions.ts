@@ -1384,13 +1384,7 @@ export const ShowAnswerInputSchema = z.object({
 		.string()
 		.optional()
 		.describe(
-			"To show an Analytics Agent answer: the answer's `iframe_url` from get_session_updates, passed verbatim.",
-		),
-	path: z
-		.string()
-		.optional()
-		.describe(
-			'To open another page: a ThoughtSpot hash route such as "#/home" or "#/pinboard/<liveboard id>", or a ThoughtSpot URL on this instance. With neither this nor `iframe_url`, opens the home page.',
+			"The answer's `iframe_url` from get_session_updates, passed verbatim.",
 		),
 	answer_id: z
 		.string()
@@ -1411,7 +1405,7 @@ export const GetThoughtSpotPageInputSchema = z.object({
 export const showAnswerToolDefinition = {
 	name: ToolName.ShowAnswer,
 	description:
-		"Show an Analytics Agent answer, or any ThoughtSpot page, to the user inline as the live, interactive ThoughtSpot view. This is the default way to show answers: call it with the answer's `iframe_url` from get_session_updates whenever an answer would be clearer as a visual than as text, instead of telling the user to open the link. Also use it to open the home page or a Liveboard. If it fails to display, fall back to get_answer_image. Pages that embed other sites may not load. The result only confirms which page was opened.",
+		"Show an Analytics Agent answer to the user inline as the live, interactive ThoughtSpot view. This is the default way to show answers: call it with the answer's `iframe_url` from get_session_updates whenever an answer would be clearer as a visual than as text, instead of telling the user to open the link. It opens only Analytics Agent answers, not Liveboards, the home page or other ThoughtSpot pages; share their links instead. If it fails to display, fall back to get_answer_image. The result only confirms which answer was opened.",
 	inputSchema: z.toJSONSchema(ShowAnswerInputSchema),
 	outputSchema: z.toJSONSchema(ShowAnswerOutputSchema),
 	annotations: {
