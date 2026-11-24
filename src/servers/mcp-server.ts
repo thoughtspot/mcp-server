@@ -2239,24 +2239,30 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 		);
 	}
 
-	/** show_answer_embed: tell the SDK widget which ThoughtSpot route to frame. */
+	/**
+	 * show_answer_embed: tell the SDK widget which Analytics Agent answer to
+	 * frame. Only answer embeds are opened; Liveboards and other pages are refused.
+	 */
 	@WithSpan("call-show-answer-embed")
 	async callShowAnswerEmbed(request: z.infer<typeof CallToolRequestSchema>) {
 		if (!this.isEmbedSdkAvailable()) {
 			return this.embedSdkDisabledError();
 		}
-		const { iframe_url, path } = ShowAnswerInputSchema.parse(
+		const { iframe_url } = ShowAnswerInputSchema.parse(
 			request.params.arguments ?? {},
 		);
+		if (!iframe_url) {
+			return this.createErrorResponse(
+				"To show an answer, pass its `iframe_url` from get_session_updates.",
+				"show_answer_embed called without an iframe_url",
+			);
+		}
 		const instanceUrl = this.ctx.props.instanceUrl;
-		const target = iframe_url || path;
-		const route = target
-			? tryResolveThoughtSpotRoute(instanceUrl, target)
-			: DEFAULT_THOUGHTSPOT_ROUTE;
+		const route = tryResolveThoughtSpotRoute(instanceUrl, iframe_url);
 		if (!route) {
 			return this.createErrorResponse(
-				'Could not open that in ThoughtSpot. Pass the answer\'s `iframe_url` from get_session_updates verbatim, or a ThoughtSpot route such as "#/home".',
-				`show_answer_embed: unresolvable target ${target?.slice(0, 200)}`,
+				"show_answer_embed only opens Analytics Agent answers. Pass the answer's `iframe_url` from get_session_updates verbatim; Liveboards and other ThoughtSpot pages cannot be opened here.",
+				`show_answer_embed: not an answer embed ${iframe_url.slice(0, 200)}`,
 			);
 		}
 		return this.createStructuredContentSuccessResponse(

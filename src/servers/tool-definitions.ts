@@ -1485,7 +1485,7 @@ export const ShowAnswerEmbedOutputSchema = z.object({
 export const showAnswerEmbedToolDefinition = {
 	name: ToolName.ShowAnswerEmbed,
 	description:
-		'Prototype: show an Analytics Agent answer, or any ThoughtSpot page, inline using the ThoughtSpot Visual Embed SDK, which frames the ThoughtSpot instance directly. Pass the answer\'s `iframe_url` from get_session_updates verbatim, or a route such as "#/pinboard/<liveboard id>". Use it only when asked to test the embed SDK view; otherwise prefer show_answer. The result only confirms which page was opened.',
+		"Prototype: show an Analytics Agent answer inline using the ThoughtSpot Visual Embed SDK, which frames the ThoughtSpot instance directly. Pass the answer's `iframe_url` from get_session_updates verbatim. It opens only Analytics Agent answers, not Liveboards, the home page or other ThoughtSpot pages. Use it only when asked to test the embed SDK view; otherwise prefer show_answer. The result only confirms which answer was opened.",
 	inputSchema: z.toJSONSchema(ShowAnswerInputSchema),
 	outputSchema: z.toJSONSchema(ShowAnswerEmbedOutputSchema),
 	annotations: {

@@ -1999,24 +1999,32 @@ describe("MCP Server", () => {
 					});
 				});
 
-				it("show_answer_embed opens home with no target", async () => {
+				it("show_answer_embed asks for an iframe_url instead of opening home", async () => {
 					await server.init();
 					const { callTool } = connect(server);
 
 					const result = await callTool("show_answer_embed", {});
 
-					expect((result.structuredContent as any).path).toBe("home");
+					expect(result.isError).toBe(true);
+					expect(JSON.stringify(result.content)).toContain("iframe_url");
 				});
 
-				it("show_answer_embed rejects URLs off the instance", async () => {
+				it("show_answer_embed refuses Liveboards, other pages and URLs off the instance", async () => {
 					await server.init();
 					const { callTool } = connect(server);
 
-					const result = await callTool("show_answer_embed", {
-						iframe_url: "https://evil.example.com/#/home",
-					});
-
-					expect(result.isError).toBe(true);
+					for (const target of [
+						"#/home",
+						"#/pinboard/abc",
+						"https://test.thoughtspot.cloud/#/insights/pinboard/abc",
+						"https://evil.example.com/#/embed/conv-assist-answer?sessionId=s",
+					]) {
+						const result = await callTool("show_answer_embed", {
+							iframe_url: target,
+						});
+						expect(result.isError).toBe(true);
+						expect(result.structuredContent).toBeUndefined();
+					}
 				});
 
 				it("get_embed_token mints a short-lived org token, not the session token", async () => {
