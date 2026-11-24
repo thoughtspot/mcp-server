@@ -12,6 +12,12 @@ import {
 	buildAnswerOpenUrl,
 } from "../apps/answer-widget";
 import {
+	MCP_VIEW_PAGE_HTML,
+	MCP_VIEW_WIDGET_HTML,
+	MCP_VIEW_WIDGET_URI,
+	checkViewRelayRequest,
+} from "../apps/mcp-view-widget";
+import {
 	ApiRelayRejectedError,
 	RelayNonceSigner,
 	THOUGHTSPOT_SERVER_USER_AGENT,
@@ -108,15 +114,20 @@ import {
 	SendModelMessageInputSchema,
 	SendSessionMessageInputSchema,
 	ShowAnswerInputSchema,
+	ShowAnswerViewInputSchema,
 	SwitchOrgInputSchema,
 	ThoughtSpotApiRequestInputSchema,
+	ThoughtSpotViewRequestInputSchema,
 	ToolName,
 	createAnalysisSessionToolDefinitionSpotterX,
 	fetchAnswerImageToolDefinition,
 	getAnswerImageToolDefinition,
+	getMcpViewPageToolDefinition,
 	getThoughtSpotPageToolDefinition,
 	showAnswerToolDefinition,
+	showAnswerViewToolDefinition,
 	thoughtSpotApiRequestToolDefinition,
+	thoughtSpotViewRequestToolDefinition,
 } from "./tool-definitions";
 import { recordGetDataFailure } from "./upstream-error-utils";
 import {
@@ -135,6 +146,11 @@ export class MCPServer extends BaseMCPServer {
 	// Signed with a per-login secret so nonces survive Durable Object restarts.
 	private readonly relayNonces = new RelayNonceSigner(() =>
 		this.getStorageKeyHash(),
+	);
+	// Nonces for the MCP view relay (approach C1 prototype). A different key from
+	// relayNonces, so a nonce for one relay is never accepted by the other.
+	private readonly viewRelayNonces = new RelayNonceSigner(
+		async () => `mcp-view:${await this.getStorageKeyHash()}`,
 	);
 
 	constructor(ctx: Context) {
@@ -582,6 +598,14 @@ export class MCPServer extends BaseMCPServer {
 			);
 		}
 
+		if (this.isMcpViewAvailable()) {
+			tools.push(
+				showAnswerViewToolDefinition,
+				getMcpViewPageToolDefinition,
+				thoughtSpotViewRequestToolDefinition,
+			);
+		}
+
 		return { tools };
 	}
 
@@ -616,6 +640,14 @@ export class MCPServer extends BaseMCPServer {
 				mimeType: MCP_APP_MIME_TYPE,
 			});
 		}
+		if (this.isMcpViewAvailable()) {
+			resources.push({
+				uri: MCP_VIEW_WIDGET_URI,
+				name: "ThoughtSpot (MCP view)",
+				description: "Lightweight read-only ThoughtSpot view (prototype).",
+				mimeType: MCP_APP_MIME_TYPE,
+			});
+		}
 		if (this.isAnswerWidgetEnabledForClient()) {
 			resources.push({
 				uri: ANSWER_WIDGET_URI,
@@ -641,6 +673,20 @@ export class MCPServer extends BaseMCPServer {
 						// The widget needs no external origins: the image arrives as a data: URL
 						// and the open-in-ThoughtSpot link goes through the host (ui/open-link).
 						_meta: { ui: { prefersBorder: true } },
+					},
+				],
+			};
+		}
+		if (uri === MCP_VIEW_WIDGET_URI && this.isMcpViewAvailable()) {
+			return {
+				contents: [
+					{
+						uri,
+						mimeType: MCP_APP_MIME_TYPE,
+						text: MCP_VIEW_WIDGET_HTML,
+						// The page is self-contained and its data comes through the
+						// relay, so no external origins are needed.
+						_meta: { ui: { prefersBorder: false } },
 					},
 				],
 			};
@@ -906,6 +952,18 @@ export class MCPServer extends BaseMCPServer {
 
 			case ToolName.ThoughtSpotApiRequest: {
 				return this.callThoughtSpotApiRequest(request);
+			}
+
+			case ToolName.ShowAnswerView: {
+				return this.callShowAnswerView(request);
+			}
+
+			case ToolName.GetMcpViewPage: {
+				return this.callGetMcpViewPage();
+			}
+
+			case ToolName.ThoughtSpotViewRequest: {
+				return this.callThoughtSpotViewRequest(request);
 			}
 
 			default:
@@ -2168,6 +2226,148 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			return this.createErrorResponse(
 				"The ThoughtSpot request failed.",
 				`thoughtspot_api_request failed: ${error}`,
+			);
+		}
+	}
+
+	/**
+	 * Approach C1 prototype (`mcp-view=true`). Only offered to clients that
+	 * render MCP Apps, so the app-only helpers are never exposed to a model.
+	 */
+	private isMcpViewAvailable(): boolean {
+		return (
+			!!this.ctx.props.enableMcpViewWidget &&
+			clientSupportsMcpApps(this.getClientCapabilities())
+		);
+	}
+
+	private mcpViewDisabledError() {
+		return this.createErrorResponse(
+			"The MCP view is not available for this connection.",
+			"mcp view tool called without the flag or MCP Apps support",
+		);
+	}
+
+	/** show_answer_view: tell the widget which answer or Liveboard to show. */
+	@WithSpan("call-show-answer-view")
+	async callShowAnswerView(request: z.infer<typeof CallToolRequestSchema>) {
+		if (!this.isMcpViewAvailable()) {
+			return this.mcpViewDisabledError();
+		}
+		const { answer_id, liveboard_id, visualization_ids, title } =
+			ShowAnswerViewInputSchema.parse(request.params.arguments ?? {});
+		if (answer_id) {
+			const [answer] = parseAnswerIds([{ answer_id, title: "" }]) ?? [];
+			if (!answer) {
+				return this.createErrorResponse(
+					'Invalid answer_id. Pass the `answer_id` returned from the "get_session_updates" tool verbatim.',
+					`show_answer_view: invalid answer_id ${answer_id.slice(0, 200)}`,
+				);
+			}
+			return this.createStructuredContentSuccessResponse(
+				{
+					kind: "answer",
+					title,
+					session_identifier: answer.session_identifier,
+					generation_number: answer.generation_number,
+				},
+				"Opened MCP view",
+			);
+		}
+		if (liveboard_id) {
+			return this.createStructuredContentSuccessResponse(
+				{ kind: "liveboard", title, liveboard_id, visualization_ids },
+				"Opened MCP view",
+			);
+		}
+		return this.createErrorResponse(
+			"Pass an `answer_id` or a `liveboard_id`.",
+			"show_answer_view called with neither answer_id nor liveboard_id",
+		);
+	}
+
+	/**
+	 * get_mcp_view_page: the view page HTML and a nonce for its relay calls. In
+	 * the real C1 the cluster would serve the page; this prototype serves a
+	 * stand-in. App-only.
+	 */
+	@WithSpan("call-get-mcp-view-page")
+	async callGetMcpViewPage() {
+		if (!this.isMcpViewAvailable()) {
+			return this.mcpViewDisabledError();
+		}
+		return {
+			content: [{ type: "text" as const, text: "MCP view page ready." }],
+			structuredContent: {
+				html: MCP_VIEW_PAGE_HTML,
+				relay_nonce: await this.viewRelayNonces.issue(),
+			},
+		};
+	}
+
+	/**
+	 * thoughtspot_view_request: one request from the MCP view page, only if it is
+	 * in VIEW_RELAY_ALLOWLIST, made here with the user's token. App-only.
+	 */
+	@WithSpan("call-thoughtspot-view-request")
+	async callThoughtSpotViewRequest(
+		request: z.infer<typeof CallToolRequestSchema>,
+	) {
+		if (!this.isMcpViewAvailable()) {
+			return this.mcpViewDisabledError();
+		}
+		const nonce = request.params.arguments?.relay_nonce;
+		if (
+			typeof nonce !== "string" ||
+			!(await this.viewRelayNonces.isValid(nonce))
+		) {
+			return this.createErrorResponse(
+				"Request not allowed: the view is not loaded; reopen it.",
+				"thoughtspot_view_request rejected: missing or unknown relay nonce",
+			);
+		}
+		const { method, path, body_base64 } =
+			ThoughtSpotViewRequestInputSchema.parse(request.params.arguments);
+		const span = this.initSpanWithCommonAttributes();
+		span?.setAttributes({ relay_method: method, relay_path: path });
+		try {
+			const checkedBody = checkViewRelayRequest({
+				method,
+				path,
+				body: Buffer.from(body_base64 ?? "", "base64").toString("utf8"),
+			});
+			const response = await withTimeout(
+				relayThoughtSpotApiRequest(
+					this.ctx.props.instanceUrl,
+					this.getActiveToken(),
+					{
+						method: "POST",
+						path,
+						headers: {
+							"content-type": "application/json",
+							accept: "*/*",
+						},
+						body_base64: Buffer.from(checkedBody).toString("base64"),
+					},
+				),
+				UPSTREAM_CALL_TIMEOUT_MS,
+				"ThoughtSpot view relay",
+			);
+			span?.setAttribute("relay_status", response.status);
+			return {
+				content: [{ type: "text" as const, text: `Status ${response.status}` }],
+				structuredContent: response,
+			};
+		} catch (error) {
+			if (error instanceof ApiRelayRejectedError) {
+				return this.createErrorResponse(
+					`Request not allowed: ${error.message}.`,
+					`thoughtspot_view_request rejected: ${error.message}`,
+				);
+			}
+			return this.createErrorResponse(
+				"The ThoughtSpot request failed.",
+				`thoughtspot_view_request failed: ${error}`,
 			);
 		}
 	}

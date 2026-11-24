@@ -1878,6 +1878,231 @@ describe("MCP Server", () => {
 		});
 	});
 
+	describe("Approach C1 prototype: MCP view (mcp-view URL flag)", () => {
+		const mcpAppsCapabilities = {
+			extensions: {
+				"io.modelcontextprotocol/ui": {
+					mimeTypes: ["text/html;profile=mcp-app"],
+				},
+			},
+		};
+		const supportMcpApps = () =>
+			vi
+				.spyOn(server, "getClientCapabilities")
+				.mockReturnValue(mcpAppsCapabilities as any);
+		const answerId = JSON.stringify({ session_id: "sess-1", gen_no: 2 });
+		const toBase64 = (text: string) => Buffer.from(text).toString("base64");
+
+		afterEach(() => {
+			vi.unstubAllGlobals();
+		});
+
+		it("is off by default", async () => {
+			supportMcpApps();
+			await server.init();
+			const { listTools } = connect(server);
+
+			const names = (await listTools()).tools.map((t) => t.name);
+			expect(names).not.toContain("show_answer_view");
+			expect(names).not.toContain("thoughtspot_view_request");
+		});
+
+		describe("when on", () => {
+			beforeEach(() => {
+				mockProps.enableMcpViewWidget = true;
+			});
+
+			it("hides the tools from clients without MCP Apps support", async () => {
+				await server.init();
+				const { listTools } = connect(server);
+
+				const names = (await listTools()).tools.map((t) => t.name);
+				expect(names).not.toContain("show_answer_view");
+				expect(names).not.toContain("get_mcp_view_page");
+				expect(names).not.toContain("thoughtspot_view_request");
+			});
+
+			describe("for an MCP Apps client", () => {
+				beforeEach(() => {
+					supportMcpApps();
+				});
+
+				it("lists show_answer_view linked to the widget and the helpers as app-only", async () => {
+					await server.init();
+					const { listTools } = connect(server);
+
+					const { tools } = await listTools();
+					const byName = (name: string) =>
+						tools.find((t) => t.name === name) as any;
+					expect(byName("show_answer_view")._meta.ui.resourceUri).toBe(
+						"ui://thoughtspot/mcp-view.html",
+					);
+					expect(byName("get_mcp_view_page")._meta.ui).toEqual({
+						visibility: ["app"],
+					});
+					expect(byName("thoughtspot_view_request")._meta.ui).toEqual({
+						visibility: ["app"],
+					});
+				});
+
+				it("serves the widget with no external domains", async () => {
+					await server.init();
+
+					const result = await server.readResource({
+						method: "resources/read",
+						params: { uri: "ui://thoughtspot/mcp-view.html" },
+					});
+					const [content] = result.contents as any[];
+					expect(content.mimeType).toBe("text/html;profile=mcp-app");
+					expect(content._meta.ui.csp).toBeUndefined();
+				});
+
+				it("show_answer_view turns an answer_id into session ids", async () => {
+					await server.init();
+					const { callTool } = connect(server);
+
+					const result = await callTool("show_answer_view", {
+						answer_id: answerId,
+						title: "Sales",
+					});
+
+					expect(result.structuredContent).toEqual({
+						kind: "answer",
+						title: "Sales",
+						session_identifier: "sess-1",
+						generation_number: 2,
+					});
+				});
+
+				it("get_mcp_view_page returns the page and a view nonce kept out of it", async () => {
+					await server.init();
+					const { callTool } = connect(server);
+
+					const result = await callTool("get_mcp_view_page", {});
+
+					const { html, relay_nonce } = result.structuredContent as any;
+					expect(html).toContain("thoughtspot-mcp-view");
+					expect(html).not.toContain(relay_nonce);
+					expect(
+						await (server as any).viewRelayNonces.isValid(relay_nonce),
+					).toBe(true);
+					expect(await (server as any).relayNonces.isValid(relay_nonce)).toBe(
+						false,
+					);
+				});
+
+				it("show_answer_view rejects a malformed answer_id", async () => {
+					await server.init();
+					const { callTool } = connect(server);
+
+					const result = await callTool("show_answer_view", {
+						answer_id: "nope",
+					});
+
+					expect(result.isError).toBe(true);
+				});
+
+				it("relays an allowed request with the user's token", async () => {
+					const fetchSpy = vi
+						.fn()
+						.mockResolvedValue(new Response("a,b\n1,2\n", { status: 200 }));
+					vi.stubGlobal("fetch", fetchSpy);
+					await server.init();
+					const { callTool } = connect(server);
+					// mcp-testing-kit answers only the first call per connection.
+					const nonce = await (server as any).viewRelayNonces.issue();
+
+					const result = await callTool("thoughtspot_view_request", {
+						method: "POST",
+						path: "/api/rest/2.0/report/answer",
+						body_base64: toBase64(
+							JSON.stringify({
+								session_identifier: "sess-1",
+								generation_number: 2,
+								file_format: "CSV",
+							}),
+						),
+						relay_nonce: nonce,
+					});
+
+					expect(result.isError).toBeFalsy();
+					expect((result.structuredContent as any).status).toBe(200);
+					const [url, init] = fetchSpy.mock.calls[0];
+					expect(String(url)).toBe(
+						"https://test.thoughtspot.cloud/api/rest/2.0/report/answer",
+					);
+					expect(init.method).toBe("POST");
+					expect(new Headers(init.headers).get("authorization")).toMatch(
+						/^Bearer /,
+					);
+				});
+
+				it("rejects a request outside the allowlist without calling the cluster", async () => {
+					const fetchSpy = vi.fn();
+					vi.stubGlobal("fetch", fetchSpy);
+					await server.init();
+					const { callTool } = connect(server);
+					// mcp-testing-kit answers only the first call per connection.
+					const nonce = await (server as any).viewRelayNonces.issue();
+
+					const result = await callTool("thoughtspot_view_request", {
+						method: "POST",
+						path: "/prism/",
+						body_base64: toBase64("{}"),
+						relay_nonce: nonce,
+					});
+
+					expect(result.isError).toBe(true);
+					expect(fetchSpy).not.toHaveBeenCalled();
+				});
+
+				it("does not accept a nonce issued for A's relay", async () => {
+					mockProps.enableThoughtSpotUiWidget = true;
+					const fetchSpy = vi.fn();
+					vi.stubGlobal("fetch", fetchSpy);
+					await server.init();
+					const { callTool } = connect(server);
+					const aNonce = await (server as any).relayNonces.issue();
+
+					const result = await callTool("thoughtspot_view_request", {
+						method: "POST",
+						path: "/api/rest/2.0/report/answer",
+						body_base64: toBase64(
+							JSON.stringify({
+								session_identifier: "s",
+								generation_number: 1,
+								file_format: "CSV",
+							}),
+						),
+						relay_nonce: aNonce,
+					});
+
+					expect(result.isError).toBe(true);
+					expect(fetchSpy).not.toHaveBeenCalled();
+				});
+
+				it("does not let a view nonce use A's relay", async () => {
+					mockProps.enableThoughtSpotUiWidget = true;
+					const fetchSpy = vi.fn();
+					vi.stubGlobal("fetch", fetchSpy);
+					await server.init();
+					const { callTool } = connect(server);
+					// mcp-testing-kit answers only the first call per connection.
+					const nonce = await (server as any).viewRelayNonces.issue();
+
+					const result = await callTool("thoughtspot_api_request", {
+						method: "GET",
+						path: "/prism/",
+						relay_nonce: nonce,
+					});
+
+					expect(result.isError).toBe(true);
+					expect(fetchSpy).not.toHaveBeenCalled();
+				});
+			});
+		});
+	});
+
 	describe("MCP Apps ThoughtSpot UI widget (thoughtspot-ui URL flag)", () => {
 		const indexHtml =
 			"<!DOCTYPE html><html><head><script>var blink = {};</script></head><body></body></html>";

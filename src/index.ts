@@ -146,6 +146,7 @@ const hooks: AuthHooks<Props> = {
 		props.enableDirectChartIframe =
 			url.searchParams.get("direct-chart-iframe") === "true";
 		props.enableRelayCapture = url.searchParams.get("relay-capture") === "true";
+		props.enableMcpViewWidget = url.searchParams.get("mcp-view") === "true";
 
 		return props;
 	},
@@ -186,6 +187,7 @@ const oauthFetchHandler = createOAuthHandler<Props>({
 		const enableDirectChartIframe =
 			url.searchParams.get("direct-chart-iframe") === "true";
 		const enableRelayCapture = url.searchParams.get("relay-capture") === "true";
+		const enableMcpViewWidget = url.searchParams.get("mcp-view") === "true";
 
 		return {
 			...(baseProps as Props),
@@ -204,6 +206,7 @@ const oauthFetchHandler = createOAuthHandler<Props>({
 			enableInlineCharts,
 			enableDirectChartIframe,
 			enableRelayCapture,
+			enableMcpViewWidget,
 		};
 	},
 	// Extra routes mounted on the default handler app (consumer-specific).
