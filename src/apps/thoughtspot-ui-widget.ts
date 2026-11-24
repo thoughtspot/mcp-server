@@ -131,6 +131,14 @@ export type ApiRelayRequest = {
 // as "(large body)" rather than decoded.
 const MAX_OPERATION_SCAN_BYTES = 256 * 1024;
 
+// An operation name as GraphQL spells one. The names come from the sandboxed
+// page, so anything else is logged as "?" rather than as free text.
+const OPERATION_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,99}$/;
+
+function operationLabel(name: string): string {
+	return OPERATION_NAME.test(name) ? name : "?";
+}
+
 /**
  * The API operations a relayed request performs, for building the view-only
  * relay allowlist: the `op` query parameter prism uses (`/prism/?op=Name`) and,
@@ -140,12 +148,16 @@ const MAX_OPERATION_SCAN_BYTES = 256 * 1024;
  */
 export function describeRelayOperations(request: ApiRelayRequest): string[] {
 	const ops: string[] = [];
-	const queryOp = new URL(
-		request.path,
-		"https://relay.invalid",
-	).searchParams.get("op");
+	let queryOp: string | null = null;
+	try {
+		queryOp = new URL(request.path, "https://relay.invalid").searchParams.get(
+			"op",
+		);
+	} catch {
+		// Not a parsable path; the relay itself rejects it.
+	}
 	if (queryOp) {
-		ops.push(`op:${queryOp}`);
+		ops.push(`op:${operationLabel(queryOp)}`);
 	}
 	if (!request.body_base64) {
 		return ops;
@@ -178,7 +190,7 @@ export function describeRelayOperations(request: ApiRelayRequest): string[] {
 					: "Q";
 		const name =
 			typeof operationName === "string"
-				? operationName
+				? operationLabel(operationName)
 				: (typeof query === "string" &&
 						/^\s*(?:query|mutation)\s+([A-Za-z_][A-Za-z0-9_]*)/.exec(
 							query,

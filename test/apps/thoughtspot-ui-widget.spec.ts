@@ -1102,6 +1102,25 @@ describe("describeRelayOperations", () => {
 			typeof value === "string" ? value : JSON.stringify(value),
 		).toString("base64");
 
+	it("records only operation-shaped names, never free text from the page", () => {
+		expect(
+			describeRelayOperations({
+				method: "POST",
+				path: "/prism/?op=Get%20x%0Aforged%20line",
+				body_base64: b64({
+					operationName: "Name with spaces\n[relay-capture] fake",
+					query: "query X { a }",
+				}),
+			}),
+		).toEqual(["op:?", "Q:?"]);
+	});
+
+	it("does not throw on a path that is not a URL", () => {
+		expect(
+			describeRelayOperations({ method: "GET", path: "http://[" }),
+		).toEqual([]);
+	});
+
 	it("reads prism's op query parameter", () => {
 		expect(
 			describeRelayOperations({
