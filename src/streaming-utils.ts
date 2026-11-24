@@ -8,6 +8,7 @@ import { withSpan } from "./metrics/tracing/tracing-utils";
 import { buildAnswerId } from "./services/answer-id-utils";
 import {
 	type Message,
+	type QuestionMessage,
 	type RawMessage,
 	SpotterResponseFormat,
 } from "./services/types";
@@ -324,6 +325,15 @@ interface SpotterXNlsAnswerResponse {
 	sage_query?: string;
 }
 
+// A question from the ask_user_disambiguation tool. Options are usually plain strings, but
+// can also be objects whose `value` is what an answer carries
+interface SpotterXDisambiguationQuestion {
+	text?: string;
+	options?: (string | { value?: string })[];
+	multi_select?: boolean;
+	allow_free_text?: boolean;
+}
+
 interface SpotterXFunctionResponse {
 	id?: string;
 	name?: string;
@@ -333,8 +343,16 @@ interface SpotterXFunctionResponse {
 			annotations?: { name?: string };
 			resource?: { text?: string };
 		}[];
+		// Present on ask_user_disambiguation responses
+		status?: string;
+		questions?: SpotterXDisambiguationQuestion[];
 	};
 }
+
+// Tool which pauses the agent to ask the user one or more questions, and the status of its
+// response while it waits for the user's input
+const ASK_USER_DISAMBIGUATION_TOOL = "ask_user_disambiguation";
+const AWAITING_USER_INPUT_STATUS = "awaiting_user_input";
 
 // Subset of the ADK event fields we use. SpotterX serializes ADK events in snake_case
 interface SpotterXEventPart {
@@ -395,6 +413,44 @@ function parseSpotterXNlsAnswer(
 		);
 		return undefined;
 	}
+}
+
+/*
+ * Questions to the user are returned in the ask_user_disambiguation tool's response, while
+ * it waits for the user's input. Returns a question message per question with text, or
+ * undefined if the response is not a pending question or has no questions.
+ */
+function parseSpotterXQuestions(
+	functionResponse: SpotterXFunctionResponse,
+): QuestionMessage[] | undefined {
+	if (
+		functionResponse.name !== ASK_USER_DISAMBIGUATION_TOOL ||
+		functionResponse.response?.status !== AWAITING_USER_INPUT_STATUS
+	) {
+		return undefined;
+	}
+	const questions = (functionResponse.response.questions ?? []).flatMap(
+		(question): QuestionMessage[] =>
+			question.text
+				? [
+						{
+							is_thinking: false,
+							type: "question",
+							text: question.text,
+							options: (question.options ?? []).flatMap((option) =>
+								typeof option === "string"
+									? [option]
+									: option?.value
+										? [option.value]
+										: [],
+							),
+							multi_select: !!question.multi_select,
+							allow_free_text: !!question.allow_free_text,
+						},
+					]
+				: [],
+	);
+	return questions.length > 0 ? questions : undefined;
 }
 
 /*
@@ -606,6 +662,12 @@ export const processSpotterXEventStream = async (
 						// updates reference it by ID), so send a step notification only the first
 						// time we see a call ID with a name, and ignore the rest
 						if (part.function_call) {
+							// Questions to the user are sent as question messages once the tool
+							// responds, so no step notification is needed for them
+							if (part.function_call.name === ASK_USER_DISAMBIGUATION_TOOL) {
+								nMessagesIgnored++;
+								continue;
+							}
 							if (
 								!part.function_call.id ||
 								!part.function_call.name ||
@@ -630,9 +692,25 @@ export const processSpotterXEventStream = async (
 							continue;
 						}
 
-						// Tool responses. We care about answer generation so check for that, but
-						// ignore the responses for any other tool calls.
+						// Tool responses. We care about questions to the user and answer
+						// generation so check for those, but ignore the responses for any other
+						// tool calls.
 						if (part.function_response) {
+							const questions = parseSpotterXQuestions(part.function_response);
+							if (questions) {
+								for (const question of questions) {
+									nTextMessagesParsed++;
+									recordUpstreamStreamMessageMetric(
+										recorder,
+										upstreamOperation,
+										"question",
+										false,
+									);
+									newMessages.push(question);
+								}
+								continue;
+							}
+
 							const callId = part.function_response.id;
 							const nlsAnswer = parseSpotterXNlsAnswer(part.function_response);
 							if (!callId || !nlsAnswer) {

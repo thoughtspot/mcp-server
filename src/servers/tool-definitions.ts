@@ -357,9 +357,9 @@ export const GetSessionUpdatesInputSchema = z.object({
 
 export const ConversationUpdateSchema = z.object({
 	type: z
-		.enum(["text", "text_chunk", "answer", "step_notification"])
+		.enum(["text", "text_chunk", "answer", "step_notification", "question"])
 		.describe(
-			"The type of update: `text` or `text_chunk` for a natural language message from the Analytics Agent, `answer` for a query result, or `step_notification` to announce key progress steps which the Agent is working through. Determines which other fields are populated.",
+			"The type of update: `text` or `text_chunk` for a natural language message from the Analytics Agent, `answer` for a query result, `step_notification` to announce key progress steps which the Agent is working through, or `question` when the Agent needs input from the user before it can continue. Determines which other fields are populated.",
 		),
 	is_thinking: z
 		.boolean()
@@ -370,7 +370,25 @@ export const ConversationUpdateSchema = z.object({
 		.string()
 		.optional()
 		.describe(
-			"The text content of the message. Only present when `type` is `text`, `text_chunk`, or `step_notification`. If `type` is `text_chunk`, concatenate the chunks of text together in the order received to form the complete message. If `type` is `step_notification`, the text will describe the step the Analytics Agent is currently working on, and is not meant to be concatenated with other text-based events.",
+			"The text content of the message. Only present when `type` is `text`, `text_chunk`, `step_notification`, or `question`. If `type` is `text_chunk`, concatenate the chunks of text together in the order received to form the complete message. If `type` is `step_notification`, the text will describe the step the Analytics Agent is currently working on, and is not meant to be concatenated with other text-based events. If `type` is `question`, the text is a question the Analytics Agent needs the user to answer before it can continue. Show the question and its `options` to the user, then send the user's answer as a followup message with the `send_session_message` tool.",
+		),
+	options: z
+		.array(z.string())
+		.optional()
+		.describe(
+			"The suggested answers to the question. Only present when `type` is `question`. May be empty, in which case the user should answer in their own words.",
+		),
+	multi_select: z
+		.boolean()
+		.optional()
+		.describe(
+			"Whether the user may choose more than one of the `options`. Only present when `type` is `question`.",
+		),
+	allow_free_text: z
+		.boolean()
+		.optional()
+		.describe(
+			"Whether the user may answer with something other than the listed `options`. Only present when `type` is `question`.",
 		),
 	answer_id: z
 		.string()
