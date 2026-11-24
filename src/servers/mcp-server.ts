@@ -12,6 +12,13 @@ import {
 	buildAnswerOpenUrl,
 } from "../apps/answer-widget";
 import {
+	EMBED_SDK_WIDGET_HTML,
+	EMBED_SDK_WIDGET_URI,
+	EMBED_TOKEN_VALIDITY_SEC,
+	embedPathForRoute,
+	embedSdkCsp,
+} from "../apps/embed-sdk-widget";
+import {
 	ApiRelayRejectedError,
 	RelayNonceSigner,
 	THOUGHTSPOT_SERVER_USER_AGENT,
@@ -50,6 +57,7 @@ import type {
 	ModelStreamSink,
 	ModelUpdate,
 } from "../services/clients/spotter-model/spotter-model-types";
+import { fetchOrgToken } from "../services/clients/thoughtspot-token-client";
 import type {
 	DataSource,
 	ThoughtSpotService,
@@ -114,7 +122,9 @@ import {
 	createAnalysisSessionToolDefinitionSpotterX,
 	fetchAnswerImageToolDefinition,
 	getAnswerImageToolDefinition,
+	getEmbedTokenToolDefinition,
 	getThoughtSpotPageToolDefinition,
+	showAnswerEmbedToolDefinition,
 	showAnswerToolDefinition,
 	thoughtSpotApiRequestToolDefinition,
 } from "./tool-definitions";
@@ -582,6 +592,10 @@ export class MCPServer extends BaseMCPServer {
 			);
 		}
 
+		if (this.isEmbedSdkAvailable()) {
+			tools.push(showAnswerEmbedToolDefinition, getEmbedTokenToolDefinition);
+		}
+
 		return { tools };
 	}
 
@@ -616,6 +630,15 @@ export class MCPServer extends BaseMCPServer {
 				mimeType: MCP_APP_MIME_TYPE,
 			});
 		}
+		if (this.isEmbedSdkAvailable()) {
+			resources.push({
+				uri: EMBED_SDK_WIDGET_URI,
+				name: "ThoughtSpot (Embed SDK)",
+				description:
+					"ThoughtSpot framed with the Visual Embed SDK (prototype).",
+				mimeType: MCP_APP_MIME_TYPE,
+			});
+		}
 		if (this.isAnswerWidgetEnabledForClient()) {
 			resources.push({
 				uri: ANSWER_WIDGET_URI,
@@ -641,6 +664,23 @@ export class MCPServer extends BaseMCPServer {
 						// The widget needs no external origins: the image arrives as a data: URL
 						// and the open-in-ThoughtSpot link goes through the host (ui/open-link).
 						_meta: { ui: { prefersBorder: true } },
+					},
+				],
+			};
+		}
+		if (uri === EMBED_SDK_WIDGET_URI && this.isEmbedSdkAvailable()) {
+			return {
+				contents: [
+					{
+						uri,
+						mimeType: MCP_APP_MIME_TYPE,
+						text: EMBED_SDK_WIDGET_HTML,
+						_meta: {
+							ui: {
+								csp: embedSdkCsp(this.ctx.props.instanceUrl),
+								prefersBorder: false,
+							},
+						},
 					},
 				],
 			};
@@ -906,6 +946,14 @@ export class MCPServer extends BaseMCPServer {
 
 			case ToolName.ThoughtSpotApiRequest: {
 				return this.callThoughtSpotApiRequest(request);
+			}
+
+			case ToolName.ShowAnswerEmbed: {
+				return this.callShowAnswerEmbed(request);
+			}
+
+			case ToolName.GetEmbedToken: {
+				return this.callGetEmbedToken();
 			}
 
 			default:
@@ -2168,6 +2216,111 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 			return this.createErrorResponse(
 				"The ThoughtSpot request failed.",
 				`thoughtspot_api_request failed: ${error}`,
+			);
+		}
+	}
+
+	/**
+	 * Approach B prototype (`embed-sdk=true`). Like show_answer it is only offered
+	 * to clients that render MCP Apps, so the app-only get_embed_token is never
+	 * exposed to a model that ignores `visibility`.
+	 */
+	private isEmbedSdkAvailable(): boolean {
+		return (
+			!!this.ctx.props.enableEmbedSdkWidget &&
+			clientSupportsMcpApps(this.getClientCapabilities())
+		);
+	}
+
+	private embedSdkDisabledError() {
+		return this.createErrorResponse(
+			"The embed SDK view is not available for this connection.",
+			"embed sdk tool called without the flag or MCP Apps support",
+		);
+	}
+
+	/**
+	 * show_answer_embed: tell the SDK widget which Analytics Agent answer to
+	 * frame. Only answer embeds are opened; Liveboards and other pages are refused.
+	 */
+	@WithSpan("call-show-answer-embed")
+	async callShowAnswerEmbed(request: z.infer<typeof CallToolRequestSchema>) {
+		if (!this.isEmbedSdkAvailable()) {
+			return this.embedSdkDisabledError();
+		}
+		const { iframe_url } = ShowAnswerInputSchema.parse(
+			request.params.arguments ?? {},
+		);
+		if (!iframe_url) {
+			return this.createErrorResponse(
+				"To show an answer, pass its `iframe_url` from get_session_updates.",
+				"show_answer_embed called without an iframe_url",
+			);
+		}
+		const instanceUrl = this.ctx.props.instanceUrl;
+		const route = tryResolveThoughtSpotRoute(instanceUrl, iframe_url);
+		if (!route) {
+			return this.createErrorResponse(
+				"show_answer_embed only opens Analytics Agent answers. Pass the answer's `iframe_url` from get_session_updates verbatim; Liveboards and other ThoughtSpot pages cannot be opened here.",
+				`show_answer_embed: not an answer embed ${iframe_url.slice(0, 200)}`,
+			);
+		}
+		return this.createStructuredContentSuccessResponse(
+			{
+				thoughtspot_host: new URL(instanceUrl).origin,
+				path: embedPathForRoute(route),
+			},
+			"Opened ThoughtSpot embed widget",
+		);
+	}
+
+	/**
+	 * get_embed_token: a short-lived token for the SDK's getAuthToken. Minted
+	 * separately from the session token, so the widget never sees the long-lived
+	 * one. It is still a full user token for its lifetime: the mint endpoint has
+	 * no view-only scope. App-only.
+	 */
+	@WithSpan("call-get-embed-token")
+	async callGetEmbedToken() {
+		if (!this.isEmbedSdkAvailable()) {
+			return this.embedSdkDisabledError();
+		}
+		try {
+			await this.ensureSessionInfo();
+			const orgId =
+				this.getActiveOrgId() ??
+				(this.sessionInfo?.currentOrgId != null
+					? String(this.sessionInfo.currentOrgId)
+					: undefined);
+			if (!orgId) {
+				throw new Error("no org id for the session");
+			}
+			const token = await withTimeout(
+				fetchOrgToken({
+					instanceUrl: this.ctx.props.instanceUrl,
+					// Mint with the global token, as switch_org does: the org mint
+					// endpoint is only known to accept the cluster-wide token.
+					bearerToken: await this.initGlobalTokenAndReconcileWithStorage(),
+					orgId,
+					validityTimeInSec: EMBED_TOKEN_VALIDITY_SEC,
+				}),
+				UPSTREAM_CALL_TIMEOUT_MS,
+				"ThoughtSpot embed token",
+			);
+			return {
+				content: [{ type: "text" as const, text: "Token issued." }],
+				structuredContent: {
+					token,
+					expires_in_sec: EMBED_TOKEN_VALIDITY_SEC,
+				},
+			};
+		} catch (error) {
+			if (this.apiErrorStatus(error) === 401) {
+				throw error;
+			}
+			return this.createErrorResponse(
+				"Could not get a ThoughtSpot token for the embed view.",
+				`get_embed_token failed: ${error}`,
 			);
 		}
 	}
