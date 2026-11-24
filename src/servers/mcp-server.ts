@@ -12,6 +12,12 @@ import {
 	buildAnswerOpenUrl,
 } from "../apps/answer-widget";
 import {
+	DIRECT_FRAME_WIDGET_HTML,
+	DIRECT_FRAME_WIDGET_URI,
+	directFrameCsp,
+	directFrameUrl,
+} from "../apps/direct-frame-widget";
+import {
 	ApiRelayRejectedError,
 	RelayNonceSigner,
 	THOUGHTSPOT_SERVER_USER_AGENT,
@@ -115,6 +121,7 @@ import {
 	fetchAnswerImageToolDefinition,
 	getAnswerImageToolDefinition,
 	getThoughtSpotPageToolDefinition,
+	showAnswerFrameToolDefinition,
 	showAnswerToolDefinition,
 	thoughtSpotApiRequestToolDefinition,
 } from "./tool-definitions";
@@ -582,6 +589,10 @@ export class MCPServer extends BaseMCPServer {
 			);
 		}
 
+		if (this.isDirectFrameAvailable()) {
+			tools.push(showAnswerFrameToolDefinition);
+		}
+
 		return { tools };
 	}
 
@@ -616,6 +627,14 @@ export class MCPServer extends BaseMCPServer {
 				mimeType: MCP_APP_MIME_TYPE,
 			});
 		}
+		if (this.isDirectFrameAvailable()) {
+			resources.push({
+				uri: DIRECT_FRAME_WIDGET_URI,
+				name: "ThoughtSpot (direct frame)",
+				description: "ThoughtSpot framed directly (prototype).",
+				mimeType: MCP_APP_MIME_TYPE,
+			});
+		}
 		if (this.isAnswerWidgetEnabledForClient()) {
 			resources.push({
 				uri: ANSWER_WIDGET_URI,
@@ -641,6 +660,23 @@ export class MCPServer extends BaseMCPServer {
 						// The widget needs no external origins: the image arrives as a data: URL
 						// and the open-in-ThoughtSpot link goes through the host (ui/open-link).
 						_meta: { ui: { prefersBorder: true } },
+					},
+				],
+			};
+		}
+		if (uri === DIRECT_FRAME_WIDGET_URI && this.isDirectFrameAvailable()) {
+			return {
+				contents: [
+					{
+						uri,
+						mimeType: MCP_APP_MIME_TYPE,
+						text: DIRECT_FRAME_WIDGET_HTML,
+						_meta: {
+							ui: {
+								csp: directFrameCsp(this.ctx.props.instanceUrl),
+								prefersBorder: false,
+							},
+						},
 					},
 				],
 			};
@@ -906,6 +942,10 @@ export class MCPServer extends BaseMCPServer {
 
 			case ToolName.ThoughtSpotApiRequest: {
 				return this.callThoughtSpotApiRequest(request);
+			}
+
+			case ToolName.ShowAnswerFrame: {
+				return this.callShowAnswerFrame(request);
 			}
 
 			default:
@@ -2170,6 +2210,49 @@ Provide this url to the user as a link to view the liveboard in ThoughtSpot.`;
 				`thoughtspot_api_request failed: ${error}`,
 			);
 		}
+	}
+
+	/** Approach C2 prototype (`direct-frame=true`), for MCP Apps clients only. */
+	private isDirectFrameAvailable(): boolean {
+		return (
+			!!this.ctx.props.enableDirectFrameWidget &&
+			clientSupportsMcpApps(this.getClientCapabilities())
+		);
+	}
+
+	/**
+	 * show_answer_frame: the cluster URL the widget frames. Only URLs and routes
+	 * on the connected instance are accepted, so the model can't point the frame
+	 * elsewhere. No token is involved.
+	 */
+	@WithSpan("call-show-answer-frame")
+	async callShowAnswerFrame(request: z.infer<typeof CallToolRequestSchema>) {
+		if (!this.isDirectFrameAvailable()) {
+			return this.createErrorResponse(
+				"The direct frame view is not available for this connection.",
+				"direct frame tool called without the flag or MCP Apps support",
+			);
+		}
+		const { iframe_url } = ShowAnswerInputSchema.parse(
+			request.params.arguments ?? {},
+		);
+		if (!iframe_url) {
+			return this.createErrorResponse(
+				"To show an answer, pass its `iframe_url` from get_session_updates.",
+				"show_answer_frame called without an iframe_url",
+			);
+		}
+		const frameUrl = directFrameUrl(this.ctx.props.instanceUrl, iframe_url);
+		if (!frameUrl) {
+			return this.createErrorResponse(
+				"show_answer_frame only opens Analytics Agent answers. Pass the answer's `iframe_url` from get_session_updates verbatim; Liveboards and other ThoughtSpot pages cannot be opened here.",
+				`show_answer_frame: not an answer embed ${iframe_url.slice(0, 200)}`,
+			);
+		}
+		return this.createStructuredContentSuccessResponse(
+			{ frame_url: frameUrl },
+			"Opened ThoughtSpot direct frame",
+		);
 	}
 
 	@WithSpan("call-get-data")
