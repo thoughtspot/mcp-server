@@ -32,6 +32,7 @@ export const UPSTREAM_OPERATION_NAMES = {
 	listOrgs: "list_orgs",
 	fetchOrgBearerToken: "fetch_org_bearer_token",
 	getData: "get_data",
+	searchAnalysts: "search_analysts",
 } as const;
 
 export type UpstreamOperation =
