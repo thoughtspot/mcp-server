@@ -51,6 +51,7 @@ export async function createSpotterXConversation(
 					enable_spotql: false,
 					enable_dataset_search:
 						isSpotterDataSourceDiscoveryEnabled && !dataSourceId,
+					gen_ui_summary: false,
 				},
 			},
 			...(dataSourceId && { context: { dataset_ids: [dataSourceId] } }),

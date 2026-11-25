@@ -137,6 +137,7 @@ describe("spotter-x-client", () => {
 						connector_tool_approvals: false,
 						enable_spotql: false,
 						enable_dataset_search: false,
+						gen_ui_summary: false,
 					},
 				},
 			});
