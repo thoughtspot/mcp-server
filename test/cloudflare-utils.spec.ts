@@ -21,7 +21,16 @@ vi.mock("@microlabs/otel-cf-workers", () => ({
 	ResolveConfigFn: vi.fn(),
 }));
 
+const callOrder: string[] = [];
+vi.mock("../src/baton", () => ({
+	installBaton: vi.fn(async () => {
+		callOrder.push("installBaton");
+		return false;
+	}),
+}));
+
 import { McpAgent } from "agents/mcp";
+import { installBaton } from "../src/baton";
 import { instrumentedMCPServer } from "../src/cloudflare-utils";
 
 class MockMCPServer {
@@ -370,5 +379,37 @@ describe("instrumentedMCPServer - INSTANCE_ALLOWLIST_BY_HOST", () => {
 		);
 
 		expect(response.status).toBe(403);
+	});
+});
+
+describe("instrumentedMCPServer init()", () => {
+	it("offers the session to Baton before the server registers its handlers", async () => {
+		callOrder.length = 0;
+		class OrderedServer {
+			constructor(public ctx: any) {}
+			async init() {
+				callOrder.push("server.init");
+			}
+			cachedSessionInfo() {
+				return { userGUID: "user-1" };
+			}
+		}
+		const Agent = instrumentedMCPServer(OrderedServer as any, vi.fn());
+		const agent = new Agent({} as any, {} as any) as any;
+		const env = { BATON_CLUSTERS: "{}" };
+		agent.env = env;
+		agent.props = { instanceUrl: "https://team1.thoughtspot.cloud" };
+
+		await agent.init();
+
+		expect(installBaton).toHaveBeenCalledWith(
+			agent.server,
+			env,
+			"https://team1.thoughtspot.cloud",
+			expect.any(Function),
+		);
+		const sessionInfo = vi.mocked(installBaton).mock.calls[0][3];
+		expect(sessionInfo?.()).toEqual({ userGUID: "user-1" });
+		expect(callOrder).toEqual(["installBaton", "server.init"]);
 	});
 });

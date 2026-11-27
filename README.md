@@ -46,6 +46,16 @@ On a listed hostname:
 
 Hostnames that aren't listed behave as before. If the value is not valid JSON, the server rejects requests with a 500 instead of lifting the restriction.
 
+### Send agent events to Baton
+
+Baton records what agents try to do with the tools and where they get stuck. It's off by default and turns on per ThoughtSpot instance. Set the `BATON_DSN` secret to the key from the Baton console, and set `BATON_CLUSTERS` to a JSON object that maps each instance URL to the name Baton records it under.
+
+```json
+{"https://team1.thoughtspot.cloud": "demo-cluster"}
+```
+
+For a listed instance, each tool gets a `user_goal` field that agents are asked to fill in. A call without it still runs, and it is removed before the tool sees its arguments. The server also gets one extra tool, `thoughtspot_annotate`. Events name the instance, the ThoughtSpot Org and the user (GUID and user name), and carry each tool's arguments and results. Every other instance runs exactly as before and sends nothing. If either variable is unset or `BATON_CLUSTERS` is not valid JSON, Baton stays off.
+
 
 ## Contributing
 
